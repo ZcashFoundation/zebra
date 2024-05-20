@@ -9,6 +9,7 @@ use crate::{
     parameters::NetworkUpgrade,
 };
 
+pub mod magic;
 pub mod testnet;
 
 #[cfg(test)]
@@ -75,7 +76,7 @@ impl From<Network> for NetworkKind {
 }
 
 /// An enum describing the possible network choices.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 #[serde(into = "NetworkKind")]
 pub enum Network {
     /// The production mainnet.

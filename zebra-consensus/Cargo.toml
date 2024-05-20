@@ -58,7 +58,7 @@ tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
 tracing = "0.1.39"
 tracing-futures = "0.2.5"
 
-orchard = "0.6.0"
+orchard = "0.7.0"
 
 zcash_proofs = { version = "0.13.0-rc.1", features = ["multicore" ] }
 wagyu-zcash-parameters = "0.2.0"

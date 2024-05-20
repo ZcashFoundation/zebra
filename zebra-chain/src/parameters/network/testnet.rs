@@ -6,11 +6,14 @@ use zcash_primitives::constants as zp_constants;
 use crate::{
     block::{self, Height},
     parameters::{
-        constants::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
+        constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
     },
+    work::difficulty::{ExpandedDifficulty, U256},
 };
+
+use super::magic::Magic;
 
 /// The Regtest NU5 activation height in tests
 // TODO: Serialize testnet parameters in Config then remove this and use a configured NU5 activation height.
@@ -63,10 +66,12 @@ pub struct ConfiguredActivationHeights {
 }
 
 /// Builder for the [`Parameters`] struct.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParametersBuilder {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
+    /// The network magic, acts as an identifier for the network.
+    network_magic: Magic,
     /// The genesis block hash
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network, see [`Parameters::activation_heights`] for more details.
@@ -79,6 +84,8 @@ pub struct ParametersBuilder {
     hrp_sapling_payment_address: String,
     /// Slow start interval for this network
     slow_start_interval: Height,
+    /// Target difficulty limit for this network
+    target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
 }
@@ -88,6 +95,7 @@ impl Default for ParametersBuilder {
     fn default() -> Self {
         Self {
             network_name: "UnknownTestnet".to_string(),
+            network_magic: magics::TESTNET,
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
@@ -102,6 +110,19 @@ impl Default for ParametersBuilder {
                 .parse()
                 .expect("hard-coded hash parses"),
             slow_start_interval: SLOW_START_INTERVAL,
+            // Testnet PoWLimit is defined as `2^251 - 1` on page 73 of the protocol specification:
+            // <https://zips.z.cash/protocol/protocol.pdf>
+            //
+            // `zcashd` converts the PoWLimit into a compact representation before
+            // using it to perform difficulty filter checks.
+            //
+            // The Zcash specification converts to compact for the default difficulty
+            // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
+            // ZIP 208 don't specify this conversion either.) See #1277 for details.
+            target_difficulty_limit: ExpandedDifficulty::from((U256::one() << 251) - 1)
+                .to_compact()
+                .to_expanded()
+                .expect("difficulty limits are valid expanded values"),
             disable_pow: false,
         }
     }
@@ -128,6 +149,20 @@ impl ParametersBuilder {
                 .all(|x| x.is_alphanumeric() || x == '_'),
             "network name must include only alphanumeric characters or '_'"
         );
+
+        self
+    }
+
+    /// Sets the network name to be used in the [`Parameters`] being built.
+    pub fn with_network_magic(mut self, network_magic: Magic) -> Self {
+        assert!(
+            [magics::MAINNET, magics::REGTEST]
+                .into_iter()
+                .all(|reserved_magic| network_magic != reserved_magic),
+            "network magic should be distinct from reserved network magics"
+        );
+
+        self.network_magic = network_magic;
 
         self
     }
@@ -247,6 +282,16 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
+    // TODO: Accept a hex-encoded String instead?
+    pub fn with_target_difficulty_limit(mut self, target_difficulty_limit: U256) -> Self {
+        self.target_difficulty_limit = ExpandedDifficulty::from(target_difficulty_limit)
+            .to_compact()
+            .to_expanded()
+            .expect("difficulty limits are valid expanded values");
+        self
+    }
+
     /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
     pub fn with_disable_pow(mut self, disable_pow: bool) -> Self {
         self.disable_pow = disable_pow;
@@ -257,16 +302,19 @@ impl ParametersBuilder {
     pub fn finish(self) -> Parameters {
         let Self {
             network_name,
+            network_magic,
             genesis_hash,
             activation_heights,
             hrp_sapling_extended_spending_key,
             hrp_sapling_extended_full_viewing_key,
             hrp_sapling_payment_address,
             slow_start_interval,
+            target_difficulty_limit,
             disable_pow,
         } = self;
         Parameters {
             network_name,
+            network_magic,
             genesis_hash,
             activation_heights,
             hrp_sapling_extended_spending_key,
@@ -274,6 +322,7 @@ impl ParametersBuilder {
             hrp_sapling_payment_address,
             slow_start_interval,
             slow_start_shift: Height(slow_start_interval.0 / 2),
+            target_difficulty_limit,
             disable_pow,
         }
     }
@@ -285,10 +334,12 @@ impl ParametersBuilder {
 }
 
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parameters {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
+    /// The network magic, acts as an identifier for the network.
+    network_magic: Magic,
     /// The genesis block hash
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network.
@@ -307,6 +358,8 @@ pub struct Parameters {
     slow_start_interval: Height,
     /// Slow start shift for this network, always half the slow start interval
     slow_start_shift: Height,
+    /// Target difficulty limit for this network
+    target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
 }
@@ -336,8 +389,11 @@ impl Parameters {
 
         Self {
             network_name: "Regtest".to_string(),
+            network_magic: magics::REGTEST,
             ..Self::build()
                 .with_genesis_hash(REGTEST_GENESIS_HASH)
+                // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
+                .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
                 .with_disable_pow(true)
                 .with_slow_start_interval(Height::MIN)
                 .with_sapling_hrps(
@@ -365,6 +421,7 @@ impl Parameters {
     pub fn is_regtest(&self) -> bool {
         let Self {
             network_name,
+            network_magic,
             genesis_hash,
             // Activation heights are configurable on Regtest
             activation_heights: _,
@@ -373,22 +430,30 @@ impl Parameters {
             hrp_sapling_payment_address,
             slow_start_interval,
             slow_start_shift,
+            target_difficulty_limit,
             disable_pow,
         } = Self::new_regtest(None);
 
         self.network_name == network_name
+            && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
             && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
             && self.hrp_sapling_payment_address == hrp_sapling_payment_address
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
+            && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
     }
 
     /// Returns the network name
     pub fn network_name(&self) -> &str {
         &self.network_name
+    }
+
+    /// Returns the network magic
+    pub fn network_magic(&self) -> Magic {
+        self.network_magic
     }
 
     /// Returns the genesis hash
@@ -424,6 +489,11 @@ impl Parameters {
     /// Returns slow start shift for this network
     pub fn slow_start_shift(&self) -> Height {
         self.slow_start_shift
+    }
+
+    /// Returns the target difficulty limit for this network
+    pub fn target_difficulty_limit(&self) -> ExpandedDifficulty {
+        self.target_difficulty_limit
     }
 
     /// Returns true if proof-of-work validation should be disabled for this network
