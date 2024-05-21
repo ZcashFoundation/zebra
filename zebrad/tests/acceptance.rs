@@ -1395,7 +1395,7 @@ fn full_sync_testnet() -> Result<()> {
     )
 }
 
-#[cfg(feature = "prometheus")]
+#[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
     use hyper::Client;
@@ -1451,7 +1451,7 @@ async fn metrics_endpoint() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "filter-reload")]
+#[cfg(all(feature = "filter-reload", not(target_os = "windows")))]
 #[tokio::test]
 async fn tracing_endpoint() -> Result<()> {
     use hyper::{Body, Client, Request};
@@ -1549,6 +1549,7 @@ async fn tracing_endpoint() -> Result<()> {
 /// Test that the JSON-RPC endpoint responds to a request,
 /// when configured with a single thread.
 #[tokio::test]
+#[cfg(not(target_os = "windows"))]
 async fn rpc_endpoint_single_thread() -> Result<()> {
     rpc_endpoint(false).await
 }
@@ -1556,6 +1557,7 @@ async fn rpc_endpoint_single_thread() -> Result<()> {
 /// Test that the JSON-RPC endpoint responds to a request,
 /// when configured with multiple threads.
 #[tokio::test]
+#[cfg(not(target_os = "windows"))]
 async fn rpc_endpoint_parallel_threads() -> Result<()> {
     rpc_endpoint(true).await
 }
@@ -1623,6 +1625,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 ///
 /// https://zcash.github.io/rpc/getblockchaininfo.html
 #[tokio::test]
+#[cfg(not(target_os = "windows"))]
 async fn rpc_endpoint_client_content_type() -> Result<()> {
     let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
@@ -2148,6 +2151,7 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
 /// It is expected that the first node spawned will get exclusive use of the port.
 /// The second node will panic with the Zcash listener conflict hint added in #1535.
 #[test]
+#[cfg(not(target_os = "windows"))]
 fn zebra_zcash_listener_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -2176,7 +2180,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash metrics
 /// conflict hint added in #1535.
 #[test]
-#[cfg(feature = "prometheus")]
+#[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 fn zebra_metrics_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -2205,7 +2209,7 @@ fn zebra_metrics_conflict() -> Result<()> {
 /// exclusive use of the port. The second node will panic with the Zcash tracing
 /// conflict hint added in #1535.
 #[test]
-#[cfg(feature = "filter-reload")]
+#[cfg(all(feature = "filter-reload", not(target_os = "windows")))]
 fn zebra_tracing_conflict() -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -2944,7 +2948,7 @@ fn scan_task_starts() -> Result<()> {
 
 /// Test that the scanner gRPC server starts when the node starts.
 #[tokio::test]
-#[cfg(feature = "shielded-scan")]
+#[cfg(all(feature = "shielded-scan", not(target_os = "windows")))]
 async fn scan_rpc_server_starts() -> Result<()> {
     use zebra_grpc::scanner::{scanner_client::ScannerClient, Empty};
 

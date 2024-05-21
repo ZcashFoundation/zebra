@@ -62,7 +62,7 @@ tower = "0.4.13"
 tracing = "0.1.39"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.201", features = ["serde_derive"] }
+serde = { version = "1.0.202", features = ["serde_derive"] }
 
 # Experimental feature getblocktemplate-rpcs
 rand = { version = "0.8.5", optional = true }
@@ -80,11 +80,11 @@ zebra-script = { path = "../zebra-script", version = "1.0.0-beta.37" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.37" }
 
 [dev-dependencies]
-insta = { version = "1.38.0", features = ["redactions", "json", "ron"] }
+insta = { version = "1.39.0", features = ["redactions", "json", "ron"] }
 
 proptest = "1.4.0"
 
-thiserror = "1.0.60"
+thiserror = "1.0.61"
 tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37", features = ["proptest-impl"] }
