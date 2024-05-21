@@ -6,12 +6,14 @@ use zcash_primitives::constants as zp_constants;
 use crate::{
     block::{self, Height},
     parameters::{
-        constants::{SLOW_START_INTERVAL, SLOW_START_SHIFT},
+        constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
     },
     work::difficulty::{ExpandedDifficulty, U256},
 };
+
+use super::magic::Magic;
 
 /// The Regtest NU5 activation height in tests
 // TODO: Serialize testnet parameters in Config then remove this and use a configured NU5 activation height.
@@ -64,10 +66,12 @@ pub struct ConfiguredActivationHeights {
 }
 
 /// Builder for the [`Parameters`] struct.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParametersBuilder {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
+    /// The network magic, acts as an identifier for the network.
+    network_magic: Magic,
     /// The genesis block hash
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network, see [`Parameters::activation_heights`] for more details.
@@ -91,6 +95,7 @@ impl Default for ParametersBuilder {
     fn default() -> Self {
         Self {
             network_name: "UnknownTestnet".to_string(),
+            network_magic: magics::TESTNET,
             // # Correctness
             //
             // `Genesis` network upgrade activation height must always be 0
@@ -144,6 +149,20 @@ impl ParametersBuilder {
                 .all(|x| x.is_alphanumeric() || x == '_'),
             "network name must include only alphanumeric characters or '_'"
         );
+
+        self
+    }
+
+    /// Sets the network name to be used in the [`Parameters`] being built.
+    pub fn with_network_magic(mut self, network_magic: Magic) -> Self {
+        assert!(
+            [magics::MAINNET, magics::REGTEST]
+                .into_iter()
+                .all(|reserved_magic| network_magic != reserved_magic),
+            "network magic should be distinct from reserved network magics"
+        );
+
+        self.network_magic = network_magic;
 
         self
     }
@@ -265,8 +284,12 @@ impl ParametersBuilder {
 
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
     // TODO: Accept a hex-encoded String instead?
-    pub fn with_target_difficulty_limit(mut self, target_difficulty_limit: U256) -> Self {
-        self.target_difficulty_limit = ExpandedDifficulty::from(target_difficulty_limit)
+    pub fn with_target_difficulty_limit(
+        mut self,
+        target_difficulty_limit: impl Into<ExpandedDifficulty>,
+    ) -> Self {
+        self.target_difficulty_limit = target_difficulty_limit
+            .into()
             .to_compact()
             .to_expanded()
             .expect("difficulty limits are valid expanded values");
@@ -283,6 +306,7 @@ impl ParametersBuilder {
     pub fn finish(self) -> Parameters {
         let Self {
             network_name,
+            network_magic,
             genesis_hash,
             activation_heights,
             hrp_sapling_extended_spending_key,
@@ -294,6 +318,7 @@ impl ParametersBuilder {
         } = self;
         Parameters {
             network_name,
+            network_magic,
             genesis_hash,
             activation_heights,
             hrp_sapling_extended_spending_key,
@@ -313,10 +338,12 @@ impl ParametersBuilder {
 }
 
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parameters {
     /// The name of this network to be used by the `Display` trait impl.
     network_name: String,
+    /// The network magic, acts as an identifier for the network.
+    network_magic: Magic,
     /// The genesis block hash
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network.
@@ -366,6 +393,7 @@ impl Parameters {
 
         Self {
             network_name: "Regtest".to_string(),
+            network_magic: magics::REGTEST,
             ..Self::build()
                 .with_genesis_hash(REGTEST_GENESIS_HASH)
                 // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
@@ -397,6 +425,7 @@ impl Parameters {
     pub fn is_regtest(&self) -> bool {
         let Self {
             network_name,
+            network_magic,
             genesis_hash,
             // Activation heights are configurable on Regtest
             activation_heights: _,
@@ -410,6 +439,7 @@ impl Parameters {
         } = Self::new_regtest(None);
 
         self.network_name == network_name
+            && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
             && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
@@ -423,6 +453,11 @@ impl Parameters {
     /// Returns the network name
     pub fn network_name(&self) -> &str {
         &self.network_name
+    }
+
+    /// Returns the network magic
+    pub fn network_magic(&self) -> Magic {
+        self.network_magic
     }
 
     /// Returns the genesis hash
