@@ -5884,27 +5884,6 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df0c99f65a840ff256c106b28d67d702d9759d206112473d4982c92003262406"
-dependencies = [
- "bellman",
- "blake2b_simd",
- "bls12_381",
- "group",
- "home",
- "jubjub",
- "known-folders",
- "lazy_static",
- "rand_core 0.6.4",
- "redjubjub",
- "tracing",
- "xdg",
- "zcash_primitives 0.13.0",
-]
-
-[[package]]
-name = "zcash_proofs"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8a02eb1f151d9b9a6e16408d2c55ff440bd2fb232b7377277146d0fa2df9bc8"
@@ -5972,7 +5951,7 @@ dependencies = [
  "zcash_encoding",
  "zcash_note_encryption",
  "zcash_primitives 0.14.0",
- "zcash_proofs 0.14.0",
+ "zcash_proofs",
 ]
 
 [[package]]
@@ -6072,6 +6051,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
+ "sapling-crypto",
  "serde",
  "spandoc",
  "thiserror",
@@ -6085,7 +6065,7 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "wagyu-zcash-parameters",
- "zcash_proofs 0.13.0",
+ "zcash_proofs",
  "zebra-chain",
  "zebra-node-services",
  "zebra-script",
