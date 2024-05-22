@@ -120,7 +120,7 @@ jobs:
           echo "GCP_FIREBASE_SA_PATH=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy Zebra book to firebase
-        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.2
         with:
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
@@ -178,7 +178,7 @@ jobs:
           echo "GCP_FIREBASE_SA_PATH=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy internal docs to firebase
-        uses: FirebaseExtended/action-hosting-deploy@v0.7.1
+        uses: FirebaseExtended/action-hosting-deploy@v0.7.2
         with:
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
           channelId: ${{ env.FIREBASE_CHANNEL }}
