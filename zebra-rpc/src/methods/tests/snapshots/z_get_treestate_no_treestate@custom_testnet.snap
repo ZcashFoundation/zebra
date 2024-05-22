@@ -1,6 +1,6 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
-expression: tree_state
+expression: treestate
 ---
 {
   "hash": "025579869bcf52a989337342f5f57a84f3a28b968f7d6a8307902b065a668d23",
