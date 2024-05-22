@@ -1,0 +1,14 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: treestate
+---
+{
+  "hash": "00f1a49e54553ac3ef735f2eb1d8247c9a87c22a47dbd7823ae70adcd6c21a18",
+  "height": 2,
+  "time": 1477676169,
+  "sapling": {
+    "commitments": {
+      "finalState": "000000"
+    }
+  }
+}

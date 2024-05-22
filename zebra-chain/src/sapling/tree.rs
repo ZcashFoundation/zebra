@@ -15,7 +15,6 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     io,
-    sync::Arc,
 };
 
 use bitvec::prelude::*;
@@ -25,7 +24,6 @@ use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
 use thiserror::Error;
-use zcash_encoding::{Optional, Vector};
 use zcash_primitives::merkle_tree::HashSer;
 
 use super::commitment::pedersen_hashes::pedersen_hash;
@@ -38,7 +36,7 @@ use crate::{
 };
 
 pub mod legacy;
-use legacy::{LegacyLeaf, LegacyNoteCommitmentTree};
+use legacy::LegacyNoteCommitmentTree;
 
 /// The type that is used to update the note commitment tree.
 ///
@@ -219,7 +217,7 @@ impl ToHex for Node {
     }
 }
 
-/// Required to convert [`NoteCommitmentTree`] into [`SerializedTree`].
+/// Required to serialize [`NoteCommitmentTree`]s in a format matching `zcashd`.
 ///
 /// Zebra stores Sapling note commitment trees as [`Frontier`]s while the
 /// [`z_gettreestate`][1] RPC requires [`CommitmentTree`][2]s. Implementing
@@ -614,7 +612,21 @@ impl NoteCommitmentTree {
         assert_eq!(self.inner, other.inner);
 
         // Check the RPC serialization format (not the same as the Zebra database format)
-        assert_eq!(SerializedTree::from(self), SerializedTree::from(other));
+        assert_eq!(self.to_rpc_bytes(), other.to_rpc_bytes());
+    }
+
+    /// Serializes [`Self`] to a format matching `zcashd`'s RPCs.
+    pub fn to_rpc_bytes(&self) -> Vec<u8> {
+        // Convert the tree from [`Frontier`](bridgetree::Frontier) to
+        // [`CommitmentTree`](merkle_tree::CommitmentTree).
+        let tree = incrementalmerkletree::frontier::CommitmentTree::from_frontier(&self.inner);
+
+        let mut rpc_bytes = vec![];
+
+        zcash_primitives::merkle_tree::write_commitment_tree(&tree, &mut rpc_bytes)
+            .expect("serializable tree");
+
+        rpc_bytes
     }
 }
 
@@ -668,137 +680,5 @@ impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
         }
 
         tree
-    }
-}
-
-/// A serialized Sapling note commitment tree.
-///
-/// The format of the serialized data is compatible with
-/// [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree) from `librustzcash` and not
-/// with [`Frontier`] from the crate
-/// [`incrementalmerkletree`]. Zebra follows the former format in order to stay
-/// consistent with `zcashd` in RPCs. Note that [`NoteCommitmentTree`] itself is
-/// represented as [`Frontier`].
-///
-/// The formats are semantically equivalent. The primary difference between them
-/// is that in [`Frontier`], the vector of parents is
-/// dense (we know where the gaps are from the position of the leaf in the
-/// overall tree); whereas in [`CommitmentTree`](incrementalmerkletree::frontier::CommitmentTree),
-/// the vector of parent hashes is sparse with [`None`] values in the gaps.
-///
-/// The sparse format, used in this implementation, allows representing invalid
-/// commitment trees while the dense format allows representing only valid
-/// commitment trees.
-///
-/// It is likely that the dense format will be used in future RPCs, in which
-/// case the current implementation will have to change and use the format
-/// compatible with [`Frontier`] instead.
-#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
-pub struct SerializedTree(Vec<u8>);
-
-impl From<&NoteCommitmentTree> for SerializedTree {
-    fn from(tree: &NoteCommitmentTree) -> Self {
-        let mut serialized_tree = vec![];
-
-        //
-        let legacy_tree = LegacyNoteCommitmentTree::from(tree.clone());
-
-        // Convert the note commitment tree represented as a frontier into the
-        // format compatible with `zcashd`.
-        //
-        // `librustzcash` has a function [`from_frontier()`][1], which returns a
-        // commitment tree in the sparse format. However, the returned tree
-        // always contains [`MERKLE_DEPTH`] parent nodes, even though some
-        // trailing parents are empty. Such trees are incompatible with Sapling
-        // commitment trees returned by `zcashd` because `zcashd` returns
-        // Sapling commitment trees without empty trailing parents. For this
-        // reason, Zebra implements its own conversion between the dense and
-        // sparse formats for Sapling.
-        //
-        // [1]: <https://github.com/zcash/librustzcash/blob/a63a37a/zcash_primitives/src/merkle_tree.rs#L125>
-        if let Some(frontier) = legacy_tree.inner.frontier {
-            let (left_leaf, right_leaf) = match frontier.leaf {
-                LegacyLeaf::Left(left_value) => (Some(left_value), None),
-                LegacyLeaf::Right(left_value, right_value) => (Some(left_value), Some(right_value)),
-            };
-
-            // Ommers are siblings of parent nodes along the branch from the
-            // most recent leaf to the root of the tree.
-            let mut ommers_iter = frontier.ommers.iter();
-
-            // Set bits in the binary representation of the position indicate
-            // the presence of ommers along the branch from the most recent leaf
-            // node to the root of the tree, except for the lowest bit.
-            let mut position: u64 = (frontier.position.0)
-                .try_into()
-                .expect("old usize position always fit in u64");
-
-            // The lowest bit does not indicate the presence of any ommers. We
-            // clear it so that we can test if there are no set bits left in
-            // [`position`].
-            position &= !1;
-
-            // Run through the bits of [`position`], and push an ommer for each
-            // set bit, or `None` otherwise. In contrast to the 'zcashd' code
-            // linked above, we want to skip any trailing `None` parents at the
-            // top of the tree. To do that, we clear the bits as we go through
-            // them, and break early if the remaining bits are all zero (i.e.
-            // [`position`] is zero).
-            let mut parents = vec![];
-            for i in 1..MERKLE_DEPTH {
-                // Test each bit in [`position`] individually. Don't test the
-                // lowest bit since it doesn't actually indicate the position of
-                // any ommer.
-                let bit_mask = 1 << i;
-
-                if position & bit_mask == 0 {
-                    parents.push(None);
-                } else {
-                    parents.push(ommers_iter.next());
-                    // Clear the set bit so that we can test if there are no set
-                    // bits left.
-                    position &= !bit_mask;
-                    // If there are no set bits left, exit early so that there
-                    // are no empty trailing parent nodes in the serialized
-                    // tree.
-                    if position == 0 {
-                        break;
-                    }
-                }
-            }
-
-            // Serialize the converted note commitment tree.
-            Optional::write(&mut serialized_tree, left_leaf, |tree, leaf| {
-                leaf.write(tree)
-            })
-            .expect("A leaf in a note commitment tree should be serializable");
-
-            Optional::write(&mut serialized_tree, right_leaf, |tree, leaf| {
-                leaf.write(tree)
-            })
-            .expect("A leaf in a note commitment tree should be serializable");
-
-            Vector::write(&mut serialized_tree, &parents, |tree, parent| {
-                Optional::write(tree, *parent, |tree, parent| parent.write(tree))
-            })
-            .expect("Parent nodes in a note commitment tree should be serializable");
-        }
-
-        Self(serialized_tree)
-    }
-}
-
-impl From<Option<Arc<NoteCommitmentTree>>> for SerializedTree {
-    fn from(maybe_tree: Option<Arc<NoteCommitmentTree>>) -> Self {
-        match maybe_tree {
-            Some(tree) => tree.as_ref().into(),
-            None => Self(vec![]),
-        }
-    }
-}
-
-impl AsRef<[u8]> for SerializedTree {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
     }
 }
