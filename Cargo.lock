@@ -4267,6 +4267,18 @@ dependencies = [
 
 [[package]]
 name = "shardtree"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c19f96dde3a8693874f7e7c53d95616569b4009379a903789efbd448f4ea9cc7"
+dependencies = [
+ "bitflags 2.5.0",
+ "either",
+ "incrementalmerkletree",
+ "tracing",
+]
+
+[[package]]
+name = "shardtree"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b3cdd24424ce0b381646737fedddc33c4dcf7dcd2d545056b53f7982097bef5"
@@ -5778,6 +5790,39 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6a382af39be9ee5a3788157145c404b7cd19acc440903f6c34b09fb44f0e991"
+dependencies = [
+ "base64 0.21.7",
+ "bech32",
+ "bls12_381",
+ "bs58",
+ "crossbeam-channel",
+ "group",
+ "hex",
+ "incrementalmerkletree",
+ "memuse",
+ "nom",
+ "orchard 0.6.0",
+ "percent-encoding",
+ "prost",
+ "rayon",
+ "secrecy",
+ "shardtree 0.1.0",
+ "subtle",
+ "time",
+ "tonic-build 0.10.2",
+ "tracing",
+ "which",
+ "zcash_address",
+ "zcash_encoding",
+ "zcash_note_encryption",
+ "zcash_primitives 0.13.0",
+]
+
+[[package]]
+name = "zcash_client_backend"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0364e69c446fcf96a1f73f342c6c3fa697ea65ae7eeeae7d76ca847b9c442e40"
@@ -5802,7 +5847,7 @@ dependencies = [
  "rayon",
  "sapling-crypto",
  "secrecy",
- "shardtree",
+ "shardtree 0.3.1",
  "subtle",
  "time",
  "tonic-build 0.10.2",
@@ -6127,7 +6172,7 @@ dependencies = [
  "uint",
  "x25519-dalek",
  "zcash_address",
- "zcash_client_backend",
+ "zcash_client_backend 0.12.1",
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
@@ -6314,7 +6359,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
- "zcash_client_backend",
+ "zcash_client_backend 0.12.1",
  "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives 0.14.0",
@@ -6432,9 +6477,8 @@ dependencies = [
  "tokio",
  "tracing-error",
  "tracing-subscriber",
- "zcash_client_backend",
- "zcash_primitives 0.14.0",
- "zcash_protocol",
+ "zcash_client_backend 0.10.0",
+ "zcash_primitives 0.13.0",
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",

@@ -416,20 +416,6 @@ pub fn scan_block(
     )
 }
 
-/// Turns a [`SaplingScanningKey`] into [`ScanningKey`] .
-///
-/// Currently only accepts a string-encoded extended full viewing key.
-///
-// TODO: use `ViewingKey::parse` from zebra-chain instead
-pub fn scanning_key(
-    key: &SaplingScanningKey,
-    network: &Network,
-) -> Result<DiversifiableFullViewingKey, Report> {
-    let efvk =
-        decode_extended_full_viewing_key(network.sapling_efvk_hrp(), key).map_err(|e| eyre!(e))?;
-    Ok(efvk.to_diversifiable_full_viewing_key())
-}
-
 /// Converts a Zebra-format scanning key into some `scan_block()` keys.
 ///
 /// Currently only accepts extended full viewing keys, and returns both their diversifiable full
