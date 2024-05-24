@@ -7,12 +7,12 @@ use crate::{
     storage::Storage,
 };
 use color_eyre::eyre::Report;
+use sapling::{zip32::DiversifiableFullViewingKey, SaplingIvk};
 use tokio::{
     sync::{mpsc::Sender, watch},
     task::JoinHandle,
 };
 use tracing::Instrument;
-use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::block::Height;
 use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::SaplingScanningKey;
@@ -65,7 +65,7 @@ impl ScanRangeTaskBuilder {
             storage,
         } = self;
 
-        tokio::spawn(
+        tokio::task::spawn_local(
             scan_range(
                 height_range.end,
                 keys,
@@ -122,7 +122,7 @@ pub async fn scan_range(
             None,
             storage.clone(),
             key_heights.clone(),
-            parsed_keys.clone(),
+            &crate::scan::new_parsed_keys(parsed_keys.clone()),
             subscribed_keys_receiver.clone(),
         )
         .await?;

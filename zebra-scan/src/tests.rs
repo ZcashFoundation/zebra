@@ -19,18 +19,14 @@ use zcash_client_backend::{
     },
 };
 use zcash_note_encryption::Domain;
-use zcash_primitives::{
-    block::BlockHash,
-    consensus::BlockHeight,
+use zcash_primitives::{block::BlockHash, consensus::BlockHeight, memo::MemoBytes};
+
+use ::sapling::{
     constants::SPENDING_KEY_GENERATOR,
-    memo::MemoBytes,
-    sapling::{
-        note_encryption::{sapling_note_encryption, SaplingDomain},
-        util::generate_random_rseed,
-        value::NoteValue,
-        Note, Nullifier,
-    },
-    zip32,
+    note_encryption::{sapling_note_encryption, SaplingDomain},
+    util::generate_random_rseed,
+    value::NoteValue,
+    zip32, Note, Nullifier,
 };
 
 use zebra_chain::{
@@ -75,10 +71,10 @@ pub fn mock_sapling_scanning_keys(num_keys: u8, network: &Network) -> Vec<Saplin
 
 /// Generates an [`zip32::sapling::ExtendedFullViewingKey`] from `seed` for tests.
 #[allow(deprecated)]
-pub fn mock_sapling_efvk(seed: &[u8]) -> zip32::sapling::ExtendedFullViewingKey {
+pub fn mock_sapling_efvk(seed: &[u8]) -> zip32::ExtendedFullViewingKey {
     // TODO: Use `to_diversifiable_full_viewing_key` since `to_extended_full_viewing_key` is
     // deprecated.
-    zip32::sapling::ExtendedSpendingKey::master(seed).to_extended_full_viewing_key()
+    zip32::ExtendedSpendingKey::master(seed).to_extended_full_viewing_key()
 }
 
 /// Generates a fake block containing a Sapling output decryptable by `dfvk`.
@@ -91,7 +87,7 @@ pub fn mock_sapling_efvk(seed: &[u8]) -> zip32::sapling::ExtendedFullViewingKey 
 pub fn fake_block(
     height: BlockHeight,
     nf: Nullifier,
-    dfvk: &zip32::sapling::DiversifiableFullViewingKey,
+    dfvk: &zip32::DiversifiableFullViewingKey,
     value: u64,
     tx_after: bool,
     initial_sapling_tree_size: Option<u32>,
@@ -165,7 +161,7 @@ pub fn fake_compact_block(
     height: BlockHeight,
     prev_hash: BlockHash,
     nf: Nullifier,
-    dfvk: &zip32::sapling::DiversifiableFullViewingKey,
+    dfvk: &zip32::DiversifiableFullViewingKey,
     value: u64,
     tx_after: bool,
     initial_sapling_tree_size: Option<u32>,
@@ -174,23 +170,17 @@ pub fn fake_compact_block(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(
-        &zcash_primitives::consensus::Network::TestNetwork,
-        height,
-        &mut rng,
-    );
+    let rseed = generate_random_rseed(::sapling::note_encryption::Zip212Enforcement::Off, &mut rng);
+
     let note = Note::from_parts(to, NoteValue::from_raw(value), rseed);
-    let encryptor = sapling_note_encryption::<_, zcash_primitives::consensus::Network>(
+    let encryptor = sapling_note_encryption::<_>(
         Some(dfvk.fvk().ovk),
         note.clone(),
-        MemoBytes::empty(),
+        *MemoBytes::empty().as_array(),
         &mut rng,
     );
     let cmu = note.cmu().to_bytes().to_vec();
-    let ephemeral_key =
-        SaplingDomain::<zcash_primitives::consensus::Network>::epk_bytes(encryptor.epk())
-            .0
-            .to_vec();
+    let ephemeral_key = SaplingDomain::epk_bytes(encryptor.epk()).0.to_vec();
     let enc_ciphertext = encryptor.encrypt_note_plaintext();
 
     // Create a fake CompactBlock containing the note

@@ -264,11 +264,16 @@ pub async fn scan_service_get_results_for_key_correctly() -> Result<()> {
 /// Tests that the scan service registers keys correctly.
 #[tokio::test]
 pub async fn scan_service_registers_keys_correctly() -> Result<()> {
-    for network in Network::iter() {
-        scan_service_registers_keys_correctly_for(&network).await?;
-    }
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            for network in Network::iter() {
+                scan_service_registers_keys_correctly_for(&network).await?;
+            }
 
-    Ok(())
+            Ok(())
+        })
+        .await
 }
 
 async fn scan_service_registers_keys_correctly_for(network: &Network) -> Result<()> {

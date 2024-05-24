@@ -51,8 +51,10 @@ tower = "0.4.13"
 tracing = "0.1.39"
 futures = "0.3.30"
 
-zcash_client_backend = "0.10.0-rc.1"
-zcash_primitives = "0.13.0"
+zcash_client_backend = { version = "0.12.1", features = ["test-dependencies"] }
+zcash_keys = { version = "0.2.0", features = ["sapling"] }
+zcash_primitives = "0.14.0"
+sapling = { package = "sapling-crypto", version = "0.1" }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37", features = ["shielded-scan"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.37", features = ["shielded-scan"] }

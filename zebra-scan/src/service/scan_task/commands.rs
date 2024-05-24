@@ -8,7 +8,7 @@ use tokio::sync::{
     oneshot,
 };
 
-use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
+use sapling::{zip32::DiversifiableFullViewingKey, SaplingIvk};
 use zebra_chain::{block::Height, parameters::Network};
 use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::SaplingScanningKey;

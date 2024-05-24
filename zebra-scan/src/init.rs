@@ -55,7 +55,7 @@ pub fn spawn_init(
         )
     } else {
         // TODO: spawn an entirely new executor here, to avoid timing attacks.
-        tokio::spawn(
+        tokio::task::spawn_local(
             async move {
                 let storage =
                     tokio::task::spawn_blocking(move || Storage::new(&config, &network, false))
