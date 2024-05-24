@@ -78,6 +78,8 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
+use std::sync::Arc;
+
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
@@ -113,6 +115,19 @@ pub struct StartCmd {
 impl StartCmd {
     async fn start(&self) -> Result<(), Report> {
         let config = APPLICATION.config();
+        let is_regtest = config.network.network.is_regtest();
+
+        let config = if is_regtest {
+            Arc::new(ZebradConfig {
+                mempool: mempool::Config {
+                    debug_enable_at_height: Some(0),
+                    ..config.mempool
+                },
+                ..Arc::unwrap_or_clone(config)
+            })
+        } else {
+            config
+        };
 
         info!("initializing node state");
         let (_, max_checkpoint_height) = zebra_consensus::router::init_checkpoint_list(
@@ -301,7 +316,7 @@ impl StartCmd {
         );
 
         info!("spawning syncer task");
-        let syncer_task_handle = if config.network.network.is_regtest() {
+        let syncer_task_handle = if is_regtest {
             if !syncer
                 .state_contains(config.network.network.genesis_hash())
                 .await?
