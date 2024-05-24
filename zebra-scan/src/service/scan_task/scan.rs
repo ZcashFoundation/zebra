@@ -331,8 +331,6 @@ pub async fn scan_height_and_store_results(
             _other => {}
         };
 
-        let _subscribed_keys_receiver = subscribed_keys_receiver.clone();
-
         let sapling_key = sapling_key.clone();
         let block = block.clone();
         let mut storage = storage.clone();
