@@ -55,12 +55,13 @@ pub fn main() {
             .expect("There should be exactly one dfvk");
 
         let ufvk_with_acc_id = HashMap::from([(
-            AccountId::from(1),
-            UnifiedFullViewingKey::new(Some(dfvk), None).expect("`dfvk` should be `Some`"),
+            AccountId::try_from(1).expect("Account ID should be valid"),
+            UnifiedFullViewingKey::new(Some(dfvk)).expect("`dfvk` should be `Some`"),
         )]);
 
         for (height, txids) in storage.sapling_results(key) {
-            let height = BlockHeight::from(height);
+            let block_number = height.0;
+            let height = BlockHeight::from(block_number);
 
             for txid in txids.iter() {
                 let tx = Transaction::read(
@@ -70,8 +71,8 @@ pub fn main() {
                 )
                 .expect("TX fetched via RPC should be deserializable from raw bytes");
 
-                for output in decrypt_transaction(&network, height, &tx, &ufvk_with_acc_id) {
-                    let memo = memo_bytes_to_string(output.memo.as_array());
+                for output in decrypt_transaction(&network, block_number.into(), &tx, &ufvk_with_acc_id).sapling_outputs() {
+                    let memo = memo_bytes_to_string(output.memo().as_array());
 
                     if !memo.is_empty()
                         // Filter out some uninteresting and repeating memos from ZECPages.
