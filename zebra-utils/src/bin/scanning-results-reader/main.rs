@@ -71,7 +71,10 @@ pub fn main() {
                 )
                 .expect("TX fetched via RPC should be deserializable from raw bytes");
 
-                for output in decrypt_transaction(&network, block_number.into(), &tx, &ufvk_with_acc_id).sapling_outputs() {
+                for output in
+                    decrypt_transaction(&network, block_number.into(), &tx, &ufvk_with_acc_id)
+                        .sapling_outputs()
+                {
                     let memo = memo_bytes_to_string(output.memo().as_array());
 
                     if !memo.is_empty()

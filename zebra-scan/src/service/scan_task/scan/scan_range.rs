@@ -65,7 +65,7 @@ impl ScanRangeTaskBuilder {
             storage,
         } = self;
 
-        tokio::task::spawn_local(
+        tokio::spawn(
             scan_range(
                 height_range.end,
                 keys,
@@ -122,7 +122,7 @@ pub async fn scan_range(
             None,
             storage.clone(),
             key_heights.clone(),
-            &crate::scan::new_parsed_keys(parsed_keys.clone()),
+            parsed_keys.clone(),
             subscribed_keys_receiver.clone(),
         )
         .await?;

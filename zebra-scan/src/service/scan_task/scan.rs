@@ -187,17 +187,14 @@ pub async fn start(
             }
         }
 
-        // Convert the keys as we have to the new format.
-        let new_parsed_keys = new_parsed_keys(parsed_keys.clone());
-
-        if !new_parsed_keys.is_empty() {
+        if !parsed_keys.is_empty() {
             let scanned_height = scan_height_and_store_results(
                 height,
                 state.clone(),
                 Some(chain_tip_change.clone()),
                 storage.clone(),
                 key_heights.clone(),
-                &new_parsed_keys,
+                parsed_keys.clone(),
                 subscribed_keys_receiver.clone(),
             )
             .await?;
@@ -219,20 +216,20 @@ pub async fn start(
 }
 
 /// Convert keys from the Zebra parsed format to the scanning format using a dummy account and the diversifiable full viewing key.
-pub fn new_parsed_keys(
+pub fn ready_scan_block_keys(
     parsed_keys: HashMap<String, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-) -> HashMap<String, ScanningKeys<AccountId, (AccountId, Scope)>> {
-    let mut new_parsed_keys = HashMap::new();
+) -> HashMap<String, Arc<ScanningKeys<AccountId, (AccountId, Scope)>>> {
+    let mut new_keys = HashMap::new();
     for keys in parsed_keys.iter() {
         for dfvk in keys.1 .0.iter() {
             let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()));
             let scanning_keys =
                 ScanningKeys::from_account_ufvks([(AccountId::ZERO, ufvk.unwrap())]);
 
-            new_parsed_keys.insert(keys.0.clone(), scanning_keys);
+            new_keys.insert(keys.0.clone(), Arc::new(scanning_keys));
         }
     }
-    new_parsed_keys
+    new_keys
 }
 
 /// Polls state service for tip height every [`CHECK_INTERVAL`] until the tip reaches the provided `tip_height`
@@ -276,7 +273,7 @@ pub async fn scan_height_and_store_results(
     chain_tip_change: Option<ChainTipChange>,
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
-    parsed_keys: &HashMap<SaplingScanningKey, ScanningKey>,
+    parsed_keys: HashMap<String, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
     subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
@@ -302,8 +299,17 @@ pub async fn scan_height_and_store_results(
         _ => unreachable!("unmatched response to a state::Block request"),
     };
 
-    for (key_index_in_task, (sapling_key, scanning_keys)) in parsed_keys.into_iter().enumerate() {
-        match key_last_scanned_heights.get(sapling_key) {
+    // Convert the keys to zcash_client_backend new format for `scan_block` function.
+    // TODO: This is probabably wrong, fix it.
+    let ready_scan_block_keys = ready_scan_block_keys(parsed_keys.clone())
+        .iter()
+        .next()
+        .expect("we should have 1 key")
+        .1
+        .clone();
+
+    for (key_index_in_task, (sapling_key, _scanning_keys)) in parsed_keys.into_iter().enumerate() {
+        match key_last_scanned_heights.get(&sapling_key) {
             // Only scan what was not scanned for each key
             Some(last_scanned_height) if height <= *last_scanned_height => continue,
 
@@ -350,8 +356,8 @@ pub async fn scan_height_and_store_results(
 
         // TODO: Next code should run in a new thread but it seems we need to implement `Send` for upstream `ScanningKeys` to do so.
 
-        let dfvk_res =
-            scan_block(&network, &block, sapling_tree_size, scanning_keys).map_err(|e| eyre!(e))?;
+        let dfvk_res = scan_block(&network, &block, sapling_tree_size, &ready_scan_block_keys)
+            .map_err(|e| eyre!(e))?;
 
         let dfvk_res = scanned_block_to_db_result(dfvk_res);
 
@@ -569,7 +575,5 @@ pub fn spawn_init(
     chain_tip_change: ChainTipChange,
     cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
-    tokio::task::spawn_local(
-        start(state, chain_tip_change, storage, cmd_receiver).in_current_span(),
-    )
+    tokio::spawn(start(state, chain_tip_change, storage, cmd_receiver).in_current_span())
 }
