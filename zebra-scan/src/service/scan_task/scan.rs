@@ -218,7 +218,7 @@ pub async fn start(
 /// Convert keys from the Zebra parsed format to the scanning format using a dummy account and the diversifiable full viewing key.
 pub fn ready_scan_block_keys(
     parsed_keys: HashMap<String, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-) -> HashMap<String, Arc<ScanningKeys<AccountId, (AccountId, Scope)>>> {
+) -> HashMap<String, ScanningKeys<AccountId, (AccountId, Scope)>> {
     let mut new_keys = HashMap::new();
     for keys in parsed_keys.iter() {
         for dfvk in keys.1 .0.iter() {
@@ -226,7 +226,7 @@ pub fn ready_scan_block_keys(
             let scanning_keys =
                 ScanningKeys::from_account_ufvks([(AccountId::ZERO, ufvk.unwrap())]);
 
-            new_keys.insert(keys.0.clone(), Arc::new(scanning_keys));
+            new_keys.insert(keys.0.clone(), scanning_keys);
         }
     }
     new_keys
@@ -301,12 +301,12 @@ pub async fn scan_height_and_store_results(
 
     // Convert the keys to zcash_client_backend new format for `scan_block` function.
     // TODO: This is probabably wrong, fix it.
-    let ready_scan_block_keys = ready_scan_block_keys(parsed_keys.clone())
+    let ready_scan_block_keys = ready_scan_block_keys(parsed_keys.clone());
+    let ready_scan_block_keys = ready_scan_block_keys
         .iter()
         .next()
         .expect("we should have 1 key")
-        .1
-        .clone();
+        .1;
 
     for (key_index_in_task, (sapling_key, _scanning_keys)) in parsed_keys.into_iter().enumerate() {
         match key_last_scanned_heights.get(&sapling_key) {
@@ -356,7 +356,7 @@ pub async fn scan_height_and_store_results(
 
         // TODO: Next code should run in a new thread but it seems we need to implement `Send` for upstream `ScanningKeys` to do so.
 
-        let dfvk_res = scan_block(&network, &block, sapling_tree_size, &ready_scan_block_keys)
+        let dfvk_res = scan_block(&network, &block, sapling_tree_size, ready_scan_block_keys)
             .map_err(|e| eyre!(e))?;
 
         let dfvk_res = scanned_block_to_db_result(dfvk_res);
@@ -412,7 +412,7 @@ pub fn scan_block(
     zcash_client_backend::scanning::scan_block(
         network,
         block_to_compact(block, chain_metadata),
-        &scanning_key,
+        scanning_key,
         // Ignore whether notes are change from a viewer's own spends for now.
         &Nullifiers::empty(),
         // Ignore previous blocks for now.
