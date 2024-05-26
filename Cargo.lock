@@ -2842,34 +2842,6 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d31e68534df32024dcc89a8390ec6d7bef65edd87d91b45cfb481a2eb2d77c5"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "ff",
- "fpe",
- "group",
- "halo2_gadgets",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand 0.8.5",
- "reddsa",
- "serde",
- "subtle",
- "tracing",
- "zcash_note_encryption",
-]
-
-[[package]]
-name = "orchard"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1fb255c3ffdccd3c84fe9ebed72aef64fdc72e6a3e4180dd411002d47abaad42"
@@ -5881,39 +5853,6 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.13.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d17e4c94ca8d69d2fcf2be97522da5732a580eb2125cda3b150761952f8df8e6"
-dependencies = [
- "aes",
- "bip0039",
- "bitvec",
- "blake2b_simd",
- "blake2s_simd",
- "bls12_381",
- "byteorder",
- "equihash",
- "ff",
- "fpe",
- "group",
- "hex",
- "incrementalmerkletree",
- "jubjub",
- "lazy_static",
- "memuse",
- "nonempty",
- "orchard 0.6.0",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "sha2",
- "subtle",
- "zcash_address",
- "zcash_encoding",
- "zcash_note_encryption",
-]
-
-[[package]]
-name = "zcash_primitives"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9070e084570bb78aed4f8d71fd6254492e62c87a5d01e084183980e98117092d"
@@ -6196,7 +6135,7 @@ dependencies = [
  "tonic-build 0.11.0",
  "tonic-reflection",
  "tower",
- "zcash_primitives 0.13.0",
+ "zcash_primitives 0.14.0",
  "zebra-chain",
  "zebra-node-services",
  "zebra-state",
