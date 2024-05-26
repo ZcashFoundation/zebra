@@ -69,7 +69,7 @@ pub fn mock_sapling_scanning_keys(num_keys: u8, network: &Network) -> Vec<Saplin
     keys
 }
 
-/// Generates an [`zip32::sapling::ExtendedFullViewingKey`] from `seed` for tests.
+/// Generates an [`zip32::ExtendedFullViewingKey`] from `seed` for tests.
 #[allow(deprecated)]
 pub fn mock_sapling_efvk(seed: &[u8]) -> zip32::ExtendedFullViewingKey {
     // TODO: Use `to_diversifiable_full_viewing_key` since `to_extended_full_viewing_key` is
