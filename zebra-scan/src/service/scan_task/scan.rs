@@ -221,7 +221,7 @@ pub fn ready_scan_block_keys(
 ) -> HashMap<String, ScanningKeys<AccountId, (AccountId, Scope)>> {
     parsed_keys
         .iter()
-        .map(|(key, (dfvks, _))| {
+        .flat_map(|(key, (dfvks, _))| {
             dfvks
                 .iter()
                 .map(|dfvk| {
@@ -235,7 +235,6 @@ pub fn ready_scan_block_keys(
                 })
                 .collect::<Vec<_>>()
         })
-        .flatten()
         .collect()
 }
 
