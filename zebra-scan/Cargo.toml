@@ -45,7 +45,7 @@ color-eyre = "0.6.3"
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
 semver = "1.0.23"
-serde = { version = "1.0.202", features = ["serde_derive"] }
+serde = { version = "1.0.203", features = ["serde_derive"] }
 tokio = { version = "1.37.0", features = ["time"] }
 tower = "0.4.13"
 tracing = "0.1.39"
