@@ -305,17 +305,8 @@ pub async fn scan_height_and_store_results(
         _ => unreachable!("unmatched response to a state::Block request"),
     };
 
-    // Convert the keys to zcash_client_backend new format for `scan_block` function.
-    // TODO: This is probabably wrong, fix it.
-    let ready_scan_block_keys = ready_scan_block_keys(parsed_keys.clone());
-    let ready_scan_block_keys = ready_scan_block_keys
-        .iter()
-        .next()
-        .expect("we should have 1 key")
-        .1;
-
-    for (key_index_in_task, (sapling_key, _scanning_keys)) in parsed_keys.into_iter().enumerate() {
-        match key_last_scanned_heights.get(&sapling_key) {
+    for (key_index_in_task, (sapling_key, _scanning_keys)) in parsed_keys.iter().enumerate() {
+        match key_last_scanned_heights.get(sapling_key) {
             // Only scan what was not scanned for each key
             Some(last_scanned_height) if height <= *last_scanned_height => continue,
 
@@ -343,10 +334,13 @@ pub async fn scan_height_and_store_results(
             _other => {}
         };
 
+        let subscribed_keys_receiver = subscribed_keys_receiver.clone();
+
         let sapling_key = sapling_key.clone();
         let block = block.clone();
         let mut storage = storage.clone();
         let network = network.clone();
+        let parsed_keys = parsed_keys.clone();
 
         // We use a dummy size of the Sapling note commitment tree.
         //
@@ -360,26 +354,38 @@ pub async fn scan_height_and_store_results(
         // TODO: use the real sapling tree size: `zs::Response::SaplingTree().position() + 1`
         let sapling_tree_size = 1 << 16;
 
-        // TODO: Next code should run in a new thread but it seems we need to implement `Send` for upstream `ScanningKeys` to do so.
+        tokio::task::spawn_blocking(move || {
+            // Convert the keys to zcash_client_backend new format for `scan_block` function.
+            // TODO: This is probabably wrong, fix it.
+            let ready_scan_block_keys = ready_scan_block_keys(parsed_keys);
+            let ready_scan_block_keys = ready_scan_block_keys
+                .iter()
+                .next()
+                .expect("we should have 1 key")
+                .1;
 
-        let dfvk_res = scan_block(&network, &block, sapling_tree_size, ready_scan_block_keys)
-            .map_err(|e| eyre!(e))?;
+            let dfvk_res = scan_block(&network, &block, sapling_tree_size, ready_scan_block_keys)
+                .map_err(|e| eyre!(e))?;
 
-        let dfvk_res = scanned_block_to_db_result(dfvk_res);
+            let dfvk_res = scanned_block_to_db_result(dfvk_res);
 
-        let latest_subscribed_keys = subscribed_keys_receiver.borrow().clone();
-        if let Some(results_sender) = latest_subscribed_keys.get(&sapling_key).cloned() {
-            for (_tx_index, tx_id) in dfvk_res.clone() {
-                // TODO: Handle `SendErrors` by dropping sender from `subscribed_keys`
-                let _ = results_sender.try_send(ScanResult {
-                    key: sapling_key.clone(),
-                    height,
-                    tx_id: tx_id.into(),
-                });
+            let latest_subscribed_keys = subscribed_keys_receiver.borrow().clone();
+            if let Some(results_sender) = latest_subscribed_keys.get(&sapling_key).cloned() {
+                for (_tx_index, tx_id) in dfvk_res.clone() {
+                    // TODO: Handle `SendErrors` by dropping sender from `subscribed_keys`
+                    let _ = results_sender.try_send(ScanResult {
+                        key: sapling_key.clone(),
+                        height,
+                        tx_id: tx_id.into(),
+                    });
+                }
             }
-        }
 
-        storage.add_sapling_results(&sapling_key, height, dfvk_res);
+            storage.add_sapling_results(&sapling_key, height, dfvk_res);
+            Ok::<_, Report>(())
+        })
+        .wait_for_panics()
+        .await?;
     }
 
     Ok(Some(height))
