@@ -219,17 +219,24 @@ pub async fn start(
 pub fn ready_scan_block_keys(
     parsed_keys: HashMap<String, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
 ) -> HashMap<String, ScanningKeys<AccountId, (AccountId, Scope)>> {
-    let mut new_keys = HashMap::new();
-    for keys in parsed_keys.iter() {
-        for dfvk in keys.1 .0.iter() {
-            let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()));
-            let scanning_keys =
-                ScanningKeys::from_account_ufvks([(AccountId::ZERO, ufvk.unwrap())]);
+    parsed_keys
+        .iter()
+        .map(|(key, (dfvks, _))| {
+            dfvks
+                .iter()
+                .map(|dfvk| {
+                    let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()));
+                    let scanning_keys = ScanningKeys::from_account_ufvks([(
+                        AccountId::ZERO,
+                        ufvk.expect("ufvk is valid"),
+                    )]);
 
-            new_keys.insert(keys.0.clone(), scanning_keys);
-        }
-    }
-    new_keys
+                    (key.clone(), scanning_keys)
+                })
+                .collect::<Vec<_>>()
+        })
+        .flatten()
+        .collect()
 }
 
 /// Polls state service for tip height every [`CHECK_INTERVAL`] until the tip reaches the provided `tip_height`
