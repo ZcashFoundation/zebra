@@ -6251,6 +6251,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "zcash_address",
  "zcash_client_backend",
  "zcash_keys",
  "zcash_note_encryption",

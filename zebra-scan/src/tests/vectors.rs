@@ -11,12 +11,8 @@ use sapling::{
 use zcash_client_backend::{
     encoding::{decode_extended_full_viewing_key, encode_extended_full_viewing_key},
     proto::compact_formats::ChainMetadata,
-    scanning::ScanningKeys,
 };
-use zcash_keys::keys::UnifiedFullViewingKey;
-use zcash_primitives::{
-    constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY, zip32::AccountId,
-};
+use zcash_primitives::constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY;
 
 use zebra_chain::{
     block::{Block, Height},
@@ -27,7 +23,7 @@ use zebra_chain::{
 use zebra_state::{SaplingScannedResult, TransactionIndex};
 
 use crate::{
-    scan::{block_to_compact, scan_block, ScanningKey},
+    scan::{block_to_compact, scan_block, scanning_key},
     storage::db::tests::new_test_storage,
     tests::{fake_block, mock_sapling_efvk, ZECPAGES_SAPLING_VIEWING_KEY},
 };
@@ -46,7 +42,7 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     assert_eq!(block.transactions.len(), 4);
 
-    let scanning_keys = scanning_key(dfvk);
+    let scanning_keys = scanning_key(&dfvk).expect("scanning key");
 
     let res = scan_block(&Network::Mainnet, &block, sapling_tree_size, &scanning_keys).unwrap();
 
@@ -107,7 +103,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
 
-    let scanning_keys = scanning_key(dfvk);
+    let scanning_keys = scanning_key(&dfvk).expect("scanning key");
 
     while let Some(block) = db.block(height.into()) {
         // We use a dummy size of the Sapling note commitment tree. We can't set the size to zero
@@ -188,7 +184,7 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    let scanning_keys = scanning_key(dfvk);
+    let scanning_keys = scanning_key(&dfvk).expect("scanning key");
 
     let result = scan_block(&Network::Mainnet, &block, sapling_tree_size, &scanning_keys).unwrap();
 
@@ -213,10 +209,4 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
     );
 
     Ok(())
-}
-
-/// Convert from the `DiversifiableFullViewingKey` to a `ScanningKey`.
-fn scanning_key(dfvk: DiversifiableFullViewingKey) -> ScanningKey {
-    let ufvk = UnifiedFullViewingKey::new(Some(dfvk));
-    ScanningKeys::from_account_ufvks([(AccountId::ZERO, ufvk.unwrap())])
 }

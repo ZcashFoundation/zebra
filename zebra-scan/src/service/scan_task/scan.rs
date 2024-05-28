@@ -15,6 +15,7 @@ use tokio::{
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use tracing::Instrument;
+use zcash_address::unified::{Encoding, Fvk, Ufvk};
 use zcash_client_backend::{
     data_api::ScannedBlock,
     encoding::decode_extended_full_viewing_key,
@@ -224,15 +225,7 @@ pub fn ready_scan_block_keys(
         .flat_map(|(key, (dfvks, _))| {
             dfvks
                 .iter()
-                .map(|dfvk| {
-                    let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()));
-                    let scanning_keys = ScanningKeys::from_account_ufvks([(
-                        AccountId::ZERO,
-                        ufvk.expect("ufvk is valid"),
-                    )]);
-
-                    (key.clone(), scanning_keys)
-                })
+                .map(|dfvk| (key.clone(), scanning_key(dfvk).expect("scanning key")))
                 .collect::<Vec<_>>()
         })
         .collect()
@@ -587,4 +580,15 @@ pub fn spawn_init(
     cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
     tokio::spawn(start(state, chain_tip_change, storage, cmd_receiver).in_current_span())
+}
+
+/// Turns a [`DiversifiableFullViewingKey`] to a [`ScanningKey`].
+pub fn scanning_key(dfvk: &DiversifiableFullViewingKey) -> Result<ScanningKey, Report> {
+    let fvk = Fvk::try_from((2, &dfvk.to_bytes()[..]))?;
+    let ufvk = Ufvk::try_from_items(vec![fvk])?;
+    let ufvk = UnifiedFullViewingKey::parse(&ufvk).map_err(|e| eyre!(e))?;
+    Ok(ScanningKeys::from_account_ufvks(vec![(
+        AccountId::ZERO,
+        ufvk,
+    )]))
 }
