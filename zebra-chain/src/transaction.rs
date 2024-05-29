@@ -33,7 +33,7 @@ pub use serialize::{
     SerializedTransaction, MIN_TRANSPARENT_TX_SIZE, MIN_TRANSPARENT_TX_V4_SIZE,
     MIN_TRANSPARENT_TX_V5_SIZE,
 };
-pub use sighash::{HashType, SigHash};
+pub use sighash::{HashType, SigHash, SigHasher};
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
@@ -194,14 +194,21 @@ impl Transaction {
         UnminedTxId::from(self)
     }
 
-    /// Calculate the sighash for the current transaction
+    /// Calculate the sighash for the current transaction.
+    ///
+    /// If you need to compute multiple sighashes for the same transactions,
+    /// it's more efficient to use [`Transaction::sighasher()`].
     ///
     /// # Details
     ///
     /// The `input` argument indicates the transparent Input for which we are
-    /// producing a sighash. It is comprised of the index identifying the
-    /// transparent::Input within the transaction and the transparent::Output
-    /// representing the UTXO being spent by that input.
+    /// producing a sighash, or None if it's a shielded input. It is comprised
+    /// of the index identifying the transparent::Input within the transaction
+    /// and the transparent::Output representing the UTXO being spent by that
+    /// input.
+    ///
+    /// The `script_code` argument indicates the script code being validated
+    /// for transparent inputs, or None if it's a shielded input.
     ///
     /// # Panics
     ///
@@ -217,15 +224,20 @@ impl Transaction {
         input: Option<usize>,
         script_code: Option<Vec<u8>>,
     ) -> SigHash {
-        sighash::SigHasher::new(
-            self,
+        sighash::SigHasher::new(self, branch_id, all_previous_outputs).sighash(
             hash_type,
-            branch_id,
-            all_previous_outputs,
             input,
             script_code,
         )
-        .sighash()
+    }
+
+    /// Return a [`SigHasher`] for this transaction.
+    pub fn sighasher<'a>(
+        &'a self,
+        branch_id: ConsensusBranchId,
+        all_previous_outputs: &'a [transparent::Output],
+    ) -> sighash::SigHasher {
+        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
     }
 
     /// Compute the authorizing data commitment of this transaction as specified

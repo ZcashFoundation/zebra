@@ -5841,6 +5841,7 @@ dependencies = [
  "ff",
  "fpe",
  "group",
+ "hdwallet",
  "hex",
  "incrementalmerkletree",
  "jubjub",
@@ -5850,7 +5851,9 @@ dependencies = [
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
+ "ripemd",
  "sapling-crypto",
+ "secp256k1",
  "sha2",
  "subtle",
  "tracing",
@@ -5933,6 +5936,7 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.1.16"
+source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=73f28bed340e698ea0eaad608548508ae4dcbc59#73f28bed340e698ea0eaad608548508ae4dcbc59"
 dependencies = [
  "bindgen",
  "cc",

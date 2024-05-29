@@ -7,6 +7,7 @@ use lazy_static::lazy_static;
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
     parameters::Network,
+    primitives::zcash_primitives::PrecomputedTxData,
     serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{sighash::SigHasher, txid::TxIdBuilder},
     transparent::Script,
@@ -607,14 +608,11 @@ fn test_vec143_1() -> Result<()> {
 
     let hasher = SigHasher::new(
         &transaction,
-        HashType::ALL,
         NetworkUpgrade::Overwinter.branch_id().unwrap(),
         &[],
-        None,
-        None,
     );
 
-    let hash = hasher.sighash();
+    let hash = hasher.sighash(HashType::ALL, None, None);
     let expected = "a1f1a4e5cd9bd522322d661edd2af1bf2a7019cfab94ece18f4ba935b0a19073";
     let result = hex::encode(hash);
     let span = tracing::span!(
@@ -646,14 +644,15 @@ fn test_vec143_2() -> Result<()> {
 
     let hasher = SigHasher::new(
         &transaction,
-        HashType::SINGLE,
         NetworkUpgrade::Overwinter.branch_id().unwrap(),
         &all_previous_outputs,
+    );
+
+    let hash = hasher.sighash(
+        HashType::SINGLE,
         Some(input_ind),
         Some(lock_script.as_raw_bytes().to_vec()),
     );
-
-    let hash = hasher.sighash();
     let expected = "23652e76cb13b85a0e3363bb5fca061fa791c40c533eccee899364e6e60bb4f7";
     let result: &[u8] = hash.as_ref();
     let result = hex::encode(result);
@@ -677,14 +676,11 @@ fn test_vec243_1() -> Result<()> {
 
     let hasher = SigHasher::new(
         &transaction,
-        HashType::ALL,
         NetworkUpgrade::Sapling.branch_id().unwrap(),
         &[],
-        None,
-        None,
     );
 
-    let hash = hasher.sighash();
+    let hash = hasher.sighash(HashType::ALL, None, None);
     let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
     let result = hex::encode(hash);
     let span = tracing::span!(
@@ -696,11 +692,14 @@ fn test_vec243_1() -> Result<()> {
     let _guard = span.enter();
     assert_eq!(expected, result);
 
-    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+    let precomputed_tx_data = PrecomputedTxData::new(
         &transaction,
-        HashType::ALL,
         NetworkUpgrade::Sapling.branch_id().unwrap(),
         &[],
+    );
+    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+        &precomputed_tx_data,
+        HashType::ALL,
         None,
         None,
     );
@@ -727,14 +726,15 @@ fn test_vec243_2() -> Result<()> {
 
     let hasher = SigHasher::new(
         &transaction,
-        HashType::NONE,
         NetworkUpgrade::Sapling.branch_id().unwrap(),
         &all_previous_outputs,
+    );
+
+    let hash = hasher.sighash(
+        HashType::NONE,
         Some(input_ind),
         Some(lock_script.as_raw_bytes().to_vec()),
     );
-
-    let hash = hasher.sighash();
     let expected = "bbe6d84f57c56b29b914c694baaccb891297e961de3eb46c68e3c89c47b1a1db";
     let result = hex::encode(hash);
     let span = tracing::span!(
@@ -754,11 +754,14 @@ fn test_vec243_2() -> Result<()> {
     let index = input_ind;
     let all_previous_outputs = mock_pre_v5_output_list(prevout, input_ind);
 
-    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+    let precomputed_tx_data = PrecomputedTxData::new(
         &transaction,
-        HashType::NONE,
         NetworkUpgrade::Sapling.branch_id().unwrap(),
         &all_previous_outputs,
+    );
+    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+        &precomputed_tx_data,
+        HashType::NONE,
         Some(index),
         Some(lock_script.as_raw_bytes().to_vec()),
     );
@@ -786,14 +789,15 @@ fn test_vec243_3() -> Result<()> {
 
     let hasher = SigHasher::new(
         &transaction,
-        HashType::ALL,
         NetworkUpgrade::Sapling.branch_id().unwrap(),
         &all_previous_outputs,
+    );
+
+    let hash = hasher.sighash(
+        HashType::ALL,
         Some(input_ind),
         Some(lock_script.as_raw_bytes().to_vec()),
     );
-
-    let hash = hasher.sighash();
     let expected = "f3148f80dfab5e573d5edfe7a850f5fd39234f80b5429d3a57edcc11e34c585b";
     let result = hex::encode(hash);
     let span = tracing::span!(
@@ -814,11 +818,15 @@ fn test_vec243_3() -> Result<()> {
     };
     let index = input_ind;
 
-    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+    let all_previous_outputs = &[prevout];
+    let precomputed_tx_data = PrecomputedTxData::new(
         &transaction,
-        HashType::ALL,
         NetworkUpgrade::Sapling.branch_id().unwrap(),
-        &[prevout],
+        all_previous_outputs,
+    );
+    let alt_sighash = crate::primitives::zcash_primitives::sighash(
+        &precomputed_tx_data,
+        HashType::ALL,
         Some(index),
         Some(lock_script.as_raw_bytes().to_vec()),
     );

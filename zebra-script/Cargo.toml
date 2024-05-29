@@ -16,7 +16,9 @@ categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
 [dependencies]
 # zcash_script = "0.1.14"
-zcash_script = { path = "/home/conrado/zfnd/zcash_script", version = "0.1.14" }
+# TODO: point to released version after https://github.com/ZcashFoundation/zcash_script/pull/157
+# merges and is included in a release
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "73f28bed340e698ea0eaad608548508ae4dcbc59" }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37" }
 

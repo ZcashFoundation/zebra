@@ -5,7 +5,7 @@ use super::Transaction;
 use crate::parameters::ConsensusBranchId;
 use crate::transparent;
 
-use crate::primitives::zcash_primitives::sighash;
+use crate::primitives::zcash_primitives::{sighash, PrecomputedTxData};
 
 bitflags::bitflags! {
     /// The different SigHash types, as defined in <https://zips.z.cash/zip-0143>
@@ -39,47 +39,55 @@ impl AsRef<[u8]> for SigHash {
     }
 }
 
-pub(super) struct SigHasher<'a> {
-    trans: &'a Transaction,
-    hash_type: HashType,
-    branch_id: ConsensusBranchId,
-    all_previous_outputs: &'a [transparent::Output],
-    input_index: Option<usize>,
-    script_code: Option<Vec<u8>>,
+/// A SigHasher context which stores precomputed data that is reused
+/// between sighash computations for the same transaction.
+pub struct SigHasher<'a> {
+    precomputed_tx_data: PrecomputedTxData<'a>,
 }
 
 impl<'a> SigHasher<'a> {
+    /// Create a new SigHasher for the given transaction.
     pub fn new(
         trans: &'a Transaction,
-        hash_type: HashType,
         branch_id: ConsensusBranchId,
         all_previous_outputs: &'a [transparent::Output],
-        input_index: Option<usize>,
-        script_code: Option<Vec<u8>>,
     ) -> Self {
+        let precomputed_tx_data = PrecomputedTxData::new(trans, branch_id, all_previous_outputs);
         SigHasher {
-            trans,
-            hash_type,
-            branch_id,
-            all_previous_outputs,
-            input_index,
-            script_code,
+            precomputed_tx_data,
         }
     }
 
-    pub(super) fn sighash(self) -> SigHash {
-        self.hash_sighash_librustzcash()
-    }
-
-    /// Compute a signature hash using librustzcash.
-    fn hash_sighash_librustzcash(&self) -> SigHash {
+    /// Calculate the sighash for the current transaction.
+    ///
+    /// # Details
+    ///
+    /// The `input` argument indicates the transparent Input for which we are
+    /// producing a sighash, or None if it's a shielded input. It is comprised
+    /// of the index identifying the transparent::Input within the transaction
+    /// and the transparent::Output representing the UTXO being spent by that
+    /// input.
+    ///
+    /// The `script_code` argument indicates the script code being validated
+    /// for transparent inputs, or None if it's a shielded input.
+    ///
+    /// # Panics
+    ///
+    /// - if passed in any NetworkUpgrade from before NetworkUpgrade::Overwinter
+    /// - if called on a v1 or v2 transaction
+    /// - if the input index points to a transparent::Input::CoinBase
+    /// - if the input index is out of bounds for self.inputs()
+    pub fn sighash(
+        &self,
+        hash_type: HashType,
+        input_index: Option<usize>,
+        script_code: Option<Vec<u8>>,
+    ) -> SigHash {
         sighash(
-            self.trans,
-            self.hash_type,
-            self.branch_id,
-            self.all_previous_outputs,
-            self.input_index,
-            self.script_code.clone(),
+            &self.precomputed_tx_data,
+            hash_type,
+            input_index,
+            script_code,
         )
     }
 }

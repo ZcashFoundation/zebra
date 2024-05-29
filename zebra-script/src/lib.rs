@@ -22,7 +22,7 @@ use zcash_script::{
 
 use zebra_chain::{
     parameters::ConsensusBranchId,
-    transaction::{HashType, Transaction},
+    transaction::{HashType, SigHasher, Transaction},
     transparent,
 };
 
@@ -42,6 +42,9 @@ pub enum Error {
     /// tx is an invalid size for it's protocol
     #[non_exhaustive]
     TxSizeMismatch,
+    /// tx is a coinbase transaction and should not be verified
+    #[non_exhaustive]
+    TxCoinbase,
     /// encountered unknown error kind from zcash_script: {0}
     #[non_exhaustive]
     Unknown(zcash_script_error_t),
@@ -76,12 +79,10 @@ pub struct CachedFfiTransaction {
 
 /// A sighash context used for the zcash_script sighash callback.
 struct SigHashContext<'a> {
-    /// The cached transaction being verified.
-    cached_transaction: &'a CachedFfiTransaction,
-    /// The consensus branch ID of the block containing the transaction.
-    branch_id: ConsensusBranchId,
     /// The index of the input being verified.
     input_index: usize,
+    /// The SigHasher for the transaction being verified.
+    sighasher: SigHasher<'a>,
 }
 
 /// The sighash callback to use with zcash_script.
@@ -101,10 +102,8 @@ extern "C" fn sighash(
         let ctx = ctx as *const SigHashContext;
         let script_code_vec =
             std::slice::from_raw_parts(script_code, script_code_len as usize).to_vec();
-        let sighash = (*ctx).cached_transaction.transaction.sighash(
-            (*ctx).branch_id,
+        let sighash = (*ctx).sighasher.sighash(
             HashType::from_bits_truncate(hash_type as u32),
-            &(*ctx).cached_transaction.all_previous_outputs,
             Some((*ctx).input_index),
             Some(script_code_vec),
         );
@@ -182,14 +181,12 @@ impl CachedFfiTransaction {
                 unlock_script,
                 sequence: _,
             } => unlock_script.as_raw_bytes(),
-            // TODO: how to handle this?
-            transparent::Input::Coinbase { .. } => todo!(),
+            transparent::Input::Coinbase { .. } => Err(Error::TxCoinbase)?,
         };
 
         let ctx = Box::new(SigHashContext {
-            cached_transaction: self,
-            branch_id,
             input_index: n_in,
+            sighasher: SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs),
         });
         // SAFETY: The `script_*` fields are created from a valid Rust `slice`.
         let ret = unsafe {
