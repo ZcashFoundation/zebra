@@ -356,12 +356,11 @@ pub async fn scan_height_and_store_results(
 
         tokio::task::spawn_blocking(move || {
             // Convert the keys to zcash_client_backend new format for `scan_block` function.
-            // TODO: This is probabably wrong, fix it.
             let ready_scan_block_keys = ready_scan_block_keys(parsed_keys);
             let ready_scan_block_keys = ready_scan_block_keys
                 .iter()
                 .next()
-                .expect("we should have 1 key")
+                .expect("we should have 1 ScanningKeys for each key")
                 .1;
 
             let dfvk_res = scan_block(&network, &block, sapling_tree_size, ready_scan_block_keys)
