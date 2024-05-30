@@ -22,6 +22,8 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
 
     let null_sapling_ovk = sapling::keys::OutgoingViewingKey([0u8; 32]);
 
+    // Note that, since this function is used to validate coinbase transactions, we can ignore
+    // the "grace period" mentioned in ZIP-212.
     let zip_212_enforcement = if network_upgrade >= NetworkUpgrade::Canopy {
         sapling::note_encryption::Zip212Enforcement::On
     } else {
