@@ -21,7 +21,7 @@ use crate::{
 };
 
 use super::*;
-use crate::sapling::{Output, SharedAnchor, Spend};
+use crate::sapling;
 
 impl ZcashDeserialize for jubjub::Fq {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
@@ -110,7 +110,7 @@ where
 // range, so we can implement its serialization and deserialization separately.
 // (Unlike V4, where it must be serialized as part of the transaction.)
 
-impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
+impl ZcashSerialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             None => {
@@ -127,21 +127,24 @@ impl ZcashSerialize for Option<sapling::ShieldedData<SharedAnchor>> {
     }
 }
 
-impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
+impl ZcashSerialize for sapling::ShieldedData<sapling::SharedAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Collect arrays for Spends
         // There's no unzip3, so we have to unzip twice.
         let (spend_prefixes, spend_proofs_sigs): (Vec<_>, Vec<_>) = self
             .spends()
             .cloned()
-            .map(Spend::<SharedAnchor>::into_v5_parts)
+            .map(sapling::Spend::<sapling::SharedAnchor>::into_v5_parts)
             .map(|(prefix, proof, sig)| (prefix, (proof, sig)))
             .unzip();
         let (spend_proofs, spend_sigs) = spend_proofs_sigs.into_iter().unzip();
 
         // Collect arrays for Outputs
-        let (output_prefixes, output_proofs): (Vec<_>, _) =
-            self.outputs().cloned().map(Output::into_v5_parts).unzip();
+        let (output_prefixes, output_proofs): (Vec<_>, _) = self
+            .outputs()
+            .cloned()
+            .map(sapling::Output::into_v5_parts)
+            .unzip();
 
         // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
         spend_prefixes.zcash_serialize(&mut writer)?;
@@ -175,7 +178,7 @@ impl ZcashSerialize for sapling::ShieldedData<SharedAnchor> {
 
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
-impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
+impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     #[allow(clippy::unwrap_in_result)]
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nSpendsSapling` and `vSpendsSapling` in the spec.
@@ -269,14 +272,16 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<SharedAnchor>> {
             .into_iter()
             .zip(spend_proofs)
             .zip(spend_sigs)
-            .map(|((prefix, proof), sig)| Spend::<SharedAnchor>::from_v5_parts(prefix, proof, sig))
+            .map(|((prefix, proof), sig)| {
+                sapling::Spend::<sapling::SharedAnchor>::from_v5_parts(prefix, proof, sig)
+            })
             .collect();
 
         // Create shielded outputs from deserialized parts
         let outputs = output_prefixes
             .into_iter()
             .zip(output_proofs)
-            .map(|(prefix, proof)| Output::from_v5_parts(prefix, proof))
+            .map(|(prefix, proof)| sapling::Output::from_v5_parts(prefix, proof))
             .collect();
 
         // Create transfers
@@ -823,7 +828,7 @@ impl ZcashDeserialize for Transaction {
                 let shielded_outputs =
                     Vec::<sapling::OutputInTransactionV4>::zcash_deserialize(&mut limited_reader)?
                         .into_iter()
-                        .map(Output::from_v4)
+                        .map(sapling::Output::from_v4)
                         .collect();
 
                 // A bundle of fields denoted in the spec as `nJoinSplit`, `vJoinSplit`,
