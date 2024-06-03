@@ -30,5 +30,5 @@ pub mod regtest;
 #[cfg(feature = "shielded-scan")]
 pub mod shielded_scan;
 
-#[cfg(all(feature = "getblocktemplate-rpcs", feature = "internal-miner"))]
+#[cfg(feature = "getblocktemplate-rpcs")]
 pub mod read_state;
