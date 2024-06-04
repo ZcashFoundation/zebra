@@ -322,6 +322,9 @@ pub async fn scan_height_and_store_results(
         let sapling_tree_size = 1 << 16;
 
         tokio::task::spawn_blocking(move || {
+            // TODO:
+            // - Wait until https://github.com/zcash/librustzcash/pull/1400 makes it to a release.
+            // - Create the scanning keys outside of this thread and move them here instead.
             let scanning_keys = scanning_keys(parsed_keys.values()).expect("scanning keys");
 
             let scanned_block = scan_block(&network, &block, sapling_tree_size, &scanning_keys)
@@ -387,7 +390,7 @@ pub fn scan_block(
     )
 }
 
-/// Converts a Zebra-format scanning key into diversifiable full viewing key key.
+/// Converts a Zebra-format scanning key into diversifiable full viewing key.
 // TODO: use `ViewingKey::parse` from zebra-chain instead
 pub fn sapling_key_to_dfvk(
     key: &SaplingScanningKey,
