@@ -53,7 +53,7 @@ futures = "0.3.30"
 
 zcash_client_backend = { version = "0.12.1" }
 zcash_keys = { version = "0.2.0", features = ["sapling"] }
-zcash_primitives = "0.14.0"
+zcash_primitives = "0.15.0"
 zcash_address = "0.3.2"
 sapling = { package = "sapling-crypto", version = "0.1" }
 
