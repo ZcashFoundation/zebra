@@ -20,16 +20,22 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
     let alt_tx = convert_tx_to_librustzcash(transaction, network_upgrade)
         .expect("zcash_primitives and Zebra transaction formats must be compatible");
 
-    let alt_height = height.0.into();
-    let null_sapling_ovk = zcash_primitives::keys::OutgoingViewingKey([0u8; 32]);
+    let null_sapling_ovk = sapling::keys::OutgoingViewingKey([0u8; 32]);
+
+    // Note that, since this function is used to validate coinbase transactions, we can ignore
+    // the "grace period" mentioned in ZIP-212.
+    let zip_212_enforcement = if network_upgrade >= NetworkUpgrade::Canopy {
+        sapling::note_encryption::Zip212Enforcement::On
+    } else {
+        sapling::note_encryption::Zip212Enforcement::Off
+    };
 
     if let Some(bundle) = alt_tx.sapling_bundle() {
         for output in bundle.shielded_outputs().iter() {
-            let recovery = zcash_primitives::sapling::note_encryption::try_sapling_output_recovery(
-                network,
-                alt_height,
+            let recovery = sapling::note_encryption::try_sapling_output_recovery(
                 &null_sapling_ovk,
                 output,
+                zip_212_enforcement,
             );
             if recovery.is_none() {
                 return false;

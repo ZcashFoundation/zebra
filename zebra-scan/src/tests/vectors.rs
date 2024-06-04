@@ -4,15 +4,15 @@ use std::sync::Arc;
 
 use color_eyre::Result;
 
+use sapling::{
+    zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
+    Nullifier,
+};
 use zcash_client_backend::{
     encoding::{decode_extended_full_viewing_key, encode_extended_full_viewing_key},
     proto::compact_formats::ChainMetadata,
 };
-use zcash_primitives::{
-    constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-    sapling::Nullifier,
-    zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
-};
+use zcash_primitives::constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY;
 
 use zebra_chain::{
     block::{Block, Height},
@@ -23,7 +23,7 @@ use zebra_chain::{
 use zebra_state::{SaplingScannedResult, TransactionIndex};
 
 use crate::{
-    scan::{block_to_compact, scan_block},
+    scan::{block_to_compact, scan_block, scanning_keys},
     storage::db::tests::new_test_storage,
     tests::{fake_block, mock_sapling_efvk, ZECPAGES_SAPLING_VIEWING_KEY},
 };
@@ -42,7 +42,9 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
 
     assert_eq!(block.transactions.len(), 4);
 
-    let res = scan_block(&Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
+    let scanning_keys = scanning_keys(&vec![dfvk]).expect("scanning key");
+
+    let res = scan_block(&Network::Mainnet, &block, sapling_tree_size, &scanning_keys).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(res.transactions().len(), 1);
@@ -52,11 +54,11 @@ async fn scanning_from_fake_generated_blocks() -> Result<()> {
         .transactions
         .iter()
         .map(|tx| tx.hash().bytes_in_display_order())
-        .any(|txid| &txid == res.transactions()[0].txid.as_ref()));
+        .any(|txid| &txid == res.transactions()[0].txid().as_ref()));
 
     // Check that the txid in the scanning result matches the third tx in the original block.
     assert_eq!(
-        res.transactions()[0].txid.as_ref(),
+        res.transactions()[0].txid().as_ref(),
         &block.transactions[2].hash().bytes_in_display_order()
     );
 
@@ -78,10 +80,7 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     )
     .unwrap();
 
-    // Build a vector of viewing keys `vks` to scan for.
-    let fvk = efvk.fvk;
-    let ivk = fvk.vk.ivk();
-    let ivks = vec![ivk];
+    let dfvk = efvk.to_diversifiable_full_viewing_key();
 
     let network = Network::Mainnet;
 
@@ -103,6 +102,9 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
     let mut transactions_found = 0;
     let mut transactions_scanned = 0;
     let mut blocks_scanned = 0;
+
+    let scanning_keys = scanning_keys(&vec![dfvk]).expect("scanning key");
+
     while let Some(block) = db.block(height.into()) {
         // We use a dummy size of the Sapling note commitment tree. We can't set the size to zero
         // because the underlying scanning function would return
@@ -118,8 +120,13 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
         let compact_block = block_to_compact(&block, chain_metadata);
 
-        let res = scan_block(&network, &block, sapling_commitment_tree_size, &ivks)
-            .expect("scanning block for the ZECpages viewing key should work");
+        let res = scan_block(
+            &network,
+            &block,
+            sapling_commitment_tree_size,
+            &scanning_keys,
+        )
+        .expect("scanning block for the ZECpages viewing key should work");
 
         transactions_found += res.transactions().len();
         transactions_scanned += compact_block.vtx.len();
@@ -177,13 +184,16 @@ fn scanning_fake_blocks_store_key_and_results() -> Result<()> {
 
     let (block, sapling_tree_size) = fake_block(1u32.into(), nf, &dfvk, 1, true, Some(0));
 
-    let result = scan_block(&Network::Mainnet, &block, sapling_tree_size, &[&dfvk]).unwrap();
+    let scanning_keys = scanning_keys(&vec![dfvk]).expect("scanning key");
+
+    let result = scan_block(&Network::Mainnet, &block, sapling_tree_size, &scanning_keys).unwrap();
 
     // The response should have one transaction relevant to the key we provided.
     assert_eq!(result.transactions().len(), 1);
 
-    let result =
-        SaplingScannedResult::from_bytes_in_display_order(*result.transactions()[0].txid.as_ref());
+    let result = SaplingScannedResult::from_bytes_in_display_order(
+        *result.transactions()[0].txid().as_ref(),
+    );
 
     // Add result to database
     storage.add_sapling_results(
