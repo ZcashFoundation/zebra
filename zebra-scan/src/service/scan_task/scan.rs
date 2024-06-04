@@ -15,6 +15,7 @@ use tokio::{
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 
 use tracing::Instrument;
+use zcash_address::unified::{Encoding, Fvk, Ufvk};
 use zcash_client_backend::{
     data_api::ScannedBlock,
     encoding::decode_extended_full_viewing_key,
@@ -26,7 +27,7 @@ use zcash_client_backend::{
 };
 use zcash_primitives::zip32::{AccountId, Scope};
 
-use sapling::{zip32::DiversifiableFullViewingKey, SaplingIvk};
+use sapling::zip32::DiversifiableFullViewingKey;
 
 use zebra_chain::{
     block::{Block, Height},
@@ -55,11 +56,6 @@ pub type State = Buffer<
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
     zebra_state::Request,
 >;
-
-/// The key for blockchain scanning.
-///
-/// Currently contains a single key.
-pub type ScanningKey = ScanningKeys<AccountId, (AccountId, Scope)>;
 
 /// Wait a few seconds at startup for some blocks to get verified.
 ///
@@ -110,15 +106,9 @@ pub async fn start(
 
     // Parse and convert keys once, then use them to scan all blocks.
     // There is some cryptography here, but it should be fast even with thousands of keys.
-    let mut parsed_keys: HashMap<
-        SaplingScanningKey,
-        (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
-    > = key_heights
+    let mut parsed_keys: HashMap<SaplingScanningKey, DiversifiableFullViewingKey> = key_heights
         .keys()
-        .map(|key| {
-            let parsed_keys = sapling_key_to_scan_block_keys(key, &network)?;
-            Ok::<_, Report>((key.clone(), parsed_keys))
-        })
+        .map(|key| Ok::<_, Report>((key.clone(), sapling_key_to_dfvk(key, &network)?)))
         .try_collect()?;
 
     let mut subscribed_keys: HashMap<SaplingScanningKey, Sender<ScanResult>> = HashMap::new();
@@ -170,7 +160,7 @@ pub async fn start(
 
             let start_height = new_keys
                 .iter()
-                .map(|(_, (_, _, height))| *height)
+                .map(|(_, (_, height))| *height)
                 .min()
                 .unwrap_or(sapling_activation_height);
 
@@ -215,29 +205,6 @@ pub async fn start(
     }
 }
 
-/// Convert keys from the Zebra parsed format to the scanning format using a dummy account and the diversifiable full viewing key.
-pub fn ready_scan_block_keys(
-    parsed_keys: HashMap<String, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
-) -> HashMap<String, ScanningKeys<AccountId, (AccountId, Scope)>> {
-    parsed_keys
-        .iter()
-        .flat_map(|(key, (dfvks, _))| {
-            dfvks
-                .iter()
-                .map(|dfvk| {
-                    let ufvk = UnifiedFullViewingKey::new(Some(dfvk.clone()));
-                    let scanning_keys = ScanningKeys::from_account_ufvks([(
-                        AccountId::ZERO,
-                        ufvk.expect("ufvk is valid"),
-                    )]);
-
-                    (key.clone(), scanning_keys)
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-
 /// Polls state service for tip height every [`CHECK_INTERVAL`] until the tip reaches the provided `tip_height`
 pub async fn wait_for_height(
     height: Height,
@@ -279,7 +246,7 @@ pub async fn scan_height_and_store_results(
     chain_tip_change: Option<ChainTipChange>,
     storage: Storage,
     key_last_scanned_heights: Arc<HashMap<SaplingScanningKey, Height>>,
-    parsed_keys: HashMap<String, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>)>,
+    parsed_keys: HashMap<String, DiversifiableFullViewingKey>,
     subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
 ) -> Result<Option<Height>, Report> {
     let network = storage.network();
@@ -305,7 +272,7 @@ pub async fn scan_height_and_store_results(
         _ => unreachable!("unmatched response to a state::Block request"),
     };
 
-    for (key_index_in_task, (sapling_key, _scanning_keys)) in parsed_keys.iter().enumerate() {
+    for (key_index_in_task, (sapling_key, _)) in parsed_keys.iter().enumerate() {
         match key_last_scanned_heights.get(sapling_key) {
             // Only scan what was not scanned for each key
             Some(last_scanned_height) if height <= *last_scanned_height => continue,
@@ -355,22 +322,19 @@ pub async fn scan_height_and_store_results(
         let sapling_tree_size = 1 << 16;
 
         tokio::task::spawn_blocking(move || {
-            // Convert the keys to zcash_client_backend new format for `scan_block` function.
-            let ready_scan_block_keys = ready_scan_block_keys(parsed_keys);
-            let ready_scan_block_keys = ready_scan_block_keys
-                .iter()
-                .next()
-                .expect("we should have 1 ScanningKeys for each key")
-                .1;
+            // TODO:
+            // - Wait until https://github.com/zcash/librustzcash/pull/1400 makes it to a release.
+            // - Create the scanning keys outside of this thread and move them here instead.
+            let scanning_keys = scanning_keys(parsed_keys.values()).expect("scanning keys");
 
-            let dfvk_res = scan_block(&network, &block, sapling_tree_size, ready_scan_block_keys)
+            let scanned_block = scan_block(&network, &block, sapling_tree_size, &scanning_keys)
                 .map_err(|e| eyre!(e))?;
 
-            let dfvk_res = scanned_block_to_db_result(dfvk_res);
+            let scanning_result = scanned_block_to_db_result(scanned_block);
 
             let latest_subscribed_keys = subscribed_keys_receiver.borrow().clone();
             if let Some(results_sender) = latest_subscribed_keys.get(&sapling_key).cloned() {
-                for (_tx_index, tx_id) in dfvk_res.clone() {
+                for (_tx_index, tx_id) in scanning_result.clone() {
                     // TODO: Handle `SendErrors` by dropping sender from `subscribed_keys`
                     let _ = results_sender.try_send(ScanResult {
                         key: sapling_key.clone(),
@@ -380,7 +344,7 @@ pub async fn scan_height_and_store_results(
                 }
             }
 
-            storage.add_sapling_results(&sapling_key, height, dfvk_res);
+            storage.add_sapling_results(&sapling_key, height, scanning_result);
             Ok::<_, Report>(())
         })
         .wait_for_panics()
@@ -391,11 +355,6 @@ pub async fn scan_height_and_store_results(
 }
 
 /// Returns the transactions from `block` belonging to the given `scanning_keys`.
-/// This list of keys should come from a single configured `SaplingScanningKey`.
-///
-/// For example, there are two individual viewing keys for most shielded transfers:
-/// - the payment (external) key, and
-/// - the change (internal) key.
 ///
 /// # Performance / Hangs
 ///
@@ -409,7 +368,7 @@ pub fn scan_block(
     network: &Network,
     block: &Block,
     sapling_tree_size: u32,
-    scanning_key: &ScanningKey,
+    scanning_key: &ScanningKeys<AccountId, (AccountId, Scope)>,
 ) -> Result<ScannedBlock<AccountId>, ScanError> {
     // TODO: Implement a check that returns early when the block height is below the Sapling
     // activation height.
@@ -431,27 +390,17 @@ pub fn scan_block(
     )
 }
 
-/// Converts a Zebra-format scanning key into some `scan_block()` keys.
-///
-/// Currently only accepts extended full viewing keys, and returns both their diversifiable full
-/// viewing key and their individual viewing key, for testing purposes.
-///
-// TODO: work out what string format is used for SaplingIvk, if any, and support it here
-//       performance: stop returning both the dfvk and ivk for the same key
+/// Converts a Zebra-format scanning key into diversifiable full viewing key.
 // TODO: use `ViewingKey::parse` from zebra-chain instead
-pub fn sapling_key_to_scan_block_keys(
+pub fn sapling_key_to_dfvk(
     key: &SaplingScanningKey,
     network: &Network,
-) -> Result<(Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>), Report> {
-    let efvk =
-        decode_extended_full_viewing_key(network.sapling_efvk_hrp(), key).map_err(|e| eyre!(e))?;
-
-    // Just return all the keys for now, so we can be sure our code supports them.
-    let dfvk = efvk.to_diversifiable_full_viewing_key();
-    let eivk = dfvk.to_ivk(Scope::External);
-    let iivk = dfvk.to_ivk(Scope::Internal);
-
-    Ok((vec![dfvk], vec![eivk, iivk]))
+) -> Result<DiversifiableFullViewingKey, Report> {
+    Ok(
+        decode_extended_full_viewing_key(network.sapling_efvk_hrp(), key)
+            .map_err(|e| eyre!(e))?
+            .to_diversifiable_full_viewing_key(),
+    )
 }
 
 /// Converts a zebra block and meta data into a compact block.
@@ -587,4 +536,25 @@ pub fn spawn_init(
     cmd_receiver: tokio::sync::mpsc::Receiver<ScanTaskCommand>,
 ) -> JoinHandle<Result<(), Report>> {
     tokio::spawn(start(state, chain_tip_change, storage, cmd_receiver).in_current_span())
+}
+
+/// Turns an iterator of [`DiversifiableFullViewingKey`]s to [`ScanningKeys`].
+pub fn scanning_keys<'a>(
+    dfvks: impl IntoIterator<Item = &'a DiversifiableFullViewingKey>,
+) -> Result<ScanningKeys<AccountId, (AccountId, Scope)>, Report> {
+    dfvks
+        .into_iter()
+        .enumerate()
+        .map(|(i, dfvk)| Ok((AccountId::try_from(u32::try_from(i)?)?, dfvk_to_ufvk(dfvk)?)))
+        .try_collect::<(_, _), Vec<(_, _)>, _>()
+        .map(ScanningKeys::from_account_ufvks)
+}
+
+/// Turns a [`DiversifiableFullViewingKey`] to [`UnifiedFullViewingKey`].
+pub fn dfvk_to_ufvk(dfvk: &DiversifiableFullViewingKey) -> Result<UnifiedFullViewingKey, Report> {
+    UnifiedFullViewingKey::parse(&Ufvk::try_from_items(vec![Fvk::try_from((
+        2,
+        &dfvk.to_bytes()[..],
+    ))?])?)
+    .map_err(|e| eyre!(e))
 }

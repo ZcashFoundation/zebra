@@ -8,12 +8,12 @@ use tokio::sync::{
     oneshot,
 };
 
-use sapling::{zip32::DiversifiableFullViewingKey, SaplingIvk};
+use sapling::zip32::DiversifiableFullViewingKey;
 use zebra_chain::{block::Height, parameters::Network};
 use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::SaplingScanningKey;
 
-use crate::scan::sapling_key_to_scan_block_keys;
+use crate::scan::sapling_key_to_dfvk;
 
 use super::ScanTask;
 
@@ -57,17 +57,11 @@ impl ScanTask {
     /// Returns newly registered keys for scanning.
     pub fn process_messages(
         cmd_receiver: &mut tokio::sync::mpsc::Receiver<ScanTaskCommand>,
-        registered_keys: &mut HashMap<
-            SaplingScanningKey,
-            (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
-        >,
+        registered_keys: &mut HashMap<SaplingScanningKey, DiversifiableFullViewingKey>,
         network: &Network,
     ) -> Result<
         (
-            HashMap<
-                SaplingScanningKey,
-                (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
-            >,
+            HashMap<SaplingScanningKey, (DiversifiableFullViewingKey, Height)>,
             HashMap<SaplingScanningKey, Sender<ScanResult>>,
             Vec<(Receiver<ScanResult>, oneshot::Sender<Receiver<ScanResult>>)>,
         ),
@@ -117,9 +111,9 @@ impl ScanTask {
                                 sapling_activation_height
                             };
 
-                            sapling_key_to_scan_block_keys(&key.0, network)
+                            sapling_key_to_dfvk(&key.0, network)
                                 .ok()
-                                .map(|parsed| (key.0, (parsed.0, parsed.1, birth_height)))
+                                .map(|parsed| (key.0, (parsed, birth_height)))
                         })
                         .collect();
 
@@ -128,10 +122,7 @@ impl ScanTask {
 
                     new_keys.extend(keys.clone());
 
-                    registered_keys.extend(
-                        keys.into_iter()
-                            .map(|(key, (dfvks, ivks, _))| (key, (dfvks, ivks))),
-                    );
+                    registered_keys.extend(keys.into_iter().map(|(key, (dfvk, _))| (key, dfvk)));
                 }
 
                 ScanTaskCommand::RemoveKeys { done_tx, keys } => {
