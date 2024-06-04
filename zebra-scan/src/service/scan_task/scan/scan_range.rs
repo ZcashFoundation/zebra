@@ -7,12 +7,12 @@ use crate::{
     storage::Storage,
 };
 use color_eyre::eyre::Report;
+use sapling::zip32::DiversifiableFullViewingKey;
 use tokio::{
     sync::{mpsc::Sender, watch},
     task::JoinHandle,
 };
 use tracing::Instrument;
-use zcash_primitives::{sapling::SaplingIvk, zip32::DiversifiableFullViewingKey};
 use zebra_chain::block::Height;
 use zebra_node_services::scan_service::response::ScanResult;
 use zebra_state::SaplingScanningKey;
@@ -24,7 +24,7 @@ pub struct ScanRangeTaskBuilder {
     height_range: std::ops::Range<Height>,
 
     /// The keys to be used for scanning blocks in this task
-    keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
+    keys: HashMap<SaplingScanningKey, (DiversifiableFullViewingKey, Height)>,
 
     /// A handle to the state service for reading the blocks and the chain tip height
     state: State,
@@ -37,10 +37,7 @@ impl ScanRangeTaskBuilder {
     /// Creates a new [`ScanRangeTaskBuilder`]
     pub fn new(
         stop_height: Height,
-        keys: HashMap<
-            SaplingScanningKey,
-            (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height),
-        >,
+        keys: HashMap<SaplingScanningKey, (DiversifiableFullViewingKey, Height)>,
         state: State,
         storage: Storage,
     ) -> Self {
@@ -83,7 +80,7 @@ impl ScanRangeTaskBuilder {
 // TODO: update the first parameter to `std::ops::Range<Height>`
 pub async fn scan_range(
     stop_before_height: Height,
-    keys: HashMap<SaplingScanningKey, (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>, Height)>,
+    keys: HashMap<SaplingScanningKey, (DiversifiableFullViewingKey, Height)>,
     state: State,
     storage: Storage,
     subscribed_keys_receiver: watch::Receiver<Arc<HashMap<String, Sender<ScanResult>>>>,
@@ -99,7 +96,7 @@ pub async fn scan_range(
 
     let key_heights: HashMap<String, Height> = keys
         .iter()
-        .map(|(key, (_, _, height))| (key.clone(), *height))
+        .map(|(key, (_, height))| (key.clone(), *height))
         .collect();
 
     let mut height = get_min_height(&key_heights).unwrap_or(sapling_activation_height);
@@ -107,12 +104,9 @@ pub async fn scan_range(
     let key_heights = Arc::new(key_heights);
 
     // Parse and convert keys once, then use them to scan all blocks.
-    let parsed_keys: HashMap<
-        SaplingScanningKey,
-        (Vec<DiversifiableFullViewingKey>, Vec<SaplingIvk>),
-    > = keys
+    let parsed_keys: HashMap<SaplingScanningKey, DiversifiableFullViewingKey> = keys
         .into_iter()
-        .map(|(key, (decoded_dfvks, decoded_ivks, _h))| (key, (decoded_dfvks, decoded_ivks)))
+        .map(|(key, (dfvk, _))| (key, dfvk))
         .collect();
 
     while height < stop_before_height {

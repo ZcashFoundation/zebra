@@ -3,7 +3,6 @@
 //! Usage: <https://docs.rs/zcash_address/0.2.0/zcash_address/trait.TryFromAddress.html#examples>
 
 use zcash_address::unified::{self, Container};
-use zcash_primitives::sapling;
 
 use crate::{parameters::NetworkKind, transparent, BoxError};
 

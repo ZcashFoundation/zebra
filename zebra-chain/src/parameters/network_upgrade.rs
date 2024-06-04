@@ -30,7 +30,7 @@ pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 8] = [
 ///
 /// Network upgrades can change the Zcash network protocol or consensus rules in
 /// incompatible ways.
-#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NetworkUpgrade {
     /// The Zcash protocol for a Genesis block.
