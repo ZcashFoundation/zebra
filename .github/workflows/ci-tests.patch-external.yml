@@ -13,7 +13,7 @@ on:
 #! `ci-tests.patch.yml` and `ci-tests.patch-external.yml` must be kept in sync.
 jobs:
   build:
-    name: Run tests / Build CI Docker / Build images
+    name: Build CI Docker / Build images
     # Only run on PRs from external repositories.
     if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
@@ -24,37 +24,37 @@ jobs:
   ## The following jobs are related to sub-ci-unit-tests-docker.yml
   ###
   test-all:
-    name: Run tests / Test all
+    name: Test all
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-fake-activation-heights:
-    name: Run tests / Test with fake activation heights
+    name: Test with fake activation heights
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-empty-sync:
-    name: Run tests / Test checkpoint sync from empty state
+    name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-lightwalletd-integration:
-    name: Run tests / Test integration with lightwalletd
+    name: Test integration with lightwalletd
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-configuration-file:
-    name: Run tests / Test CI default Docker config file / Test default-conf in Docker
+    name: Test CI default Docker config file / Test default-conf in Docker
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-zebra-conf-path:
-    name: Run tests / Test CI custom Docker config file / Test custom-conf in Docker
+    name: Test CI custom Docker config file / Test custom-conf in Docker
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
@@ -66,67 +66,67 @@ jobs:
 
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   get-available-disks:
-    name: Run tests / Check if cached state disks exist for Mainnet / Check if cached state disks exist
+    name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-stateful-sync:
-    name: Run tests / Zebra checkpoint update / Run sync-past-checkpoint test
+    name: Zebra checkpoint update / Run sync-past-checkpoint test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   test-update-sync:
-    name: Run tests / Zebra tip update / Run update-to-tip test
+    name: Zebra tip update / Run update-to-tip test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   checkpoints-mainnet:
-    name: Run tests / Generate checkpoints mainnet / Run checkpoints-mainnet test
+    name: Generate checkpoints mainnet / Run checkpoints-mainnet test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-rpc-test:
-    name: Run tests / Zebra tip JSON-RPC / Run fully-synced-rpc test
+    name: Zebra tip JSON-RPC / Run fully-synced-rpc test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-transactions-test:
-    name: Run tests / lightwalletd tip send / Run lwd-send-transactions test
+    name: lightwalletd tip send / Run lwd-send-transactions test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   get-block-template-test:
-    name: Run tests / get block template / Run get-block-template test
+    name: get block template / Run get-block-template test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   submit-block-test:
-    name: Run tests / submit block / Run submit-block test
+    name: submit block / Run submit-block test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-full-sync:
-    name: Run tests / lightwalletd tip / Run lwd-full-sync test
+    name: lightwalletd tip / Run lwd-full-sync test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-update-sync:
-    name: Run tests / lightwalletd tip update / Run lwd-update-sync test
+    name: lightwalletd tip update / Run lwd-update-sync test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
 
   lightwalletd-grpc-test:
-    name: Run tests / lightwalletd GRPC tests / Run lwd-grpc-wallet test
+    name: lightwalletd GRPC tests / Run lwd-grpc-wallet test
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
