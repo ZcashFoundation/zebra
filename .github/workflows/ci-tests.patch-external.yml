@@ -18,7 +18,7 @@ jobs:
     if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   ####
   ## The following jobs are related to sub-ci-unit-tests-docker.yml
@@ -27,37 +27,37 @@ jobs:
     name: Test all
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-fake-activation-heights:
     name: Test with fake activation heights
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-empty-sync:
     name: Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-configuration-file:
     name: Test CI default Docker config file / Test default-conf in Docker
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-zebra-conf-path:
     name: Test CI custom Docker config file / Test custom-conf in Docker
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
 
   ####
@@ -69,64 +69,64 @@ jobs:
     name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-stateful-sync:
     name: Zebra checkpoint update / Run sync-past-checkpoint test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   test-update-sync:
     name: Zebra tip update / Run update-to-tip test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   checkpoints-mainnet:
     name: Generate checkpoints mainnet / Run checkpoints-mainnet test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC / Run fully-synced-rpc test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-transactions-test:
     name: lightwalletd tip send / Run lwd-send-transactions test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   get-block-template-test:
     name: get block template / Run get-block-template test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   submit-block-test:
     name: submit block / Run submit-block test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-update-sync:
     name: lightwalletd tip update / Run lwd-update-sync test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
 
   lightwalletd-grpc-test:
     name: lightwalletd GRPC tests / Run lwd-grpc-wallet test
     runs-on: ubuntu-latest
     steps:
-      - run: 'echo "No build required"'
+      - run: 'echo "Skipping job on fork"'
