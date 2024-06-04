@@ -66,11 +66,7 @@ pub(crate) async fn has_non_finalized_best_chain() -> Result<()> {
     let mut next_block_height = tip_height.next()?;
     let mut expected_prev_block_hash = tip_hash;
 
-    loop {
-        if next_block_height.0 > NUM_BLOCKS_TO_SUBMIT.try_into().expect("should fit in u32") {
-            break;
-        }
-
+    while next_block_height.0 <= NUM_BLOCKS_TO_SUBMIT.try_into().expect("should fit in u32") {
         // Wait until the best block hash in Zebra is different from the tip hash in this read state
         let best_block_hash = loop {
             let GetBlockHash(best_block_hash) = rpc_client
