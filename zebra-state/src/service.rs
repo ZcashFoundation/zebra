@@ -1955,13 +1955,11 @@ pub fn init_read_only(
     config: Config,
     network: &Network,
 ) -> (
-    NonFinalizedState,
-    tokio::sync::watch::Sender<NonFinalizedState>,
     ReadStateService,
+    tokio::sync::watch::Sender<NonFinalizedState>,
 ) {
-    let non_finalized_state = NonFinalizedState::new(network);
     let (non_finalized_state_sender, non_finalized_state_receiver) =
-        tokio::sync::watch::channel(non_finalized_state.clone());
+        tokio::sync::watch::channel(NonFinalizedState::new(network));
 
     #[cfg(feature = "elasticsearch")]
     let finalized_state = {
@@ -1986,9 +1984,8 @@ pub fn init_read_only(
     let finalized_state = { FinalizedState::new_with_debug(&config, network, true, true) };
 
     (
-        non_finalized_state,
-        non_finalized_state_sender,
         ReadStateService::new(&finalized_state, None, non_finalized_state_receiver),
+        non_finalized_state_sender,
     )
 }
 

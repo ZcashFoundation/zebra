@@ -46,9 +46,9 @@ pub(crate) async fn has_non_finalized_best_chain() -> Result<()> {
         Some(Duration::from_millis(500)),
     ));
 
-    let (mut non_finalized_state, non_finalized_state_sender, read_state) =
-        init_read_only(config.state, &network);
+    let (read_state, non_finalized_state_sender) = init_read_only(config.state, &network);
     let finalized_state = read_state.db().clone();
+    let mut non_finalized_state = NonFinalizedState::new(&network);
 
     let zs::ReadResponse::Tip(tip_block) = read_state
         .clone()

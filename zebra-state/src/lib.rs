@@ -98,4 +98,4 @@ pub(crate) use config::hidden::{
     write_database_format_version_to_disk, write_state_database_format_version_to_disk,
 };
 
-pub(crate) use request::ContextuallyVerifiedBlock;
+pub use request::ContextuallyVerifiedBlock;
