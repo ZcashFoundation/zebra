@@ -46,7 +46,7 @@ pub use request::{
 };
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
-    chain_tip::{ChainTipChange, LatestChainTip, TipAction},
+    chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check, init, init_read_only,
     non_finalized_state::NonFinalizedState,
     spawn_init, spawn_init_read_only,
@@ -78,7 +78,6 @@ pub use response::GetBlockTemplateChainInfo;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
-    chain_tip::{ChainTipBlock, ChainTipSender},
     finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services,
 };

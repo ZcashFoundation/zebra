@@ -11,8 +11,8 @@ use zebra_chain::{
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::{
     spawn_init_read_only, ChainTipBlock, ChainTipChange, ChainTipSender, CheckpointVerifiedBlock,
-    ContextuallyVerifiedBlock, LatestChainTip, NonFinalizedState, ReadStateService,
-    SemanticallyVerifiedBlock, ZebraDb, MAX_BLOCK_REORG_HEIGHT,
+    LatestChainTip, NonFinalizedState, ReadStateService, SemanticallyVerifiedBlock, ZebraDb,
+    MAX_BLOCK_REORG_HEIGHT,
 };
 
 use zebra_chain::diagnostic::task::WaitForPanics;
@@ -162,9 +162,11 @@ impl TrustedChainSync {
             let block_hash = block.hash;
             let block_height = block.height;
             let commit_result = if self.non_finalized_state.chain_count() == 0 {
-                self.non_finalized_state.commit_new_chain(block, &self.db)
+                self.non_finalized_state
+                    .commit_new_chain(block.clone(), &self.db)
             } else {
-                self.non_finalized_state.commit_block(block, &self.db)
+                self.non_finalized_state
+                    .commit_block(block.clone(), &self.db)
             };
 
             if let Err(error) = commit_result {
@@ -175,6 +177,8 @@ impl TrustedChainSync {
                 );
                 continue;
             }
+
+            self.update_channels(block);
 
             while self
                 .non_finalized_state
@@ -233,15 +237,14 @@ impl TrustedChainSync {
     }
 
     /// Sends the new chain tip and non-finalized state to the latest chain channels.
-    fn update_channels(&mut self, best_tip: ContextuallyVerifiedBlock) {
-        let tip_block = ChainTipBlock::from(best_tip);
-
+    fn update_channels(&mut self, best_tip: impl Into<ChainTipBlock>) {
         // If the final receiver was just dropped, ignore the error.
         let _ = self
             .non_finalized_state_sender
             .send(self.non_finalized_state.clone());
 
-        self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
+        self.chain_tip_sender
+            .set_best_non_finalized_tip(best_tip.into());
     }
 }
 
@@ -294,29 +297,30 @@ async fn initial_cursor_and_tip_block(
 ///
 /// Returns a [`ReadStateService`], [`LatestChainTip`], [`ChainTipChange`], and
 /// a [`JoinHandle`](tokio::task::JoinHandle) for the sync task.
-async fn init_read_state_with_syncer(
+pub fn init_read_state_with_syncer(
     config: zebra_state::Config,
     network: &Network,
     rpc_address: SocketAddr,
-) -> Result<
-    (
-        ReadStateService,
-        LatestChainTip,
-        ChainTipChange,
-        tokio::task::JoinHandle<()>,
-    ),
-    BoxError,
+) -> tokio::task::JoinHandle<
+    Result<
+        (
+            ReadStateService,
+            LatestChainTip,
+            ChainTipChange,
+            tokio::task::JoinHandle<()>,
+        ),
+        BoxError,
+    >,
 > {
     // TODO: Return an error or panic `if config.ephemeral == true`? (It'll panic anyway but it could be useful to say it's because the state is ephemeral).
-    let (read_state, non_finalized_state_sender) = spawn_init_read_only(config, network).await?;
-    let (latest_chain_tip, chain_tip_change, sync_task) = TrustedChainSync::spawn(
-        rpc_address,
-        read_state.db().clone(),
-        non_finalized_state_sender,
-    )
-    .await;
-
-    Ok((read_state, latest_chain_tip, chain_tip_change, sync_task))
+    let network = network.clone();
+    tokio::spawn(async move {
+        let (read_state, db, non_finalized_state_sender) =
+            spawn_init_read_only(config, &network).await?;
+        let (latest_chain_tip, chain_tip_change, sync_task) =
+            TrustedChainSync::spawn(rpc_address, db, non_finalized_state_sender).await;
+        Ok((read_state, latest_chain_tip, chain_tip_change, sync_task))
+    })
 }
 
 trait SyncerRpcMethods {

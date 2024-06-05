@@ -1956,6 +1956,7 @@ pub fn init_read_only(
     network: &Network,
 ) -> (
     ReadStateService,
+    ZebraDb,
     tokio::sync::watch::Sender<NonFinalizedState>,
 ) {
     let (non_finalized_state_sender, non_finalized_state_receiver) =
@@ -1983,8 +1984,11 @@ pub fn init_read_only(
     #[cfg(not(feature = "elasticsearch"))]
     let finalized_state = { FinalizedState::new_with_debug(&config, network, true, true) };
 
+    let db = finalized_state.db.clone();
+
     (
         ReadStateService::new(&finalized_state, None, non_finalized_state_receiver),
+        db,
         non_finalized_state_sender,
     )
 }
@@ -1996,6 +2000,7 @@ pub fn spawn_init_read_only(
     network: &Network,
 ) -> tokio::task::JoinHandle<(
     ReadStateService,
+    ZebraDb,
     tokio::sync::watch::Sender<NonFinalizedState>,
 )> {
     let network = network.clone();

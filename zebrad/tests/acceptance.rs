@@ -182,10 +182,9 @@ mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
-    config::random_known_rpc_port_config,
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
-        persistent_test_config, testdir,
+        persistent_test_config, random_known_rpc_port_config, testdir,
     },
     launch::{
         spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
@@ -3173,5 +3172,39 @@ async fn regtest_submit_blocks() -> Result<()> {
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn read_state_has_non_finalized_best_chain() -> Result<()> {
     common::read_state::has_non_finalized_best_chain().await?;
+    Ok(())
+}
+
+#[cfg(feature = "rpc-syncer")]
+#[tokio::test]
+async fn trusted_chain_sync() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+    config.state.ephemeral = false;
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    let testdir = testdir()?.with_config(&mut config)?;
+    let testdir = &testdir;
+
+    let mut child = testdir.spawn_child(args!["start"])?;
+    // Run the program and kill it after a few seconds
+    std::thread::sleep(LAUNCH_DELAY);
+    let (_read_state, _latest_chain_tip, _chain_tip_change, _sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            config.state,
+            &config.network.network,
+            rpc_address,
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
+
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    output.assert_failure()?;
+
     Ok(())
 }
