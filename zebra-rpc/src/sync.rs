@@ -15,6 +15,8 @@ use zebra_state::{
     SemanticallyVerifiedBlock, ZebraDb, MAX_BLOCK_REORG_HEIGHT,
 };
 
+use zebra_chain::diagnostic::task::WaitForPanics;
+
 use crate::methods::{get_block_template_rpcs::types::hex_data::HexData, GetBlockHash};
 
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
@@ -58,10 +60,11 @@ impl TrustedChainSync {
     }
 
     /// Polls `getbestblockhash` RPC method until there are new blocks in the Zebra node's non-finalized state.
-    async fn wait_for_new_blocks(&self) -> Result<(), BoxError> {
+    async fn wait_for_new_blocks(&self) -> SyncPosition {
         // Wait until the best block hash in Zebra is different from the tip hash in this read state
         loop {
             let Some(node_block_hash) = self.rpc_client.get_best_block_hash().await else {
+                // Wait until the genesis block has been committed.
                 // TODO: Move durations to constants.
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 continue;
@@ -71,7 +74,9 @@ impl TrustedChainSync {
                 tip
             } else if let Some(tip) = {
                 let db = self.db.clone();
-                tokio::task::spawn_blocking(move || db.tip()).await?
+                tokio::task::spawn_blocking(move || db.tip())
+                    .wait_for_panics()
+                    .await
             } {
                 tip
             } else {
@@ -81,14 +86,11 @@ impl TrustedChainSync {
             };
 
             if node_block_hash != tip_hash {
-                break;
-                // break Ok(SyncPosition::new(tip_height, tip_hash, node_block_hash));
+                break SyncPosition::new(tip_height, tip_hash, node_block_hash);
             } else {
                 tokio::time::sleep(Duration::from_millis(200)).await;
             }
         }
-
-        Ok(())
     }
 
     /// Starts syncing blocks from the node's non-finalized best chain.
@@ -100,9 +102,8 @@ impl TrustedChainSync {
     }
 
     /// Sends the new chain tip and non-finalized state to the latest chain channels.
-    fn update_channels(&mut self, best_tip: ContextuallyVerifiedBlock) -> block::Height {
+    fn update_channels(&mut self, best_tip: ContextuallyVerifiedBlock) {
         let tip_block = ChainTipBlock::from(best_tip);
-        let tip_block_height = tip_block.height;
 
         // If the final receiver was just dropped, ignore the error.
         let _ = self
@@ -110,8 +111,6 @@ impl TrustedChainSync {
             .send(self.non_finalized_state.clone());
 
         self.chain_tip_sender.set_best_non_finalized_tip(tip_block);
-
-        tip_block_height
     }
 
     /// Creates a new [`TrustedChainSync`] and starts syncing blocks from the node's non-finalized best chain.
