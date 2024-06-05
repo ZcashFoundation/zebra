@@ -29,6 +29,3 @@ pub mod regtest;
 
 #[cfg(feature = "shielded-scan")]
 pub mod shielded_scan;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub mod read_state;

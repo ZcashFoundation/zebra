@@ -125,26 +125,15 @@ impl TrustedChainSync {
 
     async fn sync_new_blocks(&mut self) -> bool {
         loop {
-            // TODO:
-            // - Impl methods for `getbestblockhash` and `getblock` on RpcRequestClient
-            // - Move non-finalized state resets below this loop, also
-
             // TODO: Move all this except the `.filter()` call to a method on RpcRequestClient
             let Some(block) = self
                 .rpc_client
-                .json_result_from_call(
-                    "getblock",
-                    format!(r#"["{}", 0]"#, self.cursor.tip_height.0),
-                )
-                .await
                 // If we fail to get a block for any reason, we assume the block is missing and the chain hasn't grown, so there must have
                 // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block past the finalized tip.
+                // It should always deserialize successfully, but this resets the non-finalized state if it somehow fails.
                 // TODO: Check for the MISSING_BLOCK_ERROR_CODE?
-                .ok()
-                // It should always deserialize successfully, but this resets the non-finalized state if it somehow fails
-                // TODO: Log a warning, or, unrelated to that, panic instead if this should never happen? Could be a bad message tho, warning sounds fine
-                .and_then(|HexData(raw_block)| raw_block.zcash_deserialize_into::<Block>().ok())
-                .map(Arc::new)
+                .get_block(self.cursor.tip_height)
+                .await
                 .map(SemanticallyVerifiedBlock::from)
                 // If the next block's previous block hash doesn't match the expected hash, there must have
                 // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block
@@ -248,47 +237,6 @@ impl TrustedChainSync {
     }
 }
 
-async fn initial_cursor_and_tip_block(
-    rpc_client: &RpcRequestClient,
-    non_finalized_state: &NonFinalizedState,
-    db: &ZebraDb,
-) -> (SyncCursor, ChainTipBlock) {
-    // Wait until the best block hash in Zebra is different from the tip hash in this read state
-    loop {
-        let Some(node_block_hash) = rpc_client.get_best_block_hash().await else {
-            // Wait until the genesis block has been committed.
-            // TODO:
-            // - Move durations to constants
-            // - Add logs
-            tokio::time::sleep(Duration::from_millis(100)).await;
-            continue;
-        };
-
-        let chain_tip: ChainTipBlock = if let Some(tip_block) = non_finalized_state.best_tip_block()
-        {
-            tip_block.clone().into()
-        } else if let Some(tip_block) = {
-            let db = db.clone();
-            tokio::task::spawn_blocking(move || db.tip_block())
-                .wait_for_panics()
-                .await
-        } {
-            CheckpointVerifiedBlock::from(tip_block).into()
-        } else {
-            // If there is no genesis block, wait 200ms and try again.
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            continue;
-        };
-
-        if node_block_hash != chain_tip.hash {
-            let cursor = SyncCursor::new(chain_tip.height, chain_tip.hash, node_block_hash);
-            break (cursor, chain_tip);
-        } else {
-            tokio::time::sleep(Duration::from_millis(200)).await;
-        }
-    }
-}
-
 /// Accepts a [zebra-state configuration](zebra_state::Config), a [`Network`], and
 /// the [`SocketAddr`] of a Zebra node's RPC server.
 ///
@@ -339,157 +287,47 @@ impl SyncerRpcMethods for RpcRequestClient {
     async fn get_block(&self, Height(height): Height) -> Option<Arc<Block>> {
         self.json_result_from_call("getblock", format!(r#"["{}", 0]"#, height))
             .await
-            // If we fail to get a block for any reason, we assume the block is missing and the chain hasn't grown, so there must have
-            // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block past the finalized tip.
-            // TODO: Check for the MISSING_BLOCK_ERROR_CODE?
             .ok()
-            // It should always deserialize successfully, but this resets the non-finalized state if it somehow fails
-            // TODO: Log a warning, or, unrelated to that, panic instead if this should never happen? Could be a bad message tho, warning sounds fine
             .and_then(|HexData(raw_block)| raw_block.zcash_deserialize_into::<Block>().ok())
             .map(Arc::new)
     }
 }
 
-/// Starts syncing non-finalized blocks from Zebra via the `getbestblockhash` and `getblock` RPC methods.
-pub async fn sync_from_rpc(
-    rpc_address: SocketAddr,
-    finalized_state: ZebraDb,
-    non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
-) -> Result<(), BoxError> {
-    let rpc_client = RpcRequestClient::new(rpc_address);
-    let network = finalized_state.network();
-    let mut non_finalized_state = NonFinalizedState::new(&network);
-
-    loop {
-        // Wait until the best block hash in Zebra is different from the tip hash in this read state
-        let SyncPosition {
-            current_tip_height,
-            current_tip_hash,
-            node_tip_hash,
-        } = wait_for_new_blocks(&rpc_client, &finalized_state, &non_finalized_state).await?;
-
-        loop {
-            // TODO:
-            // - Impl methods for `getbestblockhash` and `getblock` on RpcRequestClient
-            // - Move non-finalized state resets below this loop, also
-
-            // TODO: Move all this except the `.filter()` call to a method on RpcRequestClient
-            let Some(block) = rpc_client
-                .json_result_from_call("getblock", format!(r#"["{}", 0]"#, current_tip_height.0))
-                .await
-                // If we fail to get a block for any reason, we assume the block is missing and the chain hasn't grown, so there must have
-                // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block past the finalized tip.
-                // TODO: Check for the MISSING_BLOCK_ERROR_CODE?
-                .ok()
-                // It should always deserialize successfully, but this resets the non-finalized state if it somehow fails
-                // TODO: Log a warning, or, unrelated to that, panic instead if this should never happen? Could be a bad message tho, warning sounds fine
-                .and_then(|HexData(raw_block)| raw_block.zcash_deserialize_into::<Block>().ok())
-                .map(Arc::new)
-                .map(SemanticallyVerifiedBlock::from)
-                // If the next block's previous block hash doesn't match the expected hash, there must have
-                // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block
-                // past the finalized tip.
-                .filter(|block| block.block.header.previous_block_hash == current_tip_hash)
-            else {
-                non_finalized_state = NonFinalizedState::new(&finalized_state.network());
-                non_finalized_state_sender.send(non_finalized_state.clone())?;
-                continue;
-            };
-
-            let parent_hash = block.block.header.previous_block_hash;
-            if parent_hash != current_tip_hash {
-                non_finalized_state = NonFinalizedState::new(&finalized_state.network());
-                non_finalized_state_sender.send(non_finalized_state.clone())?;
-                continue;
-            } else {
-                let block_hash = block.hash;
-
-                let finalized_tip_hash = {
-                    let finalized_state = finalized_state.clone();
-                    tokio::task::spawn_blocking(move || finalized_state.finalized_tip_hash())
-                        .await?
-                };
-
-                let commit_result = if finalized_tip_hash == parent_hash {
-                    non_finalized_state.commit_new_chain(block, &finalized_state)
-                } else {
-                    non_finalized_state.commit_block(block, &finalized_state)
-                };
-
-                if let Err(error) = commit_result {
-                    tracing::warn!(?error, "failed to commit block to non-finalized state");
-                    continue;
-                }
-
-                while non_finalized_state
-                    .best_chain_len()
-                    .expect("just successfully inserted a non-finalized block above")
-                    > MAX_BLOCK_REORG_HEIGHT
-                {
-                    tracing::trace!("finalizing block past the reorg limit");
-                    non_finalized_state.finalize();
-                }
-
-                if commit_result.is_ok() {
-                    let _ = non_finalized_state_sender.send(non_finalized_state.clone());
-                    // If the block hash matches the output from the `getbestblockhash` RPC method, we can wait until
-                    // the best block hash changes to get the next block.
-                    if block_hash == node_tip_hash {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-}
-
-struct SyncPosition {
-    current_tip_height: Height,
-    current_tip_hash: block::Hash,
-    node_tip_hash: block::Hash,
-}
-
-impl SyncPosition {
-    fn new(
-        current_tip_height: Height,
-        current_tip_hash: block::Hash,
-        node_tip_hash: block::Hash,
-    ) -> Self {
-        Self {
-            current_tip_hash,
-            current_tip_height,
-            node_tip_hash,
-        }
-    }
-}
-
-/// Polls `getbestblockhash` RPC method until there are new blocks in the Zebra node's non-finalized state.
-async fn wait_for_new_blocks(
+async fn initial_cursor_and_tip_block(
     rpc_client: &RpcRequestClient,
-    finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
-) -> Result<SyncPosition, BoxError> {
+    db: &ZebraDb,
+) -> (SyncCursor, ChainTipBlock) {
     // Wait until the best block hash in Zebra is different from the tip hash in this read state
     loop {
-        let GetBlockHash(node_block_hash) = rpc_client
-            .json_result_from_call("getbestblockhash", "[]")
-            .await?;
+        let Some(node_block_hash) = rpc_client.get_best_block_hash().await else {
+            // Wait until the genesis block has been committed.
+            // TODO:
+            // - Move durations to constants
+            // - Add logs
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            continue;
+        };
 
-        let (tip_height, tip_hash) = if let Some(tip) = non_finalized_state.best_tip() {
-            tip
-        } else if let Some(tip) = {
-            let finalized_state = finalized_state.clone();
-            tokio::task::spawn_blocking(move || finalized_state.tip()).await?
+        let chain_tip: ChainTipBlock = if let Some(tip_block) = non_finalized_state.best_tip_block()
+        {
+            tip_block.clone().into()
+        } else if let Some(tip_block) = {
+            let db = db.clone();
+            tokio::task::spawn_blocking(move || db.tip_block())
+                .wait_for_panics()
+                .await
         } {
-            tip
+            CheckpointVerifiedBlock::from(tip_block).into()
         } else {
             // If there is no genesis block, wait 200ms and try again.
             tokio::time::sleep(Duration::from_millis(200)).await;
             continue;
         };
 
-        if node_block_hash != tip_hash {
-            break Ok(SyncPosition::new(tip_height, tip_hash, node_block_hash));
+        if node_block_hash != chain_tip.hash {
+            let cursor = SyncCursor::new(chain_tip.height, chain_tip.hash, node_block_hash);
+            break (cursor, chain_tip);
         } else {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }

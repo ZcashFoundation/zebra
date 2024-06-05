@@ -3166,18 +3166,10 @@ async fn regtest_submit_blocks() -> Result<()> {
     Ok(())
 }
 
-/// Test using the standalone ReadStateService.
-#[tokio::test]
-#[ignore]
-#[cfg(feature = "getblocktemplate-rpcs")]
-async fn read_state_has_non_finalized_best_chain() -> Result<()> {
-    common::read_state::has_non_finalized_best_chain().await?;
-    Ok(())
-}
-
+// TODO: Test that chain forks are handled correctly.
 #[cfg(feature = "rpc-syncer")]
 #[tokio::test]
-async fn trusted_chain_sync() -> Result<()> {
+async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let _init_guard = zebra_test::init();
     let mut config = random_known_rpc_port_config(false, &Mainnet)?;
     config.state.ephemeral = false;
