@@ -104,6 +104,11 @@ impl TrustedChainSync {
                     .send(self.non_finalized_state.clone());
             }
 
+            // TODO: Move the loop in `wait_for_new_blocks()` here, return the latest tip height every iteration,
+            //       track the previous finalized tip height from the previous iteration, and if the latest tip height
+            //       is higher and the chain has grown, despite there being no blocks to sync, read the latest block
+            //       from the finalized state and send it to `chain_tip_sender`.
+
             // Wait until the best block hash in Zebra is different from the tip hash in this read state
             self.cursor = self.wait_for_new_blocks().await;
         }
