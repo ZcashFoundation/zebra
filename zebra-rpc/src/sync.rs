@@ -64,37 +64,19 @@ impl TrustedChainSync {
         // TODO: Spawn a tokio task to do this in and return a `JoinHandle`.
         let rpc_client = RpcRequestClient::new(rpc_address);
         let non_finalized_state = NonFinalizedState::new(&db.network());
-        let (cursor, chain_tip) =
-            initial_cursor_and_tip_block(&rpc_client, &non_finalized_state, &db).await;
-
-        let (mut syncer, latest_chain_tip, chain_tip_change) = Self::new(
-            rpc_client,
-            cursor,
-            chain_tip,
-            db,
-            non_finalized_state,
-            non_finalized_state_sender,
-        );
-
-        let sync_task = tokio::spawn(async move {
-            syncer.sync().await;
-        });
-
-        (latest_chain_tip, chain_tip_change, sync_task)
-    }
-
-    fn new(
-        rpc_client: RpcRequestClient,
-        cursor: SyncCursor,
-        initial_tip: impl Into<ChainTipBlock>,
-        db: ZebraDb,
-        non_finalized_state: NonFinalizedState,
-        non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
-    ) -> (Self, LatestChainTip, ChainTipChange) {
+        let cursor = wait_for_new_blocks(&rpc_client, &non_finalized_state, &db).await;
+        let tip = {
+            let db = db.clone();
+            tokio::task::spawn_blocking(move || db.tip_block())
+                .wait_for_panics()
+                .await
+                .expect("checked for genesis block above")
+        };
+        let chain_tip: ChainTipBlock = CheckpointVerifiedBlock::from(tip).into();
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
-            ChainTipSender::new(initial_tip.into(), &db.network());
+            ChainTipSender::new(chain_tip, &db.network());
 
-        let syncer = Self {
+        let mut syncer = Self {
             rpc_client,
             cursor,
             db,
@@ -103,7 +85,11 @@ impl TrustedChainSync {
             non_finalized_state_sender,
         };
 
-        (syncer, latest_chain_tip, chain_tip_change)
+        let sync_task = tokio::spawn(async move {
+            syncer.sync().await;
+        });
+
+        (latest_chain_tip, chain_tip_change, sync_task)
     }
 
     /// Starts syncing blocks from the node's non-finalized best chain.
@@ -125,7 +111,6 @@ impl TrustedChainSync {
 
     async fn sync_new_blocks(&mut self) -> bool {
         loop {
-            // TODO: Move all this except the `.filter()` call to a method on RpcRequestClient
             let Some(block) = self
                 .rpc_client
                 // If we fail to get a block for any reason, we assume the block is missing and the chain hasn't grown, so there must have
@@ -167,7 +152,12 @@ impl TrustedChainSync {
                 continue;
             }
 
-            self.update_channels(block);
+            update_channels(
+                block,
+                &self.non_finalized_state,
+                &mut self.non_finalized_state_sender,
+                &mut self.chain_tip_sender,
+            );
 
             while self
                 .non_finalized_state
@@ -196,44 +186,7 @@ impl TrustedChainSync {
 
     /// Polls `getbestblockhash` RPC method until there are new blocks in the Zebra node's non-finalized state.
     async fn wait_for_new_blocks(&self) -> SyncCursor {
-        // Wait until the best block hash in Zebra is different from the tip hash in this read state
-        loop {
-            let Some(node_block_hash) = self.rpc_client.get_best_block_hash().await else {
-                // Wait until the genesis block has been committed.
-                // TODO:
-                // - Move durations to constants
-                // - Add logs
-                tokio::time::sleep(Duration::from_millis(100)).await;
-                continue;
-            };
-
-            let (tip_height, tip_hash) = if let Some(tip) = self.non_finalized_state.best_tip() {
-                tip
-            } else {
-                let db = self.db.clone();
-                tokio::task::spawn_blocking(move || db.tip())
-                    .wait_for_panics()
-                    .await
-                    .expect("checked for genesis block above")
-            };
-
-            if node_block_hash != tip_hash {
-                break SyncCursor::new(tip_height, tip_hash, node_block_hash);
-            } else {
-                tokio::time::sleep(Duration::from_millis(200)).await;
-            }
-        }
-    }
-
-    /// Sends the new chain tip and non-finalized state to the latest chain channels.
-    fn update_channels(&mut self, best_tip: impl Into<ChainTipBlock>) {
-        // If the final receiver was just dropped, ignore the error.
-        let _ = self
-            .non_finalized_state_sender
-            .send(self.non_finalized_state.clone());
-
-        self.chain_tip_sender
-            .set_best_non_finalized_tip(best_tip.into());
+        wait_for_new_blocks(&self.rpc_client, &self.non_finalized_state, &self.db).await
     }
 }
 
@@ -293,14 +246,16 @@ impl SyncerRpcMethods for RpcRequestClient {
     }
 }
 
-async fn initial_cursor_and_tip_block(
+async fn wait_for_new_blocks(
     rpc_client: &RpcRequestClient,
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
-) -> (SyncCursor, ChainTipBlock) {
+) -> SyncCursor {
     // Wait until the best block hash in Zebra is different from the tip hash in this read state
     loop {
-        let Some(node_block_hash) = rpc_client.get_best_block_hash().await else {
+        // TODO: Use `getblockchaininfo` RPC instead to get the height and only break if the node tip height is above the
+        //       tip height visible in this read state service? Or at least above the finalized tip height.
+        let Some(node_tip_hash) = rpc_client.get_best_block_hash().await else {
             // Wait until the genesis block has been committed.
             // TODO:
             // - Move durations to constants
@@ -309,27 +264,36 @@ async fn initial_cursor_and_tip_block(
             continue;
         };
 
-        let chain_tip: ChainTipBlock = if let Some(tip_block) = non_finalized_state.best_tip_block()
-        {
-            tip_block.clone().into()
-        } else if let Some(tip_block) = {
+        let (tip_height, tip_hash) = if let Some(tip) = non_finalized_state.best_tip() {
+            tip
+        } else {
             let db = db.clone();
-            tokio::task::spawn_blocking(move || db.tip_block())
+            tokio::task::spawn_blocking(move || db.tip())
                 .wait_for_panics()
                 .await
-        } {
-            CheckpointVerifiedBlock::from(tip_block).into()
-        } else {
-            // If there is no genesis block, wait 200ms and try again.
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            continue;
+                .expect("checked for genesis block above")
         };
 
-        if node_block_hash != chain_tip.hash {
-            let cursor = SyncCursor::new(chain_tip.height, chain_tip.hash, node_block_hash);
-            break (cursor, chain_tip);
-        } else {
-            tokio::time::sleep(Duration::from_millis(200)).await;
+        // TODO:
+        // - Tail the db as well for new blocks to update the latest chain channels
+        // - Read config for mandatory checkpoint height - poll block height more occasionally until Zebra passes mandatory checkpoint height?
+
+        if node_tip_hash != tip_hash {
+            break SyncCursor::new(tip_height, tip_hash, node_tip_hash);
         }
+
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
+}
+
+/// Sends the new chain tip and non-finalized state to the latest chain channels.
+fn update_channels(
+    best_tip: impl Into<ChainTipBlock>,
+    non_finalized_state: &NonFinalizedState,
+    non_finalized_state_sender: &mut tokio::sync::watch::Sender<NonFinalizedState>,
+    chain_tip_sender: &mut ChainTipSender,
+) {
+    // If the final receiver was just dropped, ignore the error.
+    let _ = non_finalized_state_sender.send(non_finalized_state.clone());
+    chain_tip_sender.set_best_non_finalized_tip(best_tip.into());
 }
