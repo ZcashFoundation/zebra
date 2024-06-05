@@ -49,7 +49,7 @@ pub use service::{
     chain_tip::{ChainTipChange, LatestChainTip, TipAction},
     check, init, init_read_only,
     non_finalized_state::NonFinalizedState,
-    spawn_init,
+    spawn_init, spawn_init_read_only,
     watch_receiver::WatchReceiver,
     OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,
 };

@@ -1989,6 +1989,19 @@ pub fn init_read_only(
     )
 }
 
+/// Calls [`init_read_only`] with the provided [`Config`] and [`Network`] from a blocking task.
+/// Returns a [`tokio::task::JoinHandle`] with a read state service and chain tip sender.
+pub fn spawn_init_read_only(
+    config: Config,
+    network: &Network,
+) -> tokio::task::JoinHandle<(
+    ReadStateService,
+    tokio::sync::watch::Sender<NonFinalizedState>,
+)> {
+    let network = network.clone();
+    tokio::task::spawn_blocking(move || init_read_only(config, &network))
+}
+
 /// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.
 /// Returns a [`tokio::task::JoinHandle`] with a boxed state service,
 /// a read state service, and receivers for state chain tip updates.
