@@ -55,5 +55,5 @@ If applicable:
 - [ ] The PR Author's checklist is complete.
 
 If applicable:
-- [ ] The tests cover the PR motivation.
+- [ ] The tests cover the solution.
 
