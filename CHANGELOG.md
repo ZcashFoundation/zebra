@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - We realized that a longer than `zcashd` end of support could be problematic in some cases so we reverted back from 20 to 16 weeks ([#8530](https://github.com/ZcashFoundation/zebra/pull/8530))
 
+- The `zebrad` binary no longer supports starting the scanner of shielded
+  transactions. ([#8594](https://github.com/ZcashFoundation/zebra/pull/8594))
+  This means `zebrad` no longer contains users' viewing keys, which is a private
+  key material.
 
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
 
