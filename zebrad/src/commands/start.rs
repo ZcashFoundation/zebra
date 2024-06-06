@@ -45,11 +45,6 @@
 //!  * Progress Task
 //!    * logs progress towards the chain tip
 //!
-//! Shielded Scanning:
-//!  * Shielded Scanner Task
-//!    * if the user has configured Zebra with their shielded viewing keys, scans new and existing
-//!      blocks for transactions that use those keys
-//!
 //! Block Mining:
 //!  * Internal Miner Task
 //!    * if the user has configured Zebra to mine blocks, spawns tasks to generate new blocks,
@@ -339,24 +334,6 @@ impl StartCmd {
             tokio::spawn(syncer.sync().in_current_span())
         };
 
-        #[cfg(feature = "shielded-scan")]
-        // Spawn never ending scan task only if we have keys to scan for.
-        let scan_task_handle = {
-            // TODO: log the number of keys and update the scan_task_starts() test
-            info!("spawning shielded scanner with configured viewing keys");
-            zebra_scan::spawn_init(
-                config.shielded_scan.clone(),
-                config.network.network.clone(),
-                state,
-                chain_tip_change,
-            )
-        };
-
-        #[cfg(not(feature = "shielded-scan"))]
-        // Spawn a dummy scan task which doesn't do anything and never finishes.
-        let scan_task_handle: tokio::task::JoinHandle<Result<(), Report>> =
-            tokio::spawn(std::future::pending().in_current_span());
-
         // And finally, spawn the internal Zcash miner, if it is enabled.
         //
         // TODO: add a config to enable the miner rather than a feature.
@@ -398,7 +375,6 @@ impl StartCmd {
         pin!(tx_gossip_task_handle);
         pin!(progress_task_handle);
         pin!(end_of_support_task_handle);
-        pin!(scan_task_handle);
         pin!(miner_task_handle);
 
         // startup tasks
@@ -487,10 +463,6 @@ impl StartCmd {
                     Ok(())
                 }
 
-                scan_result = &mut scan_task_handle => scan_result
-                    .expect("unexpected panic in the scan task")
-                    .map(|_| info!("scan task exited")),
-
                 miner_result = &mut miner_task_handle => miner_result
                     .expect("unexpected panic in the miner task")
                     .map(|_| info!("miner task exited")),
@@ -519,7 +491,6 @@ impl StartCmd {
         tx_gossip_task_handle.abort();
         progress_task_handle.abort();
         end_of_support_task_handle.abort();
-        scan_task_handle.abort();
         miner_task_handle.abort();
 
         // startup tasks
