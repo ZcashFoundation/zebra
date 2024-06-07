@@ -244,7 +244,7 @@ fn method_doc(method: &syn::TraitItem) -> Result<(Vec<String>, String), Box<dyn 
         None => return Err("Description not found in method documentation".into()),
     };
 
-    Ok((method_doc, description))
+    Ok((method_doc, description.trim_end_matches("\"]").to_string()))
 }
 
 // Extract the tags from the method documentation. TODO: Assuming 1 tag per method for now
