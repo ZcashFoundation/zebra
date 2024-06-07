@@ -310,7 +310,12 @@ impl StateService {
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
         let timer = CodeTimer::start();
-        let finalized_state = { FinalizedState::new(&config, network) };
+        let finalized_state = FinalizedState::new(
+            &config,
+            network,
+            #[cfg(feature = "elasticsearch")]
+            true,
+        );
         timer.finish(module_path!(), line!(), "opening finalized state database");
 
         let timer = CodeTimer::start();
@@ -1928,7 +1933,14 @@ pub fn init_read_only(
     ZebraDb,
     tokio::sync::watch::Sender<NonFinalizedState>,
 ) {
-    let finalized_state = { FinalizedState::new_with_debug(&config, network, true, true) };
+    let finalized_state = FinalizedState::new_with_debug(
+        &config,
+        network,
+        true,
+        #[cfg(feature = "elasticsearch")]
+        false,
+        true,
+    );
     let (non_finalized_state_sender, non_finalized_state_receiver) =
         tokio::sync::watch::channel(NonFinalizedState::new(network));
 

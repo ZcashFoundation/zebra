@@ -139,8 +139,19 @@ pub struct FinalizedState {
 impl FinalizedState {
     /// Returns an on-disk database instance for `config`, `network`, and `elastic_db`.
     /// If there is no existing database, creates a new database on disk.
-    pub fn new(config: &Config, network: &Network) -> Self {
-        Self::new_with_debug(config, network, false, false)
+    pub fn new(
+        config: &Config,
+        network: &Network,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
+    ) -> Self {
+        Self::new_with_debug(
+            config,
+            network,
+            false,
+            #[cfg(feature = "elasticsearch")]
+            enable_elastic_db,
+            false,
+        )
     }
 
     /// Returns an on-disk database instance with the supplied production and debug settings.
@@ -151,10 +162,11 @@ impl FinalizedState {
         config: &Config,
         network: &Network,
         debug_skip_format_upgrades: bool,
+        #[cfg(feature = "elasticsearch")] enable_elastic_db: bool,
         read_only: bool,
     ) -> Self {
         #[cfg(feature = "elasticsearch")]
-        let elastic_db = {
+        let elastic_db = if enable_elastic_db {
             use elasticsearch::{
                 auth::Credentials::Basic,
                 cert::CertificateValidation,
@@ -177,6 +189,8 @@ impl FinalizedState {
                 .expect("elasticsearch transport builder should not fail");
 
             Some(Elasticsearch::new(transport))
+        } else {
+            None
         };
 
         let db = ZebraDb::new(

@@ -157,7 +157,7 @@ fn best_chain_wins_for_network(network: Network) -> Result<()> {
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     state.commit_new_chain(block2.prepare(), &finalized_state)?;
@@ -194,7 +194,7 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
@@ -245,7 +245,7 @@ fn commit_block_extending_best_chain_doesnt_drop_worst_chains_for_network(
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
@@ -289,7 +289,7 @@ fn shorter_chain_can_be_best_chain_for_network(network: Network) -> Result<()> {
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
@@ -334,7 +334,7 @@ fn longer_chain_with_more_work_wins_for_network(network: Network) -> Result<()> 
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
@@ -378,7 +378,7 @@ fn equal_length_goes_to_more_work_for_network(network: Network) -> Result<()> {
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
@@ -426,7 +426,7 @@ fn history_tree_is_updated_for_network_upgrade(
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     state
@@ -525,7 +525,7 @@ fn commitment_is_validated_for_network_upgrade(network: Network, network_upgrade
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     state

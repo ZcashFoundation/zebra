@@ -169,7 +169,7 @@ fn test_block_and_transaction_data_with_network(network: Network) {
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     // Assert that empty databases are the same, regardless of the network.
