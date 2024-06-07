@@ -2,6 +2,7 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
+use tokio::task::JoinHandle;
 use tower::BoxError;
 use zebra_chain::{
     block::{self, Block, Height},
@@ -18,6 +19,10 @@ use zebra_state::{
 use zebra_chain::diagnostic::task::WaitForPanics;
 
 use crate::methods::{get_block_template_rpcs::types::hex_data::HexData, GetBlockHash};
+
+/// How long to wait between calls to `getbestblockhash` when it returns an error or the block hash
+/// of the current chain tip in the process that's syncing blocks from Zebra.
+const POLL_DELAY: Duration = Duration::from_millis(100);
 
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
 struct TrustedChainSync {
@@ -60,11 +65,10 @@ impl TrustedChainSync {
         rpc_address: SocketAddr,
         db: ZebraDb,
         non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
-    ) -> (LatestChainTip, ChainTipChange, tokio::task::JoinHandle<()>) {
-        // TODO: Spawn a tokio task to do this in and return a `JoinHandle`.
+    ) -> (LatestChainTip, ChainTipChange, JoinHandle<()>) {
         let rpc_client = RpcRequestClient::new(rpc_address);
         let non_finalized_state = NonFinalizedState::new(&db.network());
-        let cursor = wait_for_new_blocks(&rpc_client, &non_finalized_state, &db).await;
+        let cursor = wait_for_chain_tip_change(&rpc_client, &non_finalized_state, &db).await;
         let tip = {
             let db = db.clone();
             tokio::task::spawn_blocking(move || db.tip_block())
@@ -104,13 +108,8 @@ impl TrustedChainSync {
                     .send(self.non_finalized_state.clone());
             }
 
-            // TODO: Move the loop in `wait_for_new_blocks()` here, return the latest tip height every iteration,
-            //       track the previous finalized tip height from the previous iteration, and if the latest tip height
-            //       is higher and the chain has grown, despite there being no blocks to sync, read the latest block
-            //       from the finalized state and send it to `chain_tip_sender`.
-
             // Wait until the best block hash in Zebra is different from the tip hash in this read state
-            self.cursor = self.wait_for_new_blocks().await;
+            self.cursor = self.wait_for_chain_tip_change().await;
         }
     }
 
@@ -121,7 +120,6 @@ impl TrustedChainSync {
                 // If we fail to get a block for any reason, we assume the block is missing and the chain hasn't grown, so there must have
                 // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block past the finalized tip.
                 // It should always deserialize successfully, but this resets the non-finalized state if it somehow fails.
-                // TODO: Check for the MISSING_BLOCK_ERROR_CODE?
                 .get_block(self.cursor.tip_height)
                 .await
                 .map(SemanticallyVerifiedBlock::from)
@@ -190,8 +188,8 @@ impl TrustedChainSync {
     }
 
     /// Polls `getbestblockhash` RPC method until there are new blocks in the Zebra node's non-finalized state.
-    async fn wait_for_new_blocks(&self) -> SyncCursor {
-        wait_for_new_blocks(&self.rpc_client, &self.non_finalized_state, &self.db).await
+    async fn wait_for_chain_tip_change(&self) -> SyncCursor {
+        wait_for_chain_tip_change(&self.rpc_client, &self.non_finalized_state, &self.db).await
     }
 }
 
@@ -218,9 +216,12 @@ pub fn init_read_state_with_syncer(
         BoxError,
     >,
 > {
-    // TODO: Return an error or panic `if config.ephemeral == true`? (It'll panic anyway but it could be useful to say it's because the state is ephemeral).
     let network = network.clone();
     tokio::spawn(async move {
+        if config.ephemeral {
+            return Err("standalone read state service cannot be used with ephemeral state".into());
+        }
+
         let (read_state, db, non_finalized_state_sender) =
             spawn_init_read_only(config, &network).await?;
         let (latest_chain_tip, chain_tip_change, sync_task) =
@@ -245,27 +246,23 @@ impl SyncerRpcMethods for RpcRequestClient {
     async fn get_block(&self, Height(height): Height) -> Option<Arc<Block>> {
         self.json_result_from_call("getblock", format!(r#"["{}", 0]"#, height))
             .await
+            // TODO: Check for the MISSING_BLOCK_ERROR_CODE and return a `Result<Option<_>>`?
             .ok()
             .and_then(|HexData(raw_block)| raw_block.zcash_deserialize_into::<Block>().ok())
             .map(Arc::new)
     }
 }
 
-async fn wait_for_new_blocks(
+async fn wait_for_chain_tip_change(
     rpc_client: &RpcRequestClient,
     non_finalized_state: &NonFinalizedState,
     db: &ZebraDb,
 ) -> SyncCursor {
     // Wait until the best block hash in Zebra is different from the tip hash in this read state
     loop {
-        // TODO: Use `getblockchaininfo` RPC instead to get the height and only break if the node tip height is above the
-        //       tip height visible in this read state service? Or at least above the finalized tip height.
         let Some(node_tip_hash) = rpc_client.get_best_block_hash().await else {
             // Wait until the genesis block has been committed.
-            // TODO:
-            // - Move durations to constants
-            // - Add logs
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            tokio::time::sleep(POLL_DELAY).await;
             continue;
         };
 
@@ -279,15 +276,12 @@ async fn wait_for_new_blocks(
                 .expect("checked for genesis block above")
         };
 
-        // TODO:
-        // - Tail the db as well for new blocks to update the latest chain channels
-        // - Read config for mandatory checkpoint height - poll block height more occasionally until Zebra passes mandatory checkpoint height?
-
+        // TODO: Return when the finalized tip has changed as well.
         if node_tip_hash != tip_hash {
             break SyncCursor::new(tip_height, tip_hash, node_tip_hash);
         }
 
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(POLL_DELAY).await;
     }
 }
 
