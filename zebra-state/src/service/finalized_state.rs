@@ -139,19 +139,8 @@ pub struct FinalizedState {
 impl FinalizedState {
     /// Returns an on-disk database instance for `config`, `network`, and `elastic_db`.
     /// If there is no existing database, creates a new database on disk.
-    pub fn new(
-        config: &Config,
-        network: &Network,
-        #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
-    ) -> Self {
-        Self::new_with_debug(
-            config,
-            network,
-            false,
-            #[cfg(feature = "elasticsearch")]
-            elastic_db,
-            false,
-        )
+    pub fn new(config: &Config, network: &Network) -> Self {
+        Self::new_with_debug(config, network, false, false)
     }
 
     /// Returns an on-disk database instance with the supplied production and debug settings.
@@ -162,9 +151,34 @@ impl FinalizedState {
         config: &Config,
         network: &Network,
         debug_skip_format_upgrades: bool,
-        #[cfg(feature = "elasticsearch")] elastic_db: Option<elasticsearch::Elasticsearch>,
         read_only: bool,
     ) -> Self {
+        #[cfg(feature = "elasticsearch")]
+        let elastic_db = {
+            use elasticsearch::{
+                auth::Credentials::Basic,
+                cert::CertificateValidation,
+                http::transport::{SingleNodeConnectionPool, TransportBuilder},
+                http::Url,
+                Elasticsearch,
+            };
+
+            let conn_pool = SingleNodeConnectionPool::new(
+                Url::parse(config.elasticsearch_url.as_str())
+                    .expect("configured elasticsearch url is invalid"),
+            );
+            let transport = TransportBuilder::new(conn_pool)
+                .cert_validation(CertificateValidation::None)
+                .auth(Basic(
+                    config.clone().elasticsearch_username,
+                    config.clone().elasticsearch_password,
+                ))
+                .build()
+                .expect("elasticsearch transport builder should not fail");
+
+            Some(Elasticsearch::new(transport))
+        };
+
         let db = ZebraDb::new(
             config,
             STATE_DATABASE_KIND,
