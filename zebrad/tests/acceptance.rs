@@ -3198,7 +3198,14 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         .await?
         .map_err(|err| eyre!(err))?;
 
-    // Submit some blocks on the best chain
+    // TODO:
+    // - Submit blocks while checking that `ChainTipChange` shows the chain growing before submitting the next block
+    // - Submit several blocks before checking that `ChainTipChange` has the latest block hash and is a `TipAction::Reset`
+    // - Check that `getblock` RPC returns the same block as the read state for every height
+    // - Submit more blocks with an older block template (and a different nonce so the hash is different) to trigger a chain reorg
+    // - Check that `ChainTipChange` isn't being updated until the best chain changes
+    // - Check that the first `ChainTipChange` `TipAction` is a `TipAction::Reset`
+    // - Check that `getblock` RPC returns the same block as the read state for every height
 
     child.kill(false)?;
     let output = child.wait_with_output()?;
@@ -3207,6 +3214,11 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     output.assert_was_killed()?;
 
     output.assert_failure()?;
+
+    // TODO:
+    // - Start another Zebra testchild on Testnet or Mainnet
+    // - Wait for it to start syncing blocks from the network
+    // - Check that `LatestChainTip` is being updated with the newly synced finalized blocks
 
     Ok(())
 }

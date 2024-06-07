@@ -25,7 +25,7 @@ use crate::{
 
 /// How long to wait between calls to `getbestblockhash` when it returns an error or the block hash
 /// of the current chain tip in the process that's syncing blocks from Zebra.
-const POLL_DELAY: Duration = Duration::from_millis(100);
+const POLL_DELAY: Duration = Duration::from_millis(200);
 
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
 #[derive(Debug)]
