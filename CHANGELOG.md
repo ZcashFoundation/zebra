@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - We realized that a longer than `zcashd` end of support could be problematic in some cases so we reverted back from 20 to 16 weeks ([#8530](https://github.com/ZcashFoundation/zebra/pull/8530))
 
+- Fixed a bug with trailing characters in the openapi spec method descriptions((#8597)[https://github.com/ZcashFoundation/zebra/pull/8597])
 
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
 
