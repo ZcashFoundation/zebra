@@ -78,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [windows-latest]
         rust: [stable, beta]
         # TODO: When vars.EXPERIMENTAL_FEATURES has features in it, add it here.
         #       Or work out a way to trim the space from the variable: GitHub doesn't allow empty variables.
@@ -110,17 +110,6 @@ jobs:
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
-
-
-      - uses: Swatinem/rust-cache@v2.7.3
-        # TODO: change Rust cache target directory on Windows,
-        #       or remove this workaround once the build is more efficient (#3005).
-        #with:
-        #  workspaces: ". -> C:\\zebra-target"
-        with:
-          # Split the experimental features cache from the regular cache, to avoid linker errors.
-          # (These might be "disk full" errors, or they might be dependency resolution issues.)
-          key: ${{ matrix.features }}
 
       - name: Change target output directory on Windows
         # Windows doesn't have enough space on the D: drive, so we redirect the build output to the
@@ -161,12 +150,34 @@ jobs:
           echo "PROPTEST_CASES=1" >> $GITHUB_ENV
           echo "PROPTEST_MAX_SHRINK_ITERS=1024" >> $GITHUB_ENV
 
+      # - name: Install WinDbg
+      #   run: |
+      #     choco install windows-sdk-10-version-2004-windbg -y; Add-Content $env:GITHUB_PATH "$env:ProgramData\chocolatey\bin\"
+
       # Run unit and basic acceptance tests, only showing command output if the test fails.
       #
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
       - name: Run tests${{ matrix.features }}
         run: |
-          cargo test --features "${{ matrix.features }}" --release --verbose --workspace
+          mkdir crashdumps
+          Invoke-WebRequest -Uri 'https://download.sysinternals.com/files/Procdump.zip' -OutFile Procdump.zip
+          Expand-Archive Procdump.zip -DestinationPath .
+          cargo test --no-run --locked -p zebra-consensus --verbose
+          $file = Get-ChildItem C:/zebra-target/debug/deps/zebra_consensus-*.exe | Select-Object -First 1
+          .\procdump.exe -accepteula -ma -x "crashdumps" $file
+        continue-on-error: true
+
+      - name: Upload Crash Dump
+        uses: actions/upload-artifact@v3
+        with:
+          name: crashdumps
+          path: crashdumps
+
+      - name: Upload Exes
+        uses: actions/upload-artifact@v3
+        with:
+          name: exes
+          path: C:/zebra-target/debug/deps/zebra_consensus*
 
       # Explicitly run any tests that are usually #[ignored]
 
