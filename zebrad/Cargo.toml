@@ -100,6 +100,8 @@ progress-bar = [
 
 prometheus = ["metrics-exporter-prometheus"]
 
+rpc-syncer = ["zebra-rpc/syncer"]
+
 # Production features that modify dependency behaviour
 
 # Enable additional error debugging in release builds

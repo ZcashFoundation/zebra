@@ -334,7 +334,6 @@ impl SyncerRpcMethods for RpcRequestClient {
             }
             Err(err) => Err(err),
         }
-        // TODO: Check for the MISSING_BLOCK_ERROR_CODE and return a `Result<Option<_>>`?
     }
 }
 

@@ -3170,3 +3170,43 @@ async fn regtest_submit_blocks() -> Result<()> {
     common::regtest::submit_blocks_test().await?;
     Ok(())
 }
+
+// TODO:
+// - Test that chain forks are handled correctly and that `ChainTipChange` sees a `Reset`
+// - Test that `ChainTipChange` is updated when the non-finalized best chain grows
+// - Test that the `ChainTipChange` updated by the RPC syncer is updated when the finalized tip changes
+#[cfg(feature = "rpc-syncer")]
+#[tokio::test]
+async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+    config.state.ephemeral = false;
+    config.network.network = Network::new_regtest(None);
+
+    let testdir = testdir()?.with_config(&mut config)?;
+    let mut child = testdir.spawn_child(args!["start"])?;
+
+    std::thread::sleep(LAUNCH_DELAY);
+
+    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
+    let (_read_state, _latest_chain_tip, _chain_tip_change, _sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            config.state,
+            &config.network.network,
+            config.rpc.listen_addr.unwrap(),
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
+
+    // Submit some blocks on the best chain
+
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    output.assert_failure()?;
+
+    Ok(())
+}
