@@ -1,4 +1,4 @@
-//! Syncer task for maintaining a non-finalized state in Zebra's ReadStateService via RPCs
+//! Syncer task for maintaining a non-finalized state in Zebra's ReadStateService and updating `ChainTipSender` via RPCs
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -18,13 +18,17 @@ use zebra_state::{
 
 use zebra_chain::diagnostic::task::WaitForPanics;
 
-use crate::methods::{get_block_template_rpcs::types::hex_data::HexData, GetBlockHash};
+use crate::{
+    constants::MISSING_BLOCK_ERROR_CODE,
+    methods::{get_block_template_rpcs::types::hex_data::HexData, GetBlockHash},
+};
 
 /// How long to wait between calls to `getbestblockhash` when it returns an error or the block hash
 /// of the current chain tip in the process that's syncing blocks from Zebra.
 const POLL_DELAY: Duration = Duration::from_millis(100);
 
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
+#[derive(Debug)]
 struct TrustedChainSync {
     /// RPC client for calling Zebra's RPC methods.
     rpc_client: RpcRequestClient,
@@ -38,6 +42,7 @@ struct TrustedChainSync {
     non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
 }
 
+#[derive(Debug)]
 enum NewChainTip {
     /// Information about the next block height to request and how it should be processed.
     Cursor(SyncCursor),
@@ -45,6 +50,7 @@ enum NewChainTip {
     Block(Arc<Block>),
 }
 
+#[derive(Debug)]
 struct SyncCursor {
     /// The best chain tip height in this process.
     tip_height: Height,
@@ -110,28 +116,43 @@ impl TrustedChainSync {
         }
     }
 
+    /// Accepts a [`SyncCursor`] and gets blocks after the current chain tip until reaching the target block hash in the cursor.
+    ///
+    /// Clears the non-finalized state and sets the finalized tip as the current chain tip if
+    /// the `getblock` RPC method returns the `MISSING_BLOCK_ERROR_CODE` before this function reaches
+    /// the target block hash.
     async fn sync_new_blocks(&mut self, mut cursor: SyncCursor) {
+        let mut consecutive_unexpected_error_count = 0;
+
         let has_found_new_best_chain = loop {
-            let Some(block) = self
-                .rpc_client
-                // If we fail to get a block for any reason, we assume the block is missing and the chain hasn't grown, so there must have
-                // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block past the finalized tip.
-                // It should always deserialize successfully, but this resets the non-finalized state if it somehow fails.
-                .get_block(cursor.tip_height)
-                .await
-                .map(SemanticallyVerifiedBlock::from)
-                // If the next block's previous block hash doesn't match the expected hash, there must have
-                // been a chain re-org/fork, and we can clear the non-finalized state and re-fetch every block
-                // past the finalized tip.
-                .filter(|block| block.block.header.previous_block_hash == cursor.tip_hash)
-            else {
-                break true;
+            let block = match self.rpc_client.get_block(cursor.tip_height).await {
+                Ok(Some(block)) if block.header.previous_block_hash == cursor.tip_hash => {
+                    SemanticallyVerifiedBlock::from(block)
+                }
+                // If the next block's previous block hash doesn't match the expected hash, or if the block is missing
+                // before this function reaches the target block hash, there was likely a chain re-org/fork, and
+                // we can clear the non-finalized state and re-fetch every block past the finalized tip.
+                Ok(_) => break true,
+                // If there was an unexpected error, retry 4 more times before returning early.
+                // TODO: Propagate this error up and exit the spawned sync task with the error if the RPC server is down for too long.
+                Err(err) => {
+                    tracing::warn!(
+                        ?consecutive_unexpected_error_count,
+                        ?cursor,
+                        ?err,
+                        "encountered an unexpected error while calling getblock method"
+                    );
+
+                    if consecutive_unexpected_error_count >= 5 {
+                        break false;
+                    } else {
+                        consecutive_unexpected_error_count += 1;
+                        continue;
+                    };
+                }
             };
 
-            let parent_hash = block.block.header.previous_block_hash;
-            if parent_hash != cursor.tip_hash {
-                break true;
-            }
+            consecutive_unexpected_error_count = 0;
 
             let block_hash = block.hash;
             let block_height = block.height;
@@ -284,7 +305,7 @@ pub fn init_read_state_with_syncer(
 
 trait SyncerRpcMethods {
     async fn get_best_block_hash(&self) -> Option<block::Hash>;
-    async fn get_block(&self, height: block::Height) -> Option<Arc<Block>>;
+    async fn get_block(&self, height: block::Height) -> Result<Option<Arc<Block>>, BoxError>;
 }
 
 impl SyncerRpcMethods for RpcRequestClient {
@@ -295,13 +316,25 @@ impl SyncerRpcMethods for RpcRequestClient {
             .ok()
     }
 
-    async fn get_block(&self, Height(height): Height) -> Option<Arc<Block>> {
-        self.json_result_from_call("getblock", format!(r#"["{}", 0]"#, height))
+    async fn get_block(&self, Height(height): Height) -> Result<Option<Arc<Block>>, BoxError> {
+        match self
+            .json_result_from_call("getblock", format!(r#"["{}", 0]"#, height))
             .await
-            // TODO: Check for the MISSING_BLOCK_ERROR_CODE and return a `Result<Option<_>>`?
-            .ok()
-            .and_then(|HexData(raw_block)| raw_block.zcash_deserialize_into::<Block>().ok())
-            .map(Arc::new)
+        {
+            Ok(HexData(raw_block)) => {
+                let block = raw_block.zcash_deserialize_into::<Block>()?;
+                Ok(Some(Arc::new(block)))
+            }
+            Err(err)
+                if err
+                    .downcast_ref::<jsonrpc_core::Error>()
+                    .is_some_and(|err| err.code == MISSING_BLOCK_ERROR_CODE) =>
+            {
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
+        // TODO: Check for the MISSING_BLOCK_ERROR_CODE and return a `Result<Option<_>>`?
     }
 }
 
