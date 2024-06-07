@@ -32,6 +32,8 @@ getblocktemplate-rpcs = [
 # Experimental internal miner support
 internal-miner = []
 
+syncer = ["zebra-node-services/rpc-client"]
+
 # Test-only features
 proptest-impl = [
     "proptest",
