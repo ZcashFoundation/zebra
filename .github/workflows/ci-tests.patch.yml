@@ -87,7 +87,7 @@ jobs:
 
 
   ####
-  ## The following jobs are related to sub-ci-intgration-tests-gcp.yml
+  ## The following jobs are related to sub-ci-integration-tests-gcp.yml
   ###
 
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
