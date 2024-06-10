@@ -34,7 +34,7 @@ on:
 #! `ci-tests.patch.yml` and `ci-tests.patch-external.yml` must be kept in sync.
 jobs:
   build:
-    name: Build CI Docker / Build images
+    name: Build CI Docker / Build CI image
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'

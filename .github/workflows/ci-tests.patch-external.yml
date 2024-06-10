@@ -13,7 +13,7 @@ on:
 #! `ci-tests.patch.yml` and `ci-tests.patch-external.yml` must be kept in sync.
 jobs:
   build:
-    name: Build CI Docker / Build images
+    name: Build CI Docker / Build CI image
     # Only run on PRs from external repositories.
     if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
