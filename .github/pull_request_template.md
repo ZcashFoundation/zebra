@@ -40,20 +40,15 @@
 ready for review. -->
 
 - [ ] The PR name will make sense to users.
-- [ ] The PR provides a summary in the CHANGELOG.
-- [ ] The PR has a priority label.
-
-If applicable:
-- [ ] The solution in the PR is tested.
+- [ ] The PR provides a CHANGELOG summary.
+- [ ] The solution is tested.
 - [ ] The documentation is up to date.
+- [ ] The PR has a priority label.
 
 ### PR Reviewer's Checklist
 
 <!-- If you are a reviewer of the PR, check the boxes below before approving it. -->
 
-- [ ] The PR scope matches the issue.
 - [ ] The PR Author's checklist is complete.
-
-If applicable:
-- [ ] The tests cover the solution.
+- [ ] The PR resolves the issue.
 
