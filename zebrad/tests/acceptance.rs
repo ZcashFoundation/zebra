@@ -3173,15 +3173,18 @@ async fn regtest_submit_blocks() -> Result<()> {
 
 // TODO:
 // - Test that chain forks are handled correctly and that `ChainTipChange` sees a `Reset`
-// - Test that `ChainTipChange` is updated when the non-finalized best chain grows
 // - Test that the `ChainTipChange` updated by the RPC syncer is updated when the finalized tip changes
 #[cfg(feature = "rpc-syncer")]
 #[tokio::test]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
+    use common::regtest::MiningRpcMethods;
+    use tokio::time::timeout;
+    use zebra_chain::parameters::testnet::REGTEST_NU5_ACTIVATION_HEIGHT;
+
     let _init_guard = zebra_test::init();
-    let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+    let mut config = random_known_rpc_port_config(false, &Network::new_regtest(None))?;
     config.state.ephemeral = false;
-    config.network.network = Network::new_regtest(None);
+    let rpc_address = config.rpc.listen_addr.unwrap();
 
     let testdir = testdir()?.with_config(&mut config)?;
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -3189,17 +3192,38 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     std::thread::sleep(LAUNCH_DELAY);
 
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
-    let (_read_state, _latest_chain_tip, _chain_tip_change, _sync_task) =
+    let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
         zebra_rpc::sync::init_read_state_with_syncer(
             config.state,
             &config.network.network,
-            config.rpc.listen_addr.unwrap(),
+            rpc_address,
         )
         .await?
         .map_err(|err| eyre!(err))?;
 
+    let rpc_client = RpcRequestClient::new(rpc_address);
+
+    for _ in 0..100 {
+        let (block, height) = rpc_client
+            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
+            .await?;
+
+        rpc_client.submit_block(block).await?;
+
+        let tip_action = timeout(
+            Duration::from_secs(1),
+            chain_tip_change.wait_for_tip_change(),
+        )
+        .await??;
+
+        assert_eq!(
+            tip_action.best_tip_height(),
+            height,
+            "tip action height should match block submission"
+        );
+    }
+
     // TODO:
-    // - Submit blocks while checking that `ChainTipChange` shows the chain growing before submitting the next block
     // - Submit several blocks before checking that `ChainTipChange` has the latest block hash and is a `TipAction::Reset`
     // - Check that `getblock` RPC returns the same block as the read state for every height
     // - Submit more blocks with an older block template (and a different nonce so the hash is different) to trigger a chain reorg
