@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Changed
 
 - We realized that a longer than `zcashd` end of support could be problematic in some cases so we reverted back from 20 to 16 weeks ([#8530](https://github.com/ZcashFoundation/zebra/pull/8530))
-- We're no longer using general conditional compilation attributes.
+- We're no longer using general conditional compilation attributes for `tor`,
+  but only feature flags instead.
 
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
 
