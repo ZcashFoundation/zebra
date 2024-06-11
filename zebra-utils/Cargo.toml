@@ -120,11 +120,12 @@ tokio = { version = "1.37.0", features = ["full"], optional = true }
 
 jsonrpc = { version = "0.18.0", optional = true }
 
-zcash_primitives = { version = "0.13.0", optional = true }
-zcash_client_backend = {version = "0.10.0-rc.1", optional = true}
+zcash_primitives = { version = "0.15.0", optional = true }
+zcash_client_backend = { version = "0.12.1", optional = true }
+zcash_protocol = { version = "0.1.1" }
 
 # For the openapi generator
-syn = { version = "2.0.65", features = ["full"], optional = true }
+syn = { version = "2.0.66", features = ["full"], optional = true }
 quote = { version = "1.0.36", optional = true }
 serde_yaml = { version = "0.9.34+deprecated", optional = true }
-serde = { version = "1.0.202", features = ["serde_derive"], optional = true }
+serde = { version = "1.0.203", features = ["serde_derive"], optional = true }

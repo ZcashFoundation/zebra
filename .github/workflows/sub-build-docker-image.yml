@@ -134,14 +134,17 @@ jobs:
           access_token_lifetime: 10800s
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v3.1.0
+        uses: docker/login-action@v3.2.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
       - name: Login to DockerHub
-        uses: docker/login-action@v3.1.0
+        # We only publish images to DockerHub if a release is not a pre-release
+        # Ref: https://github.com/orgs/community/discussions/26281#discussioncomment-3251177
+        if: ${{ github.event_name == 'release' && !github.event.release.prerelease }}
+        uses: docker/login-action@v3.2.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}

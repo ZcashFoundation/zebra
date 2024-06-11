@@ -29,14 +29,14 @@ impl zp_tx::components::transparent::Authorization for TransparentAuth<'_> {
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
 impl zp_tx::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
-    fn input_amounts(&self) -> Vec<zp_tx::components::amount::Amount> {
+    fn input_amounts(&self) -> Vec<zp_tx::components::amount::NonNegativeAmount> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
-                zp_tx::components::amount::Amount::from_nonnegative_i64_le_bytes(
-                    prevout.value.to_bytes(),
-                )
-                .expect("will not fail since it was previously validated")
+                prevout
+                    .value
+                    .try_into()
+                    .expect("will not fail since it was previously validated")
             })
             .collect()
     }
@@ -83,39 +83,31 @@ impl<'a>
 
 struct IdentityMap;
 
-impl
-    zp_tx::components::sapling::MapAuth<
-        zp_tx::components::sapling::Authorized,
-        zp_tx::components::sapling::Authorized,
-    > for IdentityMap
+impl zp_tx::components::sapling::MapAuth<sapling::bundle::Authorized, sapling::bundle::Authorized>
+    for IdentityMap
 {
     fn map_spend_proof(
-        &self,
-        p: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::SpendProof,
-    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::SpendProof
-    {
+        &mut self,
+        p: <sapling::bundle::Authorized as sapling::bundle::Authorization>::SpendProof,
+    ) -> <sapling::bundle::Authorized as sapling::bundle::Authorization>::SpendProof {
         p
     }
 
     fn map_output_proof(
-        &self,
-        p: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::OutputProof,
-    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::OutputProof
-    {
+        &mut self,
+        p: <sapling::bundle::Authorized as sapling::bundle::Authorization>::OutputProof,
+    ) -> <sapling::bundle::Authorized as sapling::bundle::Authorization>::OutputProof {
         p
     }
 
     fn map_auth_sig(
-        &self,
-        s: <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::AuthSig,
-    ) -> <zp_tx::components::sapling::Authorized as zp_tx::components::sapling::Authorization>::AuthSig{
+        &mut self,
+        s: <sapling::bundle::Authorized as sapling::bundle::Authorization>::AuthSig,
+    ) -> <sapling::bundle::Authorized as sapling::bundle::Authorization>::AuthSig {
         s
     }
 
-    fn map_authorization(
-        &self,
-        a: zp_tx::components::sapling::Authorized,
-    ) -> zp_tx::components::sapling::Authorized {
+    fn map_authorization(&mut self, a: sapling::bundle::Authorized) -> sapling::bundle::Authorized {
         a
     }
 }
@@ -141,7 +133,7 @@ struct PrecomputedAuth<'a> {
 
 impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
     type TransparentAuth = TransparentAuth<'a>;
-    type SaplingAuth = zp_tx::components::sapling::Authorized;
+    type SaplingAuth = sapling::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 }
 
@@ -213,12 +205,12 @@ impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
     }
 }
 
-/// Convert a Zebra Amount into a librustzcash one.
-impl TryFrom<Amount<NonNegative>> for zp_tx::components::Amount {
+/// Convert a Zebra non-negative Amount into a librustzcash one.
+impl TryFrom<Amount<NonNegative>> for zp_tx::components::amount::NonNegativeAmount {
     type Error = ();
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
-        zp_tx::components::Amount::from_u64(amount.into())
+        zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64(amount.into())
     }
 }
 
@@ -327,10 +319,10 @@ pub(crate) fn transparent_output_address(
     let alt_addr = tx_out.recipient_address();
 
     match alt_addr {
-        Some(zcash_primitives::legacy::TransparentAddress::PublicKey(pub_key_hash)) => Some(
+        Some(zcash_primitives::legacy::TransparentAddress::PublicKeyHash(pub_key_hash)) => Some(
             transparent::Address::from_pub_key_hash(network.kind(), pub_key_hash),
         ),
-        Some(zcash_primitives::legacy::TransparentAddress::Script(script_hash)) => Some(
+        Some(zcash_primitives::legacy::TransparentAddress::ScriptHash(script_hash)) => Some(
             transparent::Address::from_script_hash(network.kind(), script_hash),
         ),
         None => None,

@@ -40,6 +40,13 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
+  test-configuration-file-testnet:
+    name: Test CD testnet Docker config file / Test default-conf in Docker
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'
+
+
   test-zebra-conf-path:
     name: Test CD custom Docker config file / Test custom-conf in Docker
     runs-on: ubuntu-latest
