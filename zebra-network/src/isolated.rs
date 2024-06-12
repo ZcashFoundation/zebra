@@ -16,8 +16,7 @@ use crate::{
 
 // Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 // #[cfg(feature = "tor")]
-#[cfg(tor)]
-pub(crate) mod tor;
+// pub(crate) mod tor;
 
 #[cfg(test)]
 mod tests;

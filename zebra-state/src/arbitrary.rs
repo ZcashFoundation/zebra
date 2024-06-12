@@ -50,27 +50,6 @@ where
     }
 }
 
-impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
-    fn from(prepared: SemanticallyVerifiedBlock) -> Self {
-        let SemanticallyVerifiedBlock {
-            block,
-            hash,
-            height,
-            new_outputs: _,
-            transaction_hashes,
-        } = prepared;
-
-        Self {
-            hash,
-            height,
-            time: block.header.time,
-            transactions: block.transactions.clone(),
-            transaction_hashes,
-            previous_block_hash: block.header.previous_block_hash,
-        }
-    }
-}
-
 impl SemanticallyVerifiedBlock {
     /// Returns a [`ContextuallyVerifiedBlock`] created from this block,
     /// with fake zero-valued spent UTXOs.

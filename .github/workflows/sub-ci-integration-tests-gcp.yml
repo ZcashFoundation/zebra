@@ -9,7 +9,7 @@ on:
   workflow_call:
     inputs:
       network:
-        default: 'Mainnet'
+        default: "Mainnet"
         type: string
       regenerate-disks:
         default: false
@@ -59,7 +59,7 @@ jobs:
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
-      network: 'Testnet'
+      network: "Testnet"
 
   # zebrad cached checkpoint state tests
 
@@ -72,14 +72,14 @@ jobs:
   # Note: the output from get-available-disks should match with the caller workflow inputs
   regenerate-stateful-disks:
     name: Zebra checkpoint
-    needs: [ get-available-disks ]
+    needs: [get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
     with:
       app_name: zebrad
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_DISK_REBUILD=1 -e ZEBRA_FORCE_USE_COLOR=1"
       needs_zebra_state: false
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
@@ -101,14 +101,14 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   test-stateful-sync:
     name: Zebra checkpoint update
-    needs: [ regenerate-stateful-disks, get-available-disks ]
+    needs: [regenerate-stateful-disks, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || needs.regenerate-stateful-disks.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: sync-past-checkpoint
       test_description: Test full validation sync from a cached state
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_CHECKPOINT_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1"
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint
@@ -129,7 +129,7 @@ jobs:
   # Note: the output from get-available-disks should match with the caller workflow inputs
   test-full-sync:
     name: Zebra tip
-    needs: [ get-available-disks ]
+    needs: [get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     with:
@@ -138,7 +138,7 @@ jobs:
       test_description: Test a full sync up to the tip
       # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: '-e NETWORK=Mainnet -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
+      test_variables: "-e NETWORK=Mainnet -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false
@@ -172,21 +172,21 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   test-update-sync:
     name: Zebra tip update
-    needs: [ test-full-sync, get-available-disks ]
+    needs: [test-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: update-to-tip
       test_description: Test syncing to tip with a Zebra tip state
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_UPDATE_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_UPDATE_SYNC=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
 
@@ -205,7 +205,7 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   checkpoints-mainnet:
     name: Generate checkpoints mainnet
-    needs: [ test-full-sync, get-available-disks ]
+    needs: [test-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
@@ -213,13 +213,13 @@ jobs:
       test_id: checkpoints-mainnet
       test_description: Generate Zebra checkpoints on mainnet
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: '-e NETWORK=Mainnet -e GENERATE_CHECKPOINTS_MAINNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      test_variables: "-e NETWORK=Mainnet -e GENERATE_CHECKPOINTS_MAINNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
       needs_zebra_state: true
       # test-update-sync updates the disk on every PR, so we don't need to do it here
       saves_to_disk: false
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
 
@@ -240,7 +240,7 @@ jobs:
   # Note: the output from get-available-disks-testnet should match with the caller workflow inputs
   test-full-sync-testnet:
     name: Zebra tip on testnet
-    needs: [ get-available-disks-testnet ]
+    needs: [get-available-disks-testnet]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     with:
@@ -248,7 +248,7 @@ jobs:
       test_id: full-sync-testnet
       test_description: Test a full sync up to the tip on testnet
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
-      test_variables: '-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1'
+      test_variables: "-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_FORCE_USE_COLOR=1"
       network: "Testnet"
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
@@ -286,14 +286,14 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   checkpoints-testnet:
     name: Generate checkpoints testnet
-    needs: [ test-full-sync-testnet, get-available-disks-testnet ]
+    needs: [test-full-sync-testnet, get-available-disks-testnet]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || needs.test-full-sync-testnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
-      test_variables: '-e NETWORK=Testnet -e GENERATE_CHECKPOINTS_TESTNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      test_variables: "-e NETWORK=Testnet -e GENERATE_CHECKPOINTS_TESTNET=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
       network: "Testnet"
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
@@ -301,8 +301,8 @@ jobs:
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
       height_grep_text: 'zebra_tip_height.*=.*Height.*\('
     secrets: inherit
 
@@ -319,7 +319,7 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-full-sync:
     name: lightwalletd tip
-    needs: [ test-full-sync, get-available-disks ]
+    needs: [test-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     # Currently the lightwalletd tests only work on Mainnet
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
@@ -327,7 +327,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-full-sync
       test_description: Test lightwalletd full sync
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_FULL_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
@@ -336,10 +336,10 @@ jobs:
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_prefix: lwd-cache
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
-      height_grep_text: 'Waiting for block: '
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
+      lwd_state_dir: "lwd-cache"
+      height_grep_text: "Waiting for block: "
     secrets: inherit
     # We want to prevent multiple lightwalletd full syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
@@ -359,24 +359,24 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-update-sync:
     name: lightwalletd tip update
-    needs: [ lightwalletd-full-sync, get-available-disks ]
+    needs: [lightwalletd-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-update-sync
       test_description: Test lightwalletd update sync with both states
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       disk_prefix: lwd-cache
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
-      height_grep_text: 'Waiting for block: '
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
+      lwd_state_dir: "lwd-cache"
+      height_grep_text: "Waiting for block: "
     secrets: inherit
 
   # Test that Zebra can answer a synthetic RPC call, using a cached Zebra tip state
@@ -391,19 +391,19 @@ jobs:
   # TODO: move this job below the rest of the mainnet jobs that just use Zebra cached state
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC
-    needs: [ test-full-sync, get-available-disks ]
+    needs: [test-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: fully-synced-rpc
       test_description: Test lightwalletd RPC with a Zebra tip state
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_RPC_CALL=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
     secrets: inherit
 
   # Test that Zebra can handle a lightwalletd send transaction RPC call, using a cached Zebra tip state
@@ -416,21 +416,21 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-transactions-test:
     name: lightwalletd tip send
-    needs: [ lightwalletd-full-sync, get-available-disks ]
+    needs: [lightwalletd-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-send-transactions
       test_description: Test sending transactions via lightwalletd
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
+      lwd_state_dir: "lwd-cache"
     secrets: inherit
 
   # Test that Zebra can handle gRPC wallet calls, using a cached Zebra tip state
@@ -443,21 +443,21 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-grpc-test:
     name: lightwalletd GRPC tests
-    needs: [ lightwalletd-full-sync, get-available-disks ]
+    needs: [lightwalletd-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
-      lwd_state_dir: 'lwd-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
+      lwd_state_dir: "lwd-cache"
     secrets: inherit
 
   ## getblocktemplate-rpcs using cached Zebra state on mainnet
@@ -474,20 +474,20 @@ jobs:
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   get-block-template-test:
     name: get block template
-    needs: [ test-full-sync, get-available-disks ]
+    needs: [test-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
       test_id: get-block-template
       test_description: Test getblocktemplate RPC method via Zebra's rpc server
-      test_variables: '-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_GET_BLOCK_TEMPLATE=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache'
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_GET_BLOCK_TEMPLATE=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
       disk_suffix: tip
-      root_state_path: '/var/cache'
-      zebra_state_dir: 'zebrad-cache'
+      root_state_path: "/var/cache"
+      zebra_state_dir: "zebrad-cache"
     secrets: inherit
 
   # Test that Zebra can handle a submit block RPC call, using a cached Zebra tip state
@@ -516,31 +516,32 @@ jobs:
       zebra_state_dir: "zebrad-cache"
     secrets: inherit
 
-  # Test that the scanner can continue scanning where it was left when zebrad restarts.
-  #
-  # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
-  #
-  # If the state version has changed, waits for the new cached states to be created.
-  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  scan-start-where-left-test:
-    name: Scan starts where left
-    needs: [test-full-sync, get-available-disks]
-    uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    with:
-      app_name: zebrad
-      test_id: scan-start-where-left
-      test_description: Test that the scanner can continue scanning where it was left when zebrad restarts.
-      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_START_WHERE_LEFT=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
-      needs_zebra_state: true
-      needs_lwd_state: false
-      saves_to_disk: true
-      disk_suffix: tip
-      root_state_path: "/var/cache"
-      zebra_state_dir: "zebrad-cache"
-    secrets: inherit
+  # TODO: Move this test once we have the new scanner binary.
+  # # Test that the scanner can continue scanning where it was left when zebrad restarts.
+  # #
+  # # Runs:
+  # # - after every PR is merged to `main`
+  # # - on every PR update
+  # #
+  # # If the state version has changed, waits for the new cached states to be created.
+  # # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
+  # scan-start-where-left-test:
+  #   name: Scan starts where left
+  #   needs: [test-full-sync, get-available-disks]
+  #   uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
+  #   if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
+  #   with:
+  #     app_name: zebrad
+  #     test_id: scan-start-where-left
+  #     test_description: Test that the scanner can continue scanning where it was left when zebrad restarts.
+  #     test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_START_WHERE_LEFT=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
+  #     needs_zebra_state: true
+  #     needs_lwd_state: false
+  #     saves_to_disk: true
+  #     disk_suffix: tip
+  #     root_state_path: "/var/cache"
+  #     zebra_state_dir: "zebrad-cache"
+  #   secrets: inherit
 
   # Test that the scan task registers keys, deletes keys, and subscribes to results for keys while running.
   #
@@ -589,7 +590,7 @@ jobs:
         get-block-template-test,
         submit-block-test,
         scan-start-where-left-test,
-        scan-task-commands-test
+        scan-task-commands-test,
       ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
