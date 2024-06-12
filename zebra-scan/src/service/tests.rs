@@ -273,12 +273,12 @@ pub async fn scan_service_registers_keys_correctly() -> Result<()> {
 
 async fn scan_service_registers_keys_correctly_for(network: &Network) -> Result<()> {
     // Mock the state.
-    let (state, _, _, chain_tip_change) = zebra_state::populated_state(vec![], network).await;
+    let (_, read_state, _, chain_tip_change) = zebra_state::populated_state(vec![], network).await;
 
     // Instantiate the scan service.
-    let mut scan_service = ServiceBuilder::new()
-        .buffer(2)
-        .service(ScanService::new(&Config::ephemeral(), network, state, chain_tip_change).await);
+    let mut scan_service = ServiceBuilder::new().buffer(2).service(
+        ScanService::new(&Config::ephemeral(), network, read_state, chain_tip_change).await,
+    );
 
     // Mock three Sapling keys.
     let mocked_keys = mock_sapling_scanning_keys(3, network);
