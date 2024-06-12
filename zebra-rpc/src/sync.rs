@@ -5,9 +5,10 @@ use std::{net::SocketAddr, ops::RangeInclusive, sync::Arc, time::Duration};
 use futures::{stream::FuturesOrdered, StreamExt};
 use tokio::task::JoinHandle;
 use tower::BoxError;
+use tracing::info;
 use zebra_chain::{
     block::{self, Block, Height},
-    parameters::Network,
+    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     serialization::ZcashDeserializeInto,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -72,11 +73,28 @@ impl TrustedChainSync {
 
     /// Starts syncing blocks from the node's non-finalized best chain.
     async fn sync(&mut self) {
-        let mut last_chain_tip_hash = self.db.finalized_tip_hash();
+        let mut last_chain_tip_hash =
+            if let Some(finalized_tip_block) = self.finalized_chain_tip_block().await {
+                let last_chain_tip_hash = finalized_tip_block.hash;
+                self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
+                last_chain_tip_hash
+            } else {
+                GENESIS_PREVIOUS_BLOCK_HASH
+            };
 
         loop {
             let (target_tip_height, target_tip_hash) =
                 self.wait_for_chain_tip_change(last_chain_tip_hash).await;
+
+            info!(
+                ?target_tip_height,
+                ?target_tip_hash,
+                "got a chain tip change"
+            );
+
+            let catch_up_result = self.db.try_catch_up_with_primary();
+
+            info!(?catch_up_result, "trying to catch up to primary");
 
             // TODO: do in spawn_blocking
             if self.non_finalized_state.chain_count() == 0 && self.db.contains_hash(target_tip_hash)
@@ -90,16 +108,14 @@ impl TrustedChainSync {
                 continue;
             }
 
-            let (current_tip_height, mut current_tip_hash) = self.current_tip().await.expect(
-                "should have genesis block after successful bestblockheightandhash response",
-            );
+            let (next_block_height, mut current_tip_hash) =
+                self.next_block_height_and_prev_hash().await;
 
             last_chain_tip_hash = current_tip_hash;
 
-            let next_tip_height = current_tip_height.next().expect("should be valid height");
             let rpc_client = self.rpc_client.clone();
             let mut block_futs =
-                rpc_client.block_range_ordered(next_tip_height..=target_tip_height);
+                rpc_client.block_range_ordered(next_block_height..=target_tip_height);
 
             let should_reset_non_finalized_state = loop {
                 let block = match block_futs.next().await {
@@ -179,7 +195,7 @@ impl TrustedChainSync {
     }
 
     /// Returns the current tip height and hash
-    async fn current_tip(&self) -> Option<(block::Height, block::Hash)> {
+    async fn next_block_height_and_prev_hash(&self) -> (block::Height, block::Hash) {
         if let Some(tip) = self.non_finalized_state.best_tip() {
             Some(tip)
         } else {
@@ -188,6 +204,13 @@ impl TrustedChainSync {
                 .wait_for_panics()
                 .await
         }
+        .map(|(current_tip_height, current_tip_hash)| {
+            (
+                current_tip_height.next().expect("should be valid height"),
+                current_tip_hash,
+            )
+        })
+        .unwrap_or((Height::MIN, GENESIS_PREVIOUS_BLOCK_HASH))
     }
 
     async fn finalized_chain_tip_block(&self) -> Option<ChainTipBlock> {

@@ -3187,10 +3187,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_address = config.rpc.listen_addr.unwrap();
 
     let testdir = testdir()?.with_config(&mut config)?;
+
     let mut child = testdir.spawn_child(args!["start"])?;
 
-    // Wait for Zebrad to start up
-    tokio::time::sleep(LAUNCH_DELAY).await;
+    child.expect_stdout_line_matches(format!(
+        "Opened Zebra state cache at {}",
+        config.state.cache_dir.to_str().unwrap()
+    ))?;
 
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
     let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
@@ -3202,11 +3205,11 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         .await?
         .map_err(|err| eyre!(err))?;
 
-    // Wait for sync task to catch up to the best tip (genesis block)
-    tokio::time::sleep(Duration::from_secs(3)).await;
+    // Wait for Zebrad to start up
+    tokio::time::sleep(LAUNCH_DELAY).await;
 
     let tip_action = timeout(
-        Duration::from_secs(15),
+        Duration::from_secs(10),
         chain_tip_change.wait_for_tip_change(),
     )
     .await??;

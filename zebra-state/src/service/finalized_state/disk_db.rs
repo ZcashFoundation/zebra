@@ -834,7 +834,19 @@ impl DiskDb {
             .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
 
         let db_result = if read_only {
-            DB::open_cf_descriptors_read_only(&db_options, &path, column_families, false)
+            // TODO: Make this path configurable?
+            let secondary_path =
+                config.db_path("secondary_state", format_version_in_code.major, network);
+            let create_dir_result = std::fs::create_dir_all(&secondary_path);
+
+            info!(?create_dir_result, "creating secondary db directory");
+
+            DB::open_cf_descriptors_as_secondary(
+                &db_options,
+                &path,
+                &secondary_path,
+                column_families,
+            )
         } else {
             DB::open_cf_descriptors(&db_options, &path, column_families)
         };
