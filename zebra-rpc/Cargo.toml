@@ -15,7 +15,7 @@ keywords = ["zebra", "zcash"]
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding", "network-programming"]
 
 [features]
-default = []
+default = ["syncer"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 

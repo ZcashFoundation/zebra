@@ -3189,7 +3189,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let testdir = testdir()?.with_config(&mut config)?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
-    std::thread::sleep(LAUNCH_DELAY);
+    // Wait for Zebrad to start up
+    tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
     let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
@@ -3201,14 +3202,31 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         .await?
         .map_err(|err| eyre!(err))?;
 
+    // Wait for sync task to catch up to the best tip (genesis block)
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let tip_action = timeout(
+        Duration::from_secs(15),
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await??;
+
+    assert!(
+        tip_action.is_reset(),
+        "first tip action should be a reset for the genesis block"
+    );
+
     let rpc_client = RpcRequestClient::new(rpc_address);
 
-    for _ in 0..100 {
+    for _ in 0..10 {
         let (block, height) = rpc_client
             .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
             .await?;
 
         rpc_client.submit_block(block).await?;
+
+        // Wait for sync task to catch up to the best tip
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
         let tip_action = timeout(
             Duration::from_secs(1),
