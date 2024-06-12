@@ -165,13 +165,11 @@ mod protocol;
 
 // Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 // #[cfg(feature = "tor")]
-#[cfg(tor)]
-pub use crate::isolated::tor::connect_isolated_tor;
+// pub use crate::isolated::tor::connect_isolated_tor;
 
 // Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
 // #[cfg(all(feature = "tor", any(test, feature = "proptest-impl")))]
-#[cfg(tor)]
-pub use crate::isolated::tor::connect_isolated_tor_with_inbound;
+// pub use crate::isolated::tor::connect_isolated_tor_with_inbound;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use crate::{
