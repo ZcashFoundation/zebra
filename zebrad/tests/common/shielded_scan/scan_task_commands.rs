@@ -11,7 +11,6 @@ use std::{fs, time::Duration};
 use color_eyre::{eyre::eyre, Result};
 
 use tokio::sync::mpsc::error::TryRecvError;
-use tower::ServiceBuilder;
 use zebra_chain::{
     block::Height,
     chain_tip::ChainTip,
@@ -82,8 +81,14 @@ pub(crate) async fn run() -> Result<()> {
     let scan_db_path = zebrad_state_path.join(SCANNER_DATABASE_KIND);
     fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
 
-    let (state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
+    let (_state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
         start_state_service_with_cache_dir(&network, zebrad_state_path.clone()).await?;
+
+    let state_config = zebra_state::Config {
+        cache_dir: zebrad_state_path.clone(),
+        ..zebra_state::Config::default()
+    };
+    let (read_state, _db, _) = zebra_state::init_read_only(state_config, &network);
 
     let chain_tip_height = latest_chain_tip
         .best_tip_height()
@@ -105,11 +110,9 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!("opened state service with valid chain tip height, starting scan task",);
 
-    let state = ServiceBuilder::new().buffer(10).service(state_service);
-
     // Create an ephemeral `Storage` instance
     let storage = Storage::new(&scan_config, &network, false);
-    let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
+    let mut scan_task = ScanTask::spawn(storage, read_state, chain_tip_change);
 
     tracing::info!("started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",);
 
