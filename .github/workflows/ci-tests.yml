@@ -130,6 +130,8 @@ jobs:
       rust_backtrace: full
       rust_lib_backtrace: full
       rust_log: info
+    # This step needs access to Docker Hub secrets to run successfully
+    secrets: inherit
 
   # Runs Zebra unit tests
   unit-tests:

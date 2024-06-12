@@ -136,6 +136,8 @@ jobs:
       image_name: zebrad
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
+    # This step needs access to Docker Hub secrets to run successfully
+    secrets: inherit
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
