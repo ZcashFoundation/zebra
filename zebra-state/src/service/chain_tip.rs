@@ -107,15 +107,15 @@ impl From<ContextuallyVerifiedBlock> for ChainTipBlock {
     }
 }
 
-impl From<CheckpointVerifiedBlock> for ChainTipBlock {
-    fn from(finalized: CheckpointVerifiedBlock) -> Self {
-        let CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
+impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
+    fn from(prepared: SemanticallyVerifiedBlock) -> Self {
+        let SemanticallyVerifiedBlock {
             block,
             hash,
             height,
+            new_outputs: _,
             transaction_hashes,
-            ..
-        }) = finalized;
+        } = prepared;
 
         Self {
             hash,
@@ -125,6 +125,12 @@ impl From<CheckpointVerifiedBlock> for ChainTipBlock {
             transaction_hashes,
             previous_block_hash: block.header.previous_block_hash,
         }
+    }
+}
+
+impl From<CheckpointVerifiedBlock> for ChainTipBlock {
+    fn from(CheckpointVerifiedBlock(prepared): CheckpointVerifiedBlock) -> Self {
+        prepared.into()
     }
 }
 

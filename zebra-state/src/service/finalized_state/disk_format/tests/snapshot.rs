@@ -62,7 +62,7 @@ fn test_raw_rocksdb_column_families_with_network(network: Network) {
         &Config::ephemeral(),
         &network,
         #[cfg(feature = "elasticsearch")]
-        None,
+        false,
     );
 
     // Snapshot the column family names
