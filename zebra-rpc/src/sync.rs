@@ -73,6 +73,7 @@ impl TrustedChainSync {
 
     /// Starts syncing blocks from the node's non-finalized best chain.
     async fn sync(&mut self) {
+        self.try_catch_up_with_primary().await;
         let mut last_chain_tip_hash =
             if let Some(finalized_tip_block) = self.finalized_chain_tip_block().await {
                 let last_chain_tip_hash = finalized_tip_block.hash;
@@ -92,13 +93,7 @@ impl TrustedChainSync {
                 "got a chain tip change"
             );
 
-            let catch_up_result = self.db.try_catch_up_with_primary();
-
-            info!(?catch_up_result, "trying to catch up to primary");
-
-            // TODO: do in spawn_blocking
-            if self.non_finalized_state.chain_count() == 0 && self.db.contains_hash(target_tip_hash)
-            {
+            if self.is_finalized_tip_change(target_tip_hash).await {
                 let block = self.finalized_chain_tip_block().await.expect(
                     "should have genesis block after successful bestblockheightandhash response",
                 );
@@ -191,6 +186,29 @@ impl TrustedChainSync {
                 last_chain_tip_hash = block.hash;
                 self.update_channels(block);
             }
+        }
+    }
+
+    async fn try_catch_up_with_primary(&self) {
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            let catch_up_result = db.try_catch_up_with_primary();
+            tracing::debug!(?catch_up_result, "trying to catch up to primary");
+        })
+        .wait_for_panics()
+        .await
+    }
+
+    async fn is_finalized_tip_change(&self, target_tip_hash: block::Hash) -> bool {
+        self.non_finalized_state.chain_count() == 0 && {
+            let db = self.db.clone();
+            tokio::task::spawn_blocking(move || {
+                let catch_up_result = db.try_catch_up_with_primary();
+                tracing::debug!(?catch_up_result, "trying to catch up to primary");
+                db.contains_hash(target_tip_hash)
+            })
+            .wait_for_panics()
+            .await
         }
     }
 
