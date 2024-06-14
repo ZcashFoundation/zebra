@@ -91,7 +91,7 @@ pub(super) fn find_group_hash(d: [u8; 8], m: &[u8]) -> jubjub::ExtendedPoint {
         let gh = jubjub_group_hash(d, &tag[..]);
 
         // We don't want to overflow and start reusing generators
-        assert!(tag[i] != u8::max_value());
+        assert!(tag[i] != u8::MAX);
         tag[i] += 1;
 
         if let Some(gh) = gh {
