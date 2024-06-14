@@ -21,18 +21,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parse command line arguments.
     let args = Args::from_args();
+
+    let zebrad_cache_dir = args.zebrad_cache_dir;
+    let scanning_cache_dir = args.scanning_cache_dir;
+    let mut db_config = zebra_scan::Config::default().db_config;
+    db_config.cache_dir = scanning_cache_dir;
     let network = args.network;
     let sapling_keys_to_scan = args
         .sapling_keys_to_scan
         .into_iter()
         .map(|key| (key, 1))
         .collect();
-    let cache_dir = args.cache_dir;
     let listen_addr = args.listen_addr;
 
     // Create a state config with arguments.
     let state_config = zebra_state::Config {
-        cache_dir,
+        cache_dir: zebrad_cache_dir,
         ..zebra_state::Config::default()
     };
 
@@ -40,7 +44,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let scanner_config = zebra_scan::Config {
         sapling_keys_to_scan,
         listen_addr,
-        ..zebra_scan::Config::default()
+        db_config,
     };
 
     // Get a read-only state and the database.
@@ -75,7 +79,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 // Default values for the zebra-scanner arguments.
 lazy_static! {
-    static ref DEFAULT_CACHE_DIR: String = zebra_state::Config::default()
+    static ref DEFAULT_ZEBRAD_CACHE_DIR: String = zebra_state::Config::default()
+        .cache_dir
+        .to_str()
+        .expect("default cache dir is valid")
+        .to_string();
+    static ref DEFAULT_SCANNER_CACHE_DIR: String = zebra_scan::Config::default()
+        .db_config
         .cache_dir
         .to_str()
         .expect("default cache dir is valid")
@@ -86,19 +96,23 @@ lazy_static! {
 /// zebra-scanner arguments
 #[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
 pub struct Args {
-    /// Path to an existing zebra state cache directory.
-    #[structopt(default_value = &DEFAULT_CACHE_DIR, short, long)]
-    pub cache_dir: PathBuf,
+    /// Path to zebrad state.
+    #[structopt(default_value = &DEFAULT_ZEBRAD_CACHE_DIR, long)]
+    pub zebrad_cache_dir: PathBuf,
 
-    /// The Zcash network where the scanner will run.
-    #[structopt(default_value = &DEFAULT_NETWORK, short, long)]
+    /// Path to scanning state.
+    #[structopt(default_value = &DEFAULT_SCANNER_CACHE_DIR, long)]
+    pub scanning_cache_dir: PathBuf,
+
+    /// The Zcash network.
+    #[structopt(default_value = &DEFAULT_NETWORK, long)]
     pub network: Network,
 
     /// The sapling keys to scan for.
-    #[structopt(short, long)]
+    #[structopt(long)]
     pub sapling_keys_to_scan: Vec<SaplingScanningKey>,
 
-    /// IP address and port for the zebra-scan gRPC server.
-    #[structopt(short, long)]
+    /// IP address and port for the gRPC server.
+    #[structopt(long)]
     pub listen_addr: Option<SocketAddr>,
 }
