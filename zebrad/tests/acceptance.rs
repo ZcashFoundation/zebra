@@ -3172,7 +3172,7 @@ async fn regtest_submit_blocks() -> Result<()> {
 }
 
 // TODO:
-// - Test that the `ChainTipChange` updated by the RPC syncer is updated when the finalized tip changes
+// - Test that the `ChainTipChange` updated by the RPC syncer is updated when the finalized tip changes (outside Regtest)
 #[cfg(feature = "rpc-syncer")]
 #[tokio::test(flavor = "multi_thread")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
@@ -3327,6 +3327,11 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             unreachable!("wrong response variant");
         };
 
+        assert!(
+            chain_tip_change.last_tip_change().is_none(),
+            "there should be no tip change until the last block is submitted"
+        );
+
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
         let GetBlockHash(best_block_hash) = rpc_client
@@ -3385,12 +3390,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             "read state should have the same block"
         );
     }
-
-    // TODO:
-    // - Submit more blocks with an older block template (and a different nonce so the hash is different) to trigger a chain reorg
-    // - Check that `ChainTipChange` isn't being updated until the best chain changes
-    // - Check that the first `ChainTipChange` `TipAction` is a `TipAction::Reset`
-    // - Check that `getblock` RPC returns the same block as the read state for every height
 
     child.kill(false)?;
     let output = child.wait_with_output()?;
