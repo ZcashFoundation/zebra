@@ -193,11 +193,13 @@ impl TrustedChainSync {
     }
 
     /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
+    // TODO: Use getblock RPC if it fails to catch up to primary?
     async fn try_catch_up_with_primary(&self) {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
-            let catch_up_result = db.try_catch_up_with_primary();
-            tracing::debug!(?catch_up_result, "trying to catch up to primary");
+            if let Err(catch_up_error) = db.try_catch_up_with_primary() {
+                tracing::warn!(?catch_up_error, "failed to catch up to primary");
+            }
         })
         .wait_for_panics()
         .await
@@ -211,8 +213,9 @@ impl TrustedChainSync {
         self.non_finalized_state.chain_count() == 0 && {
             let db = self.db.clone();
             tokio::task::spawn_blocking(move || {
-                let catch_up_result = db.try_catch_up_with_primary();
-                tracing::debug!(?catch_up_result, "trying to catch up to primary");
+                if let Err(catch_up_error) = db.try_catch_up_with_primary() {
+                    tracing::warn!(?catch_up_error, "failed to catch up to primary");
+                }
                 db.contains_hash(target_tip_hash)
             })
             .wait_for_panics()

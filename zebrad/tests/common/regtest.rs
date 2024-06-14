@@ -96,7 +96,7 @@ pub trait MiningRpcMethods {
     async fn block_from_template(&self, nu5_activation_height: Height) -> Result<(Block, Height)>;
     async fn submit_block(&self, block: Block) -> Result<()>;
     async fn submit_block_from_template(&self) -> Result<(Block, Height)>;
-    async fn get_block(&self, height: u32) -> Result<Option<Arc<Block>>, BoxError>;
+    async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError>;
 }
 
 impl MiningRpcMethods for RpcRequestClient {
@@ -146,7 +146,7 @@ impl MiningRpcMethods for RpcRequestClient {
         Ok((block, height))
     }
 
-    async fn get_block(&self, height: u32) -> Result<Option<Arc<Block>>, BoxError> {
+    async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError> {
         match self
             .json_result_from_call("getblock", format!(r#"["{}", 0]"#, height))
             .await

@@ -3171,14 +3171,13 @@ async fn regtest_submit_blocks() -> Result<()> {
     Ok(())
 }
 
-// TODO:
-// - Test that the `ChainTipChange` updated by the RPC syncer is updated when the finalized tip changes (outside Regtest)
 #[cfg(feature = "rpc-syncer")]
 #[tokio::test(flavor = "multi_thread")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;
 
     use common::regtest::MiningRpcMethods;
+    use eyre::Error;
     use tokio::time::timeout;
     use zebra_chain::{
         chain_tip::ChainTip, parameters::NetworkUpgrade,
@@ -3193,9 +3192,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let network = config.network.network.clone();
     let rpc_address = config.rpc.listen_addr.unwrap();
 
-    let testdir = testdir()?.with_config(&mut config)?;
+    let test_dir = testdir()?.with_config(&mut config)?;
 
-    let mut child = testdir.spawn_child(args!["start"])?;
+    let mut child = test_dir.spawn_child(args!["start"])?;
 
     tracing::info!("waiting for Zebra state cache to be opened");
 
@@ -3244,10 +3243,11 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         );
     }
 
+    tracing::info!("checking that read state has the new non-finalized best chain blocks");
     for expected_block in blocks.clone() {
         let height = expected_block.coinbase_height().unwrap();
         let zebra_block = rpc_client
-            .get_block(height.0)
+            .get_block(height.0 as i32)
             .await
             .map_err(|err| eyre!(err))?
             .expect("Zebra test child should have the expected block");
@@ -3361,10 +3361,11 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         "tip action hashes and heights should match"
     );
 
+    tracing::info!("checking that read state has the new non-finalized best chain blocks");
     for expected_block in blocks {
         let height = expected_block.coinbase_height().unwrap();
         let zebra_block = rpc_client
-            .get_block(height.0)
+            .get_block(height.0 as i32)
             .await
             .map_err(|err| eyre!(err))?
             .expect("Zebra test child should have the expected block");
@@ -3391,6 +3392,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         );
     }
 
+    tracing::info!("restarting Zebra on Mainnet");
+
     child.kill(false)?;
     let output = child.wait_with_output()?;
 
@@ -3399,10 +3402,48 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     output.assert_failure()?;
 
-    // TODO:
-    // - Start another Zebra testchild on Testnet or Mainnet
-    // - Wait for it to start syncing blocks from the network
-    // - Check that `LatestChainTip` is being updated with the newly synced finalized blocks
+    let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
+    config.state.ephemeral = false;
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    let test_dir = testdir()?.with_config(&mut config)?;
+
+    let mut child = test_dir.spawn_child(args!["start"])?;
+
+    tracing::info!("waiting for Zebra state cache to be opened");
+
+    child.expect_stdout_line_matches(format!(
+        "Opened Zebra state cache at {}",
+        config.state.cache_dir.to_str().unwrap()
+    ))?;
+
+    tracing::info!("starting read state with syncer");
+    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
+    let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            config.state,
+            &config.network.network,
+            rpc_address,
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
+
+    tracing::info!("waiting for finalized chain tip changes");
+
+    timeout(
+        Duration::from_secs(100),
+        tokio::spawn(async move {
+            for _ in 0..2 {
+                chain_tip_change
+                    .wait_for_tip_change()
+                    .await
+                    .map_err(|err| eyre!(err))?;
+            }
+
+            Ok::<(), Error>(())
+        }),
+    )
+    .await???;
 
     Ok(())
 }
