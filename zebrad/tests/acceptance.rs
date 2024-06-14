@@ -3174,7 +3174,6 @@ async fn regtest_submit_blocks() -> Result<()> {
     Ok(())
 }
 
-#[cfg(feature = "rpc-syncer")]
 #[tokio::test(flavor = "multi_thread")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;
