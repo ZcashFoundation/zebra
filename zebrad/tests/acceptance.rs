@@ -3172,29 +3172,39 @@ async fn regtest_submit_blocks() -> Result<()> {
 }
 
 // TODO:
-// - Test that chain forks are handled correctly and that `ChainTipChange` sees a `Reset`
 // - Test that the `ChainTipChange` updated by the RPC syncer is updated when the finalized tip changes
 #[cfg(feature = "rpc-syncer")]
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
+    use std::sync::Arc;
+
     use common::regtest::MiningRpcMethods;
     use tokio::time::timeout;
-    use zebra_chain::parameters::testnet::REGTEST_NU5_ACTIVATION_HEIGHT;
+    use zebra_chain::{
+        chain_tip::ChainTip, parameters::NetworkUpgrade,
+        primitives::byte_array::increment_big_endian,
+    };
+    use zebra_rpc::methods::GetBlockHash;
+    use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
     let mut config = random_known_rpc_port_config(false, &Network::new_regtest(None))?;
     config.state.ephemeral = false;
+    let network = config.network.network.clone();
     let rpc_address = config.rpc.listen_addr.unwrap();
 
     let testdir = testdir()?.with_config(&mut config)?;
 
     let mut child = testdir.spawn_child(args!["start"])?;
 
+    tracing::info!("waiting for Zebra state cache to be opened");
+
     child.expect_stdout_line_matches(format!(
         "Opened Zebra state cache at {}",
         config.state.cache_dir.to_str().unwrap()
     ))?;
 
+    tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
     let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
         zebra_rpc::sync::init_read_state_with_syncer(
@@ -3205,32 +3215,22 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         .await?
         .map_err(|err| eyre!(err))?;
 
+    tracing::info!("waiting for first chain tip change");
+
     // Wait for Zebrad to start up
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
-    let tip_action = timeout(
-        Duration::from_secs(10),
-        chain_tip_change.wait_for_tip_change(),
-    )
-    .await??;
-
+    let tip_action = timeout(LAUNCH_DELAY, chain_tip_change.wait_for_tip_change()).await??;
     assert!(
         tip_action.is_reset(),
         "first tip action should be a reset for the genesis block"
     );
 
+    tracing::info!("got genesis chain tip change, submitting more blocks ..");
+
     let rpc_client = RpcRequestClient::new(rpc_address);
-
+    let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client
-            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
-            .await?;
-
-        rpc_client.submit_block(block).await?;
-
-        // Wait for sync task to catch up to the best tip
-        tokio::time::sleep(Duration::from_secs(3)).await;
-
+        let (block, height) = rpc_client.submit_block_from_template().await?;
+        blocks.push(block);
         let tip_action = timeout(
             Duration::from_secs(1),
             chain_tip_change.wait_for_tip_change(),
@@ -3244,8 +3244,88 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         );
     }
 
+    tracing::info!("getting next block template");
+    let (block_11, _) = rpc_client.block_from_template(Height(100)).await?;
+    let next_blocks: Vec<_> = blocks
+        .split_off(5)
+        .into_iter()
+        .chain(std::iter::once(block_11))
+        .collect();
+
+    tracing::info!("creating populated state");
+    let genesis_block = regtest_genesis_block();
+    let (state2, read_state2, latest_chain_tip2, _chain_tip_change2) =
+        zebra_state::populated_state(
+            std::iter::once(genesis_block).chain(blocks.into_iter().map(Arc::new)),
+            &network,
+        )
+        .await;
+
+    tracing::info!("attempting to trigger a best chain change");
+    for mut block in next_blocks {
+        let is_chain_history_activation_height = NetworkUpgrade::Heartwood
+            .activation_height(&network)
+            == Some(block.coinbase_height().unwrap());
+        let header = Arc::make_mut(&mut block.header);
+        increment_big_endian(header.nonce.as_mut());
+        let ReadResponse::ChainInfo(chain_info) = read_state2
+            .clone()
+            .oneshot(zebra_state::ReadRequest::ChainInfo)
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("wrong response variant");
+        };
+
+        header.previous_block_hash = chain_info.tip_hash;
+        header.commitment_bytes = chain_info
+            .history_tree
+            .hash()
+            .or(is_chain_history_activation_height.then_some([0; 32].into()))
+            .expect("history tree can't be empty")
+            .bytes_in_serialized_order()
+            .into();
+
+        let Response::Committed(block_hash) = state2
+            .clone()
+            .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
+                Arc::new(block.clone()).into(),
+            ))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("wrong response variant");
+        };
+
+        rpc_client.submit_block(block).await?;
+        let GetBlockHash(best_block_hash) = rpc_client
+            .json_result_from_call("getbestblockhash", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+
+        if block_hash == best_block_hash {
+            break;
+        }
+    }
+
+    tracing::info!("newly submitted blocks are in the best chain, checking for reset");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let tip_action = timeout(
+        Duration::from_secs(1),
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await??;
+    let (expected_height, expected_hash) = latest_chain_tip2
+        .best_tip_height_and_hash()
+        .expect("should have a chain tip");
+    assert!(tip_action.is_reset(), "tip action should be reset");
+    assert_eq!(
+        tip_action.best_tip_hash_and_height(),
+        (expected_hash, expected_height),
+        "tip action hashes and heights should match"
+    );
+
     // TODO:
-    // - Submit several blocks before checking that `ChainTipChange` has the latest block hash and is a `TipAction::Reset`
     // - Check that `getblock` RPC returns the same block as the read state for every height
     // - Submit more blocks with an older block template (and a different nonce so the hash is different) to trigger a chain reorg
     // - Check that `ChainTipChange` isn't being updated until the best chain changes

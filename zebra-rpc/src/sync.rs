@@ -179,16 +179,20 @@ impl TrustedChainSync {
             };
 
             if should_reset_non_finalized_state {
+                self.try_catch_up_with_primary().await;
                 let block = self.finalized_chain_tip_block().await.expect(
                     "should have genesis block after successful bestblockheightandhash response",
                 );
 
                 last_chain_tip_hash = block.hash;
+                self.non_finalized_state =
+                    NonFinalizedState::new(&self.non_finalized_state.network);
                 self.update_channels(block);
             }
         }
     }
 
+    /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
     async fn try_catch_up_with_primary(&self) {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
@@ -199,6 +203,10 @@ impl TrustedChainSync {
         .await
     }
 
+    /// If the non-finalized state is empty, tries to catch up to the primary db instance for
+    /// an up-to-date view of finalized blocks.
+    ///
+    /// Returns true if the non-finalized state is empty and the target hash is in the finalized state.
     async fn is_finalized_tip_change(&self, target_tip_hash: block::Hash) -> bool {
         self.non_finalized_state.chain_count() == 0 && {
             let db = self.db.clone();
