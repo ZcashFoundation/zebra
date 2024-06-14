@@ -189,7 +189,7 @@ A specific set of _privileged_ RPC endpoints:
   via a firewall)
 
 Support for sending tx's via _non-privileged_ RPC endpoints, or via Stolon:
-  - sendTransaction: once you author a transcation you can gossip it via any
+  - sendTransaction: once you author a transaction you can gossip it via any
     Zcash node, not just a specific instance of zebrad
 
 ## Wallet functionality
