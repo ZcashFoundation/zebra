@@ -6,18 +6,24 @@
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use color_eyre::eyre::{eyre, Context, Result};
+use tower::BoxError;
 use tracing::*;
 
 use zebra_chain::{
     block::{Block, Height},
     parameters::{testnet::REGTEST_NU5_ACTIVATION_HEIGHT, Network, NetworkUpgrade},
     primitives::byte_array::increment_big_endian,
-    serialization::ZcashSerialize,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::{proposal::TimeSource, proposal_block_from_template, GetBlockTemplate},
-    types::submit_block,
+use zebra_rpc::{
+    constants::MISSING_BLOCK_ERROR_CODE,
+    methods::get_block_template_rpcs::{
+        get_block_template::{
+            proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+        },
+        types::{hex_data::HexData, submit_block},
+    },
 };
 use zebra_test::args;
 
@@ -90,6 +96,7 @@ pub trait MiningRpcMethods {
     async fn block_from_template(&self, nu5_activation_height: Height) -> Result<(Block, Height)>;
     async fn submit_block(&self, block: Block) -> Result<()>;
     async fn submit_block_from_template(&self) -> Result<(Block, Height)>;
+    async fn get_block(&self, height: u32) -> Result<Option<Arc<Block>>, BoxError>;
 }
 
 impl MiningRpcMethods for RpcRequestClient {
@@ -137,5 +144,25 @@ impl MiningRpcMethods for RpcRequestClient {
         self.submit_block(block.clone()).await?;
 
         Ok((block, height))
+    }
+
+    async fn get_block(&self, height: u32) -> Result<Option<Arc<Block>>, BoxError> {
+        match self
+            .json_result_from_call("getblock", format!(r#"["{}", 0]"#, height))
+            .await
+        {
+            Ok(HexData(raw_block)) => {
+                let block = raw_block.zcash_deserialize_into::<Block>()?;
+                Ok(Some(Arc::new(block)))
+            }
+            Err(err)
+                if err
+                    .downcast_ref::<jsonrpc_core::Error>()
+                    .is_some_and(|err| err.code == MISSING_BLOCK_ERROR_CODE) =>
+            {
+                Ok(None)
+            }
+            Err(err) => Err(err),
+        }
     }
 }

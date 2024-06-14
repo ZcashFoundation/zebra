@@ -3206,7 +3206,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
-    let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
+    let (read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
         zebra_rpc::sync::init_read_state_with_syncer(
             config.state,
             &config.network.network,
@@ -3244,6 +3244,36 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         );
     }
 
+    for expected_block in blocks.clone() {
+        let height = expected_block.coinbase_height().unwrap();
+        let zebra_block = rpc_client
+            .get_block(height.0)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("Zebra test child should have the expected block");
+
+        assert_eq!(
+            zebra_block,
+            Arc::new(expected_block),
+            "Zebra should have the same block"
+        );
+
+        let ReadResponse::Block(read_state_block) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("unexpected read response to a block request")
+        };
+
+        assert_eq!(
+            zebra_block,
+            read_state_block.expect("read state should have the block"),
+            "read state should have the same block"
+        );
+    }
+
     tracing::info!("getting next block template");
     let (block_11, _) = rpc_client.block_from_template(Height(100)).await?;
     let next_blocks: Vec<_> = blocks
@@ -3256,7 +3286,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let genesis_block = regtest_genesis_block();
     let (state2, read_state2, latest_chain_tip2, _chain_tip_change2) =
         zebra_state::populated_state(
-            std::iter::once(genesis_block).chain(blocks.into_iter().map(Arc::new)),
+            std::iter::once(genesis_block).chain(blocks.iter().cloned().map(Arc::new)),
             &network,
         )
         .await;
@@ -3297,7 +3327,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             unreachable!("wrong response variant");
         };
 
-        rpc_client.submit_block(block).await?;
+        rpc_client.submit_block(block.clone()).await?;
+        blocks.push(block);
         let GetBlockHash(best_block_hash) = rpc_client
             .json_result_from_call("getbestblockhash", "[]")
             .await
@@ -3325,8 +3356,37 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         "tip action hashes and heights should match"
     );
 
+    for expected_block in blocks {
+        let height = expected_block.coinbase_height().unwrap();
+        let zebra_block = rpc_client
+            .get_block(height.0)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("Zebra test child should have the expected block");
+
+        assert_eq!(
+            zebra_block,
+            Arc::new(expected_block),
+            "Zebra should have the same block"
+        );
+
+        let ReadResponse::Block(read_state_block) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("unexpected read response to a block request")
+        };
+
+        assert_eq!(
+            zebra_block,
+            read_state_block.expect("read state should have the block"),
+            "read state should have the same block"
+        );
+    }
+
     // TODO:
-    // - Check that `getblock` RPC returns the same block as the read state for every height
     // - Submit more blocks with an older block template (and a different nonce so the hash is different) to trigger a chain reorg
     // - Check that `ChainTipChange` isn't being updated until the best chain changes
     // - Check that the first `ChainTipChange` `TipAction` is a `TipAction::Reset`
