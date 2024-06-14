@@ -77,7 +77,7 @@ fn u8_deser_throws_when_input_too_large() {
 /// Confirm that every u8 takes exactly 1 byte when serialized.
 /// This verifies that our calculated `MAX_U8_ALLOCATION` is indeed an upper bound.
 fn u8_size_is_correct() {
-    for byte in std::u8::MIN..=std::u8::MAX {
+    for byte in u8::MIN..=u8::MAX {
         let serialized = byte
             .zcash_serialize_to_vec()
             .expect("Serialization to vec must succeed");
