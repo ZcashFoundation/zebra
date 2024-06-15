@@ -61,7 +61,7 @@ tracing-futures = "0.2.5"
 sapling = { package = "sapling-crypto", version = "0.1" }
 orchard = "0.7.0"
 
-zcash_proofs = { version = "0.14.0", features = ["multicore" ] }
+zcash_proofs = { version = "0.15.0", features = ["multicore" ] }
 wagyu-zcash-parameters = "0.2.0"
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.13" }

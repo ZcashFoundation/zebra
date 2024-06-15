@@ -4,6 +4,7 @@
 use std::{io, ops::Deref};
 
 use zcash_primitives::transaction as zp_tx;
+use zcash_protocol::value::BalanceError;
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -207,7 +208,7 @@ impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
 
 /// Convert a Zebra non-negative Amount into a librustzcash one.
 impl TryFrom<Amount<NonNegative>> for zp_tx::components::amount::NonNegativeAmount {
-    type Error = ();
+    type Error = BalanceError;
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
         zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64(amount.into())

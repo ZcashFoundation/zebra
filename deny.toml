@@ -85,7 +85,6 @@ skip-tree = [
 
     # wait for zcash_client_backend
     { name = "orchard", version = "=0.7.0" },
-    { name = "zcash_primitives", version = "=0.14.0" },
 
     # wait for hdwallet to upgrade
     { name = "ring", version = "=0.16.20" },

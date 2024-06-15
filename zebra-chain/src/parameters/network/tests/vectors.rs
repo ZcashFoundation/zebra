@@ -4,6 +4,7 @@ use zcash_primitives::{
     consensus::{self as zp_consensus, Parameters},
     constants as zp_constants,
 };
+use zcash_protocol::consensus::NetworkConstants as _;
 
 use crate::{
     block::Height,

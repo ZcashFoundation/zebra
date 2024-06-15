@@ -26,7 +26,7 @@ tokio-stream = "0.1.15"
 tower = { version = "0.4.13", features = ["util", "buffer"] }
 color-eyre = "0.6.3"
 
-zcash_primitives = { version = "0.14.0" }
+zcash_primitives = { version = "0.15.0" }
 
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.37", features = ["shielded-scan"] }
 zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.37" }
