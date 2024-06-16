@@ -637,6 +637,28 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "getrawmempool" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&Vec::<String>::default())?,
+                },
+            );
+            props
+        }
+        "getdifficulty" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&f64::default())?,
+                },
+            );
+            props
+        }
 
         _ => {
             props.insert(
