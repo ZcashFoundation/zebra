@@ -3,7 +3,7 @@
 use zebra_chain::parameters::Network;
 
 /// Response to a `getmininginfo` RPC request.
-#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Response {
     /// The estimated network solution rate in Sol/s.
     networksolps: u64,
@@ -26,17 +26,6 @@ impl Response {
             networkhashps: networksolps,
             chain: network.bip70_network_name(),
             testnet: network.is_a_test_network(),
-        }
-    }
-}
-
-impl Default for Response {
-    fn default() -> Self {
-        Self {
-            networksolps: u64::default(),
-            networkhashps: u64::default(),
-            chain: String::default(),
-            testnet: bool::default(),
         }
     }
 }
