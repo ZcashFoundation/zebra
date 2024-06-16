@@ -611,6 +611,32 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "validateaddress" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(
+                        &get_block_template_rpcs::types::validate_address::Response::default(),
+                    )?,
+                },
+            );
+            props
+        }
+        "z_validateaddress" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(
+                        &get_block_template_rpcs::types::z_validate_address::Response::default(),
+                    )?,
+                },
+            );
+            props
+        }
 
         _ => {
             props.insert(
