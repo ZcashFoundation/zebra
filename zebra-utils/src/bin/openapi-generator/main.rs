@@ -528,6 +528,33 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "getpeerinfo" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(
+                        &get_block_template_rpcs::types::peer_info::PeerInfo::default(),
+                    )?,
+                },
+            );
+            props
+        }
+        "getblocksubsidy" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(
+                        &get_block_template_rpcs::types::subsidy::BlockSubsidy::default(),
+                    )?,
+                },
+            );
+            props
+        }
+
         _ => {
             props.insert(
                 "result".to_string(),

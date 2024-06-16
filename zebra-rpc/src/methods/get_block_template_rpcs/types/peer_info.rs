@@ -16,3 +16,11 @@ impl From<MetaAddr> for PeerInfo {
         }
     }
 }
+
+impl Default for PeerInfo {
+    fn default() -> Self {
+        Self {
+            addr: PeerSocketAddr::unspecified(),
+        }
+    }
+}
