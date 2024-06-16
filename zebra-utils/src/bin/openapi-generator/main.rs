@@ -554,6 +554,19 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "getmininginfo" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(
+                        &get_block_template_rpcs::types::get_mining_info::Response::default(),
+                    )?,
+                },
+            );
+            props
+        }
 
         _ => {
             props.insert(
