@@ -681,6 +681,28 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "getnetworksolps" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&u64::default())?,
+                },
+            );
+            props
+        }
+        "getnetworkhashps" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&u64::default())?,
+                },
+            );
+            props
+        }
 
         _ => {
             props.insert(
