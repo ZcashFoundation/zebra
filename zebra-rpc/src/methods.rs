@@ -1417,18 +1417,10 @@ impl AddressStrings {
 }
 
 /// The transparent balance of a set of addresses.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
     /// The total transparent balance.
     balance: u64,
-}
-
-impl Default for AddressBalance {
-    fn default() -> Self {
-        Self {
-            balance: u64::default(),
-        }
-    }
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
