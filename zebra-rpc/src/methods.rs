@@ -1492,6 +1492,12 @@ struct TipConsensusBranch {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 
+impl Default for SentTransactionHash {
+    fn default() -> Self {
+        Self(transaction::Hash::from([0; 32]))
+    }
+}
+
 /// Response to a `getblock` RPC request.
 ///
 /// See the notes for the [`Rpc::get_block`] method.
@@ -1575,6 +1581,16 @@ pub enum GetRawTransaction {
         /// or 0 if the transaction is in the mempool.
         confirmations: u32,
     },
+}
+
+impl Default for GetRawTransaction {
+    fn default() -> Self {
+        Self::Object {
+            hex: SerializedTransaction::from([0u8; 20].to_vec()),
+            height: i32::default(),
+            confirmations: u32::default(),
+        }
+    }
 }
 
 /// Response to a `getaddressutxos` RPC request.

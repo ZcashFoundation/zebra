@@ -659,6 +659,28 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "sendrawtransaction" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&SentTransactionHash::default())?,
+                },
+            );
+            props
+        }
+        "getrawtransaction" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&GetRawTransaction::default())?,
+                },
+            );
+            props
+        }
 
         _ => {
             props.insert(
