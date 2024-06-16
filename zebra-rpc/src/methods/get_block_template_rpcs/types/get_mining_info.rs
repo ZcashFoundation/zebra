@@ -29,3 +29,14 @@ impl Response {
         }
     }
 }
+
+impl Default for Response {
+    fn default() -> Self {
+        Self {
+            networksolps: u64::default(),
+            networkhashps: u64::default(),
+            chain: String::default(),
+            testnet: bool::default(),
+        }
+    }
+}
