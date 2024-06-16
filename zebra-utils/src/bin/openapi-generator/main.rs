@@ -578,6 +578,39 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "getaddressbalance" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&AddressBalance::default())?,
+                },
+            );
+            props
+        }
+        "getaddressutxos" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&GetAddressUtxos::default())?,
+                },
+            );
+            props
+        }
+        "getaddresstxids" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(&Vec::<String>::default())?,
+                },
+            );
+            props
+        }
 
         _ => {
             props.insert(

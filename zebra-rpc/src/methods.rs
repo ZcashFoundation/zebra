@@ -1423,6 +1423,14 @@ pub struct AddressBalance {
     balance: u64,
 }
 
+impl Default for AddressBalance {
+    fn default() -> Self {
+        Self {
+            balance: u64::default(),
+        }
+    }
+}
+
 /// A hex-encoded [`ConsensusBranchId`] string.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
@@ -1596,6 +1604,22 @@ pub struct GetAddressUtxos {
     ///
     /// We put this field last, to match the zcashd order.
     height: Height,
+}
+
+impl Default for GetAddressUtxos {
+    fn default() -> Self {
+        Self {
+            address: transparent::Address::from_pub_key_hash(
+                zebra_chain::parameters::NetworkKind::default(),
+                [0u8; 20],
+            ),
+            txid: transaction::Hash::from([0; 32]),
+            output_index: OutputIndex::from_u64(0),
+            script: transparent::Script::new(&[0u8; 10]),
+            satoshis: u64::default(),
+            height: Height(0),
+        }
+    }
 }
 
 /// A struct to use as parameter of the `getaddresstxids`.
