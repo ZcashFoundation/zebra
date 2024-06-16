@@ -11,44 +11,6 @@ info:
 servers:
   - url: http://localhost:8232
 paths:
-  /getblocktemplate:
-    post:
-      tags:
-      - mining
-      description: |-
-        Returns a block template for mining new Zcash blocks.
-
-        **Request body `params` arguments:**
-
-        - `jsonrequestobject` - A JSON object containing arguments.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: getblocktemplate
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{}'
   /sendrawtransaction:
     post:
       tags:
@@ -66,6 +28,9 @@ paths:
             schema:
               type: object
               properties:
+                method:
+                  type: string
+                  default: sendrawtransaction
                 id:
                   type: number
                   default: '123'
@@ -73,20 +38,7 @@ paths:
                   type: array
                   items: {}
                   default: '["signedhex"]'
-                method:
-                  type: string
-                  default: sendrawtransaction
       responses:
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    default: Invalid parameters
         '200':
           description: OK
           content:
@@ -97,6 +49,16 @@ paths:
                   result:
                     type: object
                     default: '{}'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    default: Invalid parameters
   /getpeerinfo:
     post:
       tags:
@@ -109,12 +71,12 @@ paths:
             schema:
               type: object
               properties:
-                method:
-                  type: string
-                  default: getpeerinfo
                 id:
                   type: number
                   default: '123'
+                method:
+                  type: string
+                  default: getpeerinfo
                 params:
                   type: array
                   items: {}
@@ -130,39 +92,6 @@ paths:
                   result:
                     type: object
                     default: '{"addr":"0.0.0.0:0"}'
-  /getmininginfo:
-    post:
-      tags:
-      - mining
-      description: Returns mining-related information.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                method:
-                  type: string
-                  default: getmininginfo
-                id:
-                  type: number
-                  default: '123'
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{"networksolps":0,"networkhashps":0,"chain":"","testnet":false}'
   /validateaddress:
     post:
       tags:
@@ -180,6 +109,9 @@ paths:
             schema:
               type: object
               properties:
+                method:
+                  type: string
+                  default: validateaddress
                 id:
                   type: number
                   default: '123'
@@ -187,9 +119,6 @@ paths:
                   type: array
                   items: {}
                   default: '[]'
-                method:
-                  type: string
-                  default: validateaddress
       responses:
         '200':
           description: OK
@@ -200,7 +129,7 @@ paths:
                 properties:
                   result:
                     type: object
-                    default: '{}'
+                    default: '{"isvalid":false}'
   /getblocksubsidy:
     post:
       tags:
@@ -218,9 +147,6 @@ paths:
             schema:
               type: object
               properties:
-                id:
-                  type: number
-                  default: '123'
                 method:
                   type: string
                   default: getblocksubsidy
@@ -228,6 +154,9 @@ paths:
                   type: array
                   items: {}
                   default: '[1]'
+                id:
+                  type: number
+                  default: '123'
       responses:
         '200':
           description: OK
@@ -249,11 +178,188 @@ paths:
                   error:
                     type: string
                     default: Invalid parameters
-  /getblockchaininfo:
+  /getaddressutxos:
+    post:
+      tags:
+      - address
+      description: |-
+        Returns all unspent outputs for a list of addresses.
+
+        **Request body `params` arguments:**
+
+        - `addresses` - The addresses to get outputs from.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  default: getaddressutxos
+                id:
+                  type: number
+                  default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[{"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"]}]'
+      responses:
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    default: Invalid parameters
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{"address":"t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs","txid":"0000000000000000000000000000000000000000000000000000000000000000","outputIndex":0,"script":"00000000000000000000","satoshis":0,"height":0}'
+  /getrawmempool:
     post:
       tags:
       - blockchain
-      description: Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
+      description: Returns all transaction ids in the memory pool, as a JSON array.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  default: getrawmempool
+                id:
+                  type: number
+                  default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{}'
+  /getblockhash:
+    post:
+      tags:
+      - blockchain
+      description: |-
+        Returns the hash of the block of a given height iff the index argument correspond
+
+        **Request body `params` arguments:**
+
+        - `index` - The block index.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: number
+                  default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[1]'
+                method:
+                  type: string
+                  default: getblockhash
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '"0000000000000000000000000000000000000000000000000000000000000000"'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    default: Invalid parameters
+  /getaddressbalance:
+    post:
+      tags:
+      - address
+      description: |-
+        Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
+
+        **Request body `params` arguments:**
+
+        - `address_strings` - A JSON map with a single entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  default: getaddressbalance
+                id:
+                  type: number
+                  default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[{"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"]}]'
+      responses:
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    default: Invalid parameters
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{"balance":0}'
+  /getinfo:
+    post:
+      tags:
+      - control
+      description: Returns software information from the RPC server, as a [`GetInfo`] JSON struct.
       requestBody:
         required: true
         content:
@@ -267,10 +373,81 @@ paths:
                   default: '[]'
                 method:
                   type: string
+                  default: getinfo
+                id:
+                  type: number
+                  default: '123'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{"build":"some build version","subversion":"some subversion"}'
+  /submitblock:
+    post:
+      tags:
+      - mining
+      description: |-
+        Submits block to the node to be validated and committed.
+
+        **Request body `params` arguments:**
+
+        - `jsonparametersobject` - - currently ignored
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+                id:
+                  type: number
+                  default: '123'
+                method:
+                  type: string
+                  default: submitblock
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{}'
+  /getblockchaininfo:
+    post:
+      tags:
+      - blockchain
+      description: Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
                   default: getblockchaininfo
                 id:
                   type: number
                   default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
       responses:
         '200':
           description: OK
@@ -301,9 +478,47 @@ paths:
             schema:
               type: object
               properties:
+                id:
+                  type: number
+                  default: '123'
                 method:
                   type: string
                   default: z_getsubtreesbyindex
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{}'
+  /getblocktemplate:
+    post:
+      tags:
+      - mining
+      description: |-
+        Returns a block template for mining new Zcash blocks.
+
+        **Request body `params` arguments:**
+
+        - `jsonrequestobject` - A JSON object containing arguments.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  default: getblocktemplate
                 params:
                   type: array
                   items: {}
@@ -322,11 +537,11 @@ paths:
                   result:
                     type: object
                     default: '{}'
-  /getrawmempool:
+  /getblockcount:
     post:
       tags:
       - blockchain
-      description: Returns all transaction ids in the memory pool, as a JSON array.
+      description: Returns the height of the most recent block in the best valid block chain (equivalently,
       requestBody:
         required: true
         content:
@@ -339,7 +554,7 @@ paths:
                   default: '123'
                 method:
                   type: string
-                  default: getrawmempool
+                  default: getblockcount
                 params:
                   type: array
                   items: {}
@@ -354,7 +569,323 @@ paths:
                 properties:
                   result:
                     type: object
+                    default: '0'
+  /getrawtransaction:
+    post:
+      tags:
+      - transaction
+      description: |-
+        Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
+
+        **Request body `params` arguments:**
+
+        - `txid` - The transaction ID of the transaction to be returned.
+        - `verbose` - If 0, return a string of hex-encoded data, otherwise return a JSON object.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: number
+                  default: '123'
+                method:
+                  type: string
+                  default: getrawtransaction
+                params:
+                  type: array
+                  items: {}
+                  default: '["mytxid", 1]'
+      responses:
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    default: Invalid parameters
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
                     default: '{}'
+  /getblock:
+    post:
+      tags:
+      - blockchain
+      description: |-
+        Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
+
+        **Request body `params` arguments:**
+
+        - `hash_or_height` - The hash or height for the block to be returned.
+        - `verbosity` - 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                method:
+                  type: string
+                  default: getblock
+                params:
+                  type: array
+                  items: {}
+                  default: '["1", 1]'
+                id:
+                  type: number
+                  default: '123'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{"hash":"0000000000000000000000000000000000000000000000000000000000000000","confirmations":0,"tx":[],"trees":{}}'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    default: Invalid parameters
+  /getmininginfo:
+    post:
+      tags:
+      - mining
+      description: Returns mining-related information.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+                method:
+                  type: string
+                  default: getmininginfo
+                id:
+                  type: number
+                  default: '123'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{"networksolps":0,"networkhashps":0,"chain":"","testnet":false}'
+  /getdifficulty:
+    post:
+      tags:
+      - blockchain
+      description: Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: number
+                  default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+                method:
+                  type: string
+                  default: getdifficulty
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{}'
+  /getaddresstxids:
+    post:
+      tags:
+      - address
+      description: |-
+        Returns the transaction ids made by the provided transparent addresses.
+
+        **Request body `params` arguments:**
+
+        - `request` - A struct with the following named fields:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: number
+                  default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[{"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"], "start": 1000, "end": 2000}]'
+                method:
+                  type: string
+                  default: getaddresstxids
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '[]'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    default: Invalid parameters
+  /getnetworksolps:
+    post:
+      tags:
+      - mining
+      description: Returns the estimated network solutions per second based on the last `num_blocks` before
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+                method:
+                  type: string
+                  default: getnetworksolps
+                id:
+                  type: number
+                  default: '123'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{}'
+  /getbestblockhash:
+    post:
+      tags:
+      - blockchain
+      description: Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+                method:
+                  type: string
+                  default: getbestblockhash
+                id:
+                  type: number
+                  default: '123'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '"0000000000000000000000000000000000000000000000000000000000000000"'
+  /z_validateaddress:
+    post:
+      tags:
+      - util
+      description: |-
+        Checks if a zcash address is valid.
+
+        **Request body `params` arguments:**
+
+        - `address` - The zcash address to validate.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: number
+                  default: '123'
+                params:
+                  type: array
+                  items: {}
+                  default: '[]'
+                method:
+                  type: string
+                  default: z_validateaddress
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  result:
+                    type: object
+                    default: '{"isvalid":false}'
   /z_gettreestate:
     post:
       tags:
@@ -403,16 +934,11 @@ paths:
                   error:
                     type: string
                     default: Invalid parameters
-  /getaddresstxids:
+  /getnetworkhashps:
     post:
       tags:
-      - address
-      description: |-
-        Returns the transaction ids made by the provided transparent addresses.
-
-        **Request body `params` arguments:**
-
-        - `request` - A struct with the following named fields:
+      - mining
+      description: Returns the estimated network solutions per second based on the last `num_blocks` before
       requestBody:
         required: true
         content:
@@ -423,13 +949,13 @@ paths:
                 params:
                   type: array
                   items: {}
-                  default: '[{"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"], "start": 1000, "end": 2000}]'
-                method:
-                  type: string
-                  default: getaddresstxids
+                  default: '[]'
                 id:
                   type: number
                   default: '123'
+                method:
+                  type: string
+                  default: getnetworkhashps
       responses:
         '200':
           description: OK
@@ -440,17 +966,7 @@ paths:
                 properties:
                   result:
                     type: object
-                    default: '[]'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    default: Invalid parameters
+                    default: '{}'
   /z_listunifiedreceivers:
     post:
       tags:
@@ -489,519 +1005,3 @@ paths:
                   result:
                     type: object
                     default: '{}'
-  /getrawtransaction:
-    post:
-      tags:
-      - transaction
-      description: |-
-        Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
-
-        **Request body `params` arguments:**
-
-        - `txid` - The transaction ID of the transaction to be returned.
-        - `verbose` - If 0, return a string of hex-encoded data, otherwise return a JSON object.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                params:
-                  type: array
-                  items: {}
-                  default: '["mytxid", 1]'
-                method:
-                  type: string
-                  default: getrawtransaction
-                id:
-                  type: number
-                  default: '123'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{}'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    default: Invalid parameters
-  /getinfo:
-    post:
-      tags:
-      - control
-      description: Returns software information from the RPC server, as a [`GetInfo`] JSON struct.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: getinfo
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{"build":"some build version","subversion":"some subversion"}'
-  /getaddressbalance:
-    post:
-      tags:
-      - address
-      description: |-
-        Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
-
-        **Request body `params` arguments:**
-
-        - `address_strings` - A JSON map with a single entry
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: getaddressbalance
-                params:
-                  type: array
-                  items: {}
-                  default: '[{"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"]}]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{"balance":0}'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    default: Invalid parameters
-  /getnetworksolps:
-    post:
-      tags:
-      - mining
-      description: Returns the estimated network solutions per second based on the last `num_blocks` before
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: getnetworksolps
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{}'
-  /getdifficulty:
-    post:
-      tags:
-      - blockchain
-      description: Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: getdifficulty
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{}'
-  /getblockhash:
-    post:
-      tags:
-      - blockchain
-      description: |-
-        Returns the hash of the block of a given height iff the index argument correspond
-
-        **Request body `params` arguments:**
-
-        - `index` - The block index.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: getblockhash
-                params:
-                  type: array
-                  items: {}
-                  default: '[1]'
-      responses:
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    default: Invalid parameters
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '"0000000000000000000000000000000000000000000000000000000000000000"'
-  /getnetworkhashps:
-    post:
-      tags:
-      - mining
-      description: Returns the estimated network solutions per second based on the last `num_blocks` before
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                method:
-                  type: string
-                  default: getnetworkhashps
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-                id:
-                  type: number
-                  default: '123'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{}'
-  /z_validateaddress:
-    post:
-      tags:
-      - util
-      description: |-
-        Checks if a zcash address is valid.
-
-        **Request body `params` arguments:**
-
-        - `address` - The zcash address to validate.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-                method:
-                  type: string
-                  default: z_validateaddress
-                id:
-                  type: number
-                  default: '123'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{}'
-  /getaddressutxos:
-    post:
-      tags:
-      - address
-      description: |-
-        Returns all unspent outputs for a list of addresses.
-
-        **Request body `params` arguments:**
-
-        - `addresses` - The addresses to get outputs from.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: getaddressutxos
-                params:
-                  type: array
-                  items: {}
-                  default: '[{"addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"]}]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{"address":"t1Hsc1LR8yKnbbe3twRp88p6vFfC5t7DLbs","txid":"0000000000000000000000000000000000000000000000000000000000000000","outputIndex":0,"script":"00000000000000000000","satoshis":0,"height":0}'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    default: Invalid parameters
-  /getbestblockhash:
-    post:
-      tags:
-      - blockchain
-      description: Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                method:
-                  type: string
-                  default: getbestblockhash
-                id:
-                  type: number
-                  default: '123'
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '"0000000000000000000000000000000000000000000000000000000000000000"'
-  /submitblock:
-    post:
-      tags:
-      - mining
-      description: |-
-        Submits block to the node to be validated and committed.
-
-        **Request body `params` arguments:**
-
-        - `jsonparametersobject` - - currently ignored
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                id:
-                  type: number
-                  default: '123'
-                method:
-                  type: string
-                  default: submitblock
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{}'
-  /getblockcount:
-    post:
-      tags:
-      - blockchain
-      description: Returns the height of the most recent block in the best valid block chain (equivalently,
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                method:
-                  type: string
-                  default: getblockcount
-                id:
-                  type: number
-                  default: '123'
-                params:
-                  type: array
-                  items: {}
-                  default: '[]'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '0'
-  /getblock:
-    post:
-      tags:
-      - blockchain
-      description: |-
-        Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
-
-        **Request body `params` arguments:**
-
-        - `hash_or_height` - The hash or height for the block to be returned.
-        - `verbosity` - 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                params:
-                  type: array
-                  items: {}
-                  default: '["1", 1]'
-                method:
-                  type: string
-                  default: getblock
-                id:
-                  type: number
-                  default: '123'
-      responses:
-        '200':
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  result:
-                    type: object
-                    default: '{"hash":"0000000000000000000000000000000000000000000000000000000000000000","confirmations":0,"tx":[],"trees":{}}'
-        '400':
-          description: Bad request
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  error:
-                    type: string
-                    default: Invalid parameters
