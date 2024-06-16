@@ -703,6 +703,32 @@ fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>
             );
             props
         }
+        "submitblock" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(
+                        &get_block_template_rpcs::types::submit_block::Response::default(),
+                    )?,
+                },
+            );
+            props
+        }
+        "z_listunifiedreceivers" => {
+            props.insert(
+                "result".to_string(),
+                Property {
+                    type_,
+                    items,
+                    default: serde_json::to_string(
+                        &get_block_template_rpcs::types::unified_address::Response::default(),
+                    )?,
+                },
+            );
+            props
+        }
 
         _ => {
             props.insert(
