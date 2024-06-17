@@ -15,7 +15,7 @@ keywords = ["zebra", "zcash"]
 categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
 [dependencies]
-zcash_script = "0.1.15"
+zcash_script = "0.2.0"
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37" }
 
