@@ -429,8 +429,8 @@ where
     }
 }
 
-#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
 #[allow(missing_docs)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 /// Errors that can be returned when validating `Amount`s
 pub enum Error {
     /// input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}
@@ -460,6 +460,34 @@ pub enum Error {
         partial_sum: i64,
         remaining_items: usize,
     },
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            Error::Constraint { value, range } => format!(
+                "input {value} is outside of valid range for zatoshi Amount, valid_range={range:?}"
+            ),
+            Error::Convert { value, .. } => {
+                format!("{value} could not be converted to an i64 Amount")
+            }
+            Error::MultiplicationOverflow {
+                amount,
+                multiplier,
+                overflowing_result,
+            } => format!(
+                "overflow when calculating {amount}i64 * {multiplier}u64 = {overflowing_result}i128"
+            ),
+            Error::DivideByZero { amount } => format!("cannot divide amount {amount} by zero"),
+            Error::SumOverflow {
+                partial_sum,
+                remaining_items,
+            } => format!(
+                "overflow when summing i64 amounts; \
+                          partial sum: {partial_sum}, number of remaining items: {remaining_items}"
+            ),
+        })
+    }
 }
 
 impl Error {
