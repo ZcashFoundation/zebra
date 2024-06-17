@@ -6346,6 +6346,7 @@ dependencies = [
  "itertools 0.13.0",
  "jsonrpc",
  "quote",
+ "rand 0.8.5",
  "regex",
  "reqwest",
  "serde",

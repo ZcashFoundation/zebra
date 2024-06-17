@@ -125,6 +125,7 @@ zcash_client_backend = { version = "0.12.1", optional = true }
 zcash_protocol = { version = "0.1.1" }
 
 # For the openapi generator
+rand = "0.8.5"
 syn = { version = "2.0.66", features = ["full"], optional = true }
 quote = { version = "1.0.36", optional = true }
 serde_yaml = { version = "0.9.34+deprecated", optional = true }

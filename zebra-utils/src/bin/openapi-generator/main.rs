@@ -3,6 +3,7 @@
 use std::{collections::HashMap, error::Error, fs::File, io::Write};
 
 use quote::ToTokens;
+use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
 use syn::LitStr;
 
@@ -357,11 +358,16 @@ fn create_request_body(method_name: &str, parameters_example: &str) -> RequestBo
         default: method_name.to_string(),
     };
 
-    // Add a hardcoded request_id to the request body
+    // Add random string is used to identify the requests done by the client
+    let rand_string: String = thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10)
+        .map(char::from)
+        .collect();
     let request_id_prop = Property {
         type_: "number".to_string(),
         items: None,
-        default: "123".to_string(),
+        default: rand_string,
     };
 
     // Create the schema and add the first 2 properties
