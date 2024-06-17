@@ -18,11 +18,14 @@ use zebra_chain::{
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     constants::MISSING_BLOCK_ERROR_CODE,
-    methods::get_block_template_rpcs::{
-        get_block_template::{
-            proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+    methods::{
+        get_block_template_rpcs::{
+            get_block_template::{
+                proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+            },
+            types::submit_block,
         },
-        types::{hex_data::HexData, submit_block},
+        hex_data::HexData,
     },
 };
 use zebra_test::args;
