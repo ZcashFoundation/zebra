@@ -22,7 +22,6 @@ required-features = ["proptest-impl"]
 [[bin]] # Bin to run the Scanner tool
 name = "zebra-scanner"
 path = "src/bin/scanner/main.rs"
-required-features = ["shielded-scan"]
 
 [features]
 
