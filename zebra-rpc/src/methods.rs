@@ -1578,7 +1578,9 @@ pub enum GetRawTransaction {
 impl Default for GetRawTransaction {
     fn default() -> Self {
         Self::Object {
-            hex: SerializedTransaction::from([0u8; 20].to_vec()),
+            hex: SerializedTransaction::from(
+                [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
+            ),
             height: i32::default(),
             confirmations: u32::default(),
         }
