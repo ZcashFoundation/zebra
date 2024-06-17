@@ -107,7 +107,6 @@ chrono = { version = "0.4.38", default-features = false, features = ["clock", "s
 humantime = "2.1.0"
 
 # Error Handling & Formatting
-displaydoc = "0.2.4"
 static_assertions = "1.1.0"
 thiserror = "1.0.61"
 tracing = "0.1.39"

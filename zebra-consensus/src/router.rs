@@ -12,13 +12,13 @@
 //! Otherwise, verification of out-of-order and invalid blocks and transactions can hang
 //! indefinitely.
 
+use core::fmt;
 use std::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 
-use displaydoc::Display;
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::task::JoinHandle;
@@ -91,13 +91,26 @@ where
 /// An error while semantically verifying a block.
 //
 // One or both of these error variants are at least 140 bytes
-#[derive(Debug, Display, Error)]
+#[derive(Debug, Error)]
 #[allow(missing_docs)]
 pub enum RouterError {
     /// Block could not be checkpointed
     Checkpoint { source: Box<VerifyCheckpointError> },
     /// Block could not be full-verified
     Block { source: Box<VerifyBlockError> },
+}
+
+impl fmt::Display for RouterError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            RouterError::Checkpoint { source } => {
+                format!("block could not be checkpointed due to: {source}")
+            }
+            RouterError::Block { source } => {
+                format!("block could not be full-verified due to: {source}")
+            }
+        })
+    }
 }
 
 impl From<VerifyCheckpointError> for RouterError {

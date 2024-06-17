@@ -1252,17 +1252,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "displaydoc"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "487585f4d0c6655fe74905e2504d8ad6908e4db67f744eb140876906c2f3175d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.66",
-]
-
-[[package]]
 name = "document-features"
 version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6038,7 +6027,6 @@ dependencies = [
  "chrono",
  "color-eyre",
  "criterion",
- "displaydoc",
  "ed25519-zebra",
  "equihash",
  "futures",
@@ -6096,7 +6084,6 @@ dependencies = [
  "bls12_381",
  "chrono",
  "color-eyre",
- "displaydoc",
  "futures",
  "futures-util",
  "halo2_proofs",
@@ -6281,7 +6268,6 @@ dependencies = [
 name = "zebra-script"
 version = "1.0.0-beta.37"
 dependencies = [
- "displaydoc",
  "hex",
  "lazy_static",
  "thiserror",

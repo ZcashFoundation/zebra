@@ -3,6 +3,7 @@
 * [Running and Debugging](#running-and-debugging)
 * [Bug Reports](#bug-reports)
 * [Pull Requests](#pull-requests)
+* [Coverage Reports](#coverage-reports)
 
 ## Running and Debugging
 [running-and-debugging]: #running-and-debugging
