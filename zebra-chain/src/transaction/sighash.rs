@@ -62,20 +62,14 @@ impl<'a> SigHasher<'a> {
     ///
     /// # Details
     ///
-    /// The `input` argument indicates the transparent Input for which we are
-    /// producing a sighash, or None if it's a shielded input. It is comprised
-    /// of the index identifying the transparent::Input within the transaction
-    /// and the transparent::Output representing the UTXO being spent by that
-    /// input.
+    /// The `input_index` argument indicates the index of the transparent Input
+    /// for which we are producing a sighash, or None if it's a shielded input.
     ///
-    /// The `script_code` argument indicates the script code being validated
-    /// for transparent inputs, or None if it's a shielded input.
+    /// The `script_code` argument indicates the script code being validated for
+    /// transparent inputs, or None if it's a shielded input.
     ///
     /// # Panics
     ///
-    /// - if passed in any NetworkUpgrade from before NetworkUpgrade::Overwinter
-    /// - if called on a v1 or v2 transaction
-    /// - if the input index points to a transparent::Input::CoinBase
     /// - if the input index is out of bounds for self.inputs()
     pub fn sighash(
         &self,

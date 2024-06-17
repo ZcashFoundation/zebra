@@ -241,6 +241,14 @@ pub(crate) struct PrecomputedTxData<'a> {
 }
 
 impl<'a> PrecomputedTxData<'a> {
+    /// Compute data used for sighash or txid computation.
+    ///
+    /// # Inputs
+    ///
+    /// - `tx`: the relevant transaction
+    /// - `branch_id`: the branch ID of the transaction
+    /// - `all_previous_outputs` the transparent Output matching each
+    ///   transparent input in the transaction.
     pub(crate) fn new(
         tx: &'a Transaction,
         branch_id: ConsensusBranchId,
@@ -271,13 +279,13 @@ impl<'a> PrecomputedTxData<'a> {
 ///
 /// # Inputs
 ///
-/// - `transaction`: the transaction whose signature hash to compute.
+/// - `precomputed_tx_data`: precomputed data for the transaction whose
+///   signature hash is being computed.
 /// - `hash_type`: the type of hash (SIGHASH) being used.
-/// - `network_upgrade`: the network upgrade of the block containing the transaction.
-/// - `input`: information about the transparent input for which this signature
-///     hash is being computed, if any. A tuple with the matching output of the
-///     previous transaction, the input itself, and the index of the input in
-///     the transaction.
+/// - `input_index`: the index of the transparent Input for which we are
+///    producing a sighash, or None if it's a shielded input.
+/// - `script_code`: the script code being validated for transparent inputs, or
+///    None if it's a shielded input.
 pub(crate) fn sighash(
     precomputed_tx_data: &PrecomputedTxData,
     hash_type: HashType,
@@ -290,7 +298,9 @@ pub(crate) fn sighash(
         Some(input_index) => {
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
-            unlock_script = zcash_primitives::legacy::Script(script_code.unwrap());
+            unlock_script = zcash_primitives::legacy::Script(
+                script_code.expect("script_code must be Some when input_index is also Some"),
+            );
             zp_tx::sighash::SignableInput::Transparent {
                 hash_type: hash_type.bits() as _,
                 index: input_index,
