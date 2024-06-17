@@ -6,6 +6,7 @@ use crate::{
     transparent,
 };
 
+use core::fmt;
 use std::{borrow::Borrow, collections::HashMap};
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -385,7 +386,7 @@ impl ValueBalance<NonNegative> {
     }
 }
 
-#[derive(thiserror::Error, Debug, displaydoc::Display, Clone, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]
 /// Errors that can be returned when validating a [`ValueBalance`]
 pub enum ValueBalanceError {
     /// transparent amount error {0}
@@ -399,6 +400,17 @@ pub enum ValueBalanceError {
 
     /// orchard amount error {0}
     Orchard(amount::Error),
+}
+
+impl fmt::Display for ValueBalanceError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            Transparent(e) => format!("transparent amount err: {e}"),
+            Sprout(e) => format!("sprout amount err: {e}"),
+            Sapling(e) => format!("sapling amount err: {e}"),
+            Orchard(e) => format!("orchard amount err: {e}"),
+        })
+    }
 }
 
 impl<C> std::ops::Add for ValueBalance<C>
