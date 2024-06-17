@@ -35,7 +35,7 @@ pub struct GetSubtrees {
 impl Default for GetSubtrees {
     fn default() -> Self {
         Self {
-            pool: String::default(),
+            pool: "sapling | orchard".to_string(),
             start_index: NoteCommitmentSubtreeIndex(u16::default()),
             subtrees: vec![],
         }
