@@ -1,7 +1,7 @@
 //! Snapshot tests for Zebra Scan gRPC responses.
 //!
 //! Currently we snapshot the `get_info` and `get_results` responses for both mainnet and testnet with a
-//! mocked scanner database. Calls that return `Empty` responses are not snapshoted in this suite.
+//! mocked scanner database. Calls that return `Empty` responses are not snapshotted in this suite.
 //!
 //! To update these snapshots, run:
 //! ```sh

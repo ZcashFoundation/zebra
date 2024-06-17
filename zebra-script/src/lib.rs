@@ -5,12 +5,12 @@
 // We allow unsafe code, so we can call zcash_script
 #![allow(unsafe_code)]
 
+use core::fmt;
 use std::{
     ffi::{c_int, c_uint, c_void},
     sync::Arc,
 };
 
-use displaydoc::Display;
 use thiserror::Error;
 
 use zcash_script::{
@@ -26,28 +26,43 @@ use zebra_chain::{
     transparent,
 };
 
-#[derive(Copy, Clone, Debug, Display, Error, PartialEq, Eq)]
-#[non_exhaustive]
 /// An Error type representing the error codes returned from zcash_script.
+#[derive(Copy, Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
-    /// script failed to verify
+    /// script verification failed
     #[non_exhaustive]
     ScriptInvalid,
-    /// could not to deserialize tx
+    /// could not deserialize tx
     #[non_exhaustive]
     TxDeserialize,
-    /// input index out of bounds for transaction's inputs
+    /// input index out of bounds
     #[non_exhaustive]
     TxIndex,
-    /// tx is an invalid size for it's protocol
+    /// tx has an invalid size
     #[non_exhaustive]
     TxSizeMismatch,
     /// tx is a coinbase transaction and should not be verified
     #[non_exhaustive]
     TxCoinbase,
-    /// encountered unknown error kind from zcash_script: {0}
+    /// unknown error from zcash_script: {0}
     #[non_exhaustive]
     Unknown(zcash_script_error_t),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            Error::ScriptInvalid => "script verification failed".to_owned(),
+            Error::TxDeserialize => "could not deserialize tx".to_owned(),
+            Error::TxIndex => "input index out of bounds".to_owned(),
+            Error::TxSizeMismatch => "tx has an invalid size".to_owned(),
+            Error::TxCoinbase => {
+                "tx is a coinbase transaction and should not be verified".to_owned()
+            }
+            Error::Unknown(e) => format!("unknown error from zcash_script: {e}"),
+        })
+    }
 }
 
 impl From<zcash_script_error_t> for Error {

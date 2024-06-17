@@ -19,10 +19,6 @@ zcash_script = "0.2.0"
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37" }
 
 thiserror = "1.0.61"
-displaydoc = "0.2.4"
-tracing = "0.1.39"
-hex = "0.4.3"
-
 
 [dev-dependencies]
 hex = "0.4.3"

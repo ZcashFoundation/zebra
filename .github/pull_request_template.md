@@ -1,75 +1,54 @@
 ## Motivation
-<!--
-Thank you for your Pull Request.
-Does it close any issues?
--->
-_What are the most important goals of the ticket or PR?_
-
-
-### PR Author Checklist
-
-#### Check before marking the PR as ready for review:
-  - [ ] Will the PR name make sense to users?
-  - [ ] Does the PR have a priority label?
-  - [ ] Have you added or updated tests?
-  - [ ] Is the documentation up to date?
-
-##### For significant changes:
-  - [ ] Is there a summary in the CHANGELOG?
-  - [ ] Can these changes be split into multiple PRs?
-
-_If a checkbox isn't relevant to the PR, mark it as done._
-
-### Specifications
 
 <!--
-If this PR changes consensus rules, quote them, and link to the Zcash spec or ZIP:
-https://zips.z.cash/#nu5-zips
+- Describe the goals of the PR.
+- If it closes any issues, list them here.
 -->
 
-
-### Complex Code or Requirements
+### Specifications & References
 
 <!--
-Does this PR change concurrency, unsafe code, or complex consensus rules?
-If it does, label this PR with `extra-reviews`.
+- Provide references related to the PR.
 -->
-
 
 ## Solution
 
 <!--
-Summarize the changes in this PR.
+- Summarize or list the changes in the PR.
 -->
 
-
-### Testing
+### Tests
 
 <!--
-Which tests were changed or added in this PR? Were there manual tests?
+- Describe how the solution in this PR is tested:
+  - Describe any manual or automated tests.
+  - If the solution can't be tested, explain why.
 -->
 
-
-## Review
+### Follow-up Work
 
 <!--
-Is this PR blocking any other work?
-If you want specific reviewers for this PR, tag them here.
+- Describe or list what's missing from the solution.
+- List any follow-up issues.
+- If this PR blocks or is blocked by any other work, provide a description, or
+  list the related issues.
 -->
 
+### PR Author's Checklist
 
-### Reviewer Checklist
+<!-- If you are the author of the PR, check the boxes below before making the PR
+ready for review. -->
 
-Check before approving the PR:
-  - [ ] Does the PR scope match the ticket?
-  - [ ] Are there enough tests to make sure it works? Do the tests cover the PR motivation?
-  - [ ] Are all the PR blockers dealt with?
-        PR blockers can be dealt with in new tickets or PRs.
+- [ ] The PR name will make sense to users.
+- [ ] The PR provides a CHANGELOG summary.
+- [ ] The solution is tested.
+- [ ] The documentation is up to date.
+- [ ] The PR has a priority label.
 
-_And check the PR Author checklist is complete._
+### PR Reviewer's Checklist
 
-## Follow Up Work
+<!-- If you are a reviewer of the PR, check the boxes below before approving it. -->
 
-<!--
-Is there anything missing from the solution?
--->
+- [ ] The PR Author's checklist is complete.
+- [ ] The PR resolves the issue.
+
