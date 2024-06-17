@@ -169,6 +169,7 @@ use zebra_chain::{
 use zebra_consensus::ParameterCheckpoint;
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
+use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
 use zebra_test::{
@@ -185,7 +186,7 @@ use common::{
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
         os_assigned_rpc_port_config, persistent_test_config, random_known_rpc_port_config,
-        read_rpc_port_from_logs, testdir,
+        read_listen_addr_from_logs, testdir,
     },
     launch::{
         spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
@@ -1578,7 +1579,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     let mut child = dir.spawn_child(args!["start"])?;
 
     // Wait until port is open.
-    let rpc_address = read_rpc_port_from_logs(&mut child)?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     // Create an http client
     let client = RpcRequestClient::new(rpc_address);
 
@@ -1620,7 +1621,6 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 ///
 /// https://zcash.github.io/rpc/getblockchaininfo.html
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn rpc_endpoint_client_content_type() -> Result<()> {
     let _init_guard = zebra_test::init();
     if zebra_test::net::zebra_skip_network_tests() {
@@ -1635,12 +1635,10 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
     let mut child = dir.spawn_child(args!["start"])?;
 
     // Wait until port is open.
-    child.expect_stdout_line_matches(
-        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
-    )?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
     // Create an http client
-    let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
+    let client = RpcRequestClient::new(rpc_address);
 
     // Call to `getinfo` RPC method with a no content type.
     let res = client

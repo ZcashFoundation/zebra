@@ -16,7 +16,6 @@ use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
-use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_test::{command::TestChild, net::random_known_port};
 use zebrad::{
     components::{mempool, sync, tracing},
@@ -193,12 +192,13 @@ pub fn rpc_port_config(
 }
 
 /// Reads Zebra's RPC server listen address from a testchild's logs
-pub fn read_rpc_port_from_logs(child: &mut TestChild<TempDir>) -> Result<SocketAddr> {
-    let line = child.expect_stdout_line_matches(OPENED_RPC_ENDPOINT_MSG)?;
-    let rpc_addr_position = line
-        .find(OPENED_RPC_ENDPOINT_MSG)
-        .expect("already checked for match")
-        + OPENED_RPC_ENDPOINT_MSG.len();
+pub fn read_listen_addr_from_logs(
+    child: &mut TestChild<TempDir>,
+    expected_msg: &str,
+) -> Result<SocketAddr> {
+    let line = child.expect_stdout_line_matches(expected_msg)?;
+    let rpc_addr_position =
+        line.find(expected_msg).expect("already checked for match") + expected_msg.len();
     let rpc_addr = line[rpc_addr_position..].trim().to_string();
     Ok(rpc_addr.parse()?)
 }
