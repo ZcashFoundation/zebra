@@ -6053,6 +6053,7 @@ dependencies = [
  "sapling-crypto",
  "semver 1.0.23",
  "serde",
+ "serde_json",
  "structopt",
  "tokio",
  "tower",
