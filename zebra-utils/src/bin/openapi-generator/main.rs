@@ -472,6 +472,7 @@ fn default_property<T: serde::Serialize>(
 }
 
 // Get requests examples by using defaults from the Zebra RPC methods
+// TODO: Make this function more concise/readable (https://github.com/ZcashFoundation/zebra/pull/8616#discussion_r1643193949)
 fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>, Box<dyn Error>> {
     let type_ = "object";
     let items = None;
