@@ -2,9 +2,14 @@
 
 use std::{collections::BTreeMap, net::SocketAddr, pin::Pin};
 
+use color_eyre::eyre::eyre;
 use futures_util::future::TryFutureExt;
+use tokio::task::JoinHandle;
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tonic::{transport::Server, Request, Response, Status};
+use tonic::{
+    transport::{server::TcpIncoming, Server},
+    Request, Response, Status,
+};
 use tower::{timeout::error::Elapsed, ServiceExt};
 
 use zebra_chain::{block::Height, transaction};
@@ -436,11 +441,13 @@ impl From<ScanResult> for ScanResponse {
     }
 }
 
+type ServerTask = JoinHandle<Result<(), tonic::transport::Error>>;
+
 /// Initializes the zebra-scan gRPC server
 pub async fn init<ScanService>(
     listen_addr: SocketAddr,
     scan_service: ScanService,
-) -> Result<(), color_eyre::Report>
+) -> Result<(ServerTask, SocketAddr), color_eyre::Report>
 where
     ScanService: tower::Service<ScanServiceRequest, Response = ScanServiceResponse, Error = BoxError>
         + Clone
@@ -455,11 +462,20 @@ where
         .build()
         .unwrap();
 
-    Server::builder()
-        .add_service(reflection_service)
-        .add_service(ScannerServer::new(service))
-        .serve(listen_addr)
-        .await?;
+    let tcp_listener = tokio::net::TcpListener::bind(listen_addr).await?;
+    let listen_addr = tcp_listener.local_addr()?;
+    let incoming =
+        TcpIncoming::from_listener(tcp_listener, true, None).map_err(|err| eyre!(err))?;
 
-    Ok(())
+    let server_task: JoinHandle<Result<(), tonic::transport::Error>> = tokio::spawn(async move {
+        Server::builder()
+            .add_service(reflection_service)
+            .add_service(ScannerServer::new(service))
+            .serve_with_incoming(incoming)
+            .await?;
+
+        Ok(())
+    });
+
+    Ok((server_task, listen_addr))
 }
