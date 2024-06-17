@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   This means `zebrad` no longer contains users' viewing keys.
 - We're no longer using general conditional compilation attributes for `tor`,
   but only feature flags instead.
-- Fixed a bug with trailing characters in the openapi spec method descriptions((#8597)[https://github.com/ZcashFoundation/zebra/pull/8597])
+- Fixed a bug with trailing characters in the openapi spec method descriptions([#8597](https://github.com/ZcashFoundation/zebra/pull/8597))
+- Added default constructions for several RPC method responses([#8616](https://github.com/ZcashFoundation/zebra/pull/8616))
 
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
 
