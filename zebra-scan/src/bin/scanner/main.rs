@@ -5,11 +5,30 @@ use lazy_static::lazy_static;
 use structopt::StructOpt;
 use tracing::*;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{block::Height, parameters::Network};
 use zebra_state::{ChainTipSender, SaplingScanningKey};
 
 use core::net::SocketAddr;
 use std::path::PathBuf;
+
+/// A strucure with sapling key and birthday height.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+pub struct SaplingKey {
+    key: SaplingScanningKey,
+    #[serde(default = "min_height")]
+    birthday_height: Height,
+}
+
+fn min_height() -> Height {
+    Height(0)
+}
+
+impl std::str::FromStr for SaplingKey {
+    type Err = Box<dyn std::error::Error>;
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(serde_json::from_str(value)?)
+    }
+}
 
 #[tokio::main]
 /// Runs the zebra scanner binary with the given arguments.
@@ -30,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sapling_keys_to_scan = args
         .sapling_keys_to_scan
         .into_iter()
-        .map(|key| (key, 1))
+        .map(|key| (key.key, key.birthday_height.0))
         .collect();
     let listen_addr = args.listen_addr;
 
@@ -110,7 +129,7 @@ pub struct Args {
 
     /// The sapling keys to scan for.
     #[structopt(long)]
-    pub sapling_keys_to_scan: Vec<SaplingScanningKey>,
+    pub sapling_keys_to_scan: Vec<SaplingKey>,
 
     /// IP address and port for the gRPC server.
     #[structopt(long)]
