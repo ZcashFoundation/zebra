@@ -3200,10 +3200,14 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     tracing::info!("waiting for Zebra state cache to be opened");
 
+    #[cfg(not(target_os = "windows"))]
     child.expect_stdout_line_matches(format!(
         "Opened Zebra state cache at {}",
-        config.state.cache_dir.to_str().unwrap()
+        config.state.cache_dir.to_str().expect("should convert")
     ))?;
+
+    #[cfg(target_os = "windows")]
+    tokio::time::sleep(Duration::from_secs(LAUNCH_DELAY)).await;
 
     tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra

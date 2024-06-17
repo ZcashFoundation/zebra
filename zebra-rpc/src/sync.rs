@@ -296,7 +296,7 @@ impl TrustedChainSync {
 /// non-finalized best chain and the latest chain tip.
 ///
 /// Returns a [`ReadStateService`], [`LatestChainTip`], [`ChainTipChange`], and
-/// a [`JoinHandle`](tokio::task::JoinHandle) for the sync task.
+/// a [`JoinHandle`] for the sync task.
 pub fn init_read_state_with_syncer(
     config: zebra_state::Config,
     network: &Network,
