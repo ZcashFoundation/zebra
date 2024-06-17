@@ -182,10 +182,10 @@ mod common;
 
 use common::{
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
-    config::random_known_rpc_port_config,
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
-        persistent_test_config, testdir,
+        os_assigned_rpc_port_config, persistent_test_config, random_known_rpc_port_config,
+        read_rpc_port_from_logs, testdir,
     },
     launch::{
         spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
@@ -1549,7 +1549,6 @@ async fn tracing_endpoint() -> Result<()> {
 /// Test that the JSON-RPC endpoint responds to a request,
 /// when configured with a single thread.
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn rpc_endpoint_single_thread() -> Result<()> {
     rpc_endpoint(false).await
 }
@@ -1557,7 +1556,6 @@ async fn rpc_endpoint_single_thread() -> Result<()> {
 /// Test that the JSON-RPC endpoint responds to a request,
 /// when configured with multiple threads.
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn rpc_endpoint_parallel_threads() -> Result<()> {
     rpc_endpoint(true).await
 }
@@ -1574,18 +1572,15 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config(parallel_cpu_threads, &Mainnet)?;
+    let mut config = os_assigned_rpc_port_config(parallel_cpu_threads, &Mainnet)?;
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
 
     // Wait until port is open.
-    child.expect_stdout_line_matches(
-        format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
-    )?;
-
+    let rpc_address = read_rpc_port_from_logs(&mut child)?;
     // Create an http client
-    let client = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
+    let client = RpcRequestClient::new(rpc_address);
 
     // Make the call to the `getinfo` RPC method
     let res = client.call("getinfo", "[]".to_string()).await?;
