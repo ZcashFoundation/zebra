@@ -365,7 +365,7 @@ fn create_request_body(method_name: &str, parameters_example: &str) -> RequestBo
         .map(char::from)
         .collect();
     let request_id_prop = Property {
-        type_: "number".to_string(),
+        type_: "string".to_string(),
         items: None,
         default: rand_string,
     };
