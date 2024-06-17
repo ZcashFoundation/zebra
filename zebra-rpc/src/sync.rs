@@ -22,7 +22,7 @@ use zebra_chain::diagnostic::task::WaitForPanics;
 
 use crate::{
     constants::MISSING_BLOCK_ERROR_CODE,
-    methods::{get_block_template_rpcs::types::hex_data::HexData, GetBlockHeightAndHash},
+    methods::{hex_data::HexData, GetBlockHeightAndHash},
 };
 
 /// How long to wait between calls to `getbestblockhash` when it returns an error or the block hash
@@ -45,7 +45,10 @@ struct TrustedChainSync {
 }
 
 impl TrustedChainSync {
-    /// Creates a new [`TrustedChainSync`] and starts syncing blocks from the node's non-finalized best chain.
+    /// Creates a new [`TrustedChainSync`] with a [`ChainTipSender`], then spawns a task to sync blocks
+    /// from the node's non-finalized best chain.
+    ///
+    /// Returns the [`LatestChainTip`], [`ChainTipChange`], and a [`JoinHandle`] for the sync task.
     pub async fn spawn(
         rpc_address: SocketAddr,
         db: ZebraDb,
@@ -71,7 +74,11 @@ impl TrustedChainSync {
         (latest_chain_tip, chain_tip_change, sync_task)
     }
 
-    /// Starts syncing blocks from the node's non-finalized best chain.
+    /// Starts syncing blocks from the node's non-finalized best chain and checking for chain tip changes in the finalized state.
+    ///
+    /// When the best chain tip in Zebra is not available in the finalized state or the local non-finalized state,
+    /// gets any unavailable blocks in Zebra's best chain from the RPC server, adds them to the local non-finalized state, then
+    /// sends the updated chain tip block and non-finalized state to the [`ChainTipSender`] and non-finalized state sender.
     async fn sync(&mut self) {
         self.try_catch_up_with_primary().await;
         let mut last_chain_tip_hash =
@@ -103,6 +110,8 @@ impl TrustedChainSync {
                 continue;
             }
 
+            // If the new best chain tip is unavailable in the finalized state, start syncing non-finalized blocks from
+            // the non-finalized best chain tip height or finalized tip height.
             let (next_block_height, mut current_tip_hash) =
                 self.next_block_height_and_prev_hash().await;
 

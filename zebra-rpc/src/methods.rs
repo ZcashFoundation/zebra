@@ -38,6 +38,7 @@ use crate::{
 };
 
 mod errors;
+pub mod hex_data;
 
 use errors::{MapServerError, OkOrServerError};
 
