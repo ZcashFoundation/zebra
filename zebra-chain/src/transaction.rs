@@ -201,11 +201,11 @@ impl Transaction {
     ///
     /// # Details
     ///
-    /// The `input` argument indicates the transparent Input for which we are
-    /// producing a sighash, or None if it's a shielded input. It is comprised
-    /// of the index identifying the transparent::Input within the transaction
-    /// and the transparent::Output representing the UTXO being spent by that
-    /// input.
+    /// The `input` argument indicates the transparent input for which we are
+    /// producing a sighash, or `None` if it's a shielded input. The
+    /// `input` represents the index of the [`transparent::Input`]
+    /// within the transaction, and `all_previous_outputs` represents
+    /// the UTXOs being spent by the input.
     ///
     /// The `script_code` argument indicates the script code being validated
     /// for transparent inputs, or None if it's a shielded input.
