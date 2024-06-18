@@ -634,7 +634,6 @@ where
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
             None,
-            None,
         );
 
         Ok(Self::verify_transparent_inputs_and_outputs(
@@ -729,7 +728,6 @@ where
                 .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
-            None,
             None,
         );
 

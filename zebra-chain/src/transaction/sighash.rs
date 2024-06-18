@@ -62,11 +62,10 @@ impl<'a> SigHasher<'a> {
     ///
     /// # Details
     ///
-    /// The `input_index` argument indicates the index of the transparent Input
-    /// for which we are producing a sighash, or None if it's a shielded input.
-    ///
-    /// The `script_code` argument indicates the script code being validated for
-    /// transparent inputs, or None if it's a shielded input.
+    /// The `input_index_script_code` tuple indicates the index of the
+    /// transparent Input for which we are producing a sighash and the
+    /// respective script code being validated, or None if it's a shielded
+    /// input.
     ///
     /// # Panics
     ///
@@ -74,14 +73,12 @@ impl<'a> SigHasher<'a> {
     pub fn sighash(
         &self,
         hash_type: HashType,
-        input_index: Option<usize>,
-        script_code: Option<Vec<u8>>,
+        input_index_script_code: Option<(usize, Vec<u8>)>,
     ) -> SigHash {
         sighash(
             &self.precomputed_tx_data,
             hash_type,
-            input_index,
-            script_code,
+            input_index_script_code,
         )
     }
 }

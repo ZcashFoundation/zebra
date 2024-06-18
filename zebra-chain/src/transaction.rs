@@ -201,14 +201,13 @@ impl Transaction {
     ///
     /// # Details
     ///
-    /// The `input` argument indicates the transparent input for which we are
-    /// producing a sighash, or `None` if it's a shielded input. The
-    /// `input` represents the index of the [`transparent::Input`]
-    /// within the transaction, and `all_previous_outputs` represents
-    /// the UTXOs being spent by the input.
+    /// `all_previous_outputs` represents the UTXOs being spent by each input
+    /// in the transaction.
     ///
-    /// The `script_code` argument indicates the script code being validated
-    /// for transparent inputs, or None if it's a shielded input.
+    /// The `input_index_script_code` tuple indicates the index of the
+    /// transparent Input for which we are producing a sighash and the
+    /// respective script code being validated, or None if it's a shielded
+    /// input.
     ///
     /// # Panics
     ///
@@ -221,14 +220,10 @@ impl Transaction {
         branch_id: ConsensusBranchId,
         hash_type: sighash::HashType,
         all_previous_outputs: &[transparent::Output],
-        input: Option<usize>,
-        script_code: Option<Vec<u8>>,
+        input_index_script_code: Option<(usize, Vec<u8>)>,
     ) -> SigHash {
-        sighash::SigHasher::new(self, branch_id, all_previous_outputs).sighash(
-            hash_type,
-            input,
-            script_code,
-        )
+        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
+            .sighash(hash_type, input_index_script_code)
     }
 
     /// Return a [`SigHasher`] for this transaction.

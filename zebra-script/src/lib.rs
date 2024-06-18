@@ -119,8 +119,7 @@ extern "C" fn sighash(
             std::slice::from_raw_parts(script_code, script_code_len as usize).to_vec();
         let sighash = (*ctx).sighasher.sighash(
             HashType::from_bits_truncate(hash_type as u32),
-            Some((*ctx).input_index),
-            Some(script_code_vec),
+            Some(((*ctx).input_index, script_code_vec)),
         );
         // Sanity check; must always be true.
         assert_eq!(sighash_out_len, sighash.0.len() as c_uint);

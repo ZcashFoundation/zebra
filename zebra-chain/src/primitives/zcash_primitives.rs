@@ -282,25 +282,21 @@ impl<'a> PrecomputedTxData<'a> {
 /// - `precomputed_tx_data`: precomputed data for the transaction whose
 ///   signature hash is being computed.
 /// - `hash_type`: the type of hash (SIGHASH) being used.
-/// - `input_index`: the index of the transparent Input for which we are
-///    producing a sighash, or None if it's a shielded input.
-/// - `script_code`: the script code being validated for transparent inputs, or
-///    None if it's a shielded input.
+/// - `input_index_script_code`: a tuple with the index of the transparent Input
+///    for which we are producing a sighash and the respective script code being
+///    validated, or None if it's a shielded input.
 pub(crate) fn sighash(
     precomputed_tx_data: &PrecomputedTxData,
     hash_type: HashType,
-    input_index: Option<usize>,
-    script_code: Option<Vec<u8>>,
+    input_index_script_code: Option<(usize, Vec<u8>)>,
 ) -> SigHash {
     let lock_script: zcash_primitives::legacy::Script;
     let unlock_script: zcash_primitives::legacy::Script;
-    let signable_input = match input_index {
-        Some(input_index) => {
+    let signable_input = match input_index_script_code {
+        Some((input_index, script_code)) => {
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
-            unlock_script = zcash_primitives::legacy::Script(
-                script_code.expect("script_code must be Some when input_index is also Some"),
-            );
+            unlock_script = zcash_primitives::legacy::Script(script_code);
             zp_tx::sighash::SignableInput::Transparent {
                 hash_type: hash_type.bits() as _,
                 index: input_index,
