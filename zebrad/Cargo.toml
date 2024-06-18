@@ -100,8 +100,6 @@ progress-bar = [
 
 prometheus = ["metrics-exporter-prometheus"]
 
-rpc-syncer = ["zebra-rpc/syncer"]
-
 # Production features that modify dependency behaviour
 
 # Enable additional error debugging in release builds
@@ -287,7 +285,7 @@ zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.37", feat
 zebra-network = { path = "../zebra-network", version = "1.0.0-beta.37", features = ["proptest-impl"] }
 zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.6", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.37", features = ["proptest-impl"] }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.37", features = ["syncer"] }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.37" }
 
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.37", features = ["rpc-client"] }
 

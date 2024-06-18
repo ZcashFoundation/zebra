@@ -3208,7 +3208,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     ))?;
 
     #[cfg(target_os = "windows")]
-    tokio::time::sleep(Duration::from_secs(LAUNCH_DELAY)).await;
+    tokio::time::sleep(LAUNCH_DELAY).await;
 
     tracing::info!("starting read state with syncer");
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
