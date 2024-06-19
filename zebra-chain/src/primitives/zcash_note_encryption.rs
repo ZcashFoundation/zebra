@@ -17,8 +17,13 @@ use crate::{
 /// since `librustzcash` won't be able to parse it.
 pub fn decrypts_successfully(transaction: &Transaction, network: &Network, height: Height) -> bool {
     let network_upgrade = NetworkUpgrade::current(network, height);
-    let alt_tx = convert_tx_to_librustzcash(transaction, network_upgrade)
-        .expect("zcash_primitives and Zebra transaction formats must be compatible");
+    let alt_tx = convert_tx_to_librustzcash(
+        transaction,
+        network_upgrade
+            .branch_id()
+            .expect("should have a branch ID"),
+    )
+    .expect("zcash_primitives and Zebra transaction formats must be compatible");
 
     let null_sapling_ovk = sapling::keys::OutgoingViewingKey([0u8; 32]);
 
