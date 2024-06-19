@@ -839,9 +839,13 @@ impl DiskDb {
             .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
 
         let db_result = if read_only {
-            // TODO: Make this path configurable?
+            // Use a tempfile for the secondary instance cache directory
+            let secondary_config = Config {
+                ephemeral: true,
+                ..config.clone()
+            };
             let secondary_path =
-                config.db_path("secondary_state", format_version_in_code.major, network);
+                secondary_config.db_path("secondary_state", format_version_in_code.major, network);
             let create_dir_result = std::fs::create_dir_all(&secondary_path);
 
             info!(?create_dir_result, "creating secondary db directory");

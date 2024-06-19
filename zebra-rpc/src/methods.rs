@@ -173,6 +173,10 @@ pub trait Rpc {
     fn get_best_block_hash(&self) -> Result<GetBlockHash>;
 
     /// Returns the height and hash of the current best blockchain tip block, as a [`GetBlockHeightAndHash`] JSON struct.
+    ///
+    /// zcashd reference: none
+    /// method: post
+    /// tags: blockchain
     #[rpc(name = "getbestblockheightandhash")]
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash>;
 
@@ -1558,6 +1562,15 @@ pub struct GetBlockHeightAndHash {
     pub height: block::Height,
     /// The best chain tip block hash
     pub hash: block::Hash,
+}
+
+impl Default for GetBlockHeightAndHash {
+    fn default() -> Self {
+        Self {
+            height: block::Height::MIN,
+            hash: block::Hash([0; 32]),
+        }
+    }
 }
 
 impl Default for GetBlockHash {

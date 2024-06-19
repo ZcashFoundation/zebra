@@ -166,6 +166,8 @@ impl TrustedChainSync {
                     break false;
                 }
 
+                // TODO: Check the finalized tip height and finalize blocks from the non-finalized state until
+                //       all non-finalized state chain root previous block hashes match the finalized tip hash
                 while self
                     .non_finalized_state
                     .best_chain_len()
@@ -202,7 +204,6 @@ impl TrustedChainSync {
     }
 
     /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
-    // TODO: Use getblock RPC if it fails to catch up to primary?
     async fn try_catch_up_with_primary(&self) {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
@@ -232,7 +233,7 @@ impl TrustedChainSync {
         }
     }
 
-    /// Returns the current tip height and hash
+    /// Returns the current tip hash and the next height immediately after the current tip height
     async fn next_block_height_and_prev_hash(&self) -> (block::Height, block::Hash) {
         if let Some(tip) = self.non_finalized_state.best_tip() {
             Some(tip)
@@ -251,6 +252,7 @@ impl TrustedChainSync {
         .unwrap_or((Height::MIN, GENESIS_PREVIOUS_BLOCK_HASH))
     }
 
+    /// Reads the finalized tip block from the secondary db instance and converts it to a [`ChainTipBlock`].
     async fn finalized_chain_tip_block(&self) -> Option<ChainTipBlock> {
         let db = self.db.clone();
         tokio::task::spawn_blocking(move || {
