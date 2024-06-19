@@ -59,7 +59,7 @@ async fn test_mocked_rpc_response_data_for_network(network: Network) {
     sleep(Duration::from_secs(1));
 
     // connect to the gRPC server
-    let client = ScannerClient::connect(listen_addr.to_string())
+    let client = ScannerClient::connect(format!("http://{listen_addr}"))
         .await
         .expect("server should receive connection");
 
