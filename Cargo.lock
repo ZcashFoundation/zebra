@@ -2745,36 +2745,6 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fb255c3ffdccd3c84fe9ebed72aef64fdc72e6a3e4180dd411002d47abaad42"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "ff",
- "fpe",
- "group",
- "halo2_gadgets",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand 0.8.5",
- "reddsa",
- "serde",
- "subtle",
- "tracing",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
-name = "orchard"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0462569fc8b0d1b158e4d640571867a4e4319225ebee2ab6647e60c70af19ae3"
@@ -5677,7 +5647,7 @@ dependencies = [
  "zcash_encoding",
  "zcash_keys",
  "zcash_note_encryption",
- "zcash_primitives 0.15.0",
+ "zcash_primitives",
  "zcash_protocol",
  "zip32",
 ]
@@ -5724,7 +5694,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_primitives 0.15.0",
+ "zcash_primitives",
  "zcash_protocol",
  "zip32",
 ]
@@ -5744,9 +5714,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9070e084570bb78aed4f8d71fd6254492e62c87a5d01e084183980e98117092d"
+checksum = "b5a8d812efec385ecbcefc862c0005bb1336474ea7dd9b671d5bbddaadd04be2"
 dependencies = [
  "aes",
  "bip0039",
@@ -5763,48 +5733,13 @@ dependencies = [
  "jubjub",
  "memuse",
  "nonempty",
- "orchard 0.7.1",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
  "ripemd",
  "sapling-crypto",
  "secp256k1",
- "sha2",
- "subtle",
- "tracing",
- "zcash_address",
- "zcash_encoding",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
-name = "zcash_primitives"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5a8d812efec385ecbcefc862c0005bb1336474ea7dd9b671d5bbddaadd04be2"
-dependencies = [
- "aes",
- "bip0039",
- "blake2b_simd",
- "byteorder",
- "document-features",
- "equihash",
- "ff",
- "fpe",
- "group",
- "hex",
- "incrementalmerkletree",
- "jubjub",
- "memuse",
- "nonempty",
- "orchard 0.8.0",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "redjubjub",
- "sapling-crypto",
  "sha2",
  "subtle",
  "tracing",
@@ -5818,9 +5753,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8a02eb1f151d9b9a6e16408d2c55ff440bd2fb232b7377277146d0fa2df9bc8"
+checksum = "5163a1110f4265cc5f2fdf87ac4497fd1e014b6ce0760ca8d16d8e3853a5c0f7"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -5836,7 +5771,7 @@ dependencies = [
  "sapling-crypto",
  "tracing",
  "xdg",
- "zcash_primitives 0.14.0",
+ "zcash_primitives",
 ]
 
 [[package]]
@@ -5895,7 +5830,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard 0.7.1",
+ "orchard",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -5926,7 +5861,7 @@ dependencies = [
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
- "zcash_primitives 0.14.0",
+ "zcash_primitives",
  "zcash_protocol",
  "zebra-test",
 ]
@@ -5950,7 +5885,7 @@ dependencies = [
  "metrics",
  "num-integer",
  "once_cell",
- "orchard 0.7.1",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -5992,7 +5927,7 @@ dependencies = [
  "tonic-build 0.11.0",
  "tonic-reflection",
  "tower",
- "zcash_primitives 0.14.0",
+ "zcash_primitives",
  "zebra-chain",
  "zebra-node-services",
  "zebra-state",
@@ -6075,7 +6010,7 @@ dependencies = [
  "tower",
  "tracing",
  "zcash_address",
- "zcash_primitives 0.14.0",
+ "zcash_primitives",
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",
@@ -6112,7 +6047,7 @@ dependencies = [
  "zcash_client_backend",
  "zcash_keys",
  "zcash_note_encryption",
- "zcash_primitives 0.14.0",
+ "zcash_primitives",
  "zebra-chain",
  "zebra-grpc",
  "zebra-node-services",
@@ -6227,7 +6162,7 @@ dependencies = [
  "tracing-error",
  "tracing-subscriber",
  "zcash_client_backend",
- "zcash_primitives 0.15.0",
+ "zcash_primitives",
  "zcash_protocol",
  "zebra-chain",
  "zebra-node-services",
