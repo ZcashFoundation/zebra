@@ -33,7 +33,7 @@ pub use serialize::{
     SerializedTransaction, MIN_TRANSPARENT_TX_SIZE, MIN_TRANSPARENT_TX_V4_SIZE,
     MIN_TRANSPARENT_TX_V5_SIZE,
 };
-pub use sighash::{HashType, SigHash};
+pub use sighash::{HashType, SigHash, SigHasher};
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
@@ -41,9 +41,11 @@ pub use unmined::{
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::NetworkUpgrade,
+    parameters::{ConsensusBranchId, NetworkUpgrade},
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
-    sapling, sprout,
+    sapling,
+    serialization::ZcashSerialize,
+    sprout,
     transparent::{
         self, outputs_from_utxos,
         CoinbaseSpendRestriction::{self, *},
@@ -192,14 +194,20 @@ impl Transaction {
         UnminedTxId::from(self)
     }
 
-    /// Calculate the sighash for the current transaction
+    /// Calculate the sighash for the current transaction.
+    ///
+    /// If you need to compute multiple sighashes for the same transactions,
+    /// it's more efficient to use [`Transaction::sighasher()`].
     ///
     /// # Details
     ///
-    /// The `input` argument indicates the transparent Input for which we are
-    /// producing a sighash. It is comprised of the index identifying the
-    /// transparent::Input within the transaction and the transparent::Output
-    /// representing the UTXO being spent by that input.
+    /// `all_previous_outputs` represents the UTXOs being spent by each input
+    /// in the transaction.
+    ///
+    /// The `input_index_script_code` tuple indicates the index of the
+    /// transparent Input for which we are producing a sighash and the
+    /// respective script code being validated, or None if it's a shielded
+    /// input.
     ///
     /// # Panics
     ///
@@ -209,19 +217,22 @@ impl Transaction {
     /// - if the input index is out of bounds for self.inputs()
     pub fn sighash(
         &self,
-        network_upgrade: NetworkUpgrade,
+        branch_id: ConsensusBranchId,
         hash_type: sighash::HashType,
         all_previous_outputs: &[transparent::Output],
-        input: Option<usize>,
+        input_index_script_code: Option<(usize, Vec<u8>)>,
     ) -> SigHash {
-        sighash::SigHasher::new(
-            self,
-            hash_type,
-            network_upgrade,
-            all_previous_outputs,
-            input,
-        )
-        .sighash()
+        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
+            .sighash(hash_type, input_index_script_code)
+    }
+
+    /// Return a [`SigHasher`] for this transaction.
+    pub fn sighasher<'a>(
+        &'a self,
+        branch_id: ConsensusBranchId,
+        all_previous_outputs: &'a [transparent::Output],
+    ) -> sighash::SigHasher {
+        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
     }
 
     /// Compute the authorizing data commitment of this transaction as specified
@@ -369,6 +380,26 @@ impl Transaction {
         } else {
             None
         }
+    }
+
+    /// Get the raw lock time value.
+    pub fn raw_lock_time(&self) -> u32 {
+        let lock_time = match self {
+            Transaction::V1 { lock_time, .. }
+            | Transaction::V2 { lock_time, .. }
+            | Transaction::V3 { lock_time, .. }
+            | Transaction::V4 { lock_time, .. }
+            | Transaction::V5 { lock_time, .. } => *lock_time,
+        };
+        let mut lock_time_bytes = Vec::new();
+        lock_time
+            .zcash_serialize(&mut lock_time_bytes)
+            .expect("lock_time should serialize");
+        u32::from_le_bytes(
+            lock_time_bytes
+                .try_into()
+                .expect("should serialize as 4 bytes"),
+        )
     }
 
     /// Returns `true` if this transaction's `lock_time` is a [`LockTime::Time`].

@@ -824,16 +824,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98cc8fbded0c607b7ba9dd60cd98df59af97e84d24e49c8557331cfc26d301ce"
 
 [[package]]
-name = "codespan-reporting"
-version = "0.11.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3538270d33cc669650c4b093848450d380def10c331d38c768e34cac80576e6e"
-dependencies = [
- "termcolor",
- "unicode-width",
-]
-
-[[package]]
 name = "color-eyre"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1072,47 +1062,6 @@ name = "curve25519-dalek-derive"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.66",
-]
-
-[[package]]
-name = "cxx"
-version = "1.0.113"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "048948e14bc2c2652ec606c8e3bb913407f0187288fb351a0b2d972beaf12070"
-dependencies = [
- "cc",
- "cxxbridge-flags",
- "cxxbridge-macro",
- "link-cplusplus",
-]
-
-[[package]]
-name = "cxx-gen"
-version = "0.7.121"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "383ecb9f96a536a1c7a2a61c5786f583da84f9240da149d78d005a4413c9a71e"
-dependencies = [
- "codespan-reporting",
- "proc-macro2",
- "quote",
- "syn 2.0.66",
-]
-
-[[package]]
-name = "cxxbridge-flags"
-version = "1.0.113"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af40b0467c68d3d9fb7550ef984edc8ad47252f703ef0f1f2d1052e0e4af8793"
-
-[[package]]
-name = "cxxbridge-macro"
-version = "1.0.113"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7743446286141c9f6d4497c493c01234eb848e14d2e20866ae9811eae0630cb9"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2473,15 +2422,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "link-cplusplus"
-version = "1.0.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9d240c6f7e1ba3a28b0249f774e6a9dd0175054b52dfbb61b16eb8505c3785c9"
-dependencies = [
- "cc",
-]
-
-[[package]]
 name = "linked-hash-map"
 version = "0.5.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2567,17 +2507,6 @@ dependencies = [
 
 [[package]]
 name = "metrics"
-version = "0.21.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fde3af1a009ed76a778cb84fdef9e7dbbdf5775ae3e4cc1f434a6a307f6f76c5"
-dependencies = [
- "ahash",
- "metrics-macros",
- "portable-atomic",
-]
-
-[[package]]
-name = "metrics"
 version = "0.22.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2be3cbd384d4e955b231c895ce10685e3d8260c5ccffae898c96c723b0772835"
@@ -2598,23 +2527,12 @@ dependencies = [
  "hyper-util",
  "indexmap 2.2.6",
  "ipnet",
- "metrics 0.22.3",
+ "metrics",
  "metrics-util",
  "quanta",
  "thiserror",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "metrics-macros"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38b4faf00617defe497754acde3024865bc143d44a86799b24e191ecff91354f"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.66",
 ]
 
 [[package]]
@@ -2626,7 +2544,7 @@ dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
  "hashbrown 0.14.5",
- "metrics 0.22.3",
+ "metrics",
  "num_cpus",
  "quanta",
  "sketches-ddsketch",
@@ -5940,41 +5858,12 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.1.16"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3febfe5f2abdab3597d17c8f71cc0071902d82f8433aa329abe52461eabaa9c4"
+checksum = "2122a042c77d529d3c60b899e74705eda39ae96a8a992460caeb06afa76990a2"
 dependencies = [
- "bellman",
  "bindgen",
- "blake2b_simd",
- "blake2s_simd",
- "bls12_381",
- "bridgetree",
- "byteorder",
  "cc",
- "crossbeam-channel",
- "cxx",
- "cxx-gen",
- "group",
- "incrementalmerkletree",
- "jubjub",
- "libc",
- "memuse",
- "metrics 0.21.1",
- "orchard 0.7.1",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "rayon",
- "redjubjub",
- "sapling-crypto",
- "subtle",
- "syn 1.0.109",
- "tracing",
- "zcash_address",
- "zcash_encoding",
- "zcash_note_encryption",
- "zcash_primitives 0.14.0",
- "zcash_proofs",
 ]
 
 [[package]]
@@ -6065,7 +5954,7 @@ dependencies = [
  "howudoin",
  "jubjub",
  "lazy_static",
- "metrics 0.22.3",
+ "metrics",
  "num-integer",
  "once_cell",
  "orchard 0.7.1",
@@ -6133,7 +6022,7 @@ dependencies = [
  "indexmap 2.2.6",
  "itertools 0.13.0",
  "lazy_static",
- "metrics 0.22.3",
+ "metrics",
  "num-integer",
  "ordered-map",
  "pin-project",
@@ -6271,7 +6160,7 @@ dependencies = [
  "itertools 0.13.0",
  "jubjub",
  "lazy_static",
- "metrics 0.22.3",
+ "metrics",
  "mset",
  "once_cell",
  "proptest",
@@ -6377,7 +6266,7 @@ dependencies = [
  "jsonrpc-core",
  "lazy_static",
  "log",
- "metrics 0.22.3",
+ "metrics",
  "metrics-exporter-prometheus",
  "num-integer",
  "once_cell",
