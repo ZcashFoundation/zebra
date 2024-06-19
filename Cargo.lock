@@ -2745,36 +2745,6 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fb255c3ffdccd3c84fe9ebed72aef64fdc72e6a3e4180dd411002d47abaad42"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "ff",
- "fpe",
- "group",
- "halo2_gadgets",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand 0.8.5",
- "reddsa",
- "serde",
- "subtle",
- "tracing",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
-name = "orchard"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0462569fc8b0d1b158e4d640571867a4e4319225ebee2ab6647e60c70af19ae3"
@@ -5763,7 +5733,7 @@ dependencies = [
  "jubjub",
  "memuse",
  "nonempty",
- "orchard 0.8.0",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
@@ -5860,7 +5830,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard 0.8.0",
+ "orchard",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -5915,7 +5885,7 @@ dependencies = [
  "metrics",
  "num-integer",
  "once_cell",
- "orchard 0.7.1",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
