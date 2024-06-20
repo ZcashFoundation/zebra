@@ -168,9 +168,9 @@ impl Argument {
     ///
     /// # Implementation
     ///
-    /// 1. Generate a list with less than ten random strings. Then proceed by selecting which strings
-    /// will become key value pairs, and generate a new random string for each value that needs to
-    /// be paired to an argument key.
+    /// 1. Generate a list with less than ten random strings. Then proceed by selecting which
+    ///    strings will become key value pairs, and generate a new random string for each value that
+    ///    needs to be paired to an argument key.
     pub fn list_strategy() -> impl Strategy<Value = Vec<Argument>> {
         // Generate a list with less than ten unique random strings.
         hash_set("\\PC+", 0..10)

@@ -140,7 +140,7 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
 /// The Consensus Branch Id, used to bind transactions and blocks to a
 /// particular network upgrade.
 #[derive(Copy, Clone, Debug, Default, Eq, Hash, PartialEq, Serialize, Deserialize)]
-pub struct ConsensusBranchId(u32);
+pub struct ConsensusBranchId(pub(crate) u32);
 
 impl ConsensusBranchId {
     /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
@@ -511,19 +511,6 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
-        }
-    }
-}
-
-impl From<zcash_primitives::consensus::NetworkUpgrade> for NetworkUpgrade {
-    fn from(value: zcash_primitives::consensus::NetworkUpgrade) -> Self {
-        match value {
-            zcash_primitives::consensus::NetworkUpgrade::Overwinter => NetworkUpgrade::Overwinter,
-            zcash_primitives::consensus::NetworkUpgrade::Sapling => NetworkUpgrade::Sapling,
-            zcash_primitives::consensus::NetworkUpgrade::Blossom => NetworkUpgrade::Blossom,
-            zcash_primitives::consensus::NetworkUpgrade::Heartwood => NetworkUpgrade::Heartwood,
-            zcash_primitives::consensus::NetworkUpgrade::Canopy => NetworkUpgrade::Canopy,
-            zcash_primitives::consensus::NetworkUpgrade::Nu5 => NetworkUpgrade::Nu5,
         }
     }
 }

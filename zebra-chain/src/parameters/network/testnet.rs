@@ -1,8 +1,6 @@
 //! Types and implementation for Testnet consensus parameters
 use std::{collections::BTreeMap, fmt};
 
-use zcash_primitives::constants as zp_constants;
-
 use crate::{
     block::{self, Height},
     parameters::{
@@ -76,12 +74,6 @@ pub struct ParametersBuilder {
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network, see [`Parameters::activation_heights`] for more details.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
-    /// Sapling extended spending key human-readable prefix for this network
-    hrp_sapling_extended_spending_key: String,
-    /// Sapling extended full viewing key human-readable prefix for this network
-    hrp_sapling_extended_full_viewing_key: String,
-    /// Sapling payment address human-readable prefix for this network
-    hrp_sapling_payment_address: String,
     /// Slow start interval for this network
     slow_start_interval: Height,
     /// Target difficulty limit for this network
@@ -100,12 +92,6 @@ impl Default for ParametersBuilder {
             //
             // `Genesis` network upgrade activation height must always be 0
             activation_heights: TESTNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
-            hrp_sapling_extended_spending_key:
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_SPENDING_KEY.to_string(),
-            hrp_sapling_extended_full_viewing_key:
-                zp_constants::testnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY.to_string(),
-            hrp_sapling_payment_address: zp_constants::testnet::HRP_SAPLING_PAYMENT_ADDRESS
-                .to_string(),
             genesis_hash: TESTNET_GENESIS_HASH
                 .parse()
                 .expect("hard-coded hash parses"),
@@ -163,44 +149,6 @@ impl ParametersBuilder {
         );
 
         self.network_magic = network_magic;
-
-        self
-    }
-
-    /// Checks that the provided Sapling human-readable prefixes (HRPs) are valid and unique, then
-    /// sets the Sapling HRPs to be used in the [`Parameters`] being built.
-    pub fn with_sapling_hrps(
-        mut self,
-        hrp_sapling_extended_spending_key: impl fmt::Display,
-        hrp_sapling_extended_full_viewing_key: impl fmt::Display,
-        hrp_sapling_payment_address: impl fmt::Display,
-    ) -> Self {
-        self.hrp_sapling_extended_spending_key = hrp_sapling_extended_spending_key.to_string();
-        self.hrp_sapling_extended_full_viewing_key =
-            hrp_sapling_extended_full_viewing_key.to_string();
-        self.hrp_sapling_payment_address = hrp_sapling_payment_address.to_string();
-
-        let sapling_hrps = [
-            &self.hrp_sapling_extended_spending_key,
-            &self.hrp_sapling_extended_full_viewing_key,
-            &self.hrp_sapling_payment_address,
-        ];
-
-        for sapling_hrp in sapling_hrps {
-            assert!(sapling_hrp.len() <= MAX_HRP_LENGTH, "Sapling human-readable prefix {sapling_hrp} is too long, must be {MAX_HRP_LENGTH} characters or less");
-            assert!(
-                sapling_hrp.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
-                "human-readable prefixes should contain only lowercase ASCII characters and dashes, hrp: {sapling_hrp}"
-            );
-            assert_eq!(
-                sapling_hrps
-                    .iter()
-                    .filter(|&&hrp| hrp == sapling_hrp)
-                    .count(),
-                1,
-                "Sapling human-readable prefixes must be unique, repeated Sapling HRP: {sapling_hrp}"
-            );
-        }
 
         self
     }
@@ -309,9 +257,6 @@ impl ParametersBuilder {
             network_magic,
             genesis_hash,
             activation_heights,
-            hrp_sapling_extended_spending_key,
-            hrp_sapling_extended_full_viewing_key,
-            hrp_sapling_payment_address,
             slow_start_interval,
             target_difficulty_limit,
             disable_pow,
@@ -321,9 +266,6 @@ impl ParametersBuilder {
             network_magic,
             genesis_hash,
             activation_heights,
-            hrp_sapling_extended_spending_key,
-            hrp_sapling_extended_full_viewing_key,
-            hrp_sapling_payment_address,
             slow_start_interval,
             slow_start_shift: Height(slow_start_interval.0 / 2),
             target_difficulty_limit,
@@ -352,12 +294,6 @@ pub struct Parameters {
     ///       compiled with the `zebra-test` feature flag AND the `TEST_FAKE_ACTIVATION_HEIGHTS`
     ///       environment variable is set.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
-    /// Sapling extended spending key human-readable prefix for this network
-    hrp_sapling_extended_spending_key: String,
-    /// Sapling extended full viewing key human-readable prefix for this network
-    hrp_sapling_extended_full_viewing_key: String,
-    /// Sapling payment address human-readable prefix for this network
-    hrp_sapling_payment_address: String,
     /// Slow start interval for this network
     slow_start_interval: Height,
     /// Slow start shift for this network, always half the slow start interval
@@ -400,11 +336,6 @@ impl Parameters {
                 .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
                 .with_disable_pow(true)
                 .with_slow_start_interval(Height::MIN)
-                .with_sapling_hrps(
-                    zp_constants::regtest::HRP_SAPLING_EXTENDED_SPENDING_KEY,
-                    zp_constants::regtest::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY,
-                    zp_constants::regtest::HRP_SAPLING_PAYMENT_ADDRESS,
-                )
                 // Removes default Testnet activation heights if not configured,
                 // most network upgrades are disabled by default for Regtest in zcashd
                 .with_activation_heights(ConfiguredActivationHeights {
@@ -429,9 +360,6 @@ impl Parameters {
             genesis_hash,
             // Activation heights are configurable on Regtest
             activation_heights: _,
-            hrp_sapling_extended_spending_key,
-            hrp_sapling_extended_full_viewing_key,
-            hrp_sapling_payment_address,
             slow_start_interval,
             slow_start_shift,
             target_difficulty_limit,
@@ -441,9 +369,6 @@ impl Parameters {
         self.network_name == network_name
             && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
-            && self.hrp_sapling_extended_spending_key == hrp_sapling_extended_spending_key
-            && self.hrp_sapling_extended_full_viewing_key == hrp_sapling_extended_full_viewing_key
-            && self.hrp_sapling_payment_address == hrp_sapling_payment_address
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
             && self.target_difficulty_limit == target_difficulty_limit
@@ -468,21 +393,6 @@ impl Parameters {
     /// Returns the network upgrade activation heights
     pub fn activation_heights(&self) -> &BTreeMap<Height, NetworkUpgrade> {
         &self.activation_heights
-    }
-
-    /// Returns the `hrp_sapling_extended_spending_key` field
-    pub fn hrp_sapling_extended_spending_key(&self) -> &str {
-        &self.hrp_sapling_extended_spending_key
-    }
-
-    /// Returns the `hrp_sapling_extended_full_viewing_key` field
-    pub fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
-        &self.hrp_sapling_extended_full_viewing_key
-    }
-
-    /// Returns the `hrp_sapling_payment_address` field
-    pub fn hrp_sapling_payment_address(&self) -> &str {
-        &self.hrp_sapling_payment_address
     }
 
     /// Returns slow start interval for this network

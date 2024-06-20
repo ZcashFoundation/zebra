@@ -5,9 +5,12 @@
 // We allow unsafe code, so we can call zcash_script
 #![allow(unsafe_code)]
 
-use std::sync::Arc;
+use core::fmt;
+use std::{
+    ffi::{c_int, c_uint, c_void},
+    sync::Arc,
+};
 
-use displaydoc::Display;
 use thiserror::Error;
 
 use zcash_script::{
@@ -18,29 +21,48 @@ use zcash_script::{
 };
 
 use zebra_chain::{
-    parameters::ConsensusBranchId, serialization::ZcashSerialize, transaction::Transaction,
+    parameters::ConsensusBranchId,
+    transaction::{HashType, SigHasher, Transaction},
     transparent,
 };
 
-#[derive(Copy, Clone, Debug, Display, Error, PartialEq, Eq)]
-#[non_exhaustive]
 /// An Error type representing the error codes returned from zcash_script.
+#[derive(Copy, Clone, Debug, Error, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Error {
-    /// script failed to verify
+    /// script verification failed
     #[non_exhaustive]
     ScriptInvalid,
-    /// could not to deserialize tx
+    /// could not deserialize tx
     #[non_exhaustive]
     TxDeserialize,
-    /// input index out of bounds for transaction's inputs
+    /// input index out of bounds
     #[non_exhaustive]
     TxIndex,
-    /// tx is an invalid size for it's protocol
+    /// tx has an invalid size
     #[non_exhaustive]
     TxSizeMismatch,
-    /// encountered unknown error kind from zcash_script: {0}
+    /// tx is a coinbase transaction and should not be verified
+    #[non_exhaustive]
+    TxCoinbase,
+    /// unknown error from zcash_script: {0}
     #[non_exhaustive]
     Unknown(zcash_script_error_t),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&match self {
+            Error::ScriptInvalid => "script verification failed".to_owned(),
+            Error::TxDeserialize => "could not deserialize tx".to_owned(),
+            Error::TxIndex => "input index out of bounds".to_owned(),
+            Error::TxSizeMismatch => "tx has an invalid size".to_owned(),
+            Error::TxCoinbase => {
+                "tx is a coinbase transaction and should not be verified".to_owned()
+            }
+            Error::Unknown(e) => format!("unknown error from zcash_script: {e}"),
+        })
+    }
 }
 
 impl From<zcash_script_error_t> for Error {
@@ -62,23 +84,47 @@ impl From<zcash_script_error_t> for Error {
 pub struct CachedFfiTransaction {
     /// The deserialized Zebra transaction.
     ///
-    /// This field is private so that `transaction`, `all_previous_outputs`, and `precomputed` always match.
+    /// This field is private so that `transaction`, and `all_previous_outputs` always match.
     transaction: Arc<Transaction>,
 
     /// The outputs from previous transactions that match each input in the transaction
     /// being verified.
-    ///
-    /// SAFETY: this field must be private,
-    ///         and `CachedFfiTransaction::new` must be the only method that modifies it,
-    ///         so that it is [`Send`], [`Sync`], consistent with `transaction` and `precomputed`.
     all_previous_outputs: Vec<transparent::Output>,
+}
 
-    /// The deserialized `zcash_script` transaction, as a C++ object.
-    ///
-    /// SAFETY: this field must be private,
-    ///         and `CachedFfiTransaction::new` must be the only method that modifies it,
-    ///         so that it is [`Send`], [`Sync`], valid, and not NULL.
-    precomputed: *mut std::ffi::c_void,
+/// A sighash context used for the zcash_script sighash callback.
+struct SigHashContext<'a> {
+    /// The index of the input being verified.
+    input_index: usize,
+    /// The SigHasher for the transaction being verified.
+    sighasher: SigHasher<'a>,
+}
+
+/// The sighash callback to use with zcash_script.
+extern "C" fn sighash(
+    sighash_out: *mut u8,
+    sighash_out_len: c_uint,
+    ctx: *const c_void,
+    script_code: *const u8,
+    script_code_len: c_uint,
+    hash_type: c_int,
+) {
+    // SAFETY: `ctx` is a valid SigHashContext because it is always passed to
+    // `zcash_script_verify_callback` which simply forwards it to the callback.
+    // `script_code` and `sighash_out` are valid buffers since they are always
+    //  specified when the callback is called.
+    unsafe {
+        let ctx = ctx as *const SigHashContext;
+        let script_code_vec =
+            std::slice::from_raw_parts(script_code, script_code_len as usize).to_vec();
+        let sighash = (*ctx).sighasher.sighash(
+            HashType::from_bits_truncate(hash_type as u32),
+            Some(((*ctx).input_index, script_code_vec)),
+        );
+        // Sanity check; must always be true.
+        assert_eq!(sighash_out_len, sighash.0.len() as c_uint);
+        std::ptr::copy_nonoverlapping(sighash.0.as_ptr(), sighash_out, sighash.0.len());
+    }
 }
 
 impl CachedFfiTransaction {
@@ -89,52 +135,9 @@ impl CachedFfiTransaction {
         transaction: Arc<Transaction>,
         all_previous_outputs: Vec<transparent::Output>,
     ) -> Self {
-        let tx_to_serialized = transaction
-            .zcash_serialize_to_vec()
-            .expect("serialization into a vec is infallible");
-
-        let tx_to_serialized_ptr = tx_to_serialized.as_ptr();
-        let tx_to_serialized_len = tx_to_serialized
-            .len()
-            .try_into()
-            .expect("serialized transaction lengths are much less than u32::MAX");
-        let mut err = 0;
-
-        let all_previous_outputs_serialized = all_previous_outputs
-            .zcash_serialize_to_vec()
-            .expect("serialization into a vec is infallible");
-        let all_previous_outputs_serialized_ptr = all_previous_outputs_serialized.as_ptr();
-        let all_previous_outputs_serialized_len: u32 = all_previous_outputs_serialized
-            .len()
-            .try_into()
-            .expect("serialized transaction lengths are much less than u32::MAX");
-
-        // SAFETY:
-        // the `tx_to_*` fields are created from a valid Rust `Vec`
-        // the `all_previous_outputs_*` fields are created from a valid Rust `Vec`
-        let precomputed = unsafe {
-            zcash_script::zcash_script_new_precomputed_tx_v5(
-                tx_to_serialized_ptr,
-                tx_to_serialized_len,
-                all_previous_outputs_serialized_ptr,
-                all_previous_outputs_serialized_len,
-                &mut err,
-            )
-        };
-        // SAFETY: the safety of other methods depends on `precomputed` being valid and not NULL.
-        assert!(
-            !precomputed.is_null(),
-            "zcash_script_new_precomputed_tx returned {} ({})",
-            err,
-            Error::from(err)
-        );
-
         Self {
             transaction,
             all_previous_outputs,
-            // SAFETY: `precomputed` must not be modified after initialisation,
-            //          so that it is `Send` and `Sync`.
-            precomputed,
         }
     }
 
@@ -159,7 +162,10 @@ impl CachedFfiTransaction {
             .get(input_index)
             .ok_or(Error::TxIndex)?
             .clone();
-        let transparent::Output { value, lock_script } = previous_output;
+        let transparent::Output {
+            value: _,
+            lock_script,
+        } = previous_output;
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
 
         // This conversion is useful on some platforms, but not others.
@@ -167,11 +173,6 @@ impl CachedFfiTransaction {
         let n_in = input_index
             .try_into()
             .expect("transaction indexes are much less than c_uint::MAX");
-
-        let script_ptr = script_pub_key.as_ptr();
-        let script_len = script_pub_key.len();
-
-        let amount = value.into();
 
         let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
             | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
@@ -181,23 +182,38 @@ impl CachedFfiTransaction {
             .try_into()
             .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");
 
-        let consensus_branch_id = branch_id.into();
-
         let mut err = 0;
+        let lock_time = self.transaction.raw_lock_time() as i64;
+        let is_final = if self.transaction.inputs()[input_index].sequence() == u32::MAX {
+            1
+        } else {
+            0
+        };
+        let signature_script = match &self.transaction.inputs()[input_index] {
+            transparent::Input::PrevOut {
+                outpoint: _,
+                unlock_script,
+                sequence: _,
+            } => unlock_script.as_raw_bytes(),
+            transparent::Input::Coinbase { .. } => Err(Error::TxCoinbase)?,
+        };
 
-        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
-        //         The `script_*` fields are created from a valid Rust `slice`.
+        let ctx = Box::new(SigHashContext {
+            input_index: n_in,
+            sighasher: SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs),
+        });
+        // SAFETY: The `script_*` fields are created from a valid Rust `slice`.
         let ret = unsafe {
-            zcash_script::zcash_script_verify_precomputed(
-                self.precomputed,
-                n_in,
-                script_ptr,
-                script_len
-                    .try_into()
-                    .expect("script lengths are much less than u32::MAX"),
-                amount,
+            zcash_script::zcash_script_verify_callback(
+                (&*ctx as *const SigHashContext) as *const c_void,
+                Some(sighash),
+                lock_time,
+                is_final,
+                script_pub_key.as_ptr(),
+                script_pub_key.len() as u32,
+                signature_script.as_ptr(),
+                signature_script.len() as u32,
                 flags,
-                consensus_branch_id,
                 &mut err,
             )
         };
@@ -213,64 +229,40 @@ impl CachedFfiTransaction {
     /// transparent inputs and outputs of this transaction.
     #[allow(clippy::unwrap_in_result)]
     pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
-        let mut err = 0;
+        let mut count: u64 = 0;
 
-        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
-        let ret = unsafe {
-            zcash_script::zcash_script_legacy_sigop_count_precomputed(self.precomputed, &mut err)
-        };
-
-        if err == zcash_script_error_t_zcash_script_ERR_OK {
-            let ret = ret.into();
-            Ok(ret)
-        } else {
-            Err(Error::from(err))
+        for input in self.transaction.inputs() {
+            count += match input {
+                transparent::Input::PrevOut {
+                    outpoint: _,
+                    unlock_script,
+                    sequence: _,
+                } => {
+                    let script = unlock_script.as_raw_bytes();
+                    // SAFETY: `script` is created from a valid Rust `slice`.
+                    unsafe {
+                        zcash_script::zcash_script_legacy_sigop_count_script(
+                            script.as_ptr(),
+                            script.len() as u32,
+                        )
+                    }
+                }
+                transparent::Input::Coinbase { .. } => 0,
+            } as u64;
         }
-    }
-}
 
-// # SAFETY
-//
-// ## Justification
-//
-// `CachedFfiTransaction` is not `Send` and `Sync` by default because of the
-// `*mut c_void` it contains. This is because raw pointers could allow the same
-// data to be mutated from different threads if copied.
-//
-// CachedFFiTransaction needs to be Send and Sync to be stored within a `Box<dyn
-// Future + Send + Sync + static>`. In `zebra_consensus/src/transaction.rs`, an
-// async block owns a `CachedFfiTransaction`, and holds it across an await
-// point, while the transaction verifier is spawning all of the script verifier
-// futures. The service readiness check requires this await between each task
-// spawn. Each `script` future needs a copy of the
-// `Arc<CachedFfiTransaction>` so that it can simultaneously verify inputs
-// without cloning the c++ allocated type unnecessarily.
-//
-// ## Explanation
-//
-// It is safe for us to mark this as `Send` and `Sync` because the data pointed
-// to by `precomputed` is never modified after it is constructed and points to
-// heap memory with a stable memory location. The function
-// `zcash_script::zcash_script_verify_precomputed` only reads from the
-// precomputed context while verifying inputs, which makes it safe to treat this
-// pointer like a shared reference (given that is how it is used).
-//
-// The function `zcash_script:zcash_script_legacy_sigop_count_precomputed` only reads
-// from the precomputed context. Currently, these reads happen after all the concurrent
-// async checks have finished.
-//
-// Since we're manually marking it as `Send` and `Sync`, we must ensure that
-// other fields in the struct are also `Send` and `Sync`. This applies to
-// `all_previous_outputs`, which are both.
-//
-// TODO: create a wrapper for `precomputed` and only make it implement Send/Sync (#3436)
-unsafe impl Send for CachedFfiTransaction {}
-unsafe impl Sync for CachedFfiTransaction {}
-
-impl Drop for CachedFfiTransaction {
-    fn drop(&mut self) {
-        // SAFETY: `CachedFfiTransaction::new` makes sure `self.precomputed` is not NULL.
-        unsafe { zcash_script::zcash_script_free_precomputed_tx(self.precomputed) };
+        for output in self.transaction.outputs() {
+            let script = output.lock_script.as_raw_bytes();
+            // SAFETY: `script` is created from a valid Rust `slice`.
+            let ret = unsafe {
+                zcash_script::zcash_script_legacy_sigop_count_script(
+                    script.as_ptr(),
+                    script.len() as u32,
+                )
+            };
+            count += ret as u64;
+        }
+        Ok(count)
     }
 }
 
@@ -280,8 +272,9 @@ mod tests {
     use std::sync::Arc;
     use zebra_chain::{
         parameters::{ConsensusBranchId, NetworkUpgrade::*},
-        serialization::ZcashDeserializeInto,
-        transparent,
+        serialization::{ZcashDeserialize, ZcashDeserializeInto},
+        transaction::Transaction,
+        transparent::{self, Output},
     };
     use zebra_test::prelude::*;
 
@@ -466,6 +459,24 @@ mod tests {
 
         verifier.is_valid(branch_id, input_index + 1).unwrap_err();
 
+        Ok(())
+    }
+
+    #[test]
+    fn p2sh() -> Result<()> {
+        let _init_guard = zebra_test::init();
+
+        // real tx with txid 51ded0b026f1ff56639447760bcd673b9f4e44a8afbf3af1dbaa6ca1fd241bea
+        let serialized_tx = "0400008085202f8901c21354bf2305e474ad695382e68efc06e2f8b83c512496f615d153c2e00e688b00000000fdfd0000483045022100d2ab3e6258fe244fa442cfb38f6cef9ac9a18c54e70b2f508e83fa87e20d040502200eead947521de943831d07a350e45af8e36c2166984a8636f0a8811ff03ed09401473044022013e15d865010c257eef133064ef69a780b4bc7ebe6eda367504e806614f940c3022062fdbc8c2d049f91db2042d6c9771de6f1ef0b3b1fea76c1ab5542e44ed29ed8014c69522103b2cc71d23eb30020a4893982a1e2d352da0d20ee657fa02901c432758909ed8f21029d1e9a9354c0d2aee9ffd0f0cea6c39bbf98c4066cf143115ba2279d0ba7dabe2103e32096b63fd57f3308149d238dcbb24d8d28aad95c0e4e74e3e5e6a11b61bcc453aeffffffff0250954903000000001976a914a5a4e1797dac40e8ce66045d1a44c4a63d12142988acccf41c590000000017a9141c973c68b2acc6d6688eff9c7a9dd122ac1346ab8786c72400000000000000000000000000000000";
+        let serialized_output = "4065675c0000000017a914c117756dcbe144a12a7c33a77cfa81aa5aeeb38187";
+        let tx = Transaction::zcash_deserialize(&hex::decode(serialized_tx).unwrap().to_vec()[..])
+            .unwrap();
+        let previous_output =
+            Output::zcash_deserialize(&hex::decode(serialized_output).unwrap().to_vec()[..])
+                .unwrap();
+
+        let verifier = super::CachedFfiTransaction::new(Arc::new(tx), vec![previous_output]);
+        verifier.is_valid(Nu5.branch_id().unwrap(), 0)?;
         Ok(())
     }
 }
