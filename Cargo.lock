@@ -6055,6 +6055,7 @@ dependencies = [
  "zebra-chain",
  "zebra-grpc",
  "zebra-node-services",
+ "zebra-rpc",
  "zebra-state",
  "zebra-test",
 ]
