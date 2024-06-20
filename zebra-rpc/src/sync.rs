@@ -25,8 +25,11 @@ use crate::{
     methods::{hex_data::HexData, GetBlockHeightAndHash},
 };
 
-/// How long to wait between calls to `getbestblockhash` when it returns an error or the block hash
-/// of the current chain tip in the process that's syncing blocks from Zebra.
+/// How long to wait between calls to `getbestblockheightandhash` when it:
+/// - Returns an error, or
+/// - Returns the block hash of a block that the read state already contains,
+///   (so that there's nothing for the syncer to do except wait for the next chain tip change).
+/// See the [`TrustedChainSync::wait_for_chain_tip_change()`] method documentation for more information.
 const POLL_DELAY: Duration = Duration::from_millis(200);
 
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
@@ -34,11 +37,11 @@ const POLL_DELAY: Duration = Duration::from_millis(200);
 struct TrustedChainSync {
     /// RPC client for calling Zebra's RPC methods.
     rpc_client: RpcRequestClient,
-    /// The read state service
+    /// The read state service.
     db: ZebraDb,
     /// The non-finalized state - currently only contains the best chain.
     non_finalized_state: NonFinalizedState,
-    /// The chain tip sender for updating [`LatestChainTip`] and [`ChainTipChange`]
+    /// The chain tip sender for updating [`LatestChainTip`] and [`ChainTipChange`].
     chain_tip_sender: ChainTipSender,
     /// The non-finalized state sender, for updating the [`ReadStateService`] when the non-finalized best chain changes.
     non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
@@ -132,7 +135,7 @@ impl TrustedChainSync {
                     // - the next block's previous block hash doesn't match the expected hash,
                     // - the next block is missing
                     // - the target tip hash is missing from the blocks in `block_futs`
-                    // because there was likely a chain re-org/fork
+                    // because there was likely a chain re-org/fork.
                     Some(Ok(_)) | None => break true,
                     // If calling the `getblock` RPC method fails with an unexpected error, wait for the next chain tip change
                     // without resetting the non-finalized state.
@@ -167,7 +170,7 @@ impl TrustedChainSync {
                 }
 
                 // TODO: Check the finalized tip height and finalize blocks from the non-finalized state until
-                //       all non-finalized state chain root previous block hashes match the finalized tip hash
+                //       all non-finalized state chain root previous block hashes match the finalized tip hash.
                 while self
                     .non_finalized_state
                     .best_chain_len()
@@ -233,7 +236,7 @@ impl TrustedChainSync {
         }
     }
 
-    /// Returns the current tip hash and the next height immediately after the current tip height
+    /// Returns the current tip hash and the next height immediately after the current tip height.
     async fn next_block_height_and_prev_hash(&self) -> (block::Height, block::Hash) {
         if let Some(tip) = self.non_finalized_state.best_tip() {
             Some(tip)
@@ -267,9 +270,9 @@ impl TrustedChainSync {
 
     /// Accepts a block hash.
     ///
-    /// Polls `getbestblockhash` RPC method until it successfully returns a different hash from the last chain tip hash.
+    /// Polls `getbestblockhash` RPC method until it successfully returns a block hash that is different from the last chain tip hash.
     ///
-    /// Returns the node's best block hash
+    /// Returns the node's best block hash.
     async fn wait_for_chain_tip_change(
         &self,
         last_chain_tip_hash: block::Hash,
@@ -281,6 +284,8 @@ impl TrustedChainSync {
                 .await
                 .filter(|&(_height, hash)| hash != last_chain_tip_hash)
             else {
+                // If `get_best_block_height_and_hash()` returns an error, or returns
+                // the current chain tip hash, wait [`POLL_DELAY`], then try again.
                 tokio::time::sleep(POLL_DELAY).await;
                 continue;
             };
