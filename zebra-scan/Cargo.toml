@@ -68,6 +68,7 @@ zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = [
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38", features = ["shielded-scan"] }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38", features = ["shielded-scan"] }
 zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.5" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.38" }
 
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
 
