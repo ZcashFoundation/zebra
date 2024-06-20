@@ -1,12 +1,13 @@
 //! The zebra-scanner binary.
 //!
 //! The zebra-scanner binary is a standalone binary that scans the Zcash blockchain for transactions using the given sapling keys.
+use color_eyre::eyre::eyre;
 use lazy_static::lazy_static;
 use structopt::StructOpt;
 use tracing::*;
 
 use zebra_chain::{block::Height, parameters::Network};
-use zebra_state::{ChainTipSender, SaplingScanningKey};
+use zebra_state::SaplingScanningKey;
 
 use core::net::SocketAddr;
 use std::path::PathBuf;
@@ -67,17 +68,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Get a read-only state and the database.
-    let (read_state, db, _) = zebra_state::init_read_only(state_config, &network);
-
-    // Get the initial tip block from the database.
-    let initial_tip = db
-        .tip_block()
-        .map(zebra_state::CheckpointVerifiedBlock::from)
-        .map(zebra_state::ChainTipBlock::from);
-
-    // Create a chain tip sender and use it to get a chain tip change.
-    let (_chain_tip_sender, _latest_chain_tip, chain_tip_change) =
-        ChainTipSender::new(initial_tip, &network);
+    let (read_state, _latest_chain_tip, chain_tip_change, sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            state_config,
+            &network,
+            args.zebra_rpc_listen_addr,
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
 
     // Spawn the scan task.
     let scan_task_handle =
@@ -85,14 +83,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Pin the scan task handle.
     tokio::pin!(scan_task_handle);
+    tokio::pin!(sync_task);
 
     // Wait for task to finish
-    loop {
-        let _result = tokio::select! {
-            scan_result = &mut scan_task_handle => scan_result
-                .expect("unexpected panic in the scan task")
-                .map(|_| info!("scan task exited")),
-        };
+    tokio::select! {
+        scan_result = &mut scan_task_handle => scan_result
+            .expect("unexpected panic in the scan task")
+            .map(|_| info!("scan task exited"))
+            .map_err(Into::into),
+        sync_result = &mut sync_task => {
+            sync_result.expect("unexpected panic in the scan task");
+            Ok(())
+        }
     }
 }
 
@@ -130,6 +132,11 @@ pub struct Args {
     /// The sapling keys to scan for.
     #[structopt(long)]
     pub sapling_keys_to_scan: Vec<SaplingKey>,
+
+    /// The listen address of Zebra's RPC server used by the syncer to check for chain tip changes
+    /// and get blocks in Zebra's non-finalized state.
+    #[structopt(long)]
+    pub zebra_rpc_listen_addr: SocketAddr,
 
     /// IP address and port for the gRPC server.
     #[structopt(long)]
