@@ -3202,10 +3202,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     tracing::info!("waiting for Zebra state cache to be opened");
 
     #[cfg(not(target_os = "windows"))]
-    child.expect_stdout_line_matches(format!(
-        "Opened Zebra state cache at {}",
-        config.state.cache_dir.to_str().expect("should convert")
-    ))?;
+    child.expect_stdout_line_matches("marked database format as newly created")?;
 
     #[cfg(target_os = "windows")]
     tokio::time::sleep(LAUNCH_DELAY).await;
@@ -3420,10 +3417,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     tracing::info!("waiting for Zebra state cache to be opened");
 
     #[cfg(not(target_os = "windows"))]
-    child.expect_stdout_line_matches(format!(
-        "Opened Zebra state cache at {}",
-        config.state.cache_dir.to_str().unwrap()
-    ))?;
+    child.expect_stdout_line_matches("marked database format as newly created")?;
 
     #[cfg(target_os = "windows")]
     tokio::time::sleep(LAUNCH_DELAY).await;
