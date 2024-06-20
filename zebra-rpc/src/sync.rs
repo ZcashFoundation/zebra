@@ -270,7 +270,7 @@ impl TrustedChainSync {
 
     /// Accepts a block hash.
     ///
-    /// Polls `getbestblockhash` RPC method until it successfully returns a block hash that is different from the last chain tip hash.
+    /// Polls `getbestblockheightandhash` RPC method until it successfully returns a block hash that is different from the last chain tip hash.
     ///
     /// Returns the node's best block hash.
     async fn wait_for_chain_tip_change(
