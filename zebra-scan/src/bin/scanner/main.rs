@@ -12,7 +12,7 @@ use zebra_state::SaplingScanningKey;
 use core::net::SocketAddr;
 use std::path::PathBuf;
 
-/// A strucure with sapling key and birthday height.
+/// A structure with sapling key and birthday height.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 pub struct SaplingKey {
     key: SaplingScanningKey,
