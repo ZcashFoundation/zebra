@@ -647,6 +647,7 @@ impl<'de> Deserialize<'de> for Config {
             slow_start_interval: Option<u32>,
             target_difficulty_limit: Option<String>,
             disable_pow: Option<bool>,
+            genesis_hash: Option<String>,
             activation_heights: Option<ConfiguredActivationHeights>,
         }
 
@@ -732,33 +733,22 @@ impl<'de> Deserialize<'de> for Config {
                     slow_start_interval,
                     target_difficulty_limit,
                     disable_pow,
+                    genesis_hash,
                     activation_heights,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
-                // TODO: allow default peers when fields match default testnet values?
-                let should_avoid_default_peers = network_magic.is_some()
-                    || slow_start_interval.is_some()
-                    || target_difficulty_limit.is_some()
-                    || disable_pow == Some(true)
-                    || activation_heights.is_some();
 
-                // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
-                // peers while activation heights or a custom network magic is configured.
-                if should_avoid_default_peers
-                    && contains_default_initial_peers(&initial_testnet_peers)
-                {
-                    return Err(de::Error::custom(
-                        "cannot use default initials peers with incompatible testnet",
-                    ));
-                }
-
-                if let Some(network_name) = network_name {
+                if let Some(network_name) = network_name.clone() {
                     params_builder = params_builder.with_network_name(network_name)
                 }
 
                 if let Some(network_magic) = network_magic {
                     params_builder = params_builder.with_network_magic(Magic(network_magic));
+                }
+
+                if let Some(genesis_hash) = genesis_hash {
+                    params_builder = params_builder.with_genesis_hash(genesis_hash);
                 }
 
                 if let Some(slow_start_interval) = slow_start_interval {
@@ -767,7 +757,7 @@ impl<'de> Deserialize<'de> for Config {
                     );
                 }
 
-                if let Some(target_difficulty_limit) = target_difficulty_limit {
+                if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
                     params_builder = params_builder.with_target_difficulty_limit(
                         target_difficulty_limit
                             .parse::<U256>()
@@ -780,11 +770,26 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
-                if let Some(activation_heights) = activation_heights {
+                if let Some(activation_heights) = activation_heights.clone() {
                     params_builder = params_builder.with_activation_heights(activation_heights)
                 }
 
-                params_builder.to_network()
+                // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
+                // peers and the configured network parameters are incompatible with the default public Testnet.
+                if !params_builder.is_compatible_with_default_parameters()
+                    && contains_default_initial_peers(&initial_testnet_peers)
+                {
+                    return Err(de::Error::custom(
+                        "cannot use default initials peers with incompatible testnet",
+                    ));
+                };
+
+                // Return the default Testnet if no network name was configured and all parameters match the default Testnet
+                if network_name.is_none() && params_builder == testnet::Parameters::build() {
+                    Network::new_default_testnet()
+                } else {
+                    params_builder.to_network()
+                }
             }
         };
 
