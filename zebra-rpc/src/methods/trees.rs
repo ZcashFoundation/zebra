@@ -32,6 +32,16 @@ pub struct GetSubtrees {
     pub subtrees: Vec<SubtreeRpcData>,
 }
 
+impl Default for GetSubtrees {
+    fn default() -> Self {
+        Self {
+            pool: "sapling | orchard".to_string(),
+            start_index: NoteCommitmentSubtreeIndex(u16::default()),
+            subtrees: vec![],
+        }
+    }
+}
+
 /// Response to a `z_gettreestate` RPC request.
 ///
 /// Contains hex-encoded Sapling & Orchard note commitment trees and their corresponding

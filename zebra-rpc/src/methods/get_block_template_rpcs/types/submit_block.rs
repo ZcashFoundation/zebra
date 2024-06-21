@@ -54,6 +54,12 @@ pub enum Response {
     Accepted,
 }
 
+impl Default for Response {
+    fn default() -> Self {
+        Self::ErrorResponse(ErrorResponse::Rejected)
+    }
+}
+
 impl From<ErrorResponse> for Response {
     fn from(error_response: ErrorResponse) -> Self {
         Self::ErrorResponse(error_response)

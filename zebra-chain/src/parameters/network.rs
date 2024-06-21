@@ -305,68 +305,6 @@ impl FromStr for Network {
 #[error("Invalid network: {0}")]
 pub struct InvalidNetworkError(String);
 
-impl zcash_primitives::consensus::Parameters for Network {
-    fn activation_height(
-        &self,
-        nu: zcash_primitives::consensus::NetworkUpgrade,
-    ) -> Option<zcash_primitives::consensus::BlockHeight> {
-        // Heights are hard-coded below Height::MAX or checked when the config is parsed.
-        NetworkUpgrade::from(nu)
-            .activation_height(self)
-            .map(|Height(h)| zcash_primitives::consensus::BlockHeight::from_u32(h))
-    }
-
-    fn coin_type(&self) -> u32 {
-        match self {
-            Network::Mainnet => zcash_primitives::constants::mainnet::COIN_TYPE,
-            // The regtest cointype reuses the testnet cointype,
-            // See <https://github.com/satoshilabs/slips/blob/master/slip-0044.md>
-            Network::Testnet(_) => zcash_primitives::constants::testnet::COIN_TYPE,
-        }
-    }
-
-    fn address_network(&self) -> Option<zcash_address::Network> {
-        match self {
-            Network::Mainnet => Some(zcash_address::Network::Main),
-            // TODO: Check if network is `Regtest` first, and if it is, return `zcash_address::Network::Regtest`
-            Network::Testnet(_params) => Some(zcash_address::Network::Test),
-        }
-    }
-
-    fn hrp_sapling_extended_spending_key(&self) -> &str {
-        match self {
-            Network::Mainnet => {
-                zcash_primitives::constants::mainnet::HRP_SAPLING_EXTENDED_SPENDING_KEY
-            }
-            Network::Testnet(params) => params.hrp_sapling_extended_spending_key(),
-        }
-    }
-
-    fn hrp_sapling_extended_full_viewing_key(&self) -> &str {
-        match self {
-            Network::Mainnet => {
-                zcash_primitives::constants::mainnet::HRP_SAPLING_EXTENDED_FULL_VIEWING_KEY
-            }
-            Network::Testnet(params) => params.hrp_sapling_extended_full_viewing_key(),
-        }
-    }
-
-    fn hrp_sapling_payment_address(&self) -> &str {
-        match self {
-            Network::Mainnet => zcash_primitives::constants::mainnet::HRP_SAPLING_PAYMENT_ADDRESS,
-            Network::Testnet(params) => params.hrp_sapling_payment_address(),
-        }
-    }
-
-    fn b58_pubkey_address_prefix(&self) -> [u8; 2] {
-        self.kind().b58_pubkey_address_prefix()
-    }
-
-    fn b58_script_address_prefix(&self) -> [u8; 2] {
-        self.kind().b58_script_address_prefix()
-    }
-}
-
 impl zcash_protocol::consensus::Parameters for Network {
     fn network_type(&self) -> zcash_address::Network {
         self.kind().into()

@@ -64,7 +64,7 @@ tracing = "0.1.39"
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.203", features = ["serde_derive"] }
 
-zcash_primitives = { version = "0.14.0" }
+zcash_primitives = { version = "0.15.0" }
 
 # Experimental feature getblocktemplate-rpcs
 rand = { version = "0.8.5", optional = true }

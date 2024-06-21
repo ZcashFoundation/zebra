@@ -28,6 +28,16 @@ pub struct BlockSubsidy {
     pub founders: Zec<NonNegative>,
 }
 
+impl Default for BlockSubsidy {
+    fn default() -> Self {
+        Self {
+            funding_streams: vec![],
+            miner: Zec::from_lossy_zec(0.0).unwrap(),
+            founders: Zec::from_lossy_zec(0.0).unwrap(),
+        }
+    }
+}
+
 /// A single funding stream's information in a  `getblocksubsidy` RPC request
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct FundingStream {
