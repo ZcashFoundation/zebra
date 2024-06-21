@@ -1431,7 +1431,7 @@ impl AddressStrings {
 }
 
 /// The transparent balance of a set of addresses.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
     /// The total transparent balance.
     balance: u64,
@@ -1497,6 +1497,12 @@ struct TipConsensusBranch {
 /// See the notes for the [`Rpc::send_raw_transaction` method].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
+
+impl Default for SentTransactionHash {
+    fn default() -> Self {
+        Self(transaction::Hash::from([0; 32]))
+    }
+}
 
 /// Response to a `getblock` RPC request.
 ///
@@ -1601,6 +1607,18 @@ pub enum GetRawTransaction {
     },
 }
 
+impl Default for GetRawTransaction {
+    fn default() -> Self {
+        Self::Object {
+            hex: SerializedTransaction::from(
+                [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
+            ),
+            height: i32::default(),
+            confirmations: u32::default(),
+        }
+    }
+}
+
 /// Response to a `getaddressutxos` RPC request.
 ///
 /// See the notes for the [`Rpc::get_address_utxos` method].
@@ -1628,6 +1646,22 @@ pub struct GetAddressUtxos {
     ///
     /// We put this field last, to match the zcashd order.
     height: Height,
+}
+
+impl Default for GetAddressUtxos {
+    fn default() -> Self {
+        Self {
+            address: transparent::Address::from_pub_key_hash(
+                zebra_chain::parameters::NetworkKind::default(),
+                [0u8; 20],
+            ),
+            txid: transaction::Hash::from([0; 32]),
+            output_index: OutputIndex::from_u64(0),
+            script: transparent::Script::new(&[0u8; 10]),
+            satoshis: u64::default(),
+            height: Height(0),
+        }
+    }
 }
 
 /// A struct to use as parameter of the `getaddresstxids`.

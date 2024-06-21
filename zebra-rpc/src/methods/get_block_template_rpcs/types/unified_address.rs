@@ -13,6 +13,17 @@ pub struct Response {
     p2sh: String,
 }
 
+impl Default for Response {
+    fn default() -> Self {
+        Self {
+            orchard: "orchard address if any".to_string(),
+            sapling: "sapling address if any".to_string(),
+            p2pkh: "p2pkh address if any".to_string(),
+            p2sh: "p2sh address if any".to_string(),
+        }
+    }
+}
+
 impl Response {
     /// Create a new response for z_listunifiedreceivers given individual addresses.
     pub fn new(orchard: String, sapling: String, p2pkh: String, p2sh: String) -> Response {
