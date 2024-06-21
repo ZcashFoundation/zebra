@@ -23,7 +23,6 @@ use super::super::*;
 
 /// Test that the JSON-RPC server spawns when configured with a single thread.
 #[test]
-#[cfg(not(target_os = "windows"))]
 fn rpc_server_spawn_single_thread() {
     rpc_server_spawn(false)
 }
@@ -42,9 +41,8 @@ fn rpc_server_spawn_parallel_threads() {
 fn rpc_server_spawn(parallel_cpu_threads: bool) {
     let _init_guard = zebra_test::init();
 
-    let port = zebra_test::net::random_known_port();
     let config = Config {
-        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
+        listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()),
         parallel_cpu_threads: if parallel_cpu_threads { 2 } else { 1 },
         debug_force_finished_sync: false,
     };
