@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Fixed a bug with trailing characters in the openapi spec method descriptions ([#8597](https://github.com/ZcashFoundation/zebra/pull/8597))
 - Added default constructions for several RPC method responses([#8616](https://github.com/ZcashFoundation/zebra/pull/8616))
 
+### Added
+
+- Added a page to the Zebra book describing custom Testnets ([#8636](https://github.com/ZcashFoundation/zebra/pull/8636))
+
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
 
 In this release we introduce Regtest functionality to Zebra and restored Windows support. Also adjusted our Zebra release interval from 2 weeks to 6 weeks approximately.
