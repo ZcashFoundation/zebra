@@ -38,7 +38,7 @@ pub struct Config {
     //
     // TODO: Remove fields that are only used by the state, and create a common database config.
     #[serde(flatten)]
-    db_config: DbConfig,
+    pub db_config: DbConfig,
 }
 
 impl Debug for Config {
