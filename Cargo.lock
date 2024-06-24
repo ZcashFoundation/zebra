@@ -5967,7 +5967,6 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
- "hyper 1.3.1",
  "indexmap 2.2.6",
  "insta",
  "jsonrpc-core",

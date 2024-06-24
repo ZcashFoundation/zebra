@@ -3,9 +3,7 @@
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
 use futures::TryStreamExt;
-use hyper::{body::Bytes, Body};
-
-use jsonrpc_http_server::RequestMiddleware;
+use jsonrpc_http_server::{RequestMiddleware, hyper};
 
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
@@ -66,10 +64,10 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
                 // Fix up the request.
                 let data = Self::remove_json_1_fields(data);
 
-                Bytes::from(data)
+                hyper::body::Bytes::from(data)
             });
 
-            Body::wrap_stream(body)
+            hyper::body::Body::wrap_stream(body)
         });
 
         tracing::trace!(?request, "modified HTTP request");
