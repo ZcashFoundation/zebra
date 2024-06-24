@@ -5714,9 +5714,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.15.0"
+version = "0.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5a8d812efec385ecbcefc862c0005bb1336474ea7dd9b671d5bbddaadd04be2"
+checksum = "8a9ccee58d0f9e8da312a999a4c0cd3d001ff3b37af6fb1318c89e6a3076f4da"
 dependencies = [
  "aes",
  "bip0039",
