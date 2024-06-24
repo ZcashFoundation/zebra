@@ -172,18 +172,18 @@ zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.6", optional = tru
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.37", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.5.4", features = ["cargo"] }
+clap = { version = "4.5.7", features = ["cargo"] }
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.2.6"
-lazy_static = "1.4.0"
+lazy_static = "1.5.0"
 semver = "1.0.23"
 serde = { version = "1.0.203", features = ["serde_derive"] }
-toml = "0.8.13"
+toml = "0.8.14"
 
 futures = "0.3.30"
 rayon = "1.10.0"
-tokio = { version = "1.37.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio = { version = "1.38.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tokio-stream = { version = "0.1.15", features = ["time"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.5"
@@ -201,7 +201,7 @@ tracing-error = "0.2.0"
 tracing-futures = "0.2.5"
 tracing = "0.1.39"
 
-metrics = "0.22.3"
+metrics = "0.23.0"
 
 dirs = "5.0.1"
 atty = "0.2.14"
@@ -223,10 +223,10 @@ inferno = { version = "0.11.19", default-features = false, optional = true }
 tracing-journald = { version = "0.3.0", optional = true }
 
 # prod feature filter-reload
-hyper = { version = "0.14.28", features = ["http1", "http2", "server"], optional = true }
+hyper = { version = "1.3.1", features = ["http1", "http2", "server"], optional = true }
 
 # prod feature prometheus
-metrics-exporter-prometheus = { version = "0.14.0", default-features = false, features = ["http-listener"], optional = true }
+metrics-exporter-prometheus = { version = "0.15.1", default-features = false, features = ["http-listener"], optional = true }
 
 # prod feature release_max_level_info
 #
@@ -239,11 +239,11 @@ howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
 indicatif = { version = "0.17.8", optional = true }
 
 # test feature proptest-impl
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.4.0", optional = true }
+proptest = { version = "1.5.0", optional = true }
+proptest-derive = { version = "0.5.0", optional = true }
 
 # test feature tokio-console
-console-subscriber = { version = "0.2.0", optional = true }
+console-subscriber = { version = "0.3.0", optional = true }
 
 [build-dependencies]
 vergen = { version = "8.3.1", default-features = false, features = ["cargo", "git", "git2", "rustc"] }
@@ -257,25 +257,25 @@ hex = "0.4.3"
 hex-literal = "0.4.1"
 jsonrpc-core = "18.0.0"
 once_cell = "1.18.0"
-regex = "1.10.4"
+regex = "1.10.5"
 insta = { version = "1.39.0", features = ["json"] }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { version = "1.0.117", features = ["preserve_order"] }
 tempfile = "3.10.1"
 
-hyper = { version = "0.14.28", features = ["http1", "http2", "server"]}
-tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
+hyper = { version = "1.3.1", features = ["http1", "http2", "server"]}
+tracing-test = { version = "0.2.5", features = ["no-env-filter"] }
 
-tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.38.0", features = ["full", "tracing", "test-util"] }
 tokio-stream = "0.1.15"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.12.6"
 tonic = "0.11.0"
 
-proptest = "1.4.0"
-proptest-derive = "0.4.0"
+proptest = "1.5.0"
+proptest-derive = "0.5.0"
 
 # enable span traces and track caller in tests
 color-eyre = { version = "0.6.3" }

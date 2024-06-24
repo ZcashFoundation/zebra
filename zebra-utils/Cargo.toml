@@ -111,12 +111,12 @@ zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.37", optional = true 
 itertools = { version = "0.13.0", optional = true }
 
 # These crates are needed for the search-issue-refs binary
-regex = { version = "1.10.4", optional = true }
+regex = { version = "1.10.5", optional = true }
 # Avoid default openssl dependency to reduce the dependency tree and security alerts. 
 reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
-tokio = { version = "1.37.0", features = ["full"], optional = true }
+tokio = { version = "1.38.0", features = ["full"], optional = true }
 
 jsonrpc = { version = "0.18.0", optional = true }
 
@@ -126,7 +126,7 @@ zcash_protocol = { version = "0.1.1" }
 
 # For the openapi generator
 rand = "0.8.5"
-syn = { version = "2.0.66", features = ["full"], optional = true }
+syn = { version = "2.0.68", features = ["full"], optional = true }
 quote = { version = "1.0.36", optional = true }
 serde_yaml = { version = "0.9.34+deprecated", optional = true }
 serde = { version = "1.0.203", features = ["serde_derive"], optional = true }

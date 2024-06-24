@@ -46,7 +46,7 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
 semver = "1.0.23"
 serde = { version = "1.0.203", features = ["serde_derive"] }
-tokio = { version = "1.37.0", features = ["time"] }
+tokio = { version = "1.38.0", features = ["time"] }
 tower = "0.4.13"
 tracing = "0.1.39"
 futures = "0.3.30"
@@ -65,8 +65,8 @@ zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.4" }
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
 
 # test feature proptest-impl
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.4.0", optional = true }
+proptest = { version = "1.5.0", optional = true }
+proptest-derive = { version = "0.5.0", optional = true }
 
 bls12_381 = { version = "0.8.0", optional = true }
 ff = { version = "0.13.0", optional = true }
@@ -79,10 +79,10 @@ zebra-test = { path = "../zebra-test", version = "1.0.0-beta.37", optional = tru
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["ron", "redactions"] }
-tokio = { version = "1.37.0", features = ["test-util"] }
+tokio = { version = "1.38.0", features = ["test-util"] }
 
-proptest = "1.4.0"
-proptest-derive = "0.4.0"
+proptest = "1.5.0"
+proptest-derive = "0.5.0"
 bls12_381 = "0.8.0"
 ff = "0.13.0"
 group = "0.13.0"

@@ -49,24 +49,24 @@ hex = "0.4.3"
 humantime-serde = "1.1.1"
 indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
-lazy_static = "1.4.0"
+lazy_static = "1.5.0"
 num-integer = "0.1.46"
 ordered-map = "0.4.2"
 pin-project = "1.1.5"
 rand = "0.8.5"
 rayon = "1.10.0"
-regex = "1.10.4"
+regex = "1.10.5"
 serde = { version = "1.0.203", features = ["serde_derive"] }
 tempfile = "3.10.1"
 thiserror = "1.0.61"
 
 futures = "0.3.30"
-tokio = { version = "1.37.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.38.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.15", features = ["sync", "time"] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
-metrics = "0.22.3"
+metrics = "0.23.0"
 tracing-futures = "0.2.5"
 tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.39"
@@ -80,18 +80,18 @@ howudoin = { version = "0.1.2", optional = true }
 # tor-rtcompat  = { version = "0.0.2", optional = true }
 
 # proptest dependencies
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.4.0", optional = true }
+proptest = { version = "1.5.0", optional = true }
+proptest-derive = { version = "0.5.0", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.37", features = ["async-error"] }
 
 [dev-dependencies]
-proptest = "1.4.0"
-proptest-derive = "0.4.0"
+proptest = "1.5.0"
+proptest-derive = "0.5.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
-toml = "0.8.13"
+tokio = { version = "1.38.0", features = ["full", "tracing", "test-util"] }
+toml = "0.8.14"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
