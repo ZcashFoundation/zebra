@@ -78,9 +78,6 @@ skip-tree = [
     # wait for indexmap, toml_edit, serde_json, tower to upgrade
     { name = "hashbrown", version = "=0.12.3" },
 
-    # wait for zcash_script to upgrade
-    { name = "metrics", version = "=0.21.1" },
-
     # ECC crates
 
     # wait for hdwallet to upgrade
@@ -113,7 +110,6 @@ skip-tree = [
     { name = "quick-error", version = "=1.2.3" },
 
     # wait for console-subscriber to update tonic.
-    { name = "tonic", version = "=0.10.2" },
     { name = "tonic-build", version = "=0.10.2" },
 
     # Optional dependencies

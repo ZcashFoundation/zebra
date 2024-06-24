@@ -3,7 +3,7 @@
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
 use futures::TryStreamExt;
-use jsonrpc_http_server::{RequestMiddleware, hyper};
+use jsonrpc_http_server::{hyper, RequestMiddleware};
 
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
