@@ -2,3 +2,81 @@
 # cargo-vet audits file
 
 [audits]
+
+[[trusted.clap]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2021-12-08"
+end = "2025-06-24"
+
+[[trusted.clap_builder]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2023-03-28"
+end = "2025-06-24"
+
+[[trusted.clap_derive]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2021-12-08"
+end = "2025-06-24"
+
+[[trusted.console-api]]
+criteria = "safe-to-deploy"
+user-id = 1249 # Eliza Weisman (hawkw)
+start = "2021-12-16"
+end = "2025-06-24"
+
+[[trusted.console-subscriber]]
+criteria = "safe-to-deploy"
+user-id = 1249 # Eliza Weisman (hawkw)
+start = "2021-12-16"
+end = "2025-06-24"
+
+[[trusted.hyper]]
+criteria = "safe-to-deploy"
+user-id = 359 # Sean McArthur (seanmonstar)
+start = "2019-03-01"
+end = "2025-06-24"
+
+[[trusted.lazy_static]]
+criteria = "safe-to-deploy"
+user-id = 539 # Josh Stone (cuviper)
+start = "2024-06-21"
+end = "2025-06-24"
+
+[[trusted.regex]]
+criteria = "safe-to-deploy"
+user-id = 189 # Andrew Gallant (BurntSushi)
+start = "2019-02-27"
+end = "2025-06-24"
+
+[[trusted.syn]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-01"
+end = "2025-06-24"
+
+[[trusted.tokio]]
+criteria = "safe-to-deploy"
+user-id = 10 # Carl Lerche (carllerche)
+start = "2019-03-02"
+end = "2025-06-24"
+
+[[trusted.tokio-macros]]
+criteria = "safe-to-deploy"
+user-id = 10 # Carl Lerche (carllerche)
+start = "2019-04-24"
+end = "2025-06-24"
+
+[[trusted.toml]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2022-12-14"
+end = "2025-06-24"
+
+[[trusted.toml_edit]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2021-09-13"
+end = "2025-06-24"
