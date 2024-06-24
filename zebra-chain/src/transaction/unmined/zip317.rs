@@ -205,8 +205,9 @@ pub fn mempool_checks(
     //
     // ## Note
     //
-    // If the check above, which checks the number of unpaid actions, doesn't fail, then there is no
-    // way for the legacy check below to fail. This renders the legacy check redundant.
+    // If the check above for the maximum number of unpaid actions passes with the default 
+    // unpaid action limit, then there is no way for the legacy check below to fail. 
+    // This renders the legacy check redundant with the default unpaid action limit of 0.
 
     const KILOBYTE: usize = 1000;
 
