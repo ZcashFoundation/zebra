@@ -48,17 +48,26 @@ skip = [
 # dependencies starting at the specified crate, up to a certain depth, which is
 # by default infinite
 skip-tree = [
+    # wait for ordered-map to release a dependency fix
+    { name = "ordered-map", version = "=0.4.2" },
+
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
 
     # wait for `color-eyre` to upgrade
     { name = "owo-colors", version = "=3.5.0" },
 
+    # wait for hdwallet to upgrade
+    { name = "ring", version = "=0.16.20" },
+
     # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
+
+    # wait for tokio-test -> tokio-stream to upgrade
+    { name = "tokio-util", version = "=0.6.10" },
 
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
