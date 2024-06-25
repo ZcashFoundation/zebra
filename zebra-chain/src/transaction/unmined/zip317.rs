@@ -41,9 +41,13 @@ const BLOCK_PRODUCTION_WEIGHT_RATIO_CAP: f32 = 4.0;
 /// This avoids special handling for transactions with zero weight.
 const MIN_BLOCK_PRODUCTION_SUBSTITUTE_FEE: i64 = 1;
 
-/// The ZIP-317 recommended limit on the number of unpaid actions per block.
-/// `block_unpaid_action_limit` in ZIP-317.
-pub const BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT: u32 = 50;
+/// If a tx has more than `BLOCK_UNPAID_ACTION_LIMIT` "unpaid actions", it will never be mined by
+/// the [_Recommended algorithm for block template construction_][alg-def], implemented in Zebra
+/// [here][alg-impl].
+///
+/// [alg-def]: https://zips.z.cash/zip-0317#recommended-algorithm-for-block-template-construction
+/// [alg-impl]: https://github.com/zcashfoundation/zebra/blob/95e4d0973caac075b47589f6a05f9d744acd3db3/zebra-rpc/src/methods/get_block_template_rpcs/zip317.rs#L39
+pub const BLOCK_UNPAID_ACTION_LIMIT: u32 = 0;
 
 /// The minimum fee per kilobyte for Zebra mempool transactions.
 /// Also used as the minimum fee for a mempool transaction.
@@ -178,7 +182,7 @@ pub fn mempool_checks(
     // > Nodes MAY drop these transactions.
     //
     // <https://zips.z.cash/zip-0317#transaction-relaying>
-    if unpaid_actions > BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT {
+    if unpaid_actions > BLOCK_UNPAID_ACTION_LIMIT {
         return Err(Error::UnpaidActions);
     }
 
@@ -198,6 +202,12 @@ pub fn mempool_checks(
     // In zcashd this is `DEFAULT_MIN_RELAY_TX_FEE` and `LEGACY_DEFAULT_FEE`:
     // <https://github.com/zcash/zcash/blob/f512291ff20098291442e83713de89bcddc07546/src/main.h#L71-L72>
     // <https://github.com/zcash/zcash/blob/9e856cfc5b81aa2607a16a23ff5584ea10014de6/src/amount.h#L35-L36>
+    //
+    // ## Note
+    //
+    // If the check above for the maximum number of unpaid actions passes with
+    // [`BLOCK_UNPAID_ACTION_LIMIT`] set to zero, then there is no way for the legacy check below to
+    // fail. This renders the legacy check redundant in that case.
 
     const KILOBYTE: usize = 1000;
 
