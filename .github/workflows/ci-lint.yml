@@ -37,14 +37,14 @@ jobs:
       rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
       workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v4.1.6
+      - uses: actions/checkout@v4.1.7
         with:
           persist-credentials: false
           fetch-depth: 0
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v44.5.2
+        uses: tj-actions/changed-files@v44.5.5
         with:
           files: |
             **/*.rs
@@ -56,7 +56,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v44.5.2
+        uses: tj-actions/changed-files@v44.5.5
         with:
           files: |
             .github/workflows/*.yml
@@ -69,7 +69,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4.1.6
+      - uses: actions/checkout@v4.1.7
         with:
           persist-credentials: false
 
@@ -119,7 +119,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4.1.6
+      - uses: actions/checkout@v4.1.7
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -149,9 +149,9 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
-      - uses: actions/checkout@v4.1.6
+      - uses: actions/checkout@v4.1.7
       - name: actionlint
-        uses: reviewdog/action-actionlint@v1.48.0
+        uses: reviewdog/action-actionlint@v1.51.0
         with:
           level: warning
           fail_on_error: false
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed-files
     steps:
-      - uses: actions/checkout@v4.1.6
+      - uses: actions/checkout@v4.1.7
       - uses: codespell-project/actions-codespell@v2.0
         with:
           only_warn: 1
