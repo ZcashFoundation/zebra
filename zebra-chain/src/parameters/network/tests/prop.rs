@@ -8,10 +8,8 @@ use crate::{
 
 proptest! {
     /// Check that the mandatory checkpoint is immediately before Canopy activation.
-    ///
-    /// This is necessary because Zebra can't fully validate the blocks prior to Canopy.
     #[test]
-    fn mandatory_checkpoint_is_after_canopy(network in any::<Network>()) {
+    fn mandatory_checkpoint_is_immediately_before_canopy(network in any::<Network>()) {
         let _init_guard = zebra_test::init();
 
         let pre_canopy_activation = NetworkUpgrade::Canopy
