@@ -10,9 +10,9 @@ Zebra's Testnet can be configured with custom:
 - Genesis hashes, and
 - Target difficulty limits.
 
-Configuring any of those Testnet parameters except the network name with non-default values will result in an incompatible custom Testnet.
-
 It's also possible to disable Proof-of-Work validation by setting `disable_pow` to `true` so that blocks can be mined onto the chain without valid Equihash solutions, nor block hashes below their target difficulties.
+
+Configuring any of those Testnet parameters except the network name with non-default values will result in an incompatible custom Testnet.
 
 All of these parameters are optional, if they are all omitted or set to their default values, Zebra will run on the default public Testnet.
 
@@ -175,6 +175,6 @@ Zebra nodes on custom Testnets will also reject peer connections with nodes that
 
 [^fn2]: Zebra's max on-disk serialized block height is currently `2^24 - 1`, the max block height of `2^31 - 1` can only be represented in-memory, so while an activation height of `2^31 - 1` is valid, Zebra's best chain would not currently be able to reach that activation height.
 
-[^fn3]: Configuring any of the Testnet parameters that are currently configurable except the network name will result in an incompatible custom Testnet, these are: the network magic, network upgrade activation heights, slow start interval, genesis hash, and target difficulty limit.
+[^fn3]: Configuring any of the Testnet parameters that are currently configurable except the network name will result in an incompatible custom Testnet, these are: the network magic, network upgrade activation heights, slow start interval, genesis hash, disabled Proof-of-Work and target difficulty limit.
 
 [^fn4]: Zebra won't make outbound peer connections on Regtest, but currently still listens for inbound peer connections, which will be rejected unless they use the Regtest network magic, and Zcash nodes using the Regtest network magic should not be making outbound peer connections. It may be updated to skip initialization of the peerset service altogether so that it won't listen for peer connections at all when support for isolated custom Testnets is added.
