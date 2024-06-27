@@ -12,7 +12,7 @@ Zebra's Testnet can be configured with custom:
 
 It's also possible to disable Proof-of-Work validation by setting `disable_pow` to `true` so that blocks can be mined onto the chain without valid Equihash solutions, nor block hashes below their target difficulties.
 
-Configuring any of those Testnet parameters except the network name with non-default values will result in an incompatible custom Testnet.
+Configuring any of those Testnet parameters except the network name with non-default values will result in an incompatible custom Testnet. Incompatible Testnets will fail to successfully complete peer handshakes with one another, or could provide one another with invalid blocks or invalid mempool transactions. Peer node connections that consistently provide invalid blocks or mempool transactions should be considered misbehaving peer connections and dropped.
 
 All of these parameters are optional, if they are all omitted or set to their default values, Zebra will run on the default public Testnet.
 
