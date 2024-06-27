@@ -34,9 +34,8 @@ slow_start_interval = 0
 target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
 disable_pow = true
 
-# Configured activation heights must be greater than or equal to 1, and less than
-# or equal to Zebra's max block height of 2^31 - 1, block height 0 is reserved
-# for the Genesis network upgrade in Zebra.
+# Configured activation heights must be greater than 0, and less than
+# 2^31. Block height 0 is reserved for the Genesis network upgrade in Zebra.
 #
 # Network upgrades must be activated in the order that they were added to Zcash,
 # configuring the activation heights of recent network upgrades will activate
@@ -54,7 +53,6 @@ NU5 = 1
 [rpc]
 listen_addr = "0.0.0.0:18232"
 ```
-
 
 Relevant parts of the configuration file with Mainnet parameters:
 
@@ -99,7 +97,7 @@ listen_addr = "0.0.0.0:18232"
 ## Caveats and Restrictions
 
 There are a few caveats:
-- Configured network upgrade activation heights must be above the genesis block height, which is reserved for Zebra's `Genesis` network upgrade, and must not be above Zebra's max block height of `2^31 -1`.
+- Configured network upgrade activation heights must be above the genesis block height, which is reserved for Zebra's `Genesis` network upgrade, and must not be above Zebra's max block height of `2^31 - 1`.
 - While it's possible to activate Canopy and later network upgrades after height 1, Zebra cannot currently produce pre-Canopy block templates, so the `getblocktemplate` RPC method and Zebra's internal miner which depends on the `getblocktemplate` method won't work until Canopy is activated. An alternative block source will be required to mine pre-Canopy blocks onto Zebra's chain.
 - While it's possible to use the default Testnet network magic with a configured Testnet, Zebra will panic when configured to use the default initial Testnet peers and Testnet parameters that are incompatible with the default public Testnet.
 - If the genesis hash is configured, a genesis block will need to be copied into the custom Testnet state or submitted via the `submitblock` RPC method, Zebra cannot currently generate genesis blocks. See the `CreateGenesisBlock()` function in `zcashd/src/chainparams.cpp` for use cases that require a new genesis block.
@@ -109,12 +107,12 @@ There are also a few other restrictions on these parameters:
     - not be any of the reserved network names: `Testnet`, `Mainnet`, and `Regtest`,
     - contain only alphanumeric characters and underscores, and
     - be shorter than the `MAX_NETWORK_NAME_LENGTH` of `30`.
-- The network magic must not be any of the reserve network magics: `[36, 233, 39, 100]` and `[170, 232, 63, 95]`, these are the `Mainnet` and `Regtest` network magics respectively.
+- The network magic must not be any of the reserved network magics: `[36, 233, 39, 100]` and `[170, 232, 63, 95]`, these are the `Mainnet` and `Regtest` network magics respectively.
 - The network upgrade activation heights must be in order, such that the activation height for every network upgrade is at or above the activation height of every preceding network upgrade.
 
 ## Comparison To Mainnet and Default Public Testnet Consensus Rules
 
-Aside from the configurable parameters, custom Testnets in Zebra validate all of same consensus rules as Testnet.
+Aside from the configurable parameters, custom Testnets in Zebra validate the same consensus rules as Testnet.
 
 ### Differences Between Mainnet and Testnet Consensus Rules
 
@@ -149,7 +147,7 @@ Zebra's Regtest network is a special case of a custom Testnet that:
 - Tries to closely match the `zcashd` Regtest parameters, and
 - Expects the Regtest genesis hash.
 
-Once Zebra's internal miner can mine Equihash solutions configurable parameters, Regtest should validate Proof-of-Work with the zcashd Equihash parameters unless it's disabled in its configuration, and custom Testnets should allow for configuring their Equihash parameters as well.
+Once Zebra's internal miner can mine Equihash solutions with configurable parameters, Zebra's Regtest should validate Proof-of-Work with the zcashd Regtest Equihash parameters unless it's disabled in its configuration, and custom Testnets should allow for configuring their Equihash parameters as well.
 
 In the future, Zebra may also allow for disabling peers on custom Testnets so that the only unique parameters of Zebra's Regtest will be the network name and magic.
 
