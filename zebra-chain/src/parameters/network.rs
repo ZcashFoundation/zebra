@@ -5,7 +5,7 @@ use std::{fmt, str::FromStr, sync::Arc};
 use thiserror::Error;
 
 use crate::{
-    block::{self, Height, HeightDiff},
+    block::{self, Height},
     parameters::NetworkUpgrade,
 };
 
@@ -14,42 +14,6 @@ pub mod testnet;
 
 #[cfg(test)]
 mod tests;
-
-/// The ZIP-212 grace period length after the Canopy activation height.
-///
-/// # Consensus
-///
-/// ZIP-212 requires Zcash nodes to validate that Sapling spends and Orchard actions follows a
-/// specific plaintext format after Canopy's activation.
-///
-/// > [Heartwood onward] All Sapling and Orchard outputs in coinbase transactions MUST decrypt to a
-/// > note plaintext , i.e. the procedure in § 4.19.3 ‘Decryption using a Full Viewing Key (Sapling
-/// > and Orchard)’ on p. 67 does not return ⊥, using a sequence of 32 zero bytes as the outgoing
-/// > viewing key . (This implies that before Canopy activation, Sapling outputs of a coinbase
-/// > transaction MUST have note plaintext lead byte equal to 0x01.)
-///
-/// > [Canopy onward] Any Sapling or Orchard output of a coinbase transaction decrypted to a note
-/// > plaintext according to the preceding rule MUST have note plaintext lead byte equal to 0x02.
-/// > (This applies even during the “grace period” specified in [ZIP-212].)
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus>
-///
-/// Wallets have a grace period of 32,256 blocks after Canopy's activation to validate those blocks,
-/// but nodes do not.
-///
-/// > There is a "grace period" of 32256 blocks starting from the block at which this ZIP activates,
-/// > during which note plaintexts with lead byte 0x01 MUST still be accepted [by wallets].
-/// >
-/// > Let ActivationHeight be the activation height of this ZIP, and let GracePeriodEndHeight be
-/// > ActivationHeight + 32256.
-///
-/// <https://zips.z.cash/zip-0212#changes-to-the-process-of-receiving-sapling-or-orchard-notes>
-///
-/// Zebra uses `librustzcash` to validate that rule, but it won't validate it during the grace
-/// period. Therefore Zebra must validate those blocks during the grace period using checkpoints.
-/// Therefore the mandatory checkpoint height ([`Network::mandatory_checkpoint_height`]) must be
-/// after the grace period.
-const ZIP_212_GRACE_PERIOD_DURATION: HeightDiff = 32_256;
 
 /// An enum describing the kind of network, whether it's the production mainnet or a testnet.
 // Note: The order of these variants is important for correct bincode (de)serialization
@@ -234,34 +198,17 @@ impl Network {
     /// Mandatory checkpoints are a Zebra-specific feature.
     /// If a Zcash consensus rule only applies before the mandatory checkpoint,
     /// Zebra can skip validation of that rule.
-    ///
-    /// ZIP-212 grace period is only applied to default networks.
+    /// This is necessary because Zebra can't fully validate the blocks prior to Canopy.
     // TODO:
     // - Support constructing pre-Canopy coinbase tx and block templates and return `Height::MAX` instead of panicking
     //   when Canopy activation height is `None` (#8434)
-    // - Add semantic block validation during the ZIP-212 grace period and update this method to always apply the ZIP-212 grace period
     pub fn mandatory_checkpoint_height(&self) -> Height {
-        // Currently this is after the ZIP-212 grace period.
-        //
-        // See the `ZIP_212_GRACE_PERIOD_DURATION` documentation for more information.
-
-        let canopy_activation = NetworkUpgrade::Canopy
+        // Currently this is just before Canopy activation
+        NetworkUpgrade::Canopy
             .activation_height(self)
-            .expect("Canopy activation height must be present for both networks");
-
-        let is_a_default_network = match self {
-            Network::Mainnet => true,
-            Network::Testnet(params) => params.is_default_testnet(),
-        };
-
-        if is_a_default_network {
-            (canopy_activation + ZIP_212_GRACE_PERIOD_DURATION)
-                .expect("ZIP-212 grace period ends at a valid block height")
-        } else {
-            canopy_activation
-                .previous()
-                .expect("Canopy activation must be above Genesis height")
-        }
+            .expect("Canopy activation height must be present on all networks")
+            .previous()
+            .expect("Canopy activation height must be above min height")
     }
 
     /// Return the network name as defined in
