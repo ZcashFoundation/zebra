@@ -118,8 +118,9 @@ You can start Zebra by
 zebrad start
 ```
 
-See the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and [Running Zebra](https://zebra.zfnd.org/user/run.html)
-sections in the book for more details.
+Refer to the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and
+[Running Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for
+enabling optional features, detailed configuration and further details.
 
 ## Documentation
 
@@ -141,7 +142,13 @@ The Zcash Foundation maintains the following resources documenting Zebra:
 
 For bug reports please [open a bug report ticket in the Zebra repository](https://github.com/ZcashFoundation/zebra/issues/new?assignees=&labels=C-bug%2C+S-needs-triage&projects=&template=bug_report.yml&title=%5BUser+reported+bug%5D%3A+).
 
-Alternatively by chat, [Join the Zcash Foundation Discord Server](https://discord.com/invite/aRgNRVwsM8) and find the #zebra-support channel.
+Alternatively by chat, [Join the Zcash Foundation Discord
+Server](https://discord.com/invite/aRgNRVwsM8) and find the #zebra-support
+channel.
+
+We maintain a list of known issues in the
+[Troubleshooting](https://zebra.zfnd.org/user/troubleshooting.html) section of
+the book.
 
 ## Security
 
