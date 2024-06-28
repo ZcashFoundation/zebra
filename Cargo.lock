@@ -6055,7 +6055,10 @@ dependencies = [
  "serde",
  "serde_json",
  "structopt",
+ "tempfile",
  "tokio",
+ "toml 0.8.13",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -6070,6 +6073,7 @@ dependencies = [
  "zebra-rpc",
  "zebra-state",
  "zebra-test",
+ "zebrad",
 ]
 
 [[package]]
