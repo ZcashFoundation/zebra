@@ -2,18 +2,13 @@
 
 ---
 
-[![CI Docker](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-integration-tests-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-integration-tests-gcp.yml) [![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml) [![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml) [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra) [![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
+[![Integration Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/sub-ci-integration-tests-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/sub-ci-integration-tests-gcp.yml) [![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml) [![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml) [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra) [![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
-
-## Contents
 
 - [About](#about)
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Building Zebra](#building-zebra)
-    - [Optional Configs & Features](#optional-configs--features)
-- [Known Issues](#known-issues)
-- [Future Work](#future-work)
 - [Documentation](#documentation)
 - [User support](#user-support)
 - [Security](#security)
@@ -125,67 +120,6 @@ zebrad start
 
 See the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and [Running Zebra](https://zebra.zfnd.org/user/run.html)
 sections in the book for more details.
-
-#### Optional Configs & Features
-
-##### Initializing Configuration File
-
-```console
-zebrad generate -o ~/.config/zebrad.toml
-```
-
-The above command places the generated `zebrad.toml` config file in the default preferences directory of Linux. For other OSes default locations [see here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
-
-##### Configuring Progress Bars
-
-Configure `tracing.progress_bar` in your `zebrad.toml` to
-[show key metrics in the terminal using progress bars](https://zfnd.org/experimental-zebra-progress-bars/).
-When progress bars are active, Zebra automatically sends logs to a file.
-
-There is a known issue where [progress bar estimates become extremely large](https://github.com/console-rs/indicatif/issues/556).
-
-In future releases, the `progress_bar = "summary"` config will show a few key metrics,
-and the "detailed" config will show all available metrics. Please let us know which metrics are
-important to you!
-
-##### Configuring Mining
-
-Zebra can be configured for mining by passing a `MINER_ADDRESS` and port mapping to Docker.
-See the [mining support docs](https://zebra.zfnd.org/user/mining-docker.html) for more details.
-
-##### Custom Build Features
-
-You can also build Zebra with additional [Cargo features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
-
-- `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
-- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
-- `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
-- `shielded-scan` for [experimental shielded scan support](https://zebra.zfnd.org/user/shielded-scan.html)
-
-You can combine multiple features by listing them as parameters of the `--features` flag:
-
-```sh
-cargo install --features="<feature1> <feature2> ..." ...
-```
-
-Our full list of experimental and developer features is in [the API documentation](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags).
-
-Some debugging and monitoring features are disabled in release builds to increase
-performance.
-
-## Known Issues
-
-There are a few bugs in Zebra that we're still working on fixing:
-
-- [The `getpeerinfo` RPC shows current and recent outbound connections](https://github.com/ZcashFoundation/zebra/issues/7893), rather than current inbound and outbound connections.
-
-- [Progress bar estimates can become extremely large](https://github.com/console-rs/indicatif/issues/556). We're waiting on a fix in the progress bar library.
-
-- Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release
-
-- Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
-
-- Experimental Tor support is disabled until Zebra upgrades to the latest `arti-client`. This happened due to a Rust dependency conflict ([#5492](https://github.com/ZcashFoundation/zebra/issues/5492)) and is still an issue due to [another dependency conflict](https://github.com/ZcashFoundation/zebra/issues/8328#issuecomment-1969989648).
 
 ## Documentation
 
