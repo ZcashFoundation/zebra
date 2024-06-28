@@ -1,8 +1,10 @@
 # Regtest with Zebra
 
-The Regtest network in Zebra enables testing of custom functionalities in a private testnet environment with configurable network upgrade activation heights. It allows for starting an isolated node which won't connect to any peers and currently allows for committing blocks without validating their Proof of Work (in the future, it may use a very low target difficulty and easier Equihash parameters instead of skipping Proof of Work validation altogether).
+The Regtest network in Zebra enables testing of custom functionalities in a private Testnet environment with configurable network upgrade activation heights. It allows for starting an isolated node which won't connect to any peers and currently allows for committing blocks without validating their Proof of Work (in the future, it may use a very low target difficulty and easier Equihash parameters instead of skipping Proof of Work validation altogether).
 
 Zebra always activates the Canopy network upgrade at block height 1 due to limitations on its block construction.
+
+## Usage
 
 In order to use Regtest, Zebra must be configured to run on the Regtest network. The `[mining]` section is also necessary for mining blocks, and the `[rpc]` section is necessary for using the `send_raw_transaction` RPC method to mine non-coinbase transactions onto the chain.
 
@@ -40,7 +42,7 @@ There are two ways to commit blocks to Zebra's state on Regtest:
 - Using the `getblocktemplate` and `submitblock` RPC methods directly
 - Using Zebra's experimental `internal-miner` feature
 
-## Using Zebra's Internal Miner
+### Using Zebra's Internal Miner
 
 Zebra can mine blocks on the Regtest network when compiled with the experimental `internal-miner` compilation feature and configured to enable to internal miner.
 
@@ -55,7 +57,7 @@ Zebra should now mine blocks on Regtest when it starts after a short delay (of a
 
 To confirm that it's working, look for `successfully mined a new block` messages in the logs, or that the tip height is increasing.
 
-## Using RPC methods directly
+### Using RPC methods directly
 
 Blocks could also be mined outside of Zebra and submitted via Zebra's RPC methods. This requires enabling the RPC server in the configuration by providing a `listen_addr` field:
 

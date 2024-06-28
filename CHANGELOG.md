@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Added Windows to the list of supported platforms in Tier 2 ([#8637](https://github.com/ZcashFoundation/zebra/pull/8637))
 - Zebra now drops transactions with unpaid actions in block templates and from the mempool.
 
+### Added
+
+- Added a page to the Zebra book describing custom Testnets ([#8636](https://github.com/ZcashFoundation/zebra/pull/8636))
+
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
 
 In this release we introduce Regtest functionality to Zebra and restored Windows support. Also adjusted our Zebra release interval from 2 weeks to 6 weeks approximately.

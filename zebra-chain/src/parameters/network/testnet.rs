@@ -43,7 +43,7 @@ const TESTNET_GENESIS_HASH: &str =
     "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38";
 
 /// Configurable activation heights for Regtest and configured Testnets.
-#[derive(Deserialize, Default)]
+#[derive(Deserialize, Default, Clone)]
 #[serde(rename_all = "PascalCase")]
 pub struct ConfiguredActivationHeights {
     /// Activation height for `BeforeOverwinter` network upgrade.
@@ -276,6 +276,26 @@ impl ParametersBuilder {
     /// Converts the builder to a configured [`Network::Testnet`]
     pub fn to_network(self) -> Network {
         Network::new_configured_testnet(self.finish())
+    }
+
+    /// Returns true if these [`Parameters`] should be compatible with the default Testnet parameters.
+    pub fn is_compatible_with_default_parameters(&self) -> bool {
+        let Self {
+            network_name: _,
+            network_magic,
+            genesis_hash,
+            activation_heights,
+            slow_start_interval,
+            target_difficulty_limit,
+            disable_pow,
+        } = Self::default();
+
+        self.activation_heights == activation_heights
+            && self.network_magic == network_magic
+            && self.genesis_hash == genesis_hash
+            && self.slow_start_interval == slow_start_interval
+            && self.target_difficulty_limit == target_difficulty_limit
+            && self.disable_pow == disable_pow
     }
 }
 
