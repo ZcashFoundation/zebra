@@ -5,12 +5,10 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 1.8.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.8.0) - 2024-07-01
+## [Zebra 1.8.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.8.0) - 2024-07-02
 
-### Summary
 
-- Zebra now drops transactions with unpaid actions in block templates and from
-  the mempool.
+- Zebra now uses a default unpaid actions limit of 0, dropping transactions with any unpaid actions from the mempool and excluding them when selecting transactions from the mempool during block template construction.
 - The `zebrad` binary no longer contains the scanner of shielded transactions.
   This means `zebrad` no longer contains users' viewing keys.
 - Support for custom Testnets and Regtest is greatly enhanced.
@@ -21,35 +19,33 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Added
 
 - Add an init function for a standalone `ReadStateService` ([#8595](https://github.com/ZcashFoundation/zebra/pull/8595))
-- Add new parameters for custom Testnets ([#8477](https://github.com/ZcashFoundation/zebra/pull/8477), [#8518](https://github.com/ZcashFoundation/zebra/pull/8518), [#8524](https://github.com/ZcashFoundation/zebra/pull/8524))
-- Add default constructions for several RPC method responses ([#8616](https://github.com/ZcashFoundation/zebra/pull/8616))
-- Allow custom Testnets to make peer connections and configure more parameters ([#8528](https://github.com/ZcashFoundation/zebra/pull/8528))
-- Allow configurable NU5 activation height on Regtest ([#8505](https://github.com/ZcashFoundation/zebra/pull/8505))
+- Allow configuring more parameters on custom Testnets and an NU5 activation height on Regtest ([#8477](https://github.com/ZcashFoundation/zebra/pull/8477), [#8518](https://github.com/ZcashFoundation/zebra/pull/8518), [#8524](https://github.com/ZcashFoundation/zebra/pull/8524), [#8528](https://github.com/ZcashFoundation/zebra/pull/8528), [#8636](https://github.com/ZcashFoundation/zebra/pull/8636))
+- Add default constructions for several RPC method responses ([#8616](https://github.com/ZcashFoundation/zebra/pull/8616), [#8505](https://github.com/ZcashFoundation/zebra/pull/8505))
+- Support constructing Canopy proposal blocks from block templates ([#8505](https://github.com/ZcashFoundation/zebra/pull/8505))
 
 #### Docs
 
-- Add a section on Regtest usage to the Zebra book ([#8526](https://github.com/ZcashFoundation/zebra/pull/8526))
-- Describe custom Testnets in the Zebra book ([#8636](https://github.com/ZcashFoundation/zebra/pull/8636))
+- Document custom Testnets, Regtest and how they compare to Mainnet and the default Testnet in the Zebra book ([#8526](https://github.com/ZcashFoundation/zebra/pull/8526), [#8636](https://github.com/ZcashFoundation/zebra/pull/8636))
 
 ### Changed
 
-- Drop transactions with unpaid actions ([#8638](https://github.com/ZcashFoundation/zebra/pull/8638))
-- Lower the mandatory checkpoint height ([#8629](https://github.com/ZcashFoundation/zebra/pull/8629))
-- Use the new `zcash_script` callback API ([#8566](https://github.com/ZcashFoundation/zebra/pull/8566))
+- Use a default unpaid action limit of 0 so that transactions with unpaid actions are excluded from the mempool and block templates by default ([#8638](https://github.com/ZcashFoundation/zebra/pull/8638))
+- Lower the mandatory checkpoint height from immediately above the ZIP-212 grace period to immediately below Canopy activation ([#8629](https://github.com/ZcashFoundation/zebra/pull/8629))
+- Use the new `zcash_script` callback API in `zebra-script`, allowing Zebra's ECC dependencies to be upgraded independently of `zcash_script` and `zcashd` ([#8566](https://github.com/ZcashFoundation/zebra/pull/8566))
 - Put Windows in Tier 2 of supported platforms ([#8637](https://github.com/ZcashFoundation/zebra/pull/8637))
-- Remove support for starting the scanner at `zebrad` startup ([#8594](https://github.com/ZcashFoundation/zebra/pull/8594))
+- Remove experimental support for starting the `zebra-scan` in the `zebrad` process as a step towards moving the scanner to its own process ([#8594](https://github.com/ZcashFoundation/zebra/pull/8594))
 - Reduce the end of support time from 20 weeks to 16 weeks ([#8530](https://github.com/ZcashFoundation/zebra/pull/8530))
-- Restore parts of the internal-miner feature for use on Regtest ([#8506](https://github.com/ZcashFoundation/zebra/pull/8506))
+- Restore parts of the experimental `internal-miner` feature for use on Regtest ([#8506](https://github.com/ZcashFoundation/zebra/pull/8506))
 
 ### Fixed
 
-- Allow square brackets in network config listen addr and external addr ([#8504](https://github.com/ZcashFoundation/zebra/pull/8504))
+- Allow square brackets in network config listen addr and external addr without explicitly configuring a port in the listen addr ([#8504](https://github.com/ZcashFoundation/zebra/pull/8504))
 - Fix general conditional compilation attributes ([#8602](https://github.com/ZcashFoundation/zebra/pull/8602))
 - Update `median_timespan()` method to align with zcashd implementation ([#8491](https://github.com/ZcashFoundation/zebra/pull/8491))
-- Refactor the serialization of empty treestates ([#8533](https://github.com/ZcashFoundation/zebra/pull/8533))
-- Address port conflict issues and enable related Windows tests ([#8624](https://github.com/ZcashFoundation/zebra/pull/8624))
-- Fix a bug with trailing characters in the openapi spec method descriptions ([#8597](https://github.com/ZcashFoundation/zebra/pull/8597))
-- Stop using `displaydoc` ([#8614](https://github.com/ZcashFoundation/zebra/pull/8614))
+- Allow custom Testnets to make peer connections ([#8528](https://github.com/ZcashFoundation/zebra/pull/8528))
+- Refactor and simplify the serialization of empty treestates to fix an incorrect serialization of empty note commitment trees for RPCs ([#8533](https://github.com/ZcashFoundation/zebra/pull/8533))
+- Fix port conflict issue in some tests and re-enable those tests on Windows where those issues were especially problematic ([#8624](https://github.com/ZcashFoundation/zebra/pull/8624))
+- Fix a bug with trailing characters in the OpenAPI spec method descriptions ([#8597](https://github.com/ZcashFoundation/zebra/pull/8597))
 
 ### Contributors
 
