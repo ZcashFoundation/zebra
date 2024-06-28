@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.8.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.8.0) - 2024-07-02
 
+### Summary
 
-- Zebra now uses a default unpaid actions limit of 0, dropping transactions with any unpaid actions from the mempool and excluding them when selecting transactions from the mempool during block template construction.
+- Zebra now uses a default unpaid actions limit of 0, dropping transactions with
+  any unpaid actions from the mempool and excluding them when selecting
+  transactions from the mempool during block template construction.
 - The `zebrad` binary no longer contains the scanner of shielded transactions.
   This means `zebrad` no longer contains users' viewing keys.
 - Support for custom Testnets and Regtest is greatly enhanced.
