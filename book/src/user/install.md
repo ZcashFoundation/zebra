@@ -1,17 +1,13 @@
 # Installing Zebra
 
-Follow the [Docker or compilation instructions](https://zebra.zfnd.org/index.html#getting-started).
+To install Zebra, follow the [Getting Started](https://zebra.zfnd.org/index.html#getting-started) section.
 
-## Installing Dependencies
-
-To compile Zebra from source, you will need to [install some dependencies.](https://zebra.zfnd.org/index.html#building-zebra).
-
-#### Optional Configs & Features
+## Optional Configs & Features
 
 Zebra supports a variety of optional features which you can enable and configure
 manually.
 
-##### Initializing Configuration File
+### Initializing Configuration File
 
 ```console
 zebrad generate -o ~/.config/zebrad.toml
@@ -21,7 +17,7 @@ The above command places the generated `zebrad.toml` config file in the default
 preferences directory of Linux. For other OSes default locations [see
 here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
 
-##### Configuring Progress Bars
+### Configuring Progress Bars
 
 Configure `tracing.progress_bar` in your `zebrad.toml` to [show key metrics in
 the terminal using progress
@@ -35,13 +31,13 @@ In future releases, the `progress_bar = "summary"` config will show a few key
 metrics, and the "detailed" config will show all available metrics. Please let
 us know which metrics are important to you!
 
-##### Configuring Mining
+### Configuring Mining
 
 Zebra can be configured for mining by passing a `MINER_ADDRESS` and port mapping
 to Docker. See the [mining support
 docs](https://zebra.zfnd.org/user/mining-docker.html) for more details.
 
-##### Custom Build Features
+### Custom Build Features
 
 You can also build Zebra with additional [Cargo
 features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
@@ -66,11 +62,14 @@ increase performance.
 
 ## Alternative Compilation Methods
 
+Zebra also supports the following compilation methods.
+
 ### Compiling Manually from git
 
 To compile Zebra directly from GitHub, or from a GitHub release source archive:
 
-1. Install the dependencies (see above)
+1. Install the dependencies as described in the [Getting
+   Started](https://zebra.zfnd.org/index.html#getting-started) section.
 
 2. Get the source code using `git` or from a GitHub source package
 
@@ -131,5 +130,4 @@ If you're having trouble with:
 cargo build
 cargo build -p zebrad --all-features
 ```
-
 
