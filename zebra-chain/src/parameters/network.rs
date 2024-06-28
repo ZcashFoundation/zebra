@@ -228,6 +228,7 @@ impl Network {
     }
 
     /// Returns the Sapling activation height for this network.
+    // TODO: Return an `Option` here now that network upgrade activation heights are configurable on Regtest and custom Testnets
     pub fn sapling_activation_height(&self) -> Height {
         super::NetworkUpgrade::Sapling
             .activation_height(self)
