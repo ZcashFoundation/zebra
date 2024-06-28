@@ -6,6 +6,64 @@ Follow the [Docker or compilation instructions](https://zebra.zfnd.org/index.htm
 
 To compile Zebra from source, you will need to [install some dependencies.](https://zebra.zfnd.org/index.html#building-zebra).
 
+#### Optional Configs & Features
+
+Zebra supports a variety of optional features which you can enable and configure
+manually.
+
+##### Initializing Configuration File
+
+```console
+zebrad generate -o ~/.config/zebrad.toml
+```
+
+The above command places the generated `zebrad.toml` config file in the default
+preferences directory of Linux. For other OSes default locations [see
+here](https://docs.rs/dirs/latest/dirs/fn.preference_dir.html).
+
+##### Configuring Progress Bars
+
+Configure `tracing.progress_bar` in your `zebrad.toml` to [show key metrics in
+the terminal using progress
+bars](https://zfnd.org/experimental-zebra-progress-bars/). When progress bars
+are active, Zebra automatically sends logs to a file.
+
+There is a known issue where [progress bar estimates become extremely
+large](https://github.com/console-rs/indicatif/issues/556).
+
+In future releases, the `progress_bar = "summary"` config will show a few key
+metrics, and the "detailed" config will show all available metrics. Please let
+us know which metrics are important to you!
+
+##### Configuring Mining
+
+Zebra can be configured for mining by passing a `MINER_ADDRESS` and port mapping
+to Docker. See the [mining support
+docs](https://zebra.zfnd.org/user/mining-docker.html) for more details.
+
+##### Custom Build Features
+
+You can also build Zebra with additional [Cargo
+features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options):
+
+- `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
+- `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
+- `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
+- `shielded-scan` for [experimental shielded scan support](https://zebra.zfnd.org/user/shielded-scan.html)
+
+You can combine multiple features by listing them as parameters of the
+`--features` flag:
+
+```sh
+cargo install --features="<feature1> <feature2> ..." ...
+```
+
+Our full list of experimental and developer features is in [the API
+documentation](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags).
+
+Some debugging and monitoring features are disabled in release builds to
+increase performance.
+
 ## Alternative Compilation Methods
 
 ### Compiling Manually from git
