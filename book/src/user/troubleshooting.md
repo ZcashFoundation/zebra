@@ -1,14 +1,5 @@
 # Troubleshooting
 
-We continuously test that our builds and tests pass on the _latest_ [GitHub
-Runners](https://docs.github.com/en/actions/using-github-hosted-runners/about-github-hosted-runners#supported-runners-and-hardware-resources)
-for:
-
-- macOS,
-- Ubuntu,
-- Docker:
-  - Debian Bookworm.
-  
 ## Known Issues
 
 There are a few bugs in Zebra that we're still working on fixing:
