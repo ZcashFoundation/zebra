@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod constants;
+pub mod indexer;
 pub mod methods;
 pub mod queue;
 pub mod server;

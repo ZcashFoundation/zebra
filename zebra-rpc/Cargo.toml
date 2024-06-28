@@ -58,10 +58,15 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 tokio = { version = "1.37.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = "0.4.13"
 
+tonic = "0.11.0"
+tonic-reflection = "0.11.0"
+prost = "0.12.6"
+
 tracing = "0.1.39"
 
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.203", features = ["serde_derive"] }
+
 
 zcash_primitives = { version = "0.15.0" }
 
@@ -79,6 +84,9 @@ zebra-network = { path = "../zebra-network", version = "1.0.0-beta.38" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38", features = ["rpc-client"] }
 zebra-script = { path = "../zebra-script", version = "1.0.0-beta.38" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38" }
+
+[build-dependencies]
+tonic-build = "0.11.0"
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["redactions", "json", "ron"] }
