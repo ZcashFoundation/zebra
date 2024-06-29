@@ -23,8 +23,8 @@ fi
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
 
 # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-scan 0.1.0-alpha.7
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-grpc 0.1.0-alpha.5
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-scan 0.1.0-alpha.8
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-grpc 0.1.0-alpha.6
 
 # Update zebrad:
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch
