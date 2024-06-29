@@ -46,7 +46,6 @@ use crate::methods::{
         types::{
             get_block_template::GetBlockTemplate,
             get_mining_info,
-            hex_data::HexData,
             long_poll::LongPollInput,
             peer_info::PeerInfo,
             submit_block,
@@ -54,7 +53,9 @@ use crate::methods::{
             unified_address, validate_address, z_validate_address,
         },
     },
-    height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+    height_from_signed_int,
+    hex_data::HexData,
+    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod constants;

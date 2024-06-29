@@ -38,6 +38,7 @@ use crate::{
 };
 
 mod errors;
+pub mod hex_data;
 
 use errors::{MapServerError, OkOrServerError};
 
@@ -170,6 +171,14 @@ pub trait Rpc {
     /// tags: blockchain
     #[rpc(name = "getbestblockhash")]
     fn get_best_block_hash(&self) -> Result<GetBlockHash>;
+
+    /// Returns the height and hash of the current best blockchain tip block, as a [`GetBlockHeightAndHash`] JSON struct.
+    ///
+    /// zcashd reference: none
+    /// method: post
+    /// tags: blockchain
+    #[rpc(name = "getbestblockheightandhash")]
+    fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -867,7 +876,6 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_best_block_hash(&self) -> Result<GetBlockHash> {
         self.latest_chain_tip
             .best_tip_hash()
@@ -875,7 +883,13 @@ where
             .ok_or_server_error("No blocks in state")
     }
 
-    // TODO: use a generic error constructor (#5548)
+    fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash> {
+        self.latest_chain_tip
+            .best_tip_height_and_hash()
+            .map(|(height, hash)| GetBlockHeightAndHash { height, hash })
+            .ok_or_server_error("No blocks in state")
+    }
+
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
         #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
@@ -1546,6 +1560,24 @@ impl Default for GetBlock {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(transparent)]
 pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
+
+/// Response to a `getbestblockheightandhash` RPC request.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct GetBlockHeightAndHash {
+    /// The best chain tip block height
+    pub height: block::Height,
+    /// The best chain tip block hash
+    pub hash: block::Hash,
+}
+
+impl Default for GetBlockHeightAndHash {
+    fn default() -> Self {
+        Self {
+            height: block::Height::MIN,
+            hash: block::Hash([0; 32]),
+        }
+    }
+}
 
 impl Default for GetBlockHash {
     fn default() -> Self {

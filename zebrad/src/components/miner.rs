@@ -30,13 +30,11 @@ use zebra_node_services::mempool;
 use zebra_rpc::{
     config::mining::Config,
     methods::{
-        get_block_template_rpcs::{
-            get_block_template::{
-                self, proposal::TimeSource, proposal_block_from_template,
-                GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
-            },
-            types::hex_data::HexData,
+        get_block_template_rpcs::get_block_template::{
+            self, proposal::TimeSource, proposal_block_from_template,
+            GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
         },
+        hex_data::HexData,
         GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
     },
 };

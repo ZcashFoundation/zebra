@@ -567,6 +567,11 @@ impl DiskDb {
         );
     }
 
+    /// When called with a secondary DB instance, tries to catch up with the primary DB instance
+    pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
+        self.db.try_catch_up_with_primary()
+    }
+
     /// Returns a forward iterator over the items in `cf` in `range`.
     ///
     /// Holding this iterator open might delay block commit transactions.
@@ -834,7 +839,23 @@ impl DiskDb {
             .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
 
         let db_result = if read_only {
-            DB::open_cf_descriptors_read_only(&db_options, &path, column_families, false)
+            // Use a tempfile for the secondary instance cache directory
+            let secondary_config = Config {
+                ephemeral: true,
+                ..config.clone()
+            };
+            let secondary_path =
+                secondary_config.db_path("secondary_state", format_version_in_code.major, network);
+            let create_dir_result = std::fs::create_dir_all(&secondary_path);
+
+            info!(?create_dir_result, "creating secondary db directory");
+
+            DB::open_cf_descriptors_as_secondary(
+                &db_options,
+                &path,
+                &secondary_path,
+                column_families,
+            )
         } else {
             DB::open_cf_descriptors(&db_options, &path, column_families)
         };

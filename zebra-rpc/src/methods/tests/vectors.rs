@@ -1259,8 +1259,9 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                 GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD,
             },
             get_block_template::{self, GetBlockTemplateRequestMode},
-            types::{hex_data::HexData, long_poll::LONG_POLL_ID_LENGTH},
+            types::long_poll::LONG_POLL_ID_LENGTH,
         },
+        hex_data::HexData,
         tests::utils::fake_history_tree,
     };
 
@@ -1547,7 +1548,7 @@ async fn rpc_submitblock_errors() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
     use zebra_network::address_book_peers::MockAddressBookPeers;
 
-    use crate::methods::get_block_template_rpcs::types::{hex_data::HexData, submit_block};
+    use crate::methods::{get_block_template_rpcs::types::submit_block, hex_data::HexData};
 
     let _init_guard = zebra_test::init();
 

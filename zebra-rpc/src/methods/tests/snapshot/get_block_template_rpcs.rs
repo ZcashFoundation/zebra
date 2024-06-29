@@ -39,13 +39,13 @@ use crate::methods::{
     get_block_template_rpcs::types::{
         get_block_template::{self, GetBlockTemplateRequestMode},
         get_mining_info,
-        hex_data::HexData,
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
         submit_block,
         subsidy::BlockSubsidy,
         unified_address, validate_address, z_validate_address,
     },
+    hex_data::HexData,
     tests::{snapshot::EXCESSIVE_BLOCK_HEIGHT, utils::fake_history_tree},
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
