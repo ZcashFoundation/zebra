@@ -50,7 +50,7 @@ serde = { version = "1.0.203", features = ["serde_derive"] }
 
 futures = "0.3.30"
 futures-util = "0.3.28"
-metrics = "0.22.3"
+metrics = "0.23.0"
 thiserror = "1.0.61"
 tokio = { version = "1.37.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
@@ -76,7 +76,7 @@ howudoin = { version = "0.1.2", optional = true }
 
 # Test-only dependencies
 proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.4.0", optional = true }
+proptest-derive = { version = "0.5.0", optional = true }
 
 [dev-dependencies]
 color-eyre = "0.6.3"
@@ -87,7 +87,7 @@ tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
 hex = "0.4.3"
 num-integer = "0.1.46"
 proptest = "1.4.0"
-proptest-derive = "0.4.0"
+proptest-derive = "0.5.0"
 spandoc = "0.2.2"
 
 tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
