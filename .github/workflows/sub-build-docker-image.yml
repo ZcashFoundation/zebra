@@ -160,6 +160,9 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v5.3.0
         with:
+          platforms: |
+            linux/amd64
+            linux/arm64
           target: ${{ inputs.dockerfile_target }}
           context: .
           file: ${{ inputs.dockerfile_path }}
