@@ -1711,12 +1711,9 @@ fn non_blocking_logger() -> Result<()> {
     let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
         let _init_guard = zebra_test::init();
 
-        // Write a configuration that has RPC listen_addr set
-        // [Note on port conflict](#Note on port conflict)
-        let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+        let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
         config.tracing.filter = Some("trace".to_string());
         config.tracing.buffer_limit = 100;
-        let zebra_rpc_address = config.rpc.listen_addr.unwrap();
 
         let dir = testdir()?.with_config(&mut config)?;
         let mut child = dir
@@ -1724,12 +1721,10 @@ fn non_blocking_logger() -> Result<()> {
             .with_timeout(TINY_CHECKPOINT_TIMEOUT);
 
         // Wait until port is open.
-        child.expect_stdout_line_matches(
-            format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
-        )?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
         // Create an http client
-        let client = RpcRequestClient::new(zebra_rpc_address);
+        let client = RpcRequestClient::new(rpc_address);
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
