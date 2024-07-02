@@ -57,7 +57,7 @@ human_bytes = { version = "0.4.3", default-features = false }
 indexmap = "2.2.6"
 itertools = "0.13.0"
 lazy_static = "1.4.0"
-metrics = "0.22.3"
+metrics = "0.23.0"
 mset = "0.1.1"
 regex = "1.10.4"
 rlimit = "0.10.1"
@@ -75,7 +75,7 @@ tracing = "0.1.39"
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
-serde_json = { version = "1.0.117", package = "serde_json", optional = true }
+serde_json = { version = "1.0.120", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = ["async-error"] }
 
@@ -85,7 +85,7 @@ howudoin = { version = "0.1.2", optional = true }
 # test feature proptest-impl
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.38", optional = true }
 proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.4.0", optional = true }
+proptest-derive = { version = "0.5.0", optional = true }
 
 [dev-dependencies]
 color-eyre = "0.6.3"
@@ -100,7 +100,7 @@ hex = { version = "0.4.3", features = ["serde"] }
 insta = { version = "1.39.0", features = ["ron", "redactions"] }
 
 proptest = "1.4.0"
-proptest-derive = "0.4.0"
+proptest-derive = "0.5.0"
 rand = "0.8.5"
 
 halo2 = { package = "halo2_proofs", version = "0.3.0" }

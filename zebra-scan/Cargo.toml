@@ -66,7 +66,7 @@ chrono = { version = "0.4.38", default-features = false, features = ["clock", "s
 
 # test feature proptest-impl
 proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.4.0", optional = true }
+proptest-derive = { version = "0.5.0", optional = true }
 
 bls12_381 = { version = "0.8.0", optional = true }
 ff = { version = "0.13.0", optional = true }
@@ -82,7 +82,7 @@ insta = { version = "1.39.0", features = ["ron", "redactions"] }
 tokio = { version = "1.37.0", features = ["test-util"] }
 
 proptest = "1.4.0"
-proptest-derive = "0.4.0"
+proptest-derive = "0.5.0"
 bls12_381 = "0.8.0"
 ff = "0.13.0"
 group = "0.13.0"
