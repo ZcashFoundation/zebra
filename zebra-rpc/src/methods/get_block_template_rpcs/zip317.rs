@@ -15,7 +15,7 @@ use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{zip317::BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
+    transaction::{zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
     transparent,
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -64,7 +64,7 @@ pub async fn select_mempool_transactions(
     // Set up limit tracking
     let mut remaining_block_bytes: usize = MAX_BLOCK_BYTES.try_into().expect("fits in memory");
     let mut remaining_block_sigops = MAX_BLOCK_SIGOPS;
-    let mut remaining_block_unpaid_actions: u32 = BLOCK_PRODUCTION_UNPAID_ACTION_LIMIT;
+    let mut remaining_block_unpaid_actions: u32 = BLOCK_UNPAID_ACTION_LIMIT;
 
     // Adjust the limits based on the coinbase transaction
     remaining_block_bytes -= fake_coinbase_tx.data.as_ref().len();

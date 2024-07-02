@@ -35,7 +35,8 @@ pub async fn init_with_server(
     info!(?listen_addr, "starting scan gRPC server");
 
     // Start the gRPC server.
-    zebra_grpc::server::init(listen_addr, scan_service).await?;
+    let (server_task, _listen_addr) = zebra_grpc::server::init(listen_addr, scan_service).await?;
+    server_task.await??;
 
     Ok(())
 }

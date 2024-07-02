@@ -62,6 +62,7 @@ network_magic = [0, 0, 0, 0]
 slow_start_interval = 0
 target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
 disable_pow = true
+genesis_hash = "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08"
 
 [network.testnet_parameters.activation_heights]
 BeforeOverwinter = 1

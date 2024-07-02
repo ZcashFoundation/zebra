@@ -70,6 +70,9 @@ impl fmt::Debug for RpcServer {
     }
 }
 
+/// The message to log when logging the RPC server's listen address
+pub const OPENED_RPC_ENDPOINT_MSG: &str = "Opened RPC endpoint at ";
+
 impl RpcServer {
     /// Start a new RPC server endpoint using the supplied configs and services.
     ///
@@ -206,7 +209,7 @@ impl RpcServer {
                         .start_http(&listen_addr)
                         .expect("Unable to start RPC server");
 
-                    info!("Opened RPC endpoint at {}", server_instance.address());
+                    info!("{OPENED_RPC_ENDPOINT_MSG}{}", server_instance.address());
 
                     let close_handle = server_instance.close_handle();
 

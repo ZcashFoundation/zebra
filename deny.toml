@@ -54,53 +54,17 @@ skip-tree = [
     # wait for primitive-types to upgrade
     { name = "proc-macro-crate", version = "=0.1.5" },
 
-    # wait for criterion to upgrade
-    { name = "itertools", version = "=0.10.5" },
-
-    # wait for h2 and tower to upgrade
-    { name = "indexmap", version = "=1.9.3" },
-
-    # wait for tracing and many other crates to upgrade
-    # this duplicate dependency currently only exists in testing builds
-    { name = "regex-syntax", version = "=0.6.29" },
-
-    # wait for `parking_lot` crate inside `jsonrpc-http-server` to upgrade
-    { name = "redox_syscall", version = "=0.2.16" },
-
     # wait for `color-eyre` to upgrade
     { name = "owo-colors", version = "=3.5.0" },
-
-    # wait for `serde_with_macros` to upgrade `darling_core`
-    { name = "strsim", version = "=0.10.0" },
-
-    # ZF crates
-
-    # wait for indexmap, toml_edit, serde_json, tower to upgrade
-    { name = "hashbrown", version = "=0.12.3" },
-
-    # wait for zcash_script to upgrade
-    { name = "metrics", version = "=0.21.1" },
-
-    # ECC crates
 
     # wait for hdwallet to upgrade
     { name = "ring", version = "=0.16.20" },
 
-    # wait for the equihash/solver feature to merge
-    # https://github.com/zcash/librustzcash/pull/1083
-    # https://github.com/zcash/librustzcash/pull/1088
-    { name = "equihash", version = "=0.2.0" },
-
-    # zebra-utils dependencies
-
     # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
-    { name = "heck", version = "=0.3.3" },
 
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
-
-    # Test-only dependencies
 
     # wait for tokio-test -> tokio-stream to upgrade
     { name = "tokio-util", version = "=0.6.10" },
@@ -109,19 +73,9 @@ skip-tree = [
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
 
-    # wait for proptest's rusty-fork dependency to upgrade quick-error
-    { name = "quick-error", version = "=1.2.3" },
-
     # wait for console-subscriber to update tonic.
     { name = "tonic", version = "=0.10.2" },
     { name = "tonic-build", version = "=0.10.2" },
-
-    # Optional dependencies
-
-    # upgrade abscissa (required dependency) and arti (optional dependency)
-    { name = "semver", version = "=0.9.0" },
-
-    # Elasticsearch dependencies
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
@@ -142,10 +96,6 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
-    # TODO: remove this after the equihash solver branch is merged and released.
-    #
-    # "cargo deny" will log a warning in builds without the internal-miner feature. That's ok.
-    "https://github.com/ZcashFoundation/librustzcash.git"
 ]
 
 [sources.allow-org]

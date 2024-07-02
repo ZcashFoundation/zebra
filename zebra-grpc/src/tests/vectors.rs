@@ -4,10 +4,7 @@ use std::{collections::BTreeMap, thread::sleep, time::Duration};
 use tonic::transport::Channel;
 
 use zebra_chain::{block::Height, parameters::Network, transaction};
-use zebra_test::{
-    mock_service::{MockService, PanicAssertion},
-    net::random_known_port,
-};
+use zebra_test::mock_service::{MockService, PanicAssertion};
 
 use crate::{
     scanner::{
@@ -26,11 +23,10 @@ pub const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45g
 
 /// Test the gRPC methods with mocked responses
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(not(target_os = "windows"))]
 async fn test_grpc_methods_mocked() {
     let _init_guard = zebra_test::init();
 
-    let (client, mock_scan_service) = start_server_and_get_client(random_known_port()).await;
+    let (client, mock_scan_service) = start_server_and_get_client().await;
 
     test_get_results_errors(client.clone()).await;
     test_register_keys_errors(client.clone()).await;
@@ -231,9 +227,7 @@ async fn test_mocked_delete_keys_for_network(
 }
 
 /// Start the gRPC server, get a client and a mock service
-async fn start_server_and_get_client(
-    random_port: u16,
-) -> (
+async fn start_server_and_get_client() -> (
     ScannerClient<tonic::transport::Channel>,
     MockService<ScanRequest, ScanResponse, PanicAssertion>,
 ) {
@@ -241,24 +235,19 @@ async fn start_server_and_get_client(
     let mock_scan_service = MockService::build().for_unit_tests();
 
     // start the gRPC server
-    let listen_addr: std::net::SocketAddr = format!("127.0.0.1:{random_port}")
+    let listen_addr: std::net::SocketAddr = "127.0.0.1:0"
         .parse()
         .expect("hard-coded IP and u16 port should parse successfully");
 
-    {
-        let mock_scan_service = mock_scan_service.clone();
-        tokio::spawn(async move {
-            init(listen_addr, mock_scan_service)
-                .await
-                .expect("Possible port conflict");
-        });
-    }
+    let (_server_task, listen_addr) = init(listen_addr, mock_scan_service.clone())
+        .await
+        .expect("Possible port conflict");
 
     // wait for the server to start
     sleep(Duration::from_secs(1));
 
     // connect to the gRPC server
-    let client = ScannerClient::connect(format!("http://127.0.0.1:{random_port}"))
+    let client = ScannerClient::connect(format!("http://{listen_addr}"))
         .await
         .expect("server should receive connection");
 

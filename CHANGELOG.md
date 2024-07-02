@@ -5,19 +5,53 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## Zebra 1.X.X - XXXX-XX-XX
+## [Zebra 1.8.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.8.0) - 2024-07-02
+
+- Zebra now uses a default unpaid actions limit of 0, dropping transactions with
+  any unpaid actions from the mempool and excluding them when selecting
+  transactions from the mempool during block template construction.
+- The `zebrad` binary no longer contains the scanner of shielded transactions.
+  This means `zebrad` no longer contains users' viewing keys.
+- Support for custom Testnets and Regtest is greatly enhanced.
+- Windows is now back in the second tier of supported platforms.
+- The end-of-support time interval is set to match `zcashd`'s 16 weeks.
+- The RPC serialization of empty treestates matches `zcashd`. 
+
+### Added
+
+- Add an init function for a standalone `ReadStateService` ([#8595](https://github.com/ZcashFoundation/zebra/pull/8595))
+- Allow configuring more parameters on custom Testnets and an NU5 activation height on Regtest ([#8477](https://github.com/ZcashFoundation/zebra/pull/8477), [#8518](https://github.com/ZcashFoundation/zebra/pull/8518), [#8524](https://github.com/ZcashFoundation/zebra/pull/8524), [#8528](https://github.com/ZcashFoundation/zebra/pull/8528), [#8636](https://github.com/ZcashFoundation/zebra/pull/8636))
+- Add default constructions for several RPC method responses ([#8616](https://github.com/ZcashFoundation/zebra/pull/8616), [#8505](https://github.com/ZcashFoundation/zebra/pull/8505))
+- Support constructing Canopy proposal blocks from block templates ([#8505](https://github.com/ZcashFoundation/zebra/pull/8505))
+
+#### Docs
+
+- Document custom Testnets, Regtest and how they compare to Mainnet and the default Testnet in the Zebra book ([#8526](https://github.com/ZcashFoundation/zebra/pull/8526), [#8636](https://github.com/ZcashFoundation/zebra/pull/8636))
 
 ### Changed
 
-- We realized that a longer than `zcashd` end of support could be problematic in
-  some cases so we reverted back from 20 to 16 weeks
-  ([#8530](https://github.com/ZcashFoundation/zebra/pull/8530))
-- The `zebrad` binary no longer contains the scanner of shielded transactions.
-  This means `zebrad` no longer contains users' viewing keys.
-- We're no longer using general conditional compilation attributes for `tor`,
-  but only feature flags instead.
-- Fixed a bug with trailing characters in the openapi spec method descriptions ([#8597](https://github.com/ZcashFoundation/zebra/pull/8597))
-- Added default constructions for several RPC method responses([#8616](https://github.com/ZcashFoundation/zebra/pull/8616))
+- Use a default unpaid action limit of 0 so that transactions with unpaid actions are excluded from the mempool and block templates by default ([#8638](https://github.com/ZcashFoundation/zebra/pull/8638))
+- Lower the mandatory checkpoint height from immediately above the ZIP-212 grace period to immediately below Canopy activation ([#8629](https://github.com/ZcashFoundation/zebra/pull/8629))
+- Use the new `zcash_script` callback API in `zebra-script`, allowing Zebra's ECC dependencies to be upgraded independently of `zcash_script` and `zcashd` ([#8566](https://github.com/ZcashFoundation/zebra/pull/8566))
+- Put Windows in Tier 2 of supported platforms ([#8637](https://github.com/ZcashFoundation/zebra/pull/8637))
+- Remove experimental support for starting the `zebra-scan` in the `zebrad` process as a step towards moving the scanner to its own process ([#8594](https://github.com/ZcashFoundation/zebra/pull/8594))
+- Reduce the end of support time from 20 weeks to 16 weeks ([#8530](https://github.com/ZcashFoundation/zebra/pull/8530))
+- Restore parts of the experimental `internal-miner` feature for use on Regtest ([#8506](https://github.com/ZcashFoundation/zebra/pull/8506))
+
+### Fixed
+
+- Allow square brackets in network config listen addr and external addr without explicitly configuring a port in the listen addr ([#8504](https://github.com/ZcashFoundation/zebra/pull/8504))
+- Fix general conditional compilation attributes ([#8602](https://github.com/ZcashFoundation/zebra/pull/8602))
+- Update `median_timespan()` method to align with zcashd implementation ([#8491](https://github.com/ZcashFoundation/zebra/pull/8491))
+- Allow custom Testnets to make peer connections ([#8528](https://github.com/ZcashFoundation/zebra/pull/8528))
+- Refactor and simplify the serialization of empty treestates to fix an incorrect serialization of empty note commitment trees for RPCs ([#8533](https://github.com/ZcashFoundation/zebra/pull/8533))
+- Fix port conflict issue in some tests and re-enable those tests on Windows where those issues were especially problematic ([#8624](https://github.com/ZcashFoundation/zebra/pull/8624))
+- Fix a bug with trailing characters in the OpenAPI spec method descriptions ([#8597](https://github.com/ZcashFoundation/zebra/pull/8597))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @gustavovalverde, @oxarbitrage and @upbqdn
 
 ## [Zebra 1.7.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.7.0) - 2024-05-07
 
