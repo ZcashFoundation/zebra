@@ -27,11 +27,12 @@ use zebra_rpc::{
         },
         hex_data::HexData,
     },
+    server::OPENED_RPC_ENDPOINT_MSG,
 };
 use zebra_test::args;
 
 use crate::common::{
-    config::{random_known_rpc_port_config, testdir},
+    config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
     launch::ZebradTestDirExt,
 };
 
@@ -43,13 +44,14 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     info!("starting regtest submit_blocks test");
 
     let network = Network::new_regtest(None);
-    let mut config = random_known_rpc_port_config(false, &network)?;
+    let mut config = os_assigned_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
-    let rpc_address = config.rpc.listen_addr.unwrap();
 
     let mut zebrad = testdir()?
         .with_config(&mut config)?
         .spawn_child(args!["start"])?;
+
+    let rpc_address = read_listen_addr_from_logs(&mut zebrad, OPENED_RPC_ENDPOINT_MSG)?;
 
     info!("waiting for zebrad to start");
 
