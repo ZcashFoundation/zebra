@@ -1,6 +1,6 @@
 //! A client for calling Zebra's JSON-RPC methods.
 //!
-//! Only used in tests and tools.
+//! Used in the rpc sync scanning functionality and in various tests and tools.
 
 use std::net::SocketAddr;
 
