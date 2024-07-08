@@ -91,11 +91,11 @@ openapi-generator = [
 color-eyre = "0.6.3"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
+tinyvec = { version = "1.7.0", features = ["rustc_1_55"] }
 
 structopt = "0.3.26"
 hex = "0.4.3"
-serde_json = "1.0.117"
+serde_json = "1.0.120"
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.18"
 thiserror = "1.0.61"
@@ -126,7 +126,7 @@ zcash_protocol = { version = "0.1.1" }
 
 # For the openapi generator
 rand = "0.8.5"
-syn = { version = "2.0.66", features = ["full"], optional = true }
+syn = { version = "2.0.69", features = ["full"], optional = true }
 quote = { version = "1.0.36", optional = true }
 serde_yaml = { version = "0.9.34+deprecated", optional = true }
-serde = { version = "1.0.203", features = ["serde_derive"], optional = true }
+serde = { version = "1.0.204", features = ["serde_derive"], optional = true }
