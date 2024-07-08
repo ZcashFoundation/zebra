@@ -109,12 +109,8 @@ error-debug = ["color-eyre/track-caller", "color-eyre/capture-spantrace"]
 #
 # Release builds are defined as "cfg(not(debug_assertions))".
 # https://docs.rs/tracing/latest/tracing/level_filters/index.html#compile-time-filters
-release_max_level_warn = ["tracing/release_max_level_warn", "log/release_max_level_warn"]
 release_max_level_info = ["tracing/release_max_level_info", "log/release_max_level_info"]
-release_max_level_debug = ["tracing/release_max_level_debug", "log/release_max_level_debug"]
 
-max_level_warn = ["tracing/max_level_warn", "log/max_level_warn"]
-max_level_info = ["tracing/max_level_info", "log/max_level_info"]
 max_level_debug = ["tracing/max_level_debug", "log/max_level_debug"]
 
 # Testing features that activate extra dependencies
