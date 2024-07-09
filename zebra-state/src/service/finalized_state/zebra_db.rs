@@ -233,6 +233,11 @@ impl ZebraDb {
         }
     }
 
+    /// When called with a secondary DB instance, tries to catch up with the primary DB instance
+    pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
+        self.db.try_catch_up_with_primary()
+    }
+
     /// Shut down the database, cleaning up background tasks and ephemeral data.
     ///
     /// If `force` is true, clean up regardless of any shared references.

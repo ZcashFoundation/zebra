@@ -15,7 +15,6 @@ keywords = ["zebra", "zcash"]
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding", "network-programming"]
 
 [features]
-default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -77,7 +76,7 @@ proptest = { version = "1.4.0", optional = true }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = ["json-conversion"] }
 zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.38" }
 zebra-network = { path = "../zebra-network", version = "1.0.0-beta.38" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38", features = ["rpc-client"] }
 zebra-script = { path = "../zebra-script", version = "1.0.0-beta.38" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38" }
 

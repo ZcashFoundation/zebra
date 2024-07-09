@@ -1,6 +1,6 @@
 //! Tests that `getpeerinfo` RPC method responds with info about at least 1 peer.
 
-use color_eyre::eyre::{Context, Result};
+use color_eyre::eyre::{eyre, Context, Result};
 
 use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -41,7 +41,8 @@ pub(crate) async fn run() -> Result<()> {
     // call `getpeerinfo` RPC method
     let peer_info_result: Vec<PeerInfo> = RpcRequestClient::new(rpc_address)
         .json_result_from_call("getpeerinfo", "[]".to_string())
-        .await?;
+        .await
+        .map_err(|err| eyre!(err))?;
 
     assert!(
         !peer_info_result.is_empty(),
