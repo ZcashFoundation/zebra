@@ -28,9 +28,9 @@ name = "scanning-results-reader"
 path = "src/bin/scanning-results-reader/main.rs"
 required-features = ["results-reader"]
 
-[[bin]] # Bin to run zebrad, used in tests
-name = "zebrad"
-path = "src/bin/zebrad/main.rs"
+[[bin]] # Bin to run zebrad, used in scanner tests
+name = "zebrad-for-scanner"
+path = "src/bin/zebrad-for-scanner/main.rs"
 
 [features]
 

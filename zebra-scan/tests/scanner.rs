@@ -250,7 +250,7 @@ where
         args.merge_with(extra_args);
 
         if zebrad {
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
+            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad-for-scanner"), args)
         } else {
             self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebra-scanner"), args)
         }
