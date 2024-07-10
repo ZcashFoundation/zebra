@@ -31,7 +31,6 @@ required-features = ["results-reader"]
 [[bin]] # Bin to run zebrad, used in tests
 name = "zebrad"
 path = "src/bin/zebrad/main.rs"
-required-features = ["proptest-impl"]
 
 [features]
 
@@ -51,7 +50,6 @@ proptest-impl = [
   "jubjub",
   "rand",
   "zcash_note_encryption",
-  "zebrad"
 ]
 
 # Needed for the zebra-scanner binary.
@@ -108,7 +106,7 @@ serde_json = "1.0.117"
 jsonrpc = { version = "0.18.0", optional = true }
 hex = { version = "0.4.3", optional = true }
 
-zebrad = { path = "../zebrad", version = "1.8.0", optional = true }
+zebrad = { path = "../zebrad", version = "1.8.0" }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["ron", "redactions"] }

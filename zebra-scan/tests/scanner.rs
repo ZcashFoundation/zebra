@@ -134,7 +134,7 @@ async fn scan_binary_starts() -> Result<()> {
 #[tokio::test]
 #[cfg(not(target_os = "windows"))]
 async fn scan_start_where_left() -> Result<()> {
-    use zebra_scan::tests::ZECPAGES_SAPLING_VIEWING_KEY;
+    use ZECPAGES_SAPLING_VIEWING_KEY;
 
     let _init_guard = zebra_test::init();
 
