@@ -6042,9 +6042,11 @@ dependencies = [
  "ff",
  "futures",
  "group",
+ "hex",
  "indexmap 2.2.6",
  "insta",
  "itertools 0.13.0",
+ "jsonrpc",
  "jubjub",
  "lazy_static",
  "proptest",
@@ -6189,7 +6191,6 @@ dependencies = [
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",
- "zebra-scan",
 ]
 
 [[package]]
@@ -6256,7 +6257,6 @@ dependencies = [
  "zebra-network",
  "zebra-node-services",
  "zebra-rpc",
- "zebra-scan",
  "zebra-state",
  "zebra-test",
  "zebra-utils",
