@@ -1,5 +1,9 @@
 //! A tonic RPC server for Zebra's indexer API.
 
+#[cfg(test)]
+mod tests;
+
+mod methods;
 mod server;
 
 // The generated indexer proto

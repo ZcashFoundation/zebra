@@ -1,20 +1,12 @@
 //! A tonic RPC server for Zebra's indexer API.
 
-use std::{net::SocketAddr, pin::Pin};
+use std::net::SocketAddr;
 
-use futures::Stream;
 use tokio::task::JoinHandle;
-use tonic::{
-    transport::{server::TcpIncoming, Server},
-    Response, Status,
-};
+use tonic::transport::{server::TcpIncoming, Server};
 use tower::BoxError;
-use zebra_state::ReadStateService;
 
-use super::{
-    indexer_server::{Indexer, IndexerServer},
-    ChainTip, Empty,
-};
+use super::indexer_server::IndexerServer;
 
 type ServerTask = JoinHandle<Result<(), tonic::transport::Error>>;
 
@@ -33,30 +25,8 @@ where
     read_state: ReadStateService,
 }
 
-#[tonic::async_trait]
-impl<ReadStateService> Indexer for IndexerRPC<ReadStateService>
-where
-    ReadStateService: tower::Service<
-            zebra_state::ReadRequest,
-            Response = zebra_state::ReadResponse,
-            Error = BoxError,
-        > + Clone
-        + Send
-        + Sync
-        + 'static,
-    <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
-{
-    type ChainTipChangeStream = Pin<Box<dyn Stream<Item = Result<ChainTip, Status>> + Send>>;
-
-    async fn chain_tip_change(
-        &self,
-        request: tonic::Request<Empty>,
-    ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
-        todo!()
-    }
-}
 /// Initializes the indexer RPC server
-pub async fn init<ScanService>(
+pub async fn init<ReadStateService>(
     listen_addr: SocketAddr,
     read_state: ReadStateService,
 ) -> Result<(ServerTask, SocketAddr), BoxError>
