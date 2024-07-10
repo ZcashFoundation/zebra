@@ -77,9 +77,6 @@ internal-miner = [
     "zebra-rpc/getblocktemplate-rpcs",
 ]
 
-# Experimental shielded blockchain scanning
-shielded-scan = ["zebra-scan"]
-
 # Experimental elasticsearch indexing
 elasticsearch = [
     "zebra-state/elasticsearch",
@@ -127,7 +124,6 @@ proptest-impl = [
     "zebra-state/proptest-impl",
     "zebra-network/proptest-impl",
     "zebra-chain/proptest-impl",
-    "zebra-scan?/proptest-impl",
 ]
 
 # Build the zebra-checkpoints utility for checkpoint generation tests
@@ -164,9 +160,6 @@ zebra-network = { path = "../zebra-network", version = "1.0.0-beta.38" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.38" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38" }
-
-# Experimental shielded-scan feature
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.7", optional = true }
 
 # Required for crates.io publishing, but it's only used in tests
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.38", optional = true }
@@ -283,7 +276,6 @@ color-eyre = { version = "0.6.3" }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.38", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", version = "1.0.0-beta.38", features = ["proptest-impl"] }
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.7", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "1.0.0-beta.38" }

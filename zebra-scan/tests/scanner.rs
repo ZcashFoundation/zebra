@@ -38,10 +38,11 @@ fn scanner_help() -> eyre::Result<()> {
 /// export CARGO_BIN_EXE_zebrad="/path/to/zebrad_binary"
 /// cargo test scan_binary_starts -- --ignored --nocapture
 /// ```
-#[ignore]
 #[tokio::test]
 #[cfg(not(target_os = "windows"))]
 async fn scan_binary_starts() -> Result<()> {
+    use std::time::Duration;
+
     let _init_guard = zebra_test::init();
 
     // Create a directory to dump test data into it.
@@ -94,6 +95,9 @@ async fn scan_binary_starts() -> Result<()> {
 
     // Check scanner was started.
     zebra_scanner.expect_stdout_line_matches("loaded Zebra scanner cache")?;
+
+    // Wait for the scanner's gRPC server to start up
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
     // Check if the grpc server is up
     let mut client = ScannerClient::connect(format!("http://{listen_addr}")).await?;
@@ -246,11 +250,7 @@ where
         args.merge_with(extra_args);
 
         if zebrad {
-            self.spawn_child_with_command(
-                &std::env::var("CARGO_BIN_EXE_zebrad")
-                    .expect("please set CARGO_BIN_EXE_zebrad env var to a zebrad path"),
-                args,
-            )
+            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad"), args)
         } else {
             self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebra-scanner"), args)
         }
