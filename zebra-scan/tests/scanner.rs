@@ -138,8 +138,12 @@ async fn scan_start_where_left() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let zebrad_cachedir = std::env::var("ZEBRA_CACHED_STATE_DIR")
-        .expect("please set a ZEBRA_CACHED_STATE_DIR env var with a populated and valid path");
+    let Ok(zebrad_cachedir) = std::env::var("ZEBRA_CACHED_STATE_DIR") else {
+        tracing::info!("skipping scan_start_where_left test due to missing cached state, \
+                        please set a ZEBRA_CACHED_STATE_DIR env var with a populated and valid path to run this test");
+        return Ok(());
+    };
+
     let scanning_cache_dir = testdir()?.path().join("scanner").to_path_buf();
 
     // Create arguments for the scanner
