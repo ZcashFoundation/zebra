@@ -25,7 +25,7 @@ where
 
     async fn chain_tip_change(
         &self,
-        request: tonic::Request<Empty>,
+        _request: tonic::Request<Empty>,
     ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
         todo!()
     }

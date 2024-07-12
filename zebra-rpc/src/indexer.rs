@@ -3,8 +3,8 @@
 #[cfg(test)]
 mod tests;
 
-mod methods;
-mod server;
+pub mod methods;
+pub mod server;
 
 // The generated indexer proto
 tonic::include_proto!("zebra.indexer.rpc");

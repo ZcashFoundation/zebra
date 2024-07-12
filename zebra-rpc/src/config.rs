@@ -30,6 +30,22 @@ pub struct Config {
     /// They can also query your node's state.
     pub listen_addr: Option<SocketAddr>,
 
+    /// IP address and port for the indexer RPC server.
+    ///
+    /// Note: The indexer RPC server is disabled by default.
+    /// To enable the indexer RPC server, compile `zebrad` with the
+    /// `indexer` feature flag and set a listen address in the config:
+    /// ```toml
+    /// [rpc]
+    /// indexer_listen_addr = '127.0.0.1:8232'
+    /// ```
+    ///
+    /// # Security
+    ///
+    /// If you bind Zebra's indexer RPC port to a public IP address,
+    /// anyone on the internet can query your node's state.
+    pub indexer_listen_addr: Option<SocketAddr>,
+
     /// The number of threads used to process RPC requests and responses.
     ///
     /// Zebra's RPC server has a separate thread pool and a `tokio` executor for each thread.
@@ -64,6 +80,9 @@ impl Default for Config {
         Self {
             // Disable RPCs by default.
             listen_addr: None,
+
+            // Disable indexer RPCs by default.
+            indexer_listen_addr: None,
 
             // Use a single thread, so we can detect RPC port conflicts.
             #[cfg(not(feature = "getblocktemplate-rpcs"))]

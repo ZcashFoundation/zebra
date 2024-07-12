@@ -59,6 +59,9 @@ default-release-binaries = ["default", "sentry"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
+# Indexer RPC support
+indexer-rpcs = ["zebra-rpc/indexer-rpcs"]
+
 # Mining RPC support
 getblocktemplate-rpcs = [
     "zebra-rpc/getblocktemplate-rpcs",
