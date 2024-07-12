@@ -58,10 +58,13 @@ pub(crate) async fn run() -> Result<()> {
     // This is currently needed for the 'Check startup logs' step in CI to pass.
     tracing::info!("Zcash network: {network}");
 
-    let zebrad_state_path = std::path::PathBuf::from(
-        std::env::var("ZEBRA_CACHED_STATE_DIR")
-            .map_err(|_| eyre!("ZEBRA_CACHED_STATE_DIR env var not set"))?,
-    );
+    let zebrad_state_path = match std::env::var_os("ZEBRA_CACHED_STATE_DIR") {
+        None => {
+            tracing::error!("ZEBRA_CACHED_STATE_DIR is not set");
+            return Ok(());
+        }
+        Some(path) => std::path::PathBuf::from(path),
+    };
 
     // Remove the scan directory before starting.
     let scan_db_path = zebrad_state_path.join(SCANNER_DATABASE_KIND);
