@@ -6,7 +6,7 @@ use futures::Stream;
 use tonic::{Response, Status};
 use tower::BoxError;
 
-use super::{indexer_server::Indexer, server::IndexerRPC, ChainTip, Empty};
+use super::{indexer_server::Indexer, server::IndexerRPC, Empty};
 
 #[tonic::async_trait]
 impl<ReadStateService> Indexer for IndexerRPC<ReadStateService>
@@ -21,7 +21,7 @@ where
         + 'static,
     <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
 {
-    type ChainTipChangeStream = Pin<Box<dyn Stream<Item = Result<ChainTip, Status>> + Send>>;
+    type ChainTipChangeStream = Pin<Box<dyn Stream<Item = Result<Empty, Status>> + Send>>;
 
     async fn chain_tip_change(
         &self,

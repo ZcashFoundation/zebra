@@ -1,14 +1,15 @@
 //! Compile proto files
 
-use std::{env, path::PathBuf};
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
-
-    tonic_build::configure()
-        .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
-        .file_descriptor_set_path(out_dir.join("indexer_descriptor.bin"))
-        .compile(&["proto/indexer.proto"], &[""])?;
+    #[cfg(feature = "indexer-rpcs")]
+    {
+        use std::{env, path::PathBuf};
+        let out_dir = env::var("OUT_DIR").map(PathBuf::from);
+        tonic_build::configure()
+            .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
+            .file_descriptor_set_path(out_dir.unwrap().join("indexer_descriptor.bin"))
+            .compile(&["proto/indexer.proto"], &[""])?;
+    }
 
     Ok(())
 }

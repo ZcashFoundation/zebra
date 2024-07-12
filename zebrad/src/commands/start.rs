@@ -79,7 +79,7 @@ use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tower::{builder::ServiceBuilder, util::BoxService, BoxError, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
