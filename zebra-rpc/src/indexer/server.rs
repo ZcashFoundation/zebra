@@ -5,13 +5,14 @@ use std::net::SocketAddr;
 use tokio::task::JoinHandle;
 use tonic::transport::{server::TcpIncoming, Server};
 use tower::BoxError;
+use zebra_chain::chain_tip::ChainTip;
 
 use super::indexer_server::IndexerServer;
 
 type ServerTask = JoinHandle<Result<(), BoxError>>;
 
 /// Indexer RPC service.
-pub struct IndexerRPC<ReadStateService>
+pub struct IndexerRPC<ReadStateService, Tip>
 where
     ReadStateService: tower::Service<
             zebra_state::ReadRequest,
@@ -22,14 +23,17 @@ where
         + Sync
         + 'static,
     <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     _read_state: ReadStateService,
+    pub(super) chain_tip_change: Tip,
 }
 
 /// Initializes the indexer RPC server
-pub async fn init<ReadStateService>(
+pub async fn init<ReadStateService, Tip>(
     listen_addr: SocketAddr,
     _read_state: ReadStateService,
+    chain_tip_change: Tip,
 ) -> Result<(ServerTask, SocketAddr), BoxError>
 where
     ReadStateService: tower::Service<
@@ -41,8 +45,13 @@ where
         + Sync
         + 'static,
     <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    let indexer_service = IndexerRPC { _read_state };
+    let indexer_service = IndexerRPC {
+        _read_state,
+        chain_tip_change,
+    };
+
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(crate::indexer::FILE_DESCRIPTOR_SET)
         .build()
