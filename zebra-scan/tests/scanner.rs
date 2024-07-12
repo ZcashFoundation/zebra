@@ -1,4 +1,12 @@
 //! `zebra-scanner` binary tests.
+//!
+//!
+//! Example of how to run the scan_task_commands test:
+//!
+//! ```console
+//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_task_commands --features shielded-scan --release -- --ignored --nocapture
+//! ```
+//!
 use tempfile::TempDir;
 
 use zebra_grpc::scanner::{scanner_client::ScannerClient, Empty};
@@ -9,6 +17,8 @@ use zebra_test::{
 };
 
 use std::{io::Write, path::Path};
+
+mod scan_task_commands;
 
 /// The extended Sapling viewing key of [ZECpages](https://zecpages.com/boardinfo)
 const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
@@ -259,4 +269,17 @@ where
             self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebra-scanner"), args)
         }
     }
+}
+
+// TODO: Add this test to CI (#8236)
+/// Tests successful:
+/// - Registration of a new key,
+/// - Subscription to scan results of new key, and
+/// - Deletion of keys
+/// in the scan task
+/// See [`common::shielded_scan::scan_task_commands`] for more information.
+#[tokio::test]
+#[ignore]
+async fn scan_task_commands() -> Result<()> {
+    scan_task_commands::run().await
 }

@@ -120,14 +120,6 @@
 //!
 //! Please refer to the documentation of each test for more information.
 //!
-//! ## Shielded scanning tests
-//!
-//! Example of how to run the scan_task_commands test:
-//!
-//! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_task_commands --features shielded-scan --release -- --ignored --nocapture
-//! ```
-//!
 //! ## Checkpoint Generation Tests
 //!
 //! Generate checkpoints on mainnet and testnet using a cached state:
@@ -2889,20 +2881,6 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
         .wrap_err("Possible port conflict. Are there other acceptance tests running?")?;
 
     Ok(())
-}
-
-// TODO: Add this test to CI (#8236)
-/// Tests successful:
-/// - Registration of a new key,
-/// - Subscription to scan results of new key, and
-/// - Deletion of keys
-/// in the scan task
-/// See [`common::shielded_scan::scan_task_commands`] for more information.
-#[tokio::test]
-#[ignore]
-#[cfg(feature = "shielded-scan")]
-async fn scan_task_commands() -> Result<()> {
-    common::shielded_scan::scan_task_commands::run().await
 }
 
 /// Checks that the Regtest genesis block can be validated.
