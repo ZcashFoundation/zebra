@@ -76,7 +76,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.1.6
+      - uses: actions/checkout@v4.1.7
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -158,7 +158,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v5.3.0
+        uses: docker/build-push-action@v6.3.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
