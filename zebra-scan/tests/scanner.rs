@@ -154,6 +154,11 @@ async fn scan_start_where_left() -> Result<()> {
         return Ok(());
     };
 
+    // Logs the network as zebrad would as part of the metadata when starting up.
+    // This is currently needed for the 'Check startup logs' step in CI to pass.
+    let network = zebra_chain::parameters::Network::Mainnet;
+    tracing::info!("Zcash network: {network}");
+
     let scanning_cache_dir = testdir()?.path().join("scanner").to_path_buf();
 
     // Create arguments for the scanner
