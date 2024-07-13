@@ -530,7 +530,7 @@ jobs:
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
-      app_name: zebrad
+      app_name: zebra-scan
       test_id: scan-start-where-left
       test_description: Test that the scanner can continue scanning where it was left when zebrad restarts.
       test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_START_WHERE_LEFT=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
@@ -556,7 +556,7 @@ jobs:
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
-      app_name: zebrad
+      app_name: zebra-scan
       test_id: scan-task-commands
       test_description: Test that the scan task registers keys, deletes keys, and subscribes to results for keys while running.
       test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_TASK_COMMANDS=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
