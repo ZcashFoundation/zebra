@@ -10,7 +10,7 @@ use zebra_chain::{block::Height, parameters::Network};
 use zebra_state::SaplingScanningKey;
 
 use core::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A structure with sapling key and birthday height.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
@@ -146,17 +146,17 @@ pub struct Args {
 }
 
 /// Create an error message is a given directory does not exist or we don't have access to it for whatever reason.
-fn validate_dir(dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+fn validate_dir(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     match dir.try_exists() {
         Ok(true) => Ok(()),
         Ok(false) => {
             let err_msg = format!("Directory {} does not exist.", dir.display());
             error!("{}", err_msg);
-            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, err_msg).into());
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, err_msg).into())
         }
         Err(e) => {
             error!("Directory {} does not exist: {:?}", dir.display(), e);
-            return Err(e.into());
+            Err(e.into())
         }
     }
 }
