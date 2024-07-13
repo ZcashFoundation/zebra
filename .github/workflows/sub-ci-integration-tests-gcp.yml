@@ -588,7 +588,7 @@ jobs:
         lightwalletd-grpc-test,
         get-block-template-test,
         submit-block-test,
-        # scan-start-where-left-test,
+        scan-start-where-left-test,
         scan-task-commands-test,
       ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
