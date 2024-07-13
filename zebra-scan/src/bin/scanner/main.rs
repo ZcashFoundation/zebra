@@ -43,6 +43,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::from_args();
 
     let zebrad_cache_dir = args.zebrad_cache_dir;
+    validate_dir(&zebrad_cache_dir)?;
+
     let scanning_cache_dir = args.scanning_cache_dir;
     let mut db_config = zebra_scan::Config::default().db_config;
     db_config.cache_dir = scanning_cache_dir;
@@ -141,4 +143,20 @@ pub struct Args {
     /// IP address and port for the gRPC server.
     #[structopt(long)]
     pub listen_addr: Option<SocketAddr>,
+}
+
+/// Create an error message is a given directory does not exist or we don't have access to it for whatever reason.
+fn validate_dir(dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    match dir.try_exists() {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            let err_msg = format!("Directory {} does not exist.", dir.display());
+            error!("{}", err_msg);
+            return Err(std::io::Error::new(std::io::ErrorKind::NotFound, err_msg).into());
+        }
+        Err(e) => {
+            error!("Directory {} does not exist: {:?}", dir.display(), e);
+            return Err(e.into());
+        }
+    }
 }
