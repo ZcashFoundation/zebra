@@ -349,12 +349,12 @@ case "$1" in
       elif [[ "${TEST_SCAN_START_WHERE_LEFT}" -eq "1" ]]; then
         # Test that the scanner can continue scanning where it was left when zebra-scanner restarts.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
-        run_cargo_test "${ENTRYPOINT_FEATURES}" "scan_start_where_left"
-      
+        exec cargo test --locked --release --features "zebra-test" --package zebra-scan -- --nocapture --include-ignored scan_start_where_left
+
       elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
         # Test that the scan task commands are working.
         check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
-        run_cargo_test "${ENTRYPOINT_FEATURES}" "scan_task_commands"
+        exec cargo test --locked --release --features "zebra-test" --package zebra-scan -- --nocapture --include-ignored scan_task_commands
 
       else
           exec "$@"
