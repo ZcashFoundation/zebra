@@ -237,6 +237,18 @@ async fn scan_start_where_left() -> Result<()> {
     Ok(())
 }
 
+/// Tests successful:
+/// - Registration of a new key,
+/// - Subscription to scan results of new key, and
+/// - Deletion of keys
+/// in the scan task
+/// See [`common::shielded_scan::scan_task_commands`] for more information.
+#[tokio::test]
+#[ignore]
+async fn scan_task_commands() -> Result<()> {
+    scan_task_commands::run().await
+}
+
 /// Create a temporary directory for testing `zebra-scanner`.
 pub fn testdir() -> eyre::Result<TempDir> {
     tempfile::Builder::new()
@@ -274,17 +286,4 @@ where
             self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebra-scanner"), args)
         }
     }
-}
-
-// TODO: Add this test to CI (#8236)
-/// Tests successful:
-/// - Registration of a new key,
-/// - Subscription to scan results of new key, and
-/// - Deletion of keys
-/// in the scan task
-/// See [`common::shielded_scan::scan_task_commands`] for more information.
-#[tokio::test]
-#[ignore]
-async fn scan_task_commands() -> Result<()> {
-    scan_task_commands::run().await
 }
