@@ -1,12 +1,4 @@
 //! `zebra-scanner` binary tests.
-//!
-//!
-//! Example of how to run the scan_task_commands test:
-//!
-//! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_task_commands --features shielded-scan --release -- --ignored --nocapture
-//! ```
-//!
 use tempfile::TempDir;
 
 use zebra_grpc::scanner::{scanner_client::ScannerClient, Empty};
@@ -30,7 +22,7 @@ fn scanner_help() -> eyre::Result<()> {
 
     let testdir = testdir()?;
 
-    let child = testdir.spawn_child(args!["--help"], false)?;
+    let child = testdir.spawn_scanner_child(args!["--help"])?;
     let output = child.wait_with_output()?;
     let output = output.assert_success()?;
 
@@ -44,9 +36,9 @@ fn scanner_help() -> eyre::Result<()> {
 /// This test creates a new zebrad cache dir by using a `zebrad` binary specified in the `CARGO_BIN_EXE_zebrad` env variable.
 ///
 /// To run it locally, one way is:
+///
 /// ```
-/// export CARGO_BIN_EXE_zebrad="/path/to/zebrad_binary"
-/// cargo test scan_binary_starts -- --ignored --nocapture
+/// RUST_LOG=info cargo test scan_binary_starts -- --include-ignored --nocapture
 /// ```
 #[tokio::test]
 #[cfg(not(target_os = "windows"))]
@@ -65,10 +57,8 @@ async fn scan_binary_starts() -> Result<()> {
     std::fs::File::create(config_file.clone())?.write_all(toml::to_string(&config)?.as_bytes())?;
 
     // Start the node just to make sure a cache is created.
-    let mut zebrad = test_dir.spawn_child(
-        args!["-c", config_file.clone().to_str().unwrap(), "start"],
-        true,
-    )?;
+    let mut zebrad =
+        test_dir.spawn_zebrad_child(args!["-c", config_file.clone().to_str().unwrap(), "start"])?;
     zebrad.expect_stdout_line_matches("Opened Zebra state cache at .*")?;
 
     // Kill the node now that we have a valid zebra node cache.
@@ -101,7 +91,7 @@ async fn scan_binary_starts() -> Result<()> {
     ];
 
     // Start the scaner using another test directory.
-    let mut zebra_scanner = test_dir.spawn_child(args, false)?;
+    let mut zebra_scanner = test_dir.spawn_scanner_child(args)?;
 
     // Check scanner was started.
     zebra_scanner.expect_stdout_line_matches("loaded Zebra scanner cache")?;
@@ -136,7 +126,7 @@ async fn scan_binary_starts() -> Result<()> {
 /// Needs a cache state close to the tip. A possible way to run it locally is:
 ///
 /// export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
-/// cargo test scan_start_where_left -- --ignored --nocapture
+/// RUST_LOG=info cargo test scan_start_where_left -- --ignored --nocapture
 ///
 /// The test will run zebrad with a key to scan, scan the first few blocks after sapling and then stops.
 /// Then it will restart zebrad and check that it resumes scanning where it was left.
@@ -179,7 +169,7 @@ async fn scan_start_where_left() -> Result<()> {
     ];
 
     // Start the scaner using another test directory.
-    let mut zebra_scanner: TestChild<TempDir> = testdir()?.spawn_child(args.clone(), false)?;
+    let mut zebra_scanner: TestChild<TempDir> = testdir()?.spawn_scanner_child(args.clone())?;
 
     // Check scanner was started.
     zebra_scanner.expect_stdout_line_matches("loaded Zebra scanner cache")?;
@@ -208,7 +198,7 @@ async fn scan_start_where_left() -> Result<()> {
     output.assert_failure()?;
 
     // Start the node again with the same arguments.
-    let mut zebra_scanner: TestChild<TempDir> = testdir()?.spawn_child(args, false)?;
+    let mut zebra_scanner: TestChild<TempDir> = testdir()?.spawn_scanner_child(args)?;
 
     // Resuming message.
     zebra_scanner.expect_stdout_line_matches(
@@ -243,6 +233,12 @@ async fn scan_start_where_left() -> Result<()> {
 /// - Deletion of keys
 /// in the scan task
 /// See [`common::shielded_scan::scan_task_commands`] for more information.
+///
+/// Example of how to run the scan_task_commands test locally:
+///
+/// ```console
+/// RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_task_commands -- --include-ignored --nocapture
+/// ```
 #[tokio::test]
 #[ignore]
 async fn scan_task_commands() -> Result<()> {
@@ -259,31 +255,29 @@ pub fn testdir() -> eyre::Result<TempDir> {
 
 /// Extension trait for methods on `tempfile::TempDir` for using it as a test
 /// directory for `zebra-scanner`.
-pub trait ZebradTestDirExt
+pub trait ScannerTestDirExt
 where
     Self: AsRef<Path> + Sized,
 {
-    // Zebra-scanner methods
+    /// Spawn `zebra-scanner` with `args` as a child process in this test directory.
+    fn spawn_scanner_child(self, args: Arguments) -> Result<TestChild<Self>>;
 
-    /// Spawn `zebra-scanner` (`zebrad` flag = `false`) or `zebrad` (`zebrad` flag = `true`)
-    /// with `args` as a child process in this test directory.
-    fn spawn_child(self, args: Arguments, zebrad: bool) -> Result<TestChild<Self>>;
+    /// Spawn `zebrad` with `args` as a child process in this test directory.
+    fn spawn_zebrad_child(self, args: Arguments) -> Result<TestChild<Self>>;
 }
 
-impl<T> ZebradTestDirExt for T
+impl<T> ScannerTestDirExt for T
 where
     Self: TestDirExt + AsRef<Path> + Sized,
 {
-    #[allow(clippy::unwrap_in_result)]
-    fn spawn_child(self, extra_args: Arguments, zebrad: bool) -> Result<TestChild<Self>> {
+    fn spawn_scanner_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
         let mut args = Arguments::new();
-
         args.merge_with(extra_args);
-
-        if zebrad {
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad-for-scanner"), args)
-        } else {
-            self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebra-scanner"), args)
-        }
+        self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebra-scanner"), args)
+    }
+    fn spawn_zebrad_child(self, extra_args: Arguments) -> Result<TestChild<Self>> {
+        let mut args = Arguments::new();
+        args.merge_with(extra_args);
+        self.spawn_child_with_command(env!("CARGO_BIN_EXE_zebrad-for-scanner"), args)
     }
 }
