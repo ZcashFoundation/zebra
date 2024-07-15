@@ -108,13 +108,13 @@ humantime = "2.1.0"
 
 # Error Handling & Formatting
 static_assertions = "1.1.0"
-thiserror = "1.0.61"
+thiserror = "1.0.62"
 tracing = "0.1.39"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.204", features = ["serde_derive", "rc"] }
-serde_with = "3.8.3"
+serde_with = "3.9.0"
 serde-big-array = "0.5.1"
 
 # Processing
@@ -153,7 +153,7 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 color-eyre = "0.6.3"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.7.0", features = ["rustc_1_55"] }
+tinyvec = { version = "1.8.0", features = ["rustc_1_55"] }
 spandoc = "0.2.2"
 tracing = "0.1.39"
 
