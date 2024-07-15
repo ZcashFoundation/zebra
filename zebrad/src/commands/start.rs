@@ -79,7 +79,7 @@ use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
 use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService, BoxError, ServiceExt};
+use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
@@ -253,7 +253,7 @@ impl StartCmd {
         );
 
         // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
-        //       any related unit tests sometimes crashed with memory errors
+        //       any related unit tests sometimes crash with memory errors
         #[cfg(feature = "indexer-rpcs")]
         let indexer_rpc_task_handle =
             if let Some(indexer_listen_addr) = config.rpc.indexer_listen_addr {
@@ -261,6 +261,7 @@ impl StartCmd {
                 let (indexer_rpc_task_handle, _listen_addr) = zebra_rpc::indexer::server::init(
                     indexer_listen_addr,
                     read_only_state_service.clone(),
+                    latest_chain_tip.clone(),
                 )
                 .await
                 .map_err(|err| eyre!(err))?;
@@ -273,7 +274,7 @@ impl StartCmd {
 
         #[cfg(not(feature = "indexer-rpcs"))]
         // Spawn a dummy indexer rpc task which doesn't do anything and never finishes.
-        let indexer_rpc_task_handle: tokio::task::JoinHandle<Result<(), BoxError>> =
+        let indexer_rpc_task_handle: tokio::task::JoinHandle<Result<(), tower::BoxError>> =
             tokio::spawn(std::future::pending().in_current_span());
 
         // Start concurrent tasks which don't add load to other tasks
