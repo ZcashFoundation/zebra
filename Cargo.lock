@@ -6016,9 +6016,11 @@ dependencies = [
  "ff",
  "futures",
  "group",
+ "hex",
  "indexmap 2.2.6",
  "insta",
  "itertools 0.13.0",
+ "jsonrpc",
  "jubjub",
  "lazy_static",
  "proptest",
@@ -6029,7 +6031,10 @@ dependencies = [
  "serde",
  "serde_json",
  "structopt",
+ "tempfile",
  "tokio",
+ "toml 0.8.14",
+ "tonic 0.11.0",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -6044,6 +6049,7 @@ dependencies = [
  "zebra-rpc",
  "zebra-state",
  "zebra-test",
+ "zebrad",
 ]
 
 [[package]]
@@ -6159,7 +6165,6 @@ dependencies = [
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",
- "zebra-scan",
 ]
 
 [[package]]
@@ -6226,7 +6231,6 @@ dependencies = [
  "zebra-network",
  "zebra-node-services",
  "zebra-rpc",
- "zebra-scan",
  "zebra-state",
  "zebra-test",
  "zebra-utils",

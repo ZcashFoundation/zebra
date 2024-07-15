@@ -37,11 +37,6 @@ path = "src/bin/block-template-to-proposal/main.rs"
 required-features = ["getblocktemplate-rpcs"]
 
 [[bin]]
-name = "scanning-results-reader"
-path = "src/bin/scanning-results-reader/main.rs"
-required-features = ["shielded-scan"]
-
-[[bin]]
 name = "openapi-generator"
 path = "src/bin/openapi-generator/main.rs"
 required-features = ["openapi-generator"]
@@ -76,7 +71,6 @@ shielded-scan = [
     "jsonrpc",
     "zcash_primitives",
     "zcash_client_backend",
-    "zebra-scan"
 ]
 
 openapi-generator = [
@@ -102,7 +96,6 @@ thiserror = "1.0.61"
 
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38" }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38" }
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.7", optional = true }
 
 # These crates are needed for the block-template-to-proposal binary
 zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.38", optional = true }
