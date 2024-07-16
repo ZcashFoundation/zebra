@@ -150,12 +150,12 @@ fn validate_dir(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     match dir.try_exists() {
         Ok(true) => Ok(()),
         Ok(false) => {
-            let err_msg = format!("Directory {} does not exist.", dir.display());
+            let err_msg = format!("directory {} does not exist.", dir.display());
             error!("{}", err_msg);
             Err(std::io::Error::new(std::io::ErrorKind::NotFound, err_msg).into())
         }
         Err(e) => {
-            error!("Directory {} does not exist: {:?}", dir.display(), e);
+            error!("directory {} could not be accessed: {:?}", dir.display(), e);
             Err(e.into())
         }
     }

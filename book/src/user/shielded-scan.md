@@ -2,17 +2,17 @@
 
 The `zebra-scanner` binary is a standalone application that utilizes Zebra libraries to scan for transactions associated with specific Sapling viewing keys. It stores the discovered transactions and scanning progress data in a RocksDB database.
 
-For this application to function, it requires a `zebrad` node to be running concurrently with the scanner application.
+For this application to function, it requires access to a Zebra node's RPC server and state cache.
  
 For now, we only support Sapling, and only store transaction IDs in the scanner results database.
 
-Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728) and [#8573](https://github.com/ZcashFoundation/zebra/issues/8573).
+Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).
 
 ## Important Security Warning
 
 Zebra's shielded scanning feature has known security issues. It is for experimental use only.
 
-Do not use regular or sensitive viewing keys with Zebra's experimental scanning feature. Do not use this feature on a shared machine. We suggest generating new keys for experimental use or publicly known keys.
+Do not use regular or sensitive viewing keys with Zebra's experimental scanning feature. Do not use this feature on a shared machine. We suggest generating new keys for experimental use or using publicly known keys.
 
 ## Build & Install
 
@@ -45,7 +45,12 @@ To initiate the scanning process, you need the following:
 - A zebrad RPC endpoint address. This can be found in the running zebrad configuration file, under the `rpc` section in the `listen_addr` field.
 
 
-Pass the data as arguments, for example:
+Sapling diversifiable/extended full viewing keys strings start with `zxviews` as
+described in
+[ZIP-32](https://zips.z.cash/zip-0032#sapling-extended-full-viewing-keys).
+
+For example, to scan the block chain with the [public ZECpages viewing
+key](https://zecpages.com/boardinfo), use:
 
 ```bash
 RUST_LOG=info zebra-scanner --sapling-keys-to-scan '{"key":"zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz", "birthday_height": 419200}' --zebrad-cache-dir /media/alfredo/stuff/chain/zebra --zebra-rpc-listen-addr '127.0.0.1:8232'

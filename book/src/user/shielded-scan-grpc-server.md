@@ -4,7 +4,7 @@
 
 ### Setup
 
-After setting up [Zebra Shielded Scanning](https://zebra.zfnd.org/user/shielded-scan.html), adyou can add a `listen-addr` argument to the scanner binary:
+After setting up [Zebra Shielded Scanning](https://zebra.zfnd.org/user/shielded-scan.html), you can add a `listen-addr` argument to the scanner binary:
 
 
 ```bash
