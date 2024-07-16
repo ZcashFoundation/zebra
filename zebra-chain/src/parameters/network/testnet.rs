@@ -61,6 +61,8 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU5` network upgrade.
     #[serde(rename = "NU5")]
     pub nu5: Option<u32>,
+    /// Activation height for `NU6` network upgrade.
+    pub nu6: Option<u32>,
 }
 
 /// Builder for the [`Parameters`] struct.
@@ -174,6 +176,7 @@ impl ParametersBuilder {
             heartwood,
             canopy,
             nu5,
+            nu6,
         }: ConfiguredActivationHeights,
     ) -> Self {
         use NetworkUpgrade::*;
@@ -191,6 +194,7 @@ impl ParametersBuilder {
             .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
             .chain(nu5.into_iter().map(|h| (h, Nu5)))
+            .chain(nu6.into_iter().map(|h| (h, Nu6)))
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();
 
