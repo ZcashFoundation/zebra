@@ -54,8 +54,4 @@ pub struct ZebradConfig {
     #[serde(skip_serializing_if = "zebra_rpc::config::mining::Config::skip_getblocktemplate")]
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,
-
-    #[cfg(feature = "shielded-scan")]
-    /// Scanner configuration
-    pub shielded_scan: zebra_scan::config::Config,
 }
