@@ -34,9 +34,14 @@ impl std::str::FromStr for SaplingKey {
 #[tokio::main]
 /// Runs the zebra scanner binary with the given arguments.
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Display all logs from the zebra-scan crate.
+    // Display logs with `info` level by default.
+    let tracing_filter: String = match std::env::var("RUST_LOG") {
+        Ok(val) if !val.is_empty() => val,
+        _ => "info".to_string(),
+    };
+
     tracing_subscriber::fmt::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(tracing_filter)
         .init();
 
     // Parse command line arguments.
