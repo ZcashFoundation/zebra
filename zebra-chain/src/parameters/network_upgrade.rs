@@ -28,8 +28,8 @@ pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 8] = [
 
 /// A Zcash network upgrade.
 ///
-/// Network upgrades can change the Zcash network protocol or consensus rules in
-/// incompatible ways.
+/// Network upgrades change the Zcash network protocol or consensus rules. Note that they have no
+/// designated codenames from NU5 onwards.
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, Ord, PartialOrd)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub enum NetworkUpgrade {
@@ -54,10 +54,7 @@ pub enum NetworkUpgrade {
     Heartwood,
     /// The Zcash protocol after the Canopy upgrade.
     Canopy,
-    /// The Zcash protocol after the Nu5 upgrade.
-    ///
-    /// Note: Network Upgrade 5 includes the Orchard Shielded Protocol, non-malleable transaction
-    /// IDs, and other changes. There is no special code name for Nu5.
+    /// The Zcash protocol after the NU5 upgrade.
     #[serde(rename = "NU5")]
     Nu5,
 }
