@@ -1,0 +1,10 @@
+syntax = "proto3";
+package zebra.indexer.rpc;
+
+// Used by methods that take no arguments.
+message Empty {};
+
+service Indexer {
+  // Notifies listeners of chain tip changes
+  rpc ChainTipChange(Empty) returns (stream Empty);
+}
