@@ -37,7 +37,7 @@ pub struct Config {
     /// `indexer` feature flag and set a listen address in the config:
     /// ```toml
     /// [rpc]
-    /// indexer_listen_addr = '127.0.0.1:8231'
+    /// indexer_listen_addr = '127.0.0.1:8230'
     /// ```
     ///
     /// # Security
