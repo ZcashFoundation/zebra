@@ -4,14 +4,12 @@
 
 ### Setup
 
-After setting up [Zebra Shielded Scanning](https://zebra.zfnd.org/user/shielded-scan.html), add a `listen_addr` field to the shielded-scan configuration:
+After setting up [Zebra Shielded Scanning](https://zebra.zfnd.org/user/shielded-scan.html), you can add a `listen-addr` argument to the scanner binary:
 
-```toml
-[shielded_scan]
-listen_addr = "127.0.0.1:8231"
+
+```bash
+zebra-scanner --sapling-keys-to-scan '{"key":"zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz", "birthday_height": 419200}' --zebrad-cache-dir /media/alfredo/stuff/chain/zebra --zebra-rpc-listen-addr '127.0.0.1:8232' --listen-addr '127.0.0.1:8231'
 ```
-
-Then, run `zebrad` to start the scan gRPC server.
 
 Making requests to the server will also require a gRPC client, the examples here use `grpcurl`, though any gRPC client should work.
 
