@@ -62,6 +62,7 @@ pub struct ConfiguredActivationHeights {
     #[serde(rename = "NU5")]
     pub nu5: Option<u32>,
     /// Activation height for `NU6` network upgrade.
+    #[serde(rename = "NU6")]
     pub nu6: Option<u32>,
 }
 
@@ -347,7 +348,10 @@ impl Parameters {
     /// Accepts a [`ConfiguredActivationHeights`].
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
-    pub fn new_regtest(nu5_activation_height: Option<u32>) -> Self {
+    pub fn new_regtest(
+        nu5_activation_height: Option<u32>,
+        nu6_activation_height: Option<u32>,
+    ) -> Self {
         #[cfg(any(test, feature = "proptest-impl"))]
         let nu5_activation_height = nu5_activation_height.or(Some(100));
 
@@ -365,6 +369,7 @@ impl Parameters {
                 .with_activation_heights(ConfiguredActivationHeights {
                     canopy: Some(1),
                     nu5: nu5_activation_height,
+                    nu6: nu6_activation_height,
                     ..Default::default()
                 })
                 .finish()
@@ -388,7 +393,7 @@ impl Parameters {
             slow_start_shift,
             target_difficulty_limit,
             disable_pow,
-        } = Self::new_regtest(None);
+        } = Self::new_regtest(None, None);
 
         self.network_name == network_name
             && self.network_magic == network_magic
