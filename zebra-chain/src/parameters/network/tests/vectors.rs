@@ -103,7 +103,7 @@ fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            nu5: Some(expected_activation_height),
+            nu6: Some(expected_activation_height),
             ..Default::default()
         })
         .to_network();

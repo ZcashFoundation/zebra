@@ -273,22 +273,23 @@ impl Version for zcash_history::V1 {
             }
             // Nu5 is included because this function is called by the V2 implementation
             // since the V1::NodeData is included inside the V2::NodeData.
-            NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy | NetworkUpgrade::Nu5 => {
-                zcash_history::NodeData {
-                    consensus_branch_id: branch_id.into(),
-                    subtree_commitment: block_hash,
-                    start_time: time,
-                    end_time: time,
-                    start_target: target,
-                    end_target: target,
-                    start_sapling_root: sapling_root,
-                    end_sapling_root: sapling_root,
-                    subtree_total_work: work,
-                    start_height: height.0 as u64,
-                    end_height: height.0 as u64,
-                    sapling_tx: sapling_tx_count,
-                }
-            }
+            NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6 => zcash_history::NodeData {
+                consensus_branch_id: branch_id.into(),
+                subtree_commitment: block_hash,
+                start_time: time,
+                end_time: time,
+                start_target: target,
+                end_target: target,
+                start_sapling_root: sapling_root,
+                end_sapling_root: sapling_root,
+                subtree_total_work: work,
+                start_height: height.0 as u64,
+                end_height: height.0 as u64,
+                sapling_tx: sapling_tx_count,
+            },
         }
     }
 }
