@@ -344,8 +344,6 @@ fn sanitize_transaction_version(
             BeforeOverwinter => 2,
             Overwinter => 3,
             Sapling | Blossom | Heartwood | Canopy => 4,
-            // TODO: move `Nu6` to its own match arm if there's a new tx format for NU6 or remove
-            // this TODO if there isn't.
             Nu5 | Nu6 => 5,
         }
     };

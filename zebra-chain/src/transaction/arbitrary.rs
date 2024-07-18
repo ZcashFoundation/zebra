@@ -778,8 +778,6 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 Self::v4_strategy(ledger_state)
             }
-            // TODO: move `NetworkUpgrade::Nu6` to its own match arm if there's a new tx format for
-            // NU6 or remove this TODO if there isn't.
             NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
                 Self::v5_strategy(ledger_state)

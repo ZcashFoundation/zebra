@@ -123,7 +123,7 @@ impl Commitment {
                 }
             }
             // NetworkUpgrade::current() returns the latest network upgrade that's activated at the provided height, so
-            // on Regtest for heights above height 0, it returns NU6, and it's possible for the current network upgrade
+            // on Regtest for heights above height 0, it could return NU6, and it's possible for the current network upgrade
             // to be NU6 (or Canopy, or any network upgrade above Heartwood) at the Heartwood activation height.
             (Canopy | Nu5 | Nu6, activation_height)
                 if height == activation_height
