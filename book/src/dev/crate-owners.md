@@ -47,7 +47,6 @@ cargo new new-crate-name
 cd new-crate-name
 cargo release publish --verbose --package new-crate-name --execute
 cargo owner --add oxarbitrage
-cargo owner --add teor2345
 cargo owner --add github:zcashfoundation:owners
 ```
 
