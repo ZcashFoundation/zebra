@@ -38,7 +38,7 @@ fn scanner_help() -> eyre::Result<()> {
 /// To run it locally, one way is:
 ///
 /// ```
-/// RUST_LOG=info cargo test scan_binary_starts -- --include-ignored --nocapture
+/// cargo test scan_binary_starts -- --nocapture
 /// ```
 #[tokio::test]
 #[cfg(not(target_os = "windows"))]
@@ -126,7 +126,7 @@ async fn scan_binary_starts() -> Result<()> {
 /// Needs a cache state close to the tip. A possible way to run it locally is:
 ///
 /// export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
-/// RUST_LOG=info cargo test scan_start_where_left -- --ignored --nocapture
+/// cargo test scan_start_where_left -- --ignored --nocapture
 ///
 /// The test will run zebrad with a key to scan, scan the first few blocks after sapling and then stops.
 /// Then it will restart zebrad and check that it resumes scanning where it was left.

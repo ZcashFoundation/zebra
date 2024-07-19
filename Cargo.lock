@@ -4844,6 +4844,19 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be4ef6dd70a610078cb4e338a0f79d06bc759ff1b22d2120c2ff02ae264ba9c2"
+dependencies = [
+ "prettyplease",
+ "proc-macro2",
+ "prost-build 0.12.6",
+ "quote",
+ "syn 2.0.71",
+]
+
+[[package]]
+name = "tonic-build"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "690943cc223adcdd67bb597a2e573ead1b88e999ba37528fe8e6356bf44b29b6"
@@ -4853,6 +4866,19 @@ dependencies = [
  "prost-build 0.13.1",
  "quote",
  "syn 2.0.71",
+]
+
+[[package]]
+name = "tonic-reflection"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "548c227bd5c0fae5925812c4ec6c66ffcfced23ea370cb823f4d18f0fc1cb6a7"
+dependencies = [
+ "prost 0.12.6",
+ "prost-types 0.12.6",
+ "tokio",
+ "tokio-stream",
+ "tonic 0.11.0",
 ]
 
 [[package]]
@@ -6060,7 +6086,7 @@ dependencies = [
  "tokio-stream",
  "tonic 0.12.0",
  "tonic-build 0.12.0",
- "tonic-reflection",
+ "tonic-reflection 0.12.0",
  "tower",
  "zcash_primitives",
  "zebra-chain",
@@ -6137,11 +6163,16 @@ dependencies = [
  "jsonrpc-derive",
  "jsonrpc-http-server",
  "proptest",
+ "prost 0.12.6",
  "rand 0.8.5",
  "serde",
  "serde_json",
  "thiserror",
  "tokio",
+ "tokio-stream",
+ "tonic 0.11.0",
+ "tonic-build 0.11.0",
+ "tonic-reflection 0.11.0",
  "tower",
  "tracing",
  "zcash_address",

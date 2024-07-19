@@ -10,7 +10,7 @@ use zebra_chain::{block::Height, parameters::Network};
 use zebra_state::SaplingScanningKey;
 
 use core::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A structure with sapling key and birthday height.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
@@ -34,15 +34,22 @@ impl std::str::FromStr for SaplingKey {
 #[tokio::main]
 /// Runs the zebra scanner binary with the given arguments.
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Display all logs from the zebra-scan crate.
+    // Display logs with `info` level by default.
+    let tracing_filter: String = match std::env::var("RUST_LOG") {
+        Ok(val) if !val.is_empty() => val,
+        _ => "info".to_string(),
+    };
+
     tracing_subscriber::fmt::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .with_env_filter(tracing_filter)
         .init();
 
     // Parse command line arguments.
     let args = Args::from_args();
 
     let zebrad_cache_dir = args.zebrad_cache_dir;
+    validate_dir(&zebrad_cache_dir)?;
+
     let scanning_cache_dir = args.scanning_cache_dir;
     let mut db_config = zebra_scan::Config::default().db_config;
     db_config.cache_dir = scanning_cache_dir;
@@ -141,4 +148,20 @@ pub struct Args {
     /// IP address and port for the gRPC server.
     #[structopt(long)]
     pub listen_addr: Option<SocketAddr>,
+}
+
+/// Create an error message is a given directory does not exist or we don't have access to it for whatever reason.
+fn validate_dir(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    match dir.try_exists() {
+        Ok(true) => Ok(()),
+        Ok(false) => {
+            let err_msg = format!("directory {} does not exist.", dir.display());
+            error!("{}", err_msg);
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, err_msg).into())
+        }
+        Err(e) => {
+            error!("directory {} could not be accessed: {:?}", dir.display(), e);
+            Err(e.into())
+        }
+    }
 }
