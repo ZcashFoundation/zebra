@@ -79,6 +79,15 @@ skip-tree = [
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
+
+    # wait for reqwest to update base64
+    { name = "base64", version = "=0.21.7" },
+
+    # wait for jsonrpc-http-server to update hyper
+    { name = "h2", version = "=0.3.26" },
+    { name = "http", version = "=0.2.12" },
+    { name = "http-body", version = "=0.4.6" },
+    { name = "hyper", version = "=0.14.30" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
