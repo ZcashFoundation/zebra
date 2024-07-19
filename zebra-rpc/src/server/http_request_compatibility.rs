@@ -3,7 +3,8 @@
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
 use futures::TryStreamExt;
-use hyper::{body::Bytes, Body};
+use hyper::body::Bytes;
+use jsonrpc_http_server::{hyper, RequestMiddlewareAction};
 
 use jsonrpc_http_server::RequestMiddleware;
 
@@ -37,10 +38,7 @@ use jsonrpc_http_server::RequestMiddleware;
 pub struct FixHttpRequestMiddleware;
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
-    fn on_request(
-        &self,
-        mut request: hyper::Request<hyper::Body>,
-    ) -> jsonrpc_http_server::RequestMiddlewareAction {
+    fn on_request(&self, mut request: hyper::Request<hyper::Body>) -> RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
 
         // Fix the request headers if needed and we can do so.
@@ -69,12 +67,12 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
                 Bytes::from(data)
             });
 
-            Body::wrap_stream(body)
+            hyper::Body::wrap_stream(body)
         });
 
         tracing::trace!(?request, "modified HTTP request");
 
-        jsonrpc_http_server::RequestMiddlewareAction::Proceed {
+        RequestMiddlewareAction::Proceed {
             // TODO: disable this security check if we see errors from lightwalletd.
             should_continue_on_invalid_cors: false,
             request,
