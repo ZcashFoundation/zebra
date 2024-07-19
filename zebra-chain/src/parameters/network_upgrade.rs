@@ -258,6 +258,9 @@ impl Network {
     /// When the environment variable TEST_FAKE_ACTIVATION_HEIGHTS is set
     /// and it's a test build, this returns a list of fake activation heights
     /// used by some tests.
+    ///
+    /// Note: This skips implicit network upgrade activations, use [`Network::full_activation_list`]
+    ///       to get an explicit list of all network upgrade activations.
     pub fn activation_list(&self) -> BTreeMap<block::Height, NetworkUpgrade> {
         match self {
             // To prevent accidentally setting this somehow, only check the env var
@@ -282,6 +285,15 @@ impl Network {
             Mainnet => MAINNET_ACTIVATION_HEIGHTS.iter().cloned().collect(),
             Testnet(params) => params.activation_heights().clone(),
         }
+    }
+
+    /// Returns a vector of all implicit and explicit network upgrades for `network`,
+    /// in ascending height order.
+    pub fn full_activation_list(&self) -> Vec<(block::Height, NetworkUpgrade)> {
+        NETWORK_UPGRADES_IN_ORDER
+            .into_iter()
+            .map_while(|nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
+            .collect()
     }
 }
 
