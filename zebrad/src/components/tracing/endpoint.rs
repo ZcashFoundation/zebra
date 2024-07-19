@@ -82,14 +82,13 @@ impl TracingEndpoint {
                 let listener = match tokio::net::TcpListener::bind(addr).await {
                     Ok(listener) => listener,
                     Err(err) => {
-                        error!(
+                        panic!(
                             "Opening tracing endpoint listener {addr:?} failed: {err:?}. \
                             Hint: Check if another zebrad or zcashd process is running. \
                             Try changing the tracing endpoint_addr in the Zebra config.",
                             addr = addr,
                             err = err,
                         );
-                        return;
                     }
                 };
                 info!(
@@ -104,7 +103,7 @@ impl TracingEndpoint {
                     tokio::spawn(async move {
                         let svc = TowerToHyperService::new(svc);
                         if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
-                            panic!(
+                            error!(
                                 "Serve connection in {addr:?} failed: {err:?}.",
                                 addr = addr,
                                 err = err
