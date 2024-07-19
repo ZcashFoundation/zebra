@@ -74,8 +74,11 @@ skip-tree = [
     { name = "base64", version = "=0.13.1" },
 
     # wait for console-subscriber to update tonic.
-    { name = "tonic", version = "=0.10.2" },
+    { name = "tonic", version = "=0.11.0" },
     { name = "tonic-build", version = "=0.10.2" },
+    { name = "axum", version = "=0.6.20" },
+    { name = "axum-core", version = "=0.3.4" },
+    { name = "hyper-timeout", version = "=0.4.1" },
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
