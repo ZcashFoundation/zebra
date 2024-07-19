@@ -82,6 +82,7 @@ skip-tree = [
 
     # wait for reqwest to update base64
     { name = "base64", version = "=0.21.7" },
+    { name = "sync_wrapper", version = "0.1.2" },
 
     # wait for jsonrpc-http-server to update hyper
     { name = "h2", version = "=0.3.26" },
