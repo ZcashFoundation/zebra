@@ -103,7 +103,7 @@ fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            nu5: Some(expected_activation_height),
+            nu6: Some(expected_activation_height),
             ..Default::default()
         })
         .to_network();
@@ -269,4 +269,29 @@ fn check_network_name() {
         expected_name,
         "network must be displayed as configured network name"
     );
+}
+
+#[test]
+fn check_full_activation_list() {
+    let network = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        })
+        .to_network();
+
+    // We expect the first 8 network upgrades to be included, up to NU5
+    let expected_network_upgrades = &NETWORK_UPGRADES_IN_ORDER[..8];
+    let full_activation_list_network_upgrades: Vec<_> = network
+        .full_activation_list()
+        .into_iter()
+        .map(|(_, nu)| nu)
+        .collect();
+
+    for expected_network_upgrade in expected_network_upgrades {
+        assert!(
+            full_activation_list_network_upgrades.contains(expected_network_upgrade),
+            "full activation list should contain expected network upgrade"
+        );
+    }
 }
