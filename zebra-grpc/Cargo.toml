@@ -23,7 +23,7 @@ prost = "0.13.1"
 serde = { version = "1.0.204", features = ["serde_derive"] }
 tokio = { version = "1.38.1", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1.15"
-tower = { version = "0.4.13", features = ["util", "buffer"] }
+tower = { version = "0.4.13", features = ["util", "buffer", "timeout"] }
 color-eyre = "0.6.3"
 
 zcash_primitives = { version = "0.15.0" }
