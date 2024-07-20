@@ -541,7 +541,7 @@ where
         //
         // Get the network upgrades in height order, like `zcashd`.
         let mut upgrades = IndexMap::new();
-        for (activation_height, network_upgrade) in network.activation_list() {
+        for (activation_height, network_upgrade) in network.full_activation_list() {
             // Zebra defines network upgrades based on incompatible consensus rule changes,
             // but zcashd defines them based on ZIPs.
             //
