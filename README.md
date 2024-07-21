@@ -150,6 +150,8 @@ We maintain a list of known issues in the
 [Troubleshooting](https://zebra.zfnd.org/user/troubleshooting.html) section of
 the book.
 
+Need more help? 🧑‍🎓: Learn at [ZecHub](https://zechub.wiki/)
+
 ## Security
 
 Zebra has a [responsible disclosure policy](https://github.com/ZcashFoundation/zebra/blob/main/SECURITY.md), which we encourage security researchers to follow.
