@@ -95,7 +95,7 @@ impl TracingEndpoint {
                     "Opened tracing endpoint at {}",
                     listener
                         .local_addr()
-                        .expect("Local address must be available as the bind was succesful")
+                        .expect("Local address must be available as the bind was successful")
                 );
 
                 while let Ok((stream, _)) = listener.accept().await {
