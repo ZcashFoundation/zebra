@@ -42,7 +42,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl"]
 [dependencies]
 bitflags = "2.5.0"
 byteorder = "1.5.0"
-bytes = "1.6.0"
+bytes = "1.6.1"
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std"] }
 dirs = "5.0.1"
 hex = "0.4.3"
@@ -58,10 +58,10 @@ rayon = "1.10.0"
 regex = "1.10.4"
 serde = { version = "1.0.204", features = ["serde_derive"] }
 tempfile = "3.10.1"
-thiserror = "1.0.61"
+thiserror = "1.0.63"
 
 futures = "0.3.30"
-tokio = { version = "1.37.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.38.1", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.15", features = ["sync", "time"] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
@@ -90,8 +90,8 @@ proptest = "1.4.0"
 proptest-derive = "0.5.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
-toml = "0.8.13"
+tokio = { version = "1.38.1", features = ["full", "tracing", "test-util"] }
+toml = "0.8.15"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
