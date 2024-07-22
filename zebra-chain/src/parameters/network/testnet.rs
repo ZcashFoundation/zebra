@@ -383,9 +383,14 @@ impl Parameters {
 
     /// Returns true if the instance of [`Parameters`] represents Regtest.
     pub fn is_regtest(&self) -> bool {
+        if self.network_magic != magics::REGTEST {
+            return false;
+        }
+
         let Self {
             network_name,
-            network_magic,
+            // Already checked network magic above
+            network_magic: _,
             genesis_hash,
             // Activation heights are configurable on Regtest
             activation_heights: _,
@@ -396,7 +401,6 @@ impl Parameters {
         } = Self::new_regtest(None, None);
 
         self.network_name == network_name
-            && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
