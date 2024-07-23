@@ -209,7 +209,6 @@ pub async fn run() -> Result<()> {
     assert_eq!(
         get_block_response
             .chain_metadata
-            .clone()
             .unwrap()
             .sapling_commitment_tree_size,
         1170439

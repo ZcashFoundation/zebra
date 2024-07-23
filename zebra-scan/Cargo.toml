@@ -65,7 +65,7 @@ indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.13.0"
 semver = "1.0.23"
 serde = { version = "1.0.204", features = ["serde_derive"] }
-tokio = { version = "1.37.0", features = ["time"] }
+tokio = { version = "1.38.1", features = ["time"] }
 tower = "0.4.13"
 tracing = "0.1.39"
 futures = "0.3.30"
@@ -110,7 +110,7 @@ zebrad = { path = "../zebrad", version = "1.8.0" }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["ron", "redactions"] }
-tokio = { version = "1.37.0", features = ["test-util"] }
+tokio = { version = "1.38.1", features = ["test-util"] }
 
 proptest = "1.4.0"
 proptest-derive = "0.5.0"
@@ -122,7 +122,7 @@ rand = "0.8.5"
 tempfile = "3.10.1"
 zcash_note_encryption = "0.4.0"
 toml = "0.8.13"
-tonic = "0.11.0"
+tonic = "0.12.0"
 
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test", version = "1.0.0-beta.38" }

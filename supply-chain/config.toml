@@ -534,10 +534,6 @@ criteria = "safe-to-deploy"
 version = "2.0.0"
 criteria = "safe-to-deploy"
 
-[[exemptions.futures]]
-version = "0.3.30"
-criteria = "safe-to-deploy"
-
 [[exemptions.futures-channel]]
 version = "0.3.30"
 criteria = "safe-to-deploy"
@@ -600,10 +596,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.h2]]
 version = "0.3.26"
-criteria = "safe-to-deploy"
-
-[[exemptions.h2]]
-version = "0.4.5"
 criteria = "safe-to-deploy"
 
 [[exemptions.half]]

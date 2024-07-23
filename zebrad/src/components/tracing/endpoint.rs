@@ -7,7 +7,15 @@ use abscissa_core::{Component, FrameworkError};
 use crate::config::ZebradConfig;
 
 #[cfg(feature = "filter-reload")]
-use hyper::{Body, Request, Response};
+use hyper::{
+    body::{Body, Incoming},
+    Method, Request, Response, StatusCode,
+};
+#[cfg(feature = "filter-reload")]
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder,
+};
 
 #[cfg(feature = "filter-reload")]
 use crate::{components::tokio::TokioComponent, prelude::*};
@@ -24,11 +32,16 @@ pub struct TracingEndpoint {
 }
 
 #[cfg(feature = "filter-reload")]
-async fn read_filter(req: Request<Body>) -> Result<String, String> {
+async fn read_filter(req: Request<impl Body>) -> Result<String, String> {
+    use http_body_util::BodyExt;
+
     std::str::from_utf8(
-        &hyper::body::to_bytes(req.into_body())
+        req.into_body()
+            .collect()
             .await
-            .map_err(|_| "Error reading body".to_owned())?,
+            .map_err(|_| "Error reading body".to_owned())?
+            .to_bytes()
+            .as_ref(),
     )
     .map(|s| s.to_owned())
     .map_err(|_| "Filter must be UTF-8".to_owned())
@@ -52,42 +65,56 @@ impl TracingEndpoint {
     #[cfg(feature = "filter-reload")]
     #[allow(clippy::unwrap_in_result)]
     pub fn init_tokio(&mut self, tokio_component: &TokioComponent) -> Result<(), FrameworkError> {
-        use hyper::{
-            service::{make_service_fn, service_fn},
-            Server,
-        };
-
         let addr = if let Some(addr) = self.addr {
             addr
         } else {
             return Ok(());
         };
 
-        let service =
-            make_service_fn(|_| async { Ok::<_, hyper::Error>(service_fn(request_handler)) });
-
         info!("Trying to open tracing endpoint at {}...", addr);
+
+        let svc = hyper::service::service_fn(|req: Request<Incoming>| async move {
+            request_handler(req).await
+        });
+
         tokio_component
             .rt
             .as_ref()
             .expect("runtime should not be taken")
             .spawn(async move {
-                // try_bind uses the tokio runtime, so we
-                // need to construct it inside the task.
-                let server = match Server::try_bind(&addr) {
-                    Ok(s) => s,
-                    Err(e) => panic!(
-                        "Opening tracing endpoint listener {addr:?} failed: {e:?}. \
-                         Hint: Check if another zebrad or zcashd process is running. \
-                         Try changing the tracing endpoint_addr in the Zebra config.",
-                    ),
-                }
-                .serve(service);
+                let listener = match tokio::net::TcpListener::bind(addr).await {
+                    Ok(listener) => listener,
+                    Err(err) => {
+                        panic!(
+                            "Opening tracing endpoint listener {addr:?} failed: {err:?}. \
+                            Hint: Check if another zebrad or zcashd process is running. \
+                            Try changing the tracing endpoint_addr in the Zebra config.",
+                            addr = addr,
+                            err = err,
+                        );
+                    }
+                };
+                info!(
+                    "Opened tracing endpoint at {}",
+                    listener
+                        .local_addr()
+                        .expect("Local address must be available as the bind was successful")
+                );
 
-                info!("Opened tracing endpoint at {}", server.local_addr());
-
-                if let Err(e) = server.await {
-                    error!("Server error: {}", e);
+                while let Ok((stream, _)) = listener.accept().await {
+                    let io = TokioIo::new(stream);
+                    tokio::spawn(async move {
+                        if let Err(err) = Builder::new(TokioExecutor::new())
+                            .serve_connection(io, svc)
+                            .await
+                        {
+                            error!(
+                                "Serve connection in {addr:?} failed: {err:?}.",
+                                addr = addr,
+                                err = err
+                            );
+                        }
+                    });
                 }
             });
 
@@ -97,13 +124,11 @@ impl TracingEndpoint {
 
 #[cfg(feature = "filter-reload")]
 #[instrument]
-async fn request_handler(req: Request<Body>) -> Result<Response<Body>, hyper::Error> {
-    use hyper::{Method, StatusCode};
-
+async fn request_handler(req: Request<Incoming>) -> Result<Response<String>, hyper::Error> {
     use super::Tracing;
 
     let rsp = match (req.method(), req.uri().path()) {
-        (&Method::GET, "/") => Response::new(Body::from(
+        (&Method::GET, "/") => Response::new(
             r#"
 This HTTP endpoint allows dynamic control of the filter applied to
 tracing events.
@@ -115,18 +140,19 @@ To get the current filter, GET /filter:
 To set the filter, POST the new filter string to /filter:
 
     curl -X POST localhost:3000/filter -d "zebrad=trace"
-"#,
-        )),
+"#
+            .to_string(),
+        ),
         (&Method::GET, "/filter") => Response::builder()
             .status(StatusCode::OK)
-            .body(Body::from(
+            .body(
                 APPLICATION
                     .state()
                     .components()
                     .get_downcast_ref::<Tracing>()
                     .expect("Tracing component should be available")
                     .filter(),
-            ))
+            )
             .expect("response with known status code cannot fail"),
         (&Method::POST, "/filter") => match read_filter(req).await {
             Ok(filter) => {
@@ -137,16 +163,16 @@ To set the filter, POST the new filter string to /filter:
                     .expect("Tracing component should be available")
                     .reload_filter(filter);
 
-                Response::new(Body::from(""))
+                Response::new("".to_string())
             }
             Err(e) => Response::builder()
                 .status(StatusCode::BAD_REQUEST)
-                .body(Body::from(e))
+                .body(e)
                 .expect("response with known status code cannot fail"),
         },
         _ => Response::builder()
             .status(StatusCode::NOT_FOUND)
-            .body(Body::from(""))
+            .body("".to_string())
             .expect("response with known status cannot fail"),
     };
     Ok(rsp)

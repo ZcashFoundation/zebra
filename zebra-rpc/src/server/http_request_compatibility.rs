@@ -3,9 +3,10 @@
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
 use futures::TryStreamExt;
-use hyper::{body::Bytes, Body};
-
-use jsonrpc_http_server::RequestMiddleware;
+use jsonrpc_http_server::{
+    hyper::{body::Bytes, header, Body, Request},
+    RequestMiddleware, RequestMiddlewareAction,
+};
 
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
@@ -37,10 +38,7 @@ use jsonrpc_http_server::RequestMiddleware;
 pub struct FixHttpRequestMiddleware;
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
-    fn on_request(
-        &self,
-        mut request: hyper::Request<hyper::Body>,
-    ) -> jsonrpc_http_server::RequestMiddlewareAction {
+    fn on_request(&self, mut request: Request<Body>) -> RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
 
         // Fix the request headers if needed and we can do so.
@@ -74,7 +72,7 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
 
         tracing::trace!(?request, "modified HTTP request");
 
-        jsonrpc_http_server::RequestMiddlewareAction::Proceed {
+        RequestMiddlewareAction::Proceed {
             // TODO: disable this security check if we see errors from lightwalletd.
             should_continue_on_invalid_cors: false,
             request,
@@ -124,10 +122,10 @@ impl FixHttpRequestMiddleware {
     /// <https://www.invicti.com/blog/web-security/importance-content-type-header-http-requests/>
     /// - Checking all the headers is secure, but only because hyper has custom code that just reads the first content-type header.
     /// <https://github.com/hyperium/headers/blob/f01cc90cf8d601a716856bc9d29f47df92b779e4/src/common/content_type.rs#L102-L108>
-    pub fn insert_or_replace_content_type_header(headers: &mut hyper::header::HeaderMap) {
-        if !headers.contains_key(hyper::header::CONTENT_TYPE)
+    pub fn insert_or_replace_content_type_header(headers: &mut header::HeaderMap) {
+        if !headers.contains_key(header::CONTENT_TYPE)
             || headers
-                .get(hyper::header::CONTENT_TYPE)
+                .get(header::CONTENT_TYPE)
                 .filter(|value| {
                     value
                         .to_str()
@@ -138,8 +136,8 @@ impl FixHttpRequestMiddleware {
                 .is_some()
         {
             headers.insert(
-                hyper::header::CONTENT_TYPE,
-                hyper::header::HeaderValue::from_static("application/json"),
+                header::CONTENT_TYPE,
+                header::HeaderValue::from_static("application/json"),
             );
         }
     }
