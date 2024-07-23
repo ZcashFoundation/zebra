@@ -17,4 +17,4 @@ push = false
 tag = false
 
 # Owners for new crates
-owners = [ 'oxarbitrage', 'zcashfoundation/owners' ]
+owners = [ 'oxarbitrage', 'conradoplg', 'zcashfoundation/owners' ]

@@ -44,7 +44,7 @@ We need to configure Zebra to behave as an RPC endpoint. The standard RPC port
 for Zebra is:
 
 - `8232` for Mainnet, and
-- `18323` for Testnet.
+- `18232` for Testnet.
 
 For example, to use Zebra as a `lightwalletd` backend on Mainnet, give it this
 `~/.config/zebrad.toml`:
