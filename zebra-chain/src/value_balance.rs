@@ -1,4 +1,5 @@
 //! A type that can hold the four types of Zcash value pools.
+// TODO: Update the docs above.
 
 use crate::{
     amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
@@ -20,6 +21,7 @@ mod tests;
 
 use ValueBalanceError::*;
 
+// TODO: Update the docs.
 /// An amount spread between different Zcash pools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct ValueBalance<C> {
@@ -27,6 +29,7 @@ pub struct ValueBalance<C> {
     sprout: Amount<C>,
     sapling: Amount<C>,
     orchard: Amount<C>,
+    deferred: Amount<C>,
 }
 
 impl<C> ValueBalance<C>
@@ -124,6 +127,7 @@ where
             sprout: zero,
             sapling: zero,
             orchard: zero,
+            deferred: zero,
         }
     }
 
@@ -138,6 +142,7 @@ where
             sprout: self.sprout.constrain().map_err(Sprout)?,
             sapling: self.sapling.constrain().map_err(Sapling)?,
             orchard: self.orchard.constrain().map_err(Orchard)?,
+            deferred: self.deferred.constrain().map_err(Deferred)?,
         })
     }
 }
@@ -333,55 +338,68 @@ impl ValueBalance<NonNegative> {
     }
 
     /// To byte array
-    pub fn to_bytes(self) -> [u8; 32] {
-        let transparent = self.transparent.to_bytes();
-        let sprout = self.sprout.to_bytes();
-        let sapling = self.sapling.to_bytes();
-        let orchard = self.orchard.to_bytes();
-        match [transparent, sprout, sapling, orchard].concat().try_into() {
+    pub fn to_bytes(self) -> [u8; 40] {
+        match [
+            self.transparent.to_bytes(),
+            self.sprout.to_bytes(),
+            self.sapling.to_bytes(),
+            self.orchard.to_bytes(),
+            self.deferred.to_bytes(),
+        ]
+        .concat()
+        .try_into()
+        {
             Ok(bytes) => bytes,
             _ => unreachable!(
-                "Four [u8; 8] should always concat with no error into a single [u8; 32]"
+                "five [u8; 8] should always concat with no error into a single [u8; 40]"
             ),
         }
     }
 
     /// From byte array
     #[allow(clippy::unwrap_in_result)]
-    pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+    pub fn from_bytes(bytes: [u8; 40]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let transparent = Amount::from_bytes(
             bytes[0..8]
                 .try_into()
-                .expect("Extracting the first quarter of a [u8; 32] should always succeed"),
+                .expect("transparent amount must be present"),
         )
         .map_err(Transparent)?;
 
         let sprout = Amount::from_bytes(
             bytes[8..16]
                 .try_into()
-                .expect("Extracting the second quarter of a [u8; 32] should always succeed"),
+                .expect("sprout amount must be present"),
         )
         .map_err(Sprout)?;
 
         let sapling = Amount::from_bytes(
             bytes[16..24]
                 .try_into()
-                .expect("Extracting the third quarter of a [u8; 32] should always succeed"),
+                .expect("sapling amount must be present"),
         )
         .map_err(Sapling)?;
 
         let orchard = Amount::from_bytes(
             bytes[24..32]
                 .try_into()
-                .expect("Extracting the last quarter of a [u8; 32] should always succeed"),
+                .expect("orchard amount must be present"),
         )
         .map_err(Orchard)?;
+
+        let deferred = Amount::from_bytes(
+            bytes[32..40]
+                .try_into()
+                .expect("deferred amount must be present"),
+        )
+        .map_err(Deferred)?;
 
         Ok(ValueBalance {
             transparent,
             sprout,
             sapling,
             orchard,
+            deferred,
         })
     }
 }
@@ -400,6 +418,9 @@ pub enum ValueBalanceError {
 
     /// orchard amount error {0}
     Orchard(amount::Error),
+
+    /// deferred amount error {0}
+    Deferred(amount::Error),
 }
 
 impl fmt::Display for ValueBalanceError {
@@ -409,6 +430,7 @@ impl fmt::Display for ValueBalanceError {
             Sprout(e) => format!("sprout amount err: {e}"),
             Sapling(e) => format!("sapling amount err: {e}"),
             Orchard(e) => format!("orchard amount err: {e}"),
+            Deferred(e) => format!("deferred amount err: {e}"),
         })
     }
 }
@@ -424,6 +446,7 @@ where
             sprout: (self.sprout + rhs.sprout).map_err(Sprout)?,
             sapling: (self.sapling + rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
+            deferred: (self.deferred + rhs.deferred).map_err(Deferred)?,
         })
     }
 }
@@ -472,6 +495,7 @@ where
             sprout: (self.sprout - rhs.sprout).map_err(Sprout)?,
             sapling: (self.sapling - rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
+            deferred: (self.deferred - rhs.deferred).map_err(Deferred)?,
         })
     }
 }
@@ -540,6 +564,7 @@ where
             sprout: self.sprout.neg(),
             sapling: self.sapling.neg(),
             orchard: self.orchard.neg(),
+            deferred: self.deferred.neg(),
         }
     }
 }

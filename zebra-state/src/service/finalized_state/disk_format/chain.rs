@@ -21,7 +21,7 @@ use zebra_chain::{
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 32];
+    type Bytes = [u8; 40];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.to_bytes()
