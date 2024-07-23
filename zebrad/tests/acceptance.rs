@@ -1391,7 +1391,11 @@ fn full_sync_testnet() -> Result<()> {
 #[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
-    use hyper::Client;
+    use bytes::Bytes;
+    use http_body_util::BodyExt;
+    use http_body_util::Full;
+    use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+    use std::io::Write;
 
     let _init_guard = zebra_test::init();
 
@@ -1412,14 +1416,22 @@ async fn metrics_endpoint() -> Result<()> {
     tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Create an http client
-    let client = Client::new();
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
 
     // Test metrics endpoint
     let res = client.get(url.try_into().expect("url is valid")).await;
+
     let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
-    let body = hyper::body::to_bytes(res).await;
-    let (body, mut child) = child.kill_on_error(body)?;
+
+    // Get the body of the response
+    let mut body = Vec::new();
+    let mut body_stream = res.into_body();
+    while let Some(next) = body_stream.frame().await {
+        body.write_all(next?.data_ref().unwrap())?;
+    }
+
+    let (body, mut child) = child.kill_on_error::<Vec<u8>, hyper::Error>(Ok(body))?;
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
@@ -1447,7 +1459,11 @@ async fn metrics_endpoint() -> Result<()> {
 #[cfg(all(feature = "filter-reload", not(target_os = "windows")))]
 #[tokio::test]
 async fn tracing_endpoint() -> Result<()> {
-    use hyper::{Body, Client, Request};
+    use bytes::Bytes;
+    use http_body_util::BodyExt;
+    use http_body_util::Full;
+    use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+    use std::io::Write;
 
     let _init_guard = zebra_test::init();
 
@@ -1469,7 +1485,7 @@ async fn tracing_endpoint() -> Result<()> {
     tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Create an http client
-    let client = Client::new();
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
 
     // Test tracing endpoint
     let res = client
@@ -1477,23 +1493,40 @@ async fn tracing_endpoint() -> Result<()> {
         .await;
     let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
-    let body = hyper::body::to_bytes(res).await;
-    let (body, child) = child.kill_on_error(body)?;
+
+    // Get the body of the response
+    let mut body = Vec::new();
+    let mut body_stream = res.into_body();
+    while let Some(next) = body_stream.frame().await {
+        body.write_all(next?.data_ref().unwrap())?;
+    }
+
+    let (body, child) = child.kill_on_error::<Vec<u8>, hyper::Error>(Ok(body))?;
 
     // Set a filter and make sure it was changed
-    let request = Request::post(url_filter.clone())
-        .body(Body::from("zebrad=debug"))
+    let request = hyper::Request::post(url_filter.clone())
+        .body("zebrad=debug".to_string().into())
         .unwrap();
+
     let post = client.request(request).await;
     let (_post, child) = child.kill_on_error(post)?;
 
     let tracing_res = client
         .get(url_filter.try_into().expect("url_filter is valid"))
         .await;
+
     let (tracing_res, child) = child.kill_on_error(tracing_res)?;
     assert!(tracing_res.status().is_success());
-    let tracing_body = hyper::body::to_bytes(tracing_res).await;
-    let (tracing_body, mut child) = child.kill_on_error(tracing_body)?;
+
+    // Get the body of the response
+    let mut tracing_body = Vec::new();
+    let mut body_stream = tracing_res.into_body();
+    while let Some(next) = body_stream.frame().await {
+        tracing_body.write_all(next?.data_ref().unwrap())?;
+    }
+
+    let (tracing_body, mut child) =
+        child.kill_on_error::<Vec<u8>, hyper::Error>(Ok(tracing_body.clone()))?;
 
     child.kill(false)?;
 
@@ -1507,6 +1540,7 @@ async fn tracing_endpoint() -> Result<()> {
     // Make sure the endpoint header is correct
     // The header is split over two lines. But we don't want to require line
     // breaks at a specific word, so we run two checks for different substrings.
+
     output.any_output_line_contains(
         "HTTP endpoint allows dynamic control of the filter",
         &body,
@@ -1519,7 +1553,8 @@ async fn tracing_endpoint() -> Result<()> {
         "tracing filter endpoint response",
         "the tracing response header",
     )?;
-    std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in tracing filter response");
+    std::str::from_utf8(&tracing_body)
+        .expect("unexpected invalid UTF-8 in tracing filter response");
 
     // Make sure endpoint requests change the filter
     output.any_output_line_contains(
