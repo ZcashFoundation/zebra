@@ -1424,7 +1424,7 @@ async fn metrics_endpoint() -> Result<()> {
     let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
 
-    // Get he body of the response
+    // Get the body of the response
     let mut body = Vec::new();
     let mut body_stream = res.into_body();
     while let Some(next) = body_stream.frame().await {
@@ -1494,7 +1494,7 @@ async fn tracing_endpoint() -> Result<()> {
     let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
 
-    // Get he body of the response
+    // Get the body of the response
     let mut body = Vec::new();
     let mut body_stream = res.into_body();
     while let Some(next) = body_stream.frame().await {
@@ -1518,7 +1518,7 @@ async fn tracing_endpoint() -> Result<()> {
     let (tracing_res, child) = child.kill_on_error(tracing_res)?;
     assert!(tracing_res.status().is_success());
 
-    // Get he body of the response
+    // Get the body of the response
     let mut tracing_body = Vec::new();
     let mut body_stream = tracing_res.into_body();
     while let Some(next) = body_stream.frame().await {
