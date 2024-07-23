@@ -11,7 +11,13 @@ use crate::{
     work::difficulty::{ExpandedDifficulty, U256},
 };
 
-use super::magic::Magic;
+use super::{
+    magic::Magic,
+    subsidy::{
+        FundingStreams, POST_NU6_FUNDING_STREAMS_MAINNET, POST_NU6_FUNDING_STREAMS_TESTNET,
+        PRE_NU6_FUNDING_STREAMS_MAINNET, PRE_NU6_FUNDING_STREAMS_TESTNET,
+    },
+};
 
 /// The Regtest NU5 activation height in tests
 // TODO: Serialize testnet parameters in Config then remove this and use a configured NU5 activation height.
@@ -79,6 +85,10 @@ pub struct ParametersBuilder {
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Slow start interval for this network
     slow_start_interval: Height,
+    /// Pre-NU6 funding streams for this network
+    pre_nu6_funding_streams: FundingStreams,
+    /// Post-NU6 funding streams for this network
+    post_nu6_funding_streams: FundingStreams,
     /// Target difficulty limit for this network
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
@@ -113,6 +123,8 @@ impl Default for ParametersBuilder {
                 .to_expanded()
                 .expect("difficulty limits are valid expanded values"),
             disable_pow: false,
+            pre_nu6_funding_streams: PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
+            post_nu6_funding_streams: POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
         }
     }
 }
@@ -263,6 +275,8 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         } = self;
@@ -273,6 +287,8 @@ impl ParametersBuilder {
             activation_heights,
             slow_start_interval,
             slow_start_shift: Height(slow_start_interval.0 / 2),
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         }
@@ -291,6 +307,8 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         } = Self::default();
@@ -299,6 +317,8 @@ impl ParametersBuilder {
             && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
+            && self.pre_nu6_funding_streams == pre_nu6_funding_streams
+            && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
     }
@@ -323,6 +343,10 @@ pub struct Parameters {
     slow_start_interval: Height,
     /// Slow start shift for this network, always half the slow start interval
     slow_start_shift: Height,
+    /// Pre-NU6 funding streams for this network
+    pre_nu6_funding_streams: FundingStreams,
+    /// Post-NU6 funding streams for this network
+    post_nu6_funding_streams: FundingStreams,
     /// Target difficulty limit for this network
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
@@ -396,6 +420,8 @@ impl Parameters {
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         } = Self::new_regtest(None, None);
@@ -404,6 +430,8 @@ impl Parameters {
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
+            && self.pre_nu6_funding_streams == pre_nu6_funding_streams
+            && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
     }
@@ -436,6 +464,16 @@ impl Parameters {
     /// Returns slow start shift for this network
     pub fn slow_start_shift(&self) -> Height {
         self.slow_start_shift
+    }
+
+    /// Returns pre-NU6 funding streams for this network
+    pub fn pre_nu6_funding_streams(&self) -> &FundingStreams {
+        &self.pre_nu6_funding_streams
+    }
+
+    /// Returns post-NU6 funding streams for this network
+    pub fn post_nu6_funding_streams(&self) -> &FundingStreams {
+        &self.post_nu6_funding_streams
     }
 
     /// Returns the target difficulty limit for this network
@@ -474,6 +512,33 @@ impl Network {
             params.slow_start_shift()
         } else {
             SLOW_START_SHIFT
+        }
+    }
+
+    /// Returns pre-NU6 funding streams for this network
+    pub fn pre_nu6_funding_streams(&self) -> &FundingStreams {
+        if let Self::Testnet(params) = self {
+            params.pre_nu6_funding_streams()
+        } else {
+            &PRE_NU6_FUNDING_STREAMS_MAINNET
+        }
+    }
+
+    /// Returns post-NU6 funding streams for this network
+    pub fn post_nu6_funding_streams(&self) -> &FundingStreams {
+        if let Self::Testnet(params) = self {
+            params.pre_nu6_funding_streams()
+        } else {
+            &POST_NU6_FUNDING_STREAMS_MAINNET
+        }
+    }
+
+    /// Returns funding streams for this network at the provided height
+    pub fn funding_streams(&self, height: Height) -> &FundingStreams {
+        if NetworkUpgrade::current(self, height) < NetworkUpgrade::Nu6 {
+            self.pre_nu6_funding_streams()
+        } else {
+            self.post_nu6_funding_streams()
         }
     }
 }

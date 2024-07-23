@@ -1,13 +1,11 @@
 //! Constants for Block Subsidy and Funding Streams
 
-use std::collections::HashMap;
-
 use lazy_static::lazy_static;
 
-use zebra_chain::{
+use crate::{
     amount::COIN,
     block::{Height, HeightDiff},
-    parameters::{Network, NetworkKind, NetworkUpgrade},
+    parameters::{Network, NetworkUpgrade},
 };
 
 /// The largest block subsidy, used before the first halving.
@@ -60,76 +58,182 @@ pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 /// [ZIP-214]: https://zips.z.cash/zip-0214
 pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
 
-// TODO: use a struct for the info for each funding stream, like zcashd does:
-// https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
+/// Funding stream recipients and height ranges.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FundingStreams {
+    recipients: Vec<FundingStreamRecipient>,
+    height_range: std::ops::Range<Height>,
+}
+
+impl FundingStreams {
+    /// Returns height range where these [`FundingStreams`] should apply.
+    pub fn height_range(&self) -> &std::ops::Range<Height> {
+        &self.height_range
+    }
+
+    /// Returns recipients of these [`FundingStreams`].
+    pub fn recipients(&self) -> &[FundingStreamRecipient] {
+        &self.recipients
+    }
+
+    /// Returns a recipient with the provided receiver.
+    pub fn recipient_by_receiver(
+        &self,
+        receiver: FundingStreamReceiver,
+    ) -> Option<&FundingStreamRecipient> {
+        self.recipients
+            .iter()
+            .find(|recipient| recipient.receiver() == receiver)
+    }
+}
+
+/// A funding stream recipient as specified in [protocol specification §7.10.1][7.10.1]
+///
+/// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FundingStreamRecipient {
+    receiver: FundingStreamReceiver,
+    name: String,
+    numerator: u64,
+    addresses: Vec<String>,
+}
+
+impl FundingStreamRecipient {
+    /// Creates a new [`FundingStreamRecipient`].
+    pub fn new(
+        receiver: FundingStreamReceiver,
+        name: impl Into<String>,
+        numerator: u64,
+        addresses: Vec<String>,
+    ) -> Self {
+        Self {
+            receiver,
+            name: name.into(),
+            numerator,
+            addresses,
+        }
+    }
+
+    /// Returns the receiver of this funding stream.
+    pub fn receiver(&self) -> FundingStreamReceiver {
+        self.receiver
+    }
+
+    /// Returns the name of this funding stream.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Returns the numerator for this funding stream.
+    pub fn numerator(&self) -> u64 {
+        self.numerator
+    }
+
+    /// Returns the receiver of this funding stream.
+    pub fn addresses(&self) -> &[String] {
+        &self.addresses
+    }
+}
+
 lazy_static! {
-    /// The name for each funding stream receiver, as described in [ZIP-1014] and [`zcashd`].
-    ///
-    /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
-    /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
-    pub static ref FUNDING_STREAM_NAMES: HashMap<FundingStreamReceiver, &'static str> = {
-        let mut hash_map = HashMap::new();
-        hash_map.insert(FundingStreamReceiver::Ecc, "Electric Coin Company");
-        hash_map.insert(FundingStreamReceiver::ZcashFoundation, "Zcash Foundation");
-        hash_map.insert(FundingStreamReceiver::MajorGrants, "Major Grants");
-        hash_map
+    /// The pre-NU6 funding streams for Mainnet
+    pub static ref PRE_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
+        recipients: vec![
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::Ecc,
+                "Electric Coin Company",
+                7,
+                FUNDING_STREAM_ECC_ADDRESSES_MAINNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::ZcashFoundation,
+                "Zcash Foundation",
+                5,
+                FUNDING_STREAM_ZF_ADDRESSES_MAINNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::MajorGrants,
+                "Major Grants",
+                8,
+                FUNDING_STREAM_MG_ADDRESSES_MAINNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+        ],
+        height_range: Height(1_046_400)..Height(2_726_400),
     };
 
-
-    /// The numerator for each funding stream receiver category
-    /// as described in [protocol specification §7.10.1][7.10.1].
-    ///
-    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub static ref FUNDING_STREAM_RECEIVER_NUMERATORS: HashMap<FundingStreamReceiver, u64> = {
-        let mut hash_map = HashMap::new();
-        hash_map.insert(FundingStreamReceiver::Ecc, 7);
-        hash_map.insert(FundingStreamReceiver::ZcashFoundation, 5);
-        hash_map.insert(FundingStreamReceiver::MajorGrants, 8);
-        hash_map
+    /// The pre-NU6 funding streams for Testnet
+    pub static ref PRE_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
+        recipients: vec![
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::Ecc,
+                "Electric Coin Company",
+                7,
+                FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::ZcashFoundation,
+                "Zcash Foundation",
+                5,
+                FUNDING_STREAM_ZF_ADDRESSES_TESTNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::MajorGrants,
+                "Major Grants",
+                8,
+                FUNDING_STREAM_MG_ADDRESSES_TESTNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+        ],
+        height_range: Height(1_028_500)..Height(2_796_000),
     };
 
-    /// Start and end Heights for funding streams
-    /// as described in [protocol specification §7.10.1][7.10.1].
-    ///
-    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
-    pub static ref FUNDING_STREAM_HEIGHT_RANGES: HashMap<NetworkKind, std::ops::Range<Height>> = {
-        let mut hash_map = HashMap::new();
-        hash_map.insert(NetworkKind::Mainnet, Height(1_046_400)..Height(2_726_400));
-        hash_map.insert(NetworkKind::Testnet, Height(1_028_500)..Height(2_796_000));
-        hash_map.insert(NetworkKind::Regtest, Height(1_028_500)..Height(2_796_000));
-        hash_map
+    /// The post-NU6 funding streams for Mainnet
+    pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
+        recipients: vec![
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::MajorGrants,
+                "Major Grants",
+                8,
+                FUNDING_STREAM_MG_ADDRESSES_MAINNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+        ],
+        height_range: Height(2_726_400)..Height(3_146_400),
     };
 
-    /// Convenient storage for all addresses, for all receivers and networks
-    pub static ref FUNDING_STREAM_ADDRESSES: HashMap<NetworkKind, HashMap<FundingStreamReceiver, Vec<String>>> = {
-        let mut addresses_by_network = HashMap::with_capacity(2);
-
-        // Mainnet addresses
-        let mut mainnet_addresses = HashMap::with_capacity(3);
-        mainnet_addresses.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
-        mainnet_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
-        mainnet_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_MAINNET.iter().map(|a| a.to_string()).collect());
-        addresses_by_network.insert(NetworkKind::Mainnet, mainnet_addresses);
-
-        // Testnet addresses
-        let mut testnet_addresses = HashMap::with_capacity(3);
-        testnet_addresses.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        testnet_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        testnet_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        addresses_by_network.insert(NetworkKind::Testnet, testnet_addresses);
-
-
-        // Regtest addresses
-        // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
-        //       There are no funding stream addresses on Regtest in zcashd, zebrad should do the same for compatibility.
-        let mut regtest_addresses = HashMap::with_capacity(3);
-        regtest_addresses.insert(FundingStreamReceiver::Ecc, FUNDING_STREAM_ECC_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        regtest_addresses.insert(FundingStreamReceiver::ZcashFoundation, FUNDING_STREAM_ZF_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        regtest_addresses.insert(FundingStreamReceiver::MajorGrants, FUNDING_STREAM_MG_ADDRESSES_TESTNET.iter().map(|a| a.to_string()).collect());
-        addresses_by_network.insert(NetworkKind::Testnet, regtest_addresses);
-
-        addresses_by_network
+    /// The post-NU6 funding streams for Testnet
+    pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
+        recipients: vec![
+            FundingStreamRecipient::new(
+                FundingStreamReceiver::MajorGrants,
+                "Major Grants",
+                8,
+                FUNDING_STREAM_MG_ADDRESSES_TESTNET
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect(),
+            ),
+        ],
+        height_range: Height(2_942_000)..Height(3_362_000),
     };
 }
 
@@ -200,9 +304,6 @@ pub const FUNDING_STREAM_ECC_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRE
 
 /// Functionality specific to block subsidy-related consensus rules
 pub trait ParameterSubsidy {
-    /// Number of addresses for each funding stream in the Network.
-    /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
-    fn num_funding_streams(&self) -> usize;
     /// Returns the minimum height after the first halving
     /// as described in [protocol specification §7.10][7.10]
     ///
@@ -212,14 +313,6 @@ pub trait ParameterSubsidy {
 
 /// Network methods related to Block Subsidy and Funding Streams
 impl ParameterSubsidy for Network {
-    fn num_funding_streams(&self) -> usize {
-        match self {
-            Network::Mainnet => FUNDING_STREAMS_NUM_ADDRESSES_MAINNET,
-            // TODO: Check what zcashd does here, consider adding a field to `NetworkParamters` to make this configurable.
-            Network::Testnet(_params) => FUNDING_STREAMS_NUM_ADDRESSES_TESTNET,
-        }
-    }
-
     fn height_for_first_halving(&self) -> Height {
         // First halving on Mainnet is at Canopy
         // while in Testnet is at block constant height of `1_116_000`

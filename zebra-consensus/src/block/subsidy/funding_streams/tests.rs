@@ -1,6 +1,7 @@
 //! Tests for funding streams.
 
 use color_eyre::Report;
+use zebra_chain::parameters::subsidy::FundingStreamReceiver;
 
 use super::*;
 
@@ -44,7 +45,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
     );
 
     // funding stream period is ending
-    let range = FUNDING_STREAM_HEIGHT_RANGES.get(&network.kind()).unwrap();
+    let funding_streams = network.pre_nu6_funding_streams();
+    let range = funding_streams.height_range();
     let end = range.end;
     let last = end - 1;
 
@@ -61,15 +63,16 @@ fn test_funding_stream_values() -> Result<(), Report> {
 #[test]
 fn test_funding_stream_addresses() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
-
-    for (network, receivers) in FUNDING_STREAM_ADDRESSES.iter() {
-        for (receiver, addresses) in receivers {
-            for address in addresses {
+    for network in Network::iter() {
+        for funding_stream_recipient in network.pre_nu6_funding_streams().recipients() {
+            let receiver = funding_stream_recipient.receiver();
+            for address in funding_stream_recipient.addresses() {
                 let address =
                     transparent::Address::from_str(address).expect("address should deserialize");
+
                 assert_eq!(
-                    &address.network_kind(),
-                    network,
+                    address.network_kind(),
+                    network.kind(),
                     "incorrect network for {receiver:?} funding stream address constant: {address}",
                 );
 
