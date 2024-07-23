@@ -87,7 +87,7 @@ skip-tree = [
     { name = "base64", version = "=0.21.7" },
     { name = "sync_wrapper", version = "0.1.2" },
 
-    # wait for jsonrpc-http-server to update hyper
+    # wait for jsonrpc-http-server to update hyper or for Zebra to replace jsonrpc (#8682)
     { name = "h2", version = "=0.3.26" },
     { name = "http", version = "=0.2.12" },
     { name = "http-body", version = "=0.4.6" },
