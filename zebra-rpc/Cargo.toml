@@ -60,9 +60,6 @@ chrono = { version = "0.4.38", default-features = false, features = [
 ] }
 futures = "0.3.30"
 
-# lightwalletd sends JSON-RPC requests over HTTP 1.1
-hyper = { version = "1.3.1", features = ["http1", "server"] }
-
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
