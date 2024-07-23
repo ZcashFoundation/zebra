@@ -14,14 +14,12 @@ use zebra_chain::{
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy::FundingStreamReceiver, Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
-use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, FundingStreamReceiver,
-};
+use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsidy};
 use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
 

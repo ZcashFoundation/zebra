@@ -36,7 +36,6 @@
 
 mod block;
 mod checkpoint;
-mod parameters;
 mod primitives;
 mod script;
 
@@ -64,7 +63,6 @@ pub use checkpoint::{
 };
 pub use config::Config;
 pub use error::BlockError;
-pub use parameters::{FundingStreamReceiver, ParameterSubsidy};
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
 pub use router::RouterError;
 
