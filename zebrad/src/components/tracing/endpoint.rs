@@ -9,11 +9,13 @@ use crate::config::ZebradConfig;
 #[cfg(feature = "filter-reload")]
 use hyper::{
     body::{Body, Incoming},
-    server::conn::http1,
     Method, Request, Response, StatusCode,
 };
 #[cfg(feature = "filter-reload")]
-use hyper_util::{rt::TokioIo, service::TowerToHyperService};
+use hyper_util::{
+    rt::{TokioExecutor, TokioIo},
+    server::conn::auto::Builder,
+};
 
 #[cfg(feature = "filter-reload")]
 use crate::{components::tokio::TokioComponent, prelude::*};
@@ -71,8 +73,9 @@ impl TracingEndpoint {
 
         info!("Trying to open tracing endpoint at {}...", addr);
 
-        let svc =
-            tower::service_fn(|req: Request<Incoming>| async move { request_handler(req).await });
+        let svc = hyper::service::service_fn(|req: Request<Incoming>| async move {
+            request_handler(req).await
+        });
 
         tokio_component
             .rt
@@ -101,8 +104,10 @@ impl TracingEndpoint {
                 while let Ok((stream, _)) = listener.accept().await {
                     let io = TokioIo::new(stream);
                     tokio::spawn(async move {
-                        let svc = TowerToHyperService::new(svc);
-                        if let Err(err) = http1::Builder::new().serve_connection(io, svc).await {
+                        if let Err(err) = Builder::new(TokioExecutor::new())
+                            .serve_connection(io, svc)
+                            .await
+                        {
                             error!(
                                 "Serve connection in {addr:?} failed: {err:?}.",
                                 addr = addr,
