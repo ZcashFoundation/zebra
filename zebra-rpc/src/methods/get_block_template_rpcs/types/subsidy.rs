@@ -2,8 +2,7 @@
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::Height,
-    parameters::{subsidy::FundingStreamReceiver, Network},
+    parameters::subsidy::FundingStreamReceiver,
     transparent,
 };
 use zebra_consensus::funding_stream_recipient_info;
@@ -66,20 +65,18 @@ pub struct FundingStream {
 impl FundingStream {
     /// Convert a `receiver`, `value`, and `address` into a `FundingStream` response.
     pub fn new(
-        network: &Network,
-        height: Height,
         receiver: FundingStreamReceiver,
         value: Amount<NonNegative>,
-        address: transparent::Address,
+        address: &transparent::Address,
     ) -> FundingStream {
-        let (recipient, specification) = funding_stream_recipient_info(network, height, receiver);
+        let (recipient, specification) = funding_stream_recipient_info(receiver);
 
         FundingStream {
             recipient: recipient.to_string(),
             specification: specification.to_string(),
             value: value.into(),
             value_zat: value,
-            address,
+            address: address.clone(),
         }
     }
 }

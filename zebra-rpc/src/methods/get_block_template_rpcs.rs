@@ -1199,10 +1199,7 @@ where
                 .iter()
                 .map(|(receiver, value)| {
                     let address = funding_stream_address(height, &network, *receiver);
-                    (
-                        *receiver,
-                        FundingStream::new(&network, height, *receiver, *value, address),
-                    )
+                    (*receiver, FundingStream::new(*receiver, *value, address))
                 })
                 .collect();
 

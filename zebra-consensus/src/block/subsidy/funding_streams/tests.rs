@@ -64,12 +64,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
 fn test_funding_stream_addresses() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
     for network in Network::iter() {
-        for funding_stream_recipient in network.pre_nu6_funding_streams().recipients() {
-            let receiver = funding_stream_recipient.receiver();
-            for address in funding_stream_recipient.addresses() {
-                let address =
-                    transparent::Address::from_str(address).expect("address should deserialize");
-
+        for (receiver, recipient) in network.pre_nu6_funding_streams().recipients() {
+            for address in recipient.addresses() {
                 assert_eq!(
                     address.network_kind(),
                     network.kind(),
@@ -77,7 +73,7 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
                 );
 
                 // Asserts if address is not a P2SH address.
-                let _script = new_coinbase_script(&address);
+                let _script = new_coinbase_script(address);
             }
         }
     }
