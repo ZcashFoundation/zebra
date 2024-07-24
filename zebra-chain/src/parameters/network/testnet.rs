@@ -133,8 +133,12 @@ impl ConfiguredFundingStreams {
             ))
             .expect("no overflow should happen in this sub") as usize;
 
-        for recipient in funding_streams.recipients().values() {
-            // TODO: Make an exception for the `Deferred` receiver.
+        for (&receiver, recipient) in funding_streams.recipients() {
+            if receiver == FundingStreamReceiver::Deferred {
+                // The `Deferred` receiver doesn't need any addresses.
+                continue;
+            }
+
             assert!(
                 recipient.addresses().len() >= expected_min_num_addresses,
                 "recipients must have a sufficient number of addresses for height range, \

@@ -59,6 +59,11 @@ impl ProposalResponse {
 
         ProposalResponse::Rejected(final_error.to_string())
     }
+
+    /// Returns true if self is [`ProposalResponse::Valid`]
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid)
+    }
 }
 
 impl From<ProposalResponse> for Response {
