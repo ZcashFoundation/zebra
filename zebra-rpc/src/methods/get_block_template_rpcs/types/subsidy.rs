@@ -59,7 +59,8 @@ pub struct FundingStream {
     ///
     /// The current Zcash funding streams only use transparent addresses,
     /// so Zebra doesn't support Sapling addresses in this RPC.
-    pub address: transparent::Address,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<transparent::Address>,
 }
 
 impl FundingStream {
@@ -67,7 +68,7 @@ impl FundingStream {
     pub fn new(
         receiver: FundingStreamReceiver,
         value: Amount<NonNegative>,
-        address: &transparent::Address,
+        address: Option<&transparent::Address>,
     ) -> FundingStream {
         let (recipient, specification) = funding_stream_recipient_info(receiver);
 
@@ -76,7 +77,7 @@ impl FundingStream {
             specification: specification.to_string(),
             value: value.into(),
             value_zat: value,
-            address: address.clone(),
+            address: address.cloned(),
         }
     }
 }

@@ -52,7 +52,7 @@ pub fn funding_stream_values(
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-fn funding_stream_address_index(height: Height, network: &Network) -> usize {
+fn funding_stream_address_index(height: Height, network: &Network) -> Option<usize> {
     let funding_streams = network.funding_streams(height);
 
     let index = 1u32
@@ -70,16 +70,14 @@ fn funding_stream_address_index(height: Height, network: &Network) -> usize {
     let num_addresses = funding_streams
         .recipients()
         .values()
-        .next()
-        // TODO: Return an Option from this function and replace `.unwrap()` with `?`
-        .unwrap()
+        .next()?
         .addresses()
         .len();
 
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but
     // Zebra indices for addresses start at zero, return converted.
-    index - 1
+    Some(index - 1)
 }
 
 /// Return the address corresponding to given height, network and funding stream receiver.
@@ -90,17 +88,10 @@ pub fn funding_stream_address(
     height: Height,
     network: &Network,
     receiver: FundingStreamReceiver,
-) -> &transparent::Address {
-    let index = funding_stream_address_index(height, network);
+) -> Option<&transparent::Address> {
+    let index = funding_stream_address_index(height, network)?;
     let funding_streams = network.funding_streams(height);
-    funding_streams
-        .recipient(receiver)
-        // TODO: Change return type to option and return None here instead of panicking
-        .unwrap()
-        .addresses()
-        .get(index)
-        // TODO: Change return type to option and return None here instead of panicking
-        .unwrap()
+    funding_streams.recipient(receiver)?.addresses().get(index)
 }
 
 /// Return a human-readable name and a specification URL for the funding stream `receiver`.

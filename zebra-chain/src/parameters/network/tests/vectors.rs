@@ -320,9 +320,11 @@ fn check_configured_funding_stream_constraints() {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 20,
-                addresses: FUNDING_STREAM_ECC_ADDRESSES_TESTNET
-                    .map(Into::into)
-                    .to_vec(),
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
             }]),
             ..Default::default()
         },
@@ -330,9 +332,11 @@ fn check_configured_funding_stream_constraints() {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 100,
-                addresses: FUNDING_STREAM_ECC_ADDRESSES_TESTNET
-                    .map(Into::into)
-                    .to_vec(),
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
             }]),
             ..Default::default()
         },
@@ -398,7 +402,7 @@ fn check_configured_funding_stream_constraints() {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 10,
-                addresses: vec![],
+                addresses: Some(vec![]),
             }]),
             ..Default::default()
         });
@@ -410,9 +414,11 @@ fn check_configured_funding_stream_constraints() {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 101,
-                addresses: FUNDING_STREAM_ECC_ADDRESSES_TESTNET
-                    .map(Into::into)
-                    .to_vec(),
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
             }]),
             ..Default::default()
         });
@@ -424,9 +430,11 @@ fn check_configured_funding_stream_constraints() {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 10,
-                addresses: FUNDING_STREAM_ECC_ADDRESSES_MAINNET
-                    .map(Into::into)
-                    .to_vec(),
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_MAINNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
             }]),
             ..Default::default()
         });

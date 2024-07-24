@@ -62,6 +62,9 @@ pub enum FundingStreamReceiver {
 
     /// The Major Grants (Zcash Community Grants) funding stream.
     MajorGrants,
+
+    /// The deferred pool contribution.
+    Deferred,
 }
 
 impl FundingStreamReceiver {
@@ -74,6 +77,8 @@ impl FundingStreamReceiver {
             FundingStreamReceiver::Ecc => "Electric Coin Company",
             FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
             FundingStreamReceiver::MajorGrants => "Major Grants",
+            // TODO: Find out what this should be called and update the funding stream name
+            FundingStreamReceiver::Deferred => "Deferred Fund",
         }
     }
 }
@@ -144,21 +149,25 @@ pub struct FundingStreamRecipient {
 
 impl FundingStreamRecipient {
     /// Creates a new [`FundingStreamRecipient`].
-    pub fn new<I, T>(numerator: u64, addresses: I) -> Self
+    pub fn new<I, T>(numerator: u64, addresses: Option<I>) -> Self
     where
         T: ToString,
         I: IntoIterator<Item = T>,
     {
         Self {
             numerator,
-            addresses: addresses
-                .into_iter()
-                .map(|addr| {
-                    let addr = addr.to_string();
-                    addr.parse()
-                        .expect("funding stream address must deserialize")
-                })
-                .collect(),
+            addresses: if let Some(addresses) = addresses {
+                addresses
+                    .into_iter()
+                    .map(|addr| {
+                        let addr = addr.to_string();
+                        addr.parse()
+                            .expect("funding stream address must deserialize")
+                    })
+                    .collect()
+            } else {
+                vec![]
+            },
         }
     }
 
@@ -180,15 +189,15 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET.iter()),
+                FundingStreamRecipient::new(7, Some(FUNDING_STREAM_ECC_ADDRESSES_MAINNET)),
             ),
             (
                 FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_MAINNET),
+                FundingStreamRecipient::new(5, Some(FUNDING_STREAM_ZF_ADDRESSES_MAINNET)),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
+                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_MAINNET)),
             ),
         ]
         .into_iter()
@@ -198,7 +207,19 @@ lazy_static! {
     /// The post-NU6 funding streams for Mainnet
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
         height_range: Height(2_726_400)..Height(3_146_400),
-        recipients: HashMap::new()
+        recipients: [
+            (
+                FundingStreamReceiver::Deferred,
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, None),
+            ),
+            (
+                FundingStreamReceiver::MajorGrants,
+                // TODO: Update these addresses
+                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_MAINNET)),
+            ),
+        ]
+        .into_iter()
+        .collect()
     };
 
     /// The pre-NU6 funding streams for Testnet
@@ -207,15 +228,15 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_TESTNET),
+                FundingStreamRecipient::new(7, Some(FUNDING_STREAM_ECC_ADDRESSES_TESTNET)),
             ),
             (
                 FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_TESTNET),
+                FundingStreamRecipient::new(5, Some(FUNDING_STREAM_ZF_ADDRESSES_TESTNET)),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
+                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_TESTNET)),
             ),
         ]
         .into_iter()
@@ -225,7 +246,19 @@ lazy_static! {
     /// The post-NU6 funding streams for Testnet
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
         height_range: Height(2_942_000)..Height(3_362_000),
-        recipients: HashMap::new()
+        recipients: [
+            (
+                FundingStreamReceiver::Deferred,
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, None),
+            ),
+            (
+                FundingStreamReceiver::MajorGrants,
+                // TODO: Update these addresses
+                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_TESTNET)),
+            ),
+        ]
+        .into_iter()
+        .collect()
     };
 }
 
