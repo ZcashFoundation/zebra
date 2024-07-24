@@ -13,6 +13,37 @@ use zebra_chain::{
 
 use crate::funding_stream_values;
 
+/// The halving index for a block height and network.
+///
+/// `Halving(height)`, as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn num_halvings(height: Height, network: &Network) -> u32 {
+    let slow_start_shift = network.slow_start_shift();
+    let blossom_height = Blossom
+        .activation_height(network)
+        .expect("blossom activation height should be available");
+
+    let halving_index = if height < slow_start_shift {
+        panic!("unsupported block height {height:?}: checkpoints should handle blocks below {slow_start_shift:?}")
+    } else if height < blossom_height {
+        let pre_blossom_height = height - slow_start_shift;
+        pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL
+    } else {
+        let pre_blossom_height = blossom_height - slow_start_shift;
+        let scaled_pre_blossom_height =
+            pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
+
+        let post_blossom_height = height - blossom_height;
+
+        (scaled_pre_blossom_height + post_blossom_height) / POST_BLOSSOM_HALVING_INTERVAL
+    };
+
+    halving_index
+        .try_into()
+        .expect("already checked for negatives")
+}
+
 /// The divisor used for halvings.
 ///
 /// `1 << Halving(height)`, as described in [protocol specification §7.8][7.8]
@@ -21,45 +52,8 @@ use crate::funding_stream_values;
 ///
 /// Returns `None` if the divisor would overflow a `u64`.
 pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
-    let blossom_height = Blossom
-        .activation_height(network)
-        .expect("blossom activation height should be available");
-
-    if height < network.slow_start_shift() {
-        panic!(
-            "unsupported block height {height:?}: checkpoints should handle blocks below {:?}",
-            network.slow_start_shift()
-        )
-    } else if height < blossom_height {
-        let pre_blossom_height = height - network.slow_start_shift();
-        let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL;
-
-        let halving_div = 1u64
-            .checked_shl(
-                halving_shift
-                    .try_into()
-                    .expect("already checked for negatives"),
-            )
-            .expect("pre-blossom heights produce small shifts");
-
-        Some(halving_div)
-    } else {
-        let pre_blossom_height = blossom_height - network.slow_start_shift();
-        let scaled_pre_blossom_height =
-            pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
-
-        let post_blossom_height = height - blossom_height;
-
-        let halving_shift =
-            (scaled_pre_blossom_height + post_blossom_height) / POST_BLOSSOM_HALVING_INTERVAL;
-
-        // Some far-future shifts can be more than 63 bits
-        1u64.checked_shl(
-            halving_shift
-                .try_into()
-                .expect("already checked for negatives"),
-        )
-    }
+    // Some far-future shifts can be more than 63 bits
+    1u64.checked_shl(num_halvings(height, network))
 }
 
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
@@ -78,9 +72,7 @@ pub fn block_subsidy(height: Height, network: &Network) -> Result<Amount<NonNega
         return Ok(Amount::zero());
     };
 
-    // TODO: Add this as a field on `testnet::Parameters` instead of checking `disable_pow()`, this is 0 for Regtest in zcashd,
-    //       see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L640>
-    if height < network.slow_start_interval() && !network.disable_pow() {
+    if height < network.slow_start_interval() {
         unreachable!(
             "unsupported block height {height:?}: callers should handle blocks below {:?}",
             network.slow_start_interval()

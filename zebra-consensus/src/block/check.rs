@@ -148,8 +148,9 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
     // Validate funding streams
-    let Some(halving_div) = subsidy::general::halving_divisor(height, network) else {
-        // Far future halving, with no founders reward or funding streams
+
+    // Future halving, with no founders reward or funding streams
+    if subsidy::general::num_halvings(height, network) > 2 {
         return Ok(());
     };
 
@@ -157,68 +158,48 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
         .activation_height(network)
         .expect("Canopy activation height is known");
 
-    // TODO: Add this as a field on `testnet::Parameters` instead of checking `disable_pow()`, this is 0 for Regtest in zcashd,
-    //       see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L640>
-    let slow_start_interval = if network.disable_pow() {
-        Height(0)
-    } else {
-        network.slow_start_interval()
-    };
-
-    if height < slow_start_interval {
-        unreachable!(
-            "unsupported block height: callers should handle blocks below {:?}",
-            slow_start_interval
-        )
-    } else if halving_div.count_ones() != 1 {
-        unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")
-    } else if height < canopy_activation_height {
+    if height < canopy_activation_height {
         // Founders rewards are paid up to Canopy activation, on both mainnet and testnet.
         // But we checkpoint in Canopy so founders reward does not apply for Zebra.
         unreachable!("we cannot verify consensus rules before Canopy activation");
-    } else if halving_div < 8 {
-        // Funding streams are paid from Canopy activation to the second halving
-        // Note: Canopy activation is at the first halving on mainnet, but not on testnet
-        // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
-        // funding stream amount values
-        let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
-            .expect("We always expect a funding stream hashmap response even if empty");
+    }
 
-        // # Consensus
-        //
-        // > [Canopy onward] The coinbase transaction at block height `height`
-        // > MUST contain at least one output per funding stream `fs` active at `height`,
-        // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
-        // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-        for (receiver, expected_amount) in funding_streams {
-            if receiver == FundingStreamReceiver::Deferred {
-                // The deferred pool contribution is checked in `miner_fees_are_valid()`
-                // TODO: Add link to lockbox stream ZIP
-                continue;
-            }
+    // Funding streams are paid from Canopy activation to the second halving
+    // Note: Canopy activation is at the first halving on mainnet, but not on testnet
+    // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
+    // funding stream amount values
+    let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
+        .expect("We always expect a funding stream hashmap response even if empty");
 
-            let address = subsidy::funding_streams::funding_stream_address(
-                height, network, receiver,
-            )
+    // # Consensus
+    //
+    // > [Canopy onward] The coinbase transaction at block height `height`
+    // > MUST contain at least one output per funding stream `fs` active at `height`,
+    // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
+    // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+    for (receiver, expected_amount) in funding_streams {
+        if receiver == FundingStreamReceiver::Deferred {
+            // The deferred pool contribution is checked in `miner_fees_are_valid()`
+            // TODO: Add link to lockbox stream ZIP
+            continue;
+        }
+
+        let address = subsidy::funding_streams::funding_stream_address(height, network, receiver)
             .expect("funding stream receivers other than the deferred pool must have an address");
 
-            let has_expected_output =
-                subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
-                    .iter()
-                    .map(zebra_chain::transparent::Output::value)
-                    .any(|value| value == expected_amount);
+        let has_expected_output =
+            subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
+                .iter()
+                .map(zebra_chain::transparent::Output::value)
+                .any(|value| value == expected_amount);
 
-            if !has_expected_output {
-                Err(SubsidyError::FundingStreamNotFound)?;
-            }
+        if !has_expected_output {
+            Err(SubsidyError::FundingStreamNotFound)?;
         }
-        Ok(())
-    } else {
-        // Future halving, with no founders reward or funding streams
-        Ok(())
     }
+    Ok(())
 }
 
 /// Returns `Ok(())` if the miner fees consensus rule is valid.
@@ -264,10 +245,11 @@ pub fn miner_fees_are_valid(
 
     // TODO: Add link to exact coinbase balance ZIP
     let should_allow_unclaimed_subsidy =
-        NetworkUpgrade::current(network, height) <= NetworkUpgrade::Nu5;
+        NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu6;
     let is_invalid_miner_fee = if should_allow_unclaimed_subsidy {
         left > right
     } else {
+        // TODO: Document the need for claiming all subsidy once the ZIP for NU6 is out.
         left != right
     };
 
