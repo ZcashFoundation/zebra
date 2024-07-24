@@ -88,7 +88,8 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
     (block::Height(1_687_104), Nu5),
-    (block::Height(2_726_400), Nu6),
+    // TODO: Add NU6
+    // (block::Height(2_726_400), Nu6),
 ];
 
 /// Fake mainnet network upgrade activation heights, used in tests.
@@ -124,7 +125,8 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(903_800), Heartwood),
     (block::Height(1_028_500), Canopy),
     (block::Height(1_842_420), Nu5),
-    (block::Height(2_942_000), Nu6),
+    // TODO: Add NU6
+    // (block::Height(2_942_000), Nu6),
 ];
 
 /// Fake testnet network upgrade activation heights, used in tests.
