@@ -186,12 +186,7 @@ lazy_static! {
     /// The post-NU6 funding streams for Mainnet
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
         height_range: Height(2_726_400)..Height(3_146_400),
-        recipients: [(
-            FundingStreamReceiver::MajorGrants,
-            FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET)
-        )]
-        .into_iter()
-        .collect(),
+        recipients: HashMap::new()
     };
 
     /// The pre-NU6 funding streams for Testnet
@@ -218,12 +213,7 @@ lazy_static! {
     /// The post-NU6 funding streams for Testnet
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
         height_range: Height(2_942_000)..Height(3_362_000),
-        recipients: [(
-            FundingStreamReceiver::MajorGrants,
-            FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
-        )]
-        .into_iter()
-        .collect(),
+        recipients: HashMap::new()
     };
 }
 
