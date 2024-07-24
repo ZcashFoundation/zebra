@@ -69,10 +69,12 @@ fn funding_stream_address_index(height: Height, network: &Network) -> usize {
     // when configured Testnet parameters are built.
     let num_addresses = funding_streams
         .recipients()
-        .iter()
+        .values()
         .next()
-        .map(|(_, recipient)| recipient.addresses().len())
-        .unwrap_or_default();
+        // TODO: Return an Option from this function and replace `.unwrap()` with `?`
+        .unwrap()
+        .addresses()
+        .len();
 
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but

@@ -7,7 +7,7 @@ use crate::{
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{funding_stream_address_period, FUNDING_STREAM_RECEIVER_DENOMINATOR},
-        Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
+        Network, NetworkKind, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
     },
     work::difficulty::{ExpandedDifficulty, U256},
 };
@@ -50,6 +50,7 @@ const REGTEST_GENESIS_HASH: &str =
 const TESTNET_GENESIS_HASH: &str =
     "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38";
 
+/// Used to validate number of funding stream recipient addresses on configured Testnets.
 struct TestnetParameterSubsidyImpl;
 
 impl ParameterSubsidy for TestnetParameterSubsidyImpl {
@@ -58,7 +59,7 @@ impl ParameterSubsidy for TestnetParameterSubsidyImpl {
     }
 }
 
-/// Configurable funding streams for Regtest and configured Testnets.
+/// Configurable funding stream recipient for configured Testnets.
 #[derive(Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ConfiguredFundingStreamRecipient {
@@ -80,7 +81,7 @@ impl ConfiguredFundingStreamRecipient {
     }
 }
 
-/// Configurable funding streams for Regtest and configured Testnets.
+/// Configurable funding streams for configured Testnets.
 #[derive(Deserialize, Clone, Default, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ConfiguredFundingStreams {
@@ -91,6 +92,8 @@ pub struct ConfiguredFundingStreams {
 }
 
 impl ConfiguredFundingStreams {
+    /// Converts a [`ConfiguredFundingStreams`] to a [`FundingStreams`], using the provided default values
+    /// if `height_range` or `recipients` are None.
     fn convert_with_default(self, default_funding_streams: FundingStreams) -> FundingStreams {
         let height_range = self
             .height_range
@@ -137,6 +140,14 @@ impl ConfiguredFundingStreams {
                 "recipients must have a sufficient number of addresses for height range, \
                  minimum num addresses required: {expected_min_num_addresses}"
             );
+
+            for address in recipient.addresses() {
+                assert_eq!(
+                    address.network_kind(),
+                    NetworkKind::Testnet,
+                    "configured funding stream addresses must be for Testnet"
+                );
+            }
         }
 
         // check that sum of receiver numerators is valid.
@@ -662,7 +673,7 @@ impl Network {
         }
     }
 
-    /// Returns funding streams for this network at the provided height
+    /// Returns post-Canopy funding streams for this network at the provided height
     pub fn funding_streams(&self, height: Height) -> &FundingStreams {
         if NetworkUpgrade::current(self, height) < NetworkUpgrade::Nu6 {
             self.pre_nu6_funding_streams()

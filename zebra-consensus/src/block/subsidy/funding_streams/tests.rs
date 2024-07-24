@@ -1,7 +1,7 @@
 //! Tests for funding streams.
 
 use color_eyre::Report;
-use zebra_chain::parameters::subsidy::FundingStreamReceiver;
+use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 
 use super::*;
 
@@ -45,8 +45,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
     );
 
     // funding stream period is ending
-    let funding_streams = network.pre_nu6_funding_streams();
-    let range = funding_streams.height_range();
+    // TODO: Check post-NU6 funding streams here as well.
+    let range = network.pre_nu6_funding_streams().height_range();
     let end = range.end;
     let last = end - 1;
 
@@ -66,9 +66,15 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
     for network in Network::iter() {
         for (receiver, recipient) in network.pre_nu6_funding_streams().recipients() {
             for address in recipient.addresses() {
+                let expected_network_kind = match network.kind() {
+                    NetworkKind::Mainnet => NetworkKind::Mainnet,
+                    // `Regtest` uses `Testnet` transparent addresses.
+                    NetworkKind::Testnet | NetworkKind::Regtest => NetworkKind::Testnet,
+                };
+
                 assert_eq!(
                     address.network_kind(),
-                    network.kind(),
+                    expected_network_kind,
                     "incorrect network for {receiver:?} funding stream address constant: {address}",
                 );
 
