@@ -7,8 +7,9 @@ use crate::{
     block::Height,
     parameters::{
         subsidy::{
-            FundingStreamReceiver, FUNDING_STREAM_ECC_ADDRESSES_TESTNET,
-            POST_NU6_FUNDING_STREAMS_TESTNET, PRE_NU6_FUNDING_STREAMS_TESTNET,
+            FundingStreamReceiver, FUNDING_STREAM_ECC_ADDRESSES_MAINNET,
+            FUNDING_STREAM_ECC_ADDRESSES_TESTNET, POST_NU6_FUNDING_STREAMS_TESTNET,
+            PRE_NU6_FUNDING_STREAMS_TESTNET,
         },
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
@@ -301,8 +302,10 @@ fn check_full_activation_list() {
     }
 }
 
+/// Tests that a set of constraints are enforced when building Testnet parameters,
+/// and that funding stream configurations that should be valid can be built.
 #[test]
-fn check_funding_streams() {
+fn check_configured_funding_stream_constraints() {
     let configured_funding_streams = [
         Default::default(),
         ConfiguredFundingStreams {
@@ -415,6 +418,20 @@ fn check_funding_streams() {
         });
     });
 
+    // should panic when recipient addresses are for Mainnet.
+    let expected_panic_wrong_addr_network = std::panic::catch_unwind(|| {
+        testnet::Parameters::build().with_pre_nu6_funding_streams(ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Ecc,
+                numerator: 10,
+                addresses: FUNDING_STREAM_ECC_ADDRESSES_MAINNET
+                    .map(Into::into)
+                    .to_vec(),
+            }]),
+            ..Default::default()
+        });
+    });
+
     // drop panic hook before expecting errors.
     let _ = std::panic::take_hook();
 
@@ -422,4 +439,6 @@ fn check_funding_streams() {
     expected_panic_numerator.expect_err(
         "should panic when sum of numerators is greater than funding stream denominator",
     );
+    expected_panic_wrong_addr_network
+        .expect_err("should panic when recipient addresses are for Mainnet");
 }

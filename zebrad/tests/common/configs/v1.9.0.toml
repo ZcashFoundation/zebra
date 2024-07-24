@@ -193,7 +193,6 @@ addresses = [
     "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
 ]
 
-
 [rpc]
 debug_force_finished_sync = false
 parallel_cpu_threads = 0

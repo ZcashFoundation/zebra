@@ -1,4 +1,16 @@
 //! Constants and calculations for Block Subsidy and Funding Streams
+//!
+//! This module contains the consensus parameters which are required for
+//! verification.
+//!
+//! Some consensus parameters change based on network upgrades. Each network
+//! upgrade happens at a particular block height. Some parameters have a value
+//! (or function) before the upgrade height, at the upgrade height, and after
+//! the upgrade height. (For example, the value of the reserved field in the
+//! block header during the Heartwood upgrade.)
+//!
+//! Typically, consensus parameters are accessed via a function that takes a
+//! `Network` and `block::Height`.
 
 use std::collections::HashMap;
 
@@ -403,7 +415,7 @@ pub fn funding_stream_address_period(height: Height, network: impl ParameterSubs
     //
     // In Rust, "integer division rounds towards zero":
     // <https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators>
-    //   This is the same as `floor()`, because these numbers are all positive.
+    // This is the same as `floor()`, because these numbers are all positive.
 
     let height_after_first_halving = height - network.height_for_first_halving();
 
