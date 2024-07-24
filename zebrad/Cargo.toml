@@ -296,4 +296,4 @@ zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.5" }
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.38" }
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)', 'cfg(zcash_unstable = "nu6")'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)', 'cfg(zcash_unstable, values("nu6"))'] }
