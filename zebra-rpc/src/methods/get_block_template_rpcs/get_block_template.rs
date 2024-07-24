@@ -376,11 +376,11 @@ pub fn standard_coinbase_outputs(
         (Amount<NonNegative>, &transparent::Address),
     > = funding_streams
         .into_iter()
-        .map(|(receiver, amount)| {
-            (
+        .filter_map(|(receiver, amount)| {
+            Some((
                 receiver,
-                (amount, funding_stream_address(height, network, receiver)),
-            )
+                (amount, funding_stream_address(height, network, receiver)?),
+            ))
         })
         .collect();
 

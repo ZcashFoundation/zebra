@@ -68,7 +68,7 @@ pub struct ConfiguredFundingStreamRecipient {
     /// The numerator for each funding stream receiver category, see [`FundingStreamRecipient::numerator`] for more details.
     pub numerator: u64,
     /// Addresses for the funding stream recipient, see [`FundingStreamRecipient::addresses`] for more details.
-    pub addresses: Vec<String>,
+    pub addresses: Option<Vec<String>>,
 }
 
 impl ConfiguredFundingStreamRecipient {

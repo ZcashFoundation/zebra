@@ -214,8 +214,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
-    // TODO: Use the real consensus branch ID once it's specified.
-    (Nu6, ConsensusBranchId(0xdeadc0de)),
+    (Nu6, ConsensusBranchId(0xc8e71055)),
 ];
 
 /// The target block spacing before Blossom.
@@ -530,6 +529,8 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
+            #[cfg(zcash_unstable = "nu6")]
+            zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
         }
     }
 }
