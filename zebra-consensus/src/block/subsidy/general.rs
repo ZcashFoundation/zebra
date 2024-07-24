@@ -152,6 +152,10 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
 mod test {
     use super::*;
     use color_eyre::Report;
+    use zebra_chain::parameters::testnet::{
+        self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+        ConfiguredFundingStreams,
+    };
 
     #[test]
     fn halving_test() -> Result<(), Report> {
@@ -418,6 +422,73 @@ mod test {
             block_subsidy(Height(Height::MAX_AS_U32 / 2), network)
         );
         assert_eq!(Amount::try_from(0), block_subsidy(Height::MAX, network));
+
+        Ok(())
+    }
+
+    #[test]
+    fn check_lockbox_input_value() -> Result<(), Report> {
+        let _init_guard = zebra_test::init();
+
+        let network = testnet::Parameters::build()
+            .with_activation_heights(ConfiguredActivationHeights {
+                blossom: Some(Blossom.activation_height(&Network::Mainnet).unwrap().0),
+                nu6: Some(POST_NU6_FUNDING_STREAMS_MAINNET.height_range().start.0),
+                ..Default::default()
+            })
+            .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+                // Start checking funding streams from block height 1
+                height_range: Some(POST_NU6_FUNDING_STREAMS_MAINNET.height_range().clone()),
+                // Use default post-NU6 recipients
+                recipients: Some(
+                    POST_NU6_FUNDING_STREAMS_TESTNET
+                        .recipients()
+                        .iter()
+                        .map(|(&receiver, recipient)| ConfiguredFundingStreamRecipient {
+                            receiver,
+                            numerator: recipient.numerator(),
+                            addresses: Some(
+                                recipient
+                                    .addresses()
+                                    .iter()
+                                    .map(|addr| addr.to_string())
+                                    .collect(),
+                            ),
+                        })
+                        .collect(),
+                ),
+            })
+            .to_network();
+
+        let nu6_height = Nu6.activation_height(&network).unwrap();
+        let post_nu6_funding_streams = network.post_nu6_funding_streams();
+        let height_range = post_nu6_funding_streams.height_range();
+
+        let last_funding_stream_height = post_nu6_funding_streams
+            .height_range()
+            .end
+            .previous()
+            .expect("the previous height should be valid");
+
+        assert_eq!(
+            Amount::<NonNegative>::zero(),
+            lockbox_input_value(&network, Height::MIN)
+        );
+
+        let expected_lockbox_value: Amount<NonNegative> = Amount::try_from(18_750_000)?;
+        assert_eq!(
+            expected_lockbox_value,
+            lockbox_input_value(&network, nu6_height)
+        );
+
+        let num_blocks_total = height_range.end.0 - height_range.start.0;
+        let expected_input_per_block: Amount<NonNegative> = Amount::try_from(18_750_000)?;
+        let expected_lockbox_value = (expected_input_per_block * num_blocks_total.into())?;
+
+        assert_eq!(
+            expected_lockbox_value,
+            lockbox_input_value(&network, last_funding_stream_height)
+        );
 
         Ok(())
     }
