@@ -64,6 +64,7 @@ pub enum FundingStreamReceiver {
     MajorGrants,
 
     /// The deferred pool contribution.
+    // TODO: Add link to lockbox stream ZIP
     Deferred,
 }
 
@@ -208,6 +209,7 @@ lazy_static! {
     /// The post-NU6 funding streams for Mainnet
     // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
+        // TODO: Adjust this height range and recipient list once a proposal is selected
         height_range: Height(2_726_400)..Height(3_146_400),
         recipients: [
             (
@@ -250,6 +252,7 @@ lazy_static! {
     // TODO: Add a reference to lockbox stream ZIP, this is currently based on the number of blocks between the
     //       start and end heights for Mainnet in https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
+        // TODO: Adjust this height range and recipient list once a proposal is selected
         height_range: Height(2_942_000)..Height(3_362_000),
         recipients: [
             (

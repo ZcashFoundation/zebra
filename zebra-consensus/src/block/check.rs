@@ -196,6 +196,7 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
         for (receiver, expected_amount) in funding_streams {
             if receiver == FundingStreamReceiver::Deferred {
                 // The deferred pool contribution is checked in `miner_fees_are_valid()`
+                // TODO: Add link to lockbox stream ZIP
                 continue;
             }
 
@@ -243,10 +244,13 @@ pub fn miner_fees_are_valid(
 
     let block_subsidy = subsidy::general::block_subsidy(height, network)
         .expect("a valid block subsidy for this height and network");
+
+    // TODO: Add link to lockbox stream ZIP
     let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(height, network)
         .expect("we always expect a funding stream hashmap response even if empty")
         .remove(&FundingStreamReceiver::Deferred)
         .unwrap_or_default();
+
     // # Consensus
     //
     // > The total value in zatoshi of transparent outputs from a coinbase transaction,
@@ -259,9 +263,9 @@ pub fn miner_fees_are_valid(
     let right = (block_subsidy + block_miner_fees - expected_deferred_amount)
         .map_err(|_| SubsidyError::SumOverflow)?;
 
+    // TODO: Add link to exact coinbase balance ZIP
     let should_allow_unclaimed_subsidy =
         NetworkUpgrade::current(network, height) <= NetworkUpgrade::Nu5;
-
     let is_invalid_miner_fee = if should_allow_unclaimed_subsidy {
         left > right
     } else {
