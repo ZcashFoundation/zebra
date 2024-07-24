@@ -174,7 +174,8 @@ impl FundingStreamRecipient {
 }
 
 lazy_static! {
-    /// The pre-NU6 funding streams for Mainnet
+    /// The pre-NU6 funding streams for Mainnet as described in [protocol specification §7.10.1][7.10.1]
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref PRE_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
         height_range: Height(1_046_400)..Height(2_726_400),
         recipients: [
@@ -196,12 +197,14 @@ lazy_static! {
     };
 
     /// The post-NU6 funding streams for Mainnet
+    // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
         height_range: Height(2_726_400)..Height(3_146_400),
         recipients: HashMap::new()
     };
 
-    /// The pre-NU6 funding streams for Testnet
+    /// The pre-NU6 funding streams for Testnet as described in [protocol specification §7.10.1][7.10.1]
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref PRE_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
         height_range: Height(1_028_500)..Height(2_796_000),
         recipients: [
@@ -223,6 +226,8 @@ lazy_static! {
     };
 
     /// The post-NU6 funding streams for Testnet
+    // TODO: Add a reference to lockbox stream ZIP, this is currently based on the number of blocks between the
+    //       start and end heights for Mainnet in https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
         height_range: Height(2_942_000)..Height(3_362_000),
         recipients: HashMap::new()
@@ -304,7 +309,7 @@ pub trait ParameterSubsidy {
 }
 
 /// Network methods related to Block Subsidy and Funding Streams
-impl ParameterSubsidy for &Network {
+impl ParameterSubsidy for Network {
     fn height_for_first_halving(&self) -> Height {
         // First halving on Mainnet is at Canopy
         // while in Testnet is at block constant height of `1_116_000`
@@ -316,12 +321,6 @@ impl ParameterSubsidy for &Network {
             // TODO: Check what zcashd does here, consider adding a field to `testnet::Parameters` to make this configurable.
             Network::Testnet(_params) => FIRST_HALVING_TESTNET,
         }
-    }
-}
-
-impl ParameterSubsidy for Network {
-    fn height_for_first_halving(&self) -> Height {
-        (&self).height_for_first_halving()
     }
 }
 
@@ -407,7 +406,7 @@ pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub fn funding_stream_address_period(height: Height, network: impl ParameterSubsidy) -> u32 {
+pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, network: &N) -> u32 {
     // Spec equation: `address_period = floor((height - (height_for_halving(1) - post_blossom_halving_interval))/funding_stream_address_change_interval)`,
     // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     //
