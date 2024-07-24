@@ -76,14 +76,14 @@ fn test_funding_stream_values() -> Result<(), Report> {
             recipients: Some(
                 POST_NU6_FUNDING_STREAMS_TESTNET
                     .recipients()
-                    .into_iter()
+                    .iter()
                     .map(|(&receiver, recipient)| ConfiguredFundingStreamRecipient {
                         receiver,
                         numerator: recipient.numerator(),
                         addresses: Some(
                             recipient
                                 .addresses()
-                                .into_iter()
+                                .iter()
                                 .map(|addr| addr.to_string())
                                 .collect(),
                         ),
