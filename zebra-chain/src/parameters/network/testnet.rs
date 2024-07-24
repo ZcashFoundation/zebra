@@ -124,12 +124,12 @@ impl ConfiguredFundingStreams {
                     .end
                     .previous()
                     .expect("end height must be above start height and genesis height"),
-                TestnetParameterSubsidyImpl,
+                &TestnetParameterSubsidyImpl,
             ))
             .expect("no overflow should happen in this sum")
             .checked_sub(funding_stream_address_period(
                 height_range.start,
-                TestnetParameterSubsidyImpl,
+                &TestnetParameterSubsidyImpl,
             ))
             .expect("no overflow should happen in this sub") as usize;
 
