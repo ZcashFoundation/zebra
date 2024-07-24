@@ -208,8 +208,8 @@ impl Block {
     /// Get the overall chain value pool change in this block,
     /// the negative sum of the transaction value balances in this block.
     ///
-    /// These are the changes in the transparent, sprout, sapling, and orchard
-    /// chain value pools, as a result of this block.
+    /// These are the changes in the transparent, Sprout, Sapling, and  Orchard chain value pools, as
+    /// a result of this block.
     ///
     /// Positive values are added to the corresponding chain value pool.
     /// Negative values are removed from the corresponding pool.
