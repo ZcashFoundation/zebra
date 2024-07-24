@@ -64,6 +64,9 @@ fn funding_stream_address_index(height: Height, network: &Network) -> usize {
         ))
         .expect("no overflow should happen in this sub") as usize;
 
+    // Funding stream recipients may not have the same number of addresses on configured Testnets,
+    // the number of addresses for each recipient should be validated for a configured height range
+    // when configured Testnet parameters are built.
     let num_addresses = funding_streams
         .recipients()
         .iter()
