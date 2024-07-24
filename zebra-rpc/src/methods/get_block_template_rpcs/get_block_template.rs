@@ -164,6 +164,13 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    // TODO:
+    // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
+    // - Check the field in `sync_status` so it applies to the mempool as well.
+    if network.disable_pow() {
+        return Ok(());
+    }
+
     // The tip estimate may not be the same as the one coming from the state
     // but this is ok for an estimate
     let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
