@@ -156,10 +156,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, Height},
-    parameters::{
-        testnet::ConfiguredFundingStreams,
-        Network::{self, *},
-    },
+    parameters::Network::{self, *},
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -3242,7 +3239,7 @@ async fn nu6_lockbox_funding_stream() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
-            testnet::{self, ConfiguredActivationHeights},
+            testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
             NetworkUpgrade,
         },
         serialization::ZcashSerialize,

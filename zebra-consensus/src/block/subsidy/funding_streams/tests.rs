@@ -45,7 +45,6 @@ fn test_funding_stream_values() -> Result<(), Report> {
     );
 
     // funding stream period is ending
-    // TODO: Check post-NU6 funding streams here as well.
     let range = network.pre_nu6_funding_streams().height_range();
     let end = range.end;
     let last = end - 1;
@@ -55,6 +54,26 @@ fn test_funding_stream_values() -> Result<(), Report> {
         hash_map
     );
     assert!(funding_stream_values(end, network)?.is_empty());
+
+    let mut hash_map = HashMap::new();
+    hash_map.insert(
+        FundingStreamReceiver::Deferred,
+        Amount::try_from(18_750_000)?,
+    );
+    hash_map.insert(
+        FundingStreamReceiver::MajorGrants,
+        Amount::try_from(12_500_000)?,
+    );
+
+    let nu6_height = Nu6.activation_height(network).unwrap();
+
+    for height in [
+        nu6_height,
+        Height(nu6_height.0 + 1),
+        Height(nu6_height.0 + 1),
+    ] {
+        assert_eq!(funding_stream_values(height, network).unwrap(), hash_map);
+    }
 
     Ok(())
 }
