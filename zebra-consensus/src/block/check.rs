@@ -177,7 +177,7 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
         // Founders rewards are paid up to Canopy activation, on both mainnet and testnet.
         // But we checkpoint in Canopy so founders reward does not apply for Zebra.
         unreachable!("we cannot verify consensus rules before Canopy activation");
-    } else if matches!(halving_div, 1 | 2 | 4) {
+    } else if halving_div < 8 {
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
