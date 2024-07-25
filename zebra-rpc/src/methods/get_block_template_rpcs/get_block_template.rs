@@ -154,6 +154,7 @@ where
 // - State and syncer checks
 
 /// Returns an error if Zebra is not synced to the consensus chain tip.
+/// Returns early with `Ok(())` if Proof-of-Work is disabled on the provided `network`.
 /// This error might be incorrect if the local clock is skewed.
 pub fn check_synced_to_tip<Tip, SyncStatus>(
     network: &Network,
