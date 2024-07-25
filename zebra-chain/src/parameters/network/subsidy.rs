@@ -88,6 +88,7 @@ impl FundingStreamReceiver {
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
+// TODO: Update the link for post-NU6 funding streams.
 /// The specification for all current funding stream receivers, a URL that links to [ZIP-214].
 ///
 /// [ZIP-214]: https://zips.z.cash/zip-0214

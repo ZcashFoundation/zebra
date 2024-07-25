@@ -93,6 +93,7 @@ pub fn funding_stream_address(
     funding_streams.recipient(receiver)?.addresses().get(index)
 }
 
+// TODO: Move this fn to [`FundingStreamReceiver`].
 /// Return a human-readable name and a specification URL for the funding stream `receiver`.
 pub fn funding_stream_recipient_info(
     receiver: FundingStreamReceiver,
