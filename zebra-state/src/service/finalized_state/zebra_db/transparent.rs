@@ -389,6 +389,7 @@ impl DiskWriteBatch {
     /// - insert created UTXOs,
     /// - insert transparent address UTXO index entries, and
     /// - insert transparent address transaction entries,
+    ///
     /// without actually writing anything.
     ///
     /// Also modifies the `address_balances` for these new UTXOs.
@@ -466,6 +467,7 @@ impl DiskWriteBatch {
     /// Adds the following changes to this batch:
     /// - delete spent UTXOs, and
     /// - delete transparent address UTXO index entries,
+    ///
     /// without actually writing anything.
     ///
     /// Also modifies the `address_balances` for these new UTXOs.
@@ -523,6 +525,7 @@ impl DiskWriteBatch {
     /// Adds the following changes to this batch:
     /// - index spending transactions for each spent transparent output
     ///   (this is different from the transaction that created the output),
+    ///
     /// without actually writing anything.
     ///
     /// # Errors
@@ -573,6 +576,7 @@ impl DiskWriteBatch {
 
     /// Prepare a database batch containing `finalized.block`'s:
     /// - transparent address balance changes,
+    ///
     /// and return it (without actually writing anything).
     ///
     /// # Errors

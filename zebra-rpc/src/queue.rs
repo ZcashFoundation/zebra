@@ -128,9 +128,9 @@ impl Runner {
     /// In this loop, get the transactions that are in the queue and:
     /// - Check if they are now in the mempool and if so, delete the transaction from the queue.
     /// - Check if the transaction is now part of a block in the state and if so,
-    /// delete the transaction from the queue.
+    ///   delete the transaction from the queue.
     /// - With the transactions left in the queue, retry sending them to the mempool ignoring
-    /// the result of this operation.
+    ///   the result of this operation.
     ///
     /// Additionally, each iteration of the above loop, will receive and insert to the queue
     /// transactions that are pending in the channel.
