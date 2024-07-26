@@ -9,10 +9,9 @@ use crate::methods::get_block_template_rpcs::GetBlockTemplateRpc;
 /// See notes for [`GetBlockTemplateRpc::submit_block`] method
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct JsonParameters {
-    /// The workid for the block template.
+    /// The workid for the block template. Currently unused.
     ///
     /// > If the server provided a workid, it MUST be included with submissions,
-    /// currently unused.
     ///
     /// Rationale:
     ///

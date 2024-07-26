@@ -55,7 +55,7 @@ pub fn main() {
 
             for txid in txids.iter() {
                 let tx = Transaction::read(
-                    &hex::decode(&fetch_tx_via_rpc(txid.encode_hex()))
+                    &hex::decode(fetch_tx_via_rpc(txid.encode_hex()))
                         .expect("RPC response should be decodable from hex string to bytes")[..],
                     BranchId::for_height(&network, height),
                 )

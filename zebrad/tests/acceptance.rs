@@ -27,11 +27,11 @@
 //! Some of them require environment variables or directories to be present:
 //!
 //! - `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
-//! will allow this test to run or give up. Value for the Mainnet full sync tests.
+//!   will allow this test to run or give up. Value for the Mainnet full sync tests.
 //! - `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
-//! will allow this test to run or give up. Value for the Testnet ful  sync tests.
+//!   will allow this test to run or give up. Value for the Testnet ful  sync tests.
 //! - `/zebrad-cache` directory: For some sync tests, this needs to be created in
-//! the file system, the created directory should have write permissions.
+//!   the file system, the created directory should have write permissions.
 //!
 //! Here are some examples on how to run each of the tests:
 //!
@@ -811,28 +811,13 @@ fn last_config_is_stored() -> Result<()> {
          \n\
          Take the missing config file logged above, \n\
          and commit it to Zebra's git repository as:\n\
-         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
+         zebrad/tests/common/configs/<next-release-tag>.toml \n\
          \n\
          Or run: \n\
-         cargo build {}--bin zebrad && \n\
+         cargo build --bin zebrad && \n\
          zebrad generate | \n\
          sed 's/cache_dir = \".*\"/cache_dir = \"cache_dir\"/' > \n\
-         zebrad/tests/common/configs/{}<next-release-tag>.toml",
-        if cfg!(feature = "shielded-scan") {
-            SHIELDED_SCAN_CONFIG_PREFIX
-        } else {
-            ""
-        },
-        if cfg!(feature = "shielded-scan") {
-            "--features=shielded-scan "
-        } else {
-            ""
-        },
-        if cfg!(feature = "shielded-scan") {
-            SHIELDED_SCAN_CONFIG_PREFIX
-        } else {
-            ""
-        },
+         zebrad/tests/common/configs/<next-release-tag>.toml",
     ))
 }
 
@@ -963,7 +948,6 @@ fn stored_configs_parsed_correctly() -> Result<()> {
 
         // ignore files starting with shieldedscan prefix
         // if we were not built with the shielded-scan feature.
-        #[cfg(not(feature = "shielded-scan"))]
         if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
             tracing::info!(?config_file_path, "skipping shielded-scan config file path");
             continue;
@@ -1018,14 +1002,6 @@ fn stored_configs_work() -> Result<()> {
                 ?config_file_path,
                 "skipping getblocktemplate-rpcs config file path"
             );
-            continue;
-        }
-
-        // ignore files starting with shieldedscan prefix
-        // if we were not built with the shielded-scan feature.
-        #[cfg(not(feature = "shielded-scan"))]
-        if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
-            tracing::info!(?config_file_path, "skipping shielded-scan config file path");
             continue;
         }
 
