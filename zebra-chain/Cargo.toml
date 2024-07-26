@@ -79,6 +79,7 @@ equihash = "0.2.0"
 
 group = "0.13.0"
 incrementalmerkletree = "0.5.1"
+
 jubjub = "0.10.0"
 lazy_static = "1.4.0"
 num-integer = "0.1.46"
@@ -94,13 +95,13 @@ x25519-dalek = { version = "2.0.1", features = ["serde"] }
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 orchard = "0.8.0"
-zcash_encoding = "0.2.0"
-zcash_history = "0.4.0"
+zcash_encoding = { version = "0.2.0", git = "https://github.com/zcash/librustzcash.git", branch = "main" }
+zcash_history = { version = "0.4.0", git = "https://github.com/zcash/librustzcash.git", branch = "main"  }
 zcash_note_encryption = "0.4.0"
-zcash_primitives = { version = "0.15.0", features = ["transparent-inputs"] }
+zcash_primitives = { version = "0.15.1", features = ["transparent-inputs"], git = "https://github.com/zcash/librustzcash.git", branch = "main" }
 sapling = { package = "sapling-crypto", version = "0.1" }
-zcash_protocol = { version = "0.1.1" }
-zcash_address = { version = "0.3.2" }
+zcash_protocol = { version = "0.1.1", git = "https://github.com/zcash/librustzcash.git", branch = "main"  }
+zcash_address = { version = "0.3.2", git = "https://github.com/zcash/librustzcash.git", branch = "main"  }
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
@@ -134,7 +135,7 @@ serde_json = { version = "1.0.120", optional = true }
 tokio = { version = "1.38.1", optional = true }
 
 # Experimental feature shielded-scan
-zcash_client_backend = { version = "0.12.1", optional = true }
+zcash_client_backend = { version = "0.12.1", git = "https://github.com/zcash/librustzcash.git", branch = "main", optional = true }
 
 # Optional testing dependencies
 proptest = { version = "1.4.0", optional = true }

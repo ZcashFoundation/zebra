@@ -114,7 +114,7 @@ tokio = { version = "1.38.1", features = ["full"], optional = true }
 jsonrpc = { version = "0.18.0", optional = true }
 
 zcash_primitives = { version = "0.15.0", optional = true }
-zcash_client_backend = { version = "0.12.1", optional = true }
+zcash_client_backend = { version = "0.12.1", git = "https://github.com/zcash/librustzcash.git", branch = "main", optional = true }
 zcash_protocol = { version = "0.1.1" }
 
 # For the openapi generator
