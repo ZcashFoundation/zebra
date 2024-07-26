@@ -27,6 +27,7 @@ impl Arbitrary for DateTime32 {
 /// - making durations and intervals 3 seconds or longer,
 /// - avoiding complex time-based calculations, and
 /// - avoiding relying on subsecond precision or time order.
+///
 /// When monotonic times are needed, use the opaque `std::time::Instant` type.
 ///
 /// # Usage

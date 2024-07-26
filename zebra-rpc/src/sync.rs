@@ -29,6 +29,7 @@ use crate::{
 /// - Returns an error, or
 /// - Returns the block hash of a block that the read state already contains,
 ///   (so that there's nothing for the syncer to do except wait for the next chain tip change).
+///
 /// See the [`TrustedChainSync::wait_for_chain_tip_change()`] method documentation for more information.
 const POLL_DELAY: Duration = Duration::from_millis(200);
 

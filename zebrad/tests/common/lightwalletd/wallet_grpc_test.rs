@@ -31,8 +31,7 @@
 //!
 //! - `GetLightdInfo`: Covered.
 //!
-//! - `Ping`: Not covered and it will never be. `Ping` is only used for testing
-//! purposes.
+//! - `Ping`: Not covered and it will never be. `Ping` is only used for testing purposes.
 
 use color_eyre::eyre::Result;
 use hex_literal::hex;

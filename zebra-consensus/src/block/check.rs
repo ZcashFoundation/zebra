@@ -97,6 +97,7 @@ pub fn difficulty_threshold_is_valid(
 /// Returns `Ok(())` if `hash` passes:
 ///   - the target difficulty limit for `network` (PoWLimit), and
 ///   - the difficulty filter,
+///
 /// based on the fields in `header`.
 ///
 /// If the block is invalid, returns an error containing `height` and `hash`.
@@ -286,8 +287,8 @@ pub fn time_is_valid_at(
 /// # Consensus rules:
 ///
 /// - A SHA-256d hash in internal byte order. The merkle root is derived from the
-///  hashes of all transactions included in this block, ensuring that none of
-///  those transactions can be modified without modifying the header. [7.6]
+///   hashes of all transactions included in this block, ensuring that none of
+///   those transactions can be modified without modifying the header. [7.6]
 ///
 /// # Panics
 ///
