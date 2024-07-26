@@ -4,6 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use zebra_chain::{
     amount,
+    parameters::Network,
     transparent::{self, utxos_from_ordered_utxos, CoinbaseSpendRestriction::*},
 };
 
@@ -53,6 +54,18 @@ pub fn transparent_spend(
             .iter()
             .filter_map(transparent::Input::outpoint);
 
+        // The state service returns UTXOs from pending blocks,
+        // which can be rejected by later contextual checks.
+        // This is a particular issue for v5 transactions,
+        // because their authorizing data is only bound to the block data
+        // during contextual validation (#2336).
+        //
+        // We don't want to use UTXOs from invalid pending blocks,
+        // so we check transparent coinbase maturity and shielding
+        // using known valid UTXOs during non-finalized chain validation.
+        let spend_restriction =
+            transaction.coinbase_spend_restriction(semantically_verified.height);
+
         for spend in spends {
             let utxo = transparent_spend_chain_order(
                 spend,
@@ -63,18 +76,12 @@ pub fn transparent_spend(
                 finalized_state,
             )?;
 
-            // The state service returns UTXOs from pending blocks,
-            // which can be rejected by later contextual checks.
-            // This is a particular issue for v5 transactions,
-            // because their authorizing data is only bound to the block data
-            // during contextual validation (#2336).
-            //
-            // We don't want to use UTXOs from invalid pending blocks,
-            // so we check transparent coinbase maturity and shielding
-            // using known valid UTXOs during non-finalized chain validation.
-            let spend_restriction =
-                transaction.coinbase_spend_restriction(semantically_verified.height);
-            transparent_coinbase_spend(spend, spend_restriction, utxo.as_ref())?;
+            transparent_coinbase_spend(
+                spend,
+                spend_restriction,
+                utxo.as_ref(),
+                &finalized_state.network(),
+            )?;
 
             // We don't delete the UTXOs until the block is committed,
             // so we  need to check for duplicate spends within the same block.
@@ -185,10 +192,13 @@ fn transparent_spend_chain_order(
 /// > Founders’ Reward outputs and transparent funding stream outputs.
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+///
+/// Coinbase outputs _can_ be spent immediately on Regtest.
 pub fn transparent_coinbase_spend(
     outpoint: transparent::OutPoint,
     spend_restriction: transparent::CoinbaseSpendRestriction,
     utxo: &transparent::Utxo,
+    network: &Network,
 ) -> Result<(), ValidateContextError> {
     if !utxo.from_coinbase {
         return Ok(());
@@ -199,7 +209,7 @@ pub fn transparent_coinbase_spend(
             let min_spend_height = utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.into();
             let min_spend_height =
                 min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
-            if spend_height >= min_spend_height {
+            if spend_height >= min_spend_height || network.is_regtest() {
                 Ok(())
             } else {
                 Err(ImmatureTransparentCoinbaseSpend {

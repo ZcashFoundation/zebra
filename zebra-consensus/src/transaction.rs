@@ -376,7 +376,7 @@ where
             // WONTFIX: Return an error for Request::Block as well to replace this check in
             //       the state once #2336 has been implemented?
             if req.is_mempool() {
-                Self::check_maturity_height(&req, &spent_utxos)?;
+                Self::check_maturity_height(&req, &spent_utxos, &network)?;
             }
 
             let cached_ffi_transaction =
@@ -586,12 +586,14 @@ where
     pub fn check_maturity_height(
         request: &Request,
         spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        network: &Network,
     ) -> Result<(), TransactionError> {
         check::tx_transparent_coinbase_spends_maturity(
             request.transaction(),
             request.height(),
             request.known_utxos(),
             spent_utxos,
+            network,
         )
     }
 

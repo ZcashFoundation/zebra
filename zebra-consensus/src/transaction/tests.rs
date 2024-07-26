@@ -634,11 +634,15 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         })
         .expect("known_utxos should contain the outpoint");
 
-    let expected_error =
-        zebra_state::check::transparent_coinbase_spend(input_outpoint, spend_restriction, &utxo)
-            .map_err(Box::new)
-            .map_err(TransactionError::ValidateContextError)
-            .expect_err("check should fail");
+    let expected_error = zebra_state::check::transparent_coinbase_spend(
+        input_outpoint,
+        spend_restriction,
+        &utxo,
+        &Network::Mainnet,
+    )
+    .map_err(Box::new)
+    .map_err(TransactionError::ValidateContextError)
+    .expect_err("check should fail");
 
     let mock_state_responses = || {
         let mut state = state.clone();
