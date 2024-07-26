@@ -52,8 +52,17 @@ pub fn funding_stream_values(
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-fn funding_stream_address_index(height: Height, network: &Network) -> Option<usize> {
+fn funding_stream_address_index(
+    height: Height,
+    network: &Network,
+    receiver: FundingStreamReceiver,
+) -> Option<usize> {
+    if receiver == FundingStreamReceiver::Deferred {
+        return None;
+    }
+
     let funding_streams = network.funding_streams(height);
+    let num_addresses = funding_streams.recipient(receiver)?.addresses().len();
 
     let index = 1u32
         .checked_add(funding_stream_address_period(height, network))
@@ -63,16 +72,6 @@ fn funding_stream_address_index(height: Height, network: &Network) -> Option<usi
             network,
         ))
         .expect("no overflow should happen in this sub") as usize;
-
-    // Funding stream recipients may not have the same number of addresses on configured Testnets,
-    // the number of addresses for each recipient should be validated for a configured height range
-    // when configured Testnet parameters are built.
-    let num_addresses = funding_streams
-        .recipients()
-        .values()
-        .next()?
-        .addresses()
-        .len();
 
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but
@@ -89,7 +88,7 @@ pub fn funding_stream_address(
     network: &Network,
     receiver: FundingStreamReceiver,
 ) -> Option<&transparent::Address> {
-    let index = funding_stream_address_index(height, network)?;
+    let index = funding_stream_address_index(height, network, receiver)?;
     let funding_streams = network.funding_streams(height);
     funding_streams.recipient(receiver)?.addresses().get(index)
 }
