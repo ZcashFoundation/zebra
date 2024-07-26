@@ -586,12 +586,12 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
 }
 
 /// Tests that calls to the transaction verifier with a mempool request that spends
-/// immature coinbase outputs will return an error.
+/// immature coinbase outputs will return an error, except on Regtest.
 #[tokio::test]
 async fn mempool_request_with_immature_spend_is_rejected() {
     let _init_guard = zebra_test::init();
 
-    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let verifier = Verifier::new(&Network::Mainnet, state.clone());
 
     let height = NetworkUpgrade::Canopy
@@ -640,43 +640,47 @@ async fn mempool_request_with_immature_spend_is_rejected() {
             .map_err(TransactionError::ValidateContextError)
             .expect_err("check should fail");
 
-    tokio::spawn(async move {
-        state
-            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::BestChainNextMedianTimePast(
-                DateTime32::MAX,
-            ));
+    let mock_state_responses = || {
+        let mut state = state.clone();
+        tokio::spawn(async move {
+            state
+                .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+                .await
+                .expect("verifier should call mock state service with correct request")
+                .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                    DateTime32::MAX,
+                ));
 
-        state
-            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos.get(&input_outpoint).map(|utxo| {
-                    let mut utxo = utxo.utxo.clone();
-                    utxo.height = coinbase_spend_height;
-                    utxo.from_coinbase = true;
-                    utxo
-                }),
-            ));
+            state
+                .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+                .await
+                .expect("verifier should call mock state service with correct request")
+                .respond(zebra_state::Response::UnspentBestChainUtxo(
+                    known_utxos.get(&input_outpoint).map(|utxo| {
+                        let mut utxo = utxo.utxo.clone();
+                        utxo.height = coinbase_spend_height;
+                        utxo.from_coinbase = true;
+                        utxo
+                    }),
+                ));
 
-        state
-            .expect_request_that(|req| {
-                matches!(
-                    req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
-                )
-            })
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
-    });
+            state
+                .expect_request_that(|req| {
+                    matches!(
+                        req,
+                        zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                    )
+                })
+                .await
+                .expect("verifier should call mock state service with correct request")
+                .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+        })
+    };
 
+    mock_state_responses.clone()();
     let verifier_response = verifier
         .oneshot(Request::Mempool {
-            transaction: tx.into(),
+            transaction: tx.clone().into(),
             height,
         })
         .await
@@ -686,6 +690,17 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         verifier_response, expected_error,
         "expected to fail verification, got: {verifier_response:?}"
     );
+
+    // Check that coinbase outputs mature immediately on Regtest
+    mock_state_responses();
+    let verifier = Verifier::new(&Network::new_regtest(None, None), state.clone());
+    verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.clone().into(),
+            height,
+        })
+        .await
+        .expect("verification of transaction with immature spend should succeed");
 }
 
 /// Tests that errors from the read state service are correctly converted into

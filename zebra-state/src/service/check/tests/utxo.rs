@@ -85,7 +85,7 @@ fn reject_unshielded_coinbase_utxo_spend() {
     assert_eq!(result, Err(UnshieldedTransparentCoinbaseSpend { outpoint }));
 }
 
-/// Check that early spends of coinbase transparent outputs fail.
+/// Check that early spends of coinbase transparent outputs fail, except on Regtest.
 #[test]
 fn reject_immature_coinbase_utxo_spend() {
     let _init_guard = zebra_test::init();
@@ -117,6 +117,14 @@ fn reject_immature_coinbase_utxo_spend() {
             created_height
         })
     );
+
+    check::utxo::transparent_coinbase_spend(
+        outpoint,
+        spend_restriction,
+        ordered_utxo.as_ref(),
+        &Network::new_regtest(),
+    )
+    .expect("should pass check on Regtest");
 }
 
 // These tests use the `Arbitrary` trait to easily generate complex types,
