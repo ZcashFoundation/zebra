@@ -232,7 +232,9 @@ async fn start_server_and_get_client() -> (
     MockService<ScanRequest, ScanResponse, PanicAssertion>,
 ) {
     // get a mocked scan service
-    let mock_scan_service = MockService::build().for_unit_tests();
+    let mock_scan_service = MockService::build()
+        .with_max_request_delay(Duration::from_secs(2))
+        .for_unit_tests();
 
     // start the gRPC server
     let listen_addr: std::net::SocketAddr = "127.0.0.1:0"
@@ -246,8 +248,12 @@ async fn start_server_and_get_client() -> (
     // wait for the server to start
     sleep(Duration::from_secs(1));
 
+    let endpoint = tonic::transport::channel::Endpoint::new(format!("http://{listen_addr}"))
+        .unwrap()
+        .timeout(Duration::from_secs(2));
+
     // connect to the gRPC server
-    let client = ScannerClient::connect(format!("http://{listen_addr}"))
+    let client = ScannerClient::connect(endpoint)
         .await
         .expect("server should receive connection");
 

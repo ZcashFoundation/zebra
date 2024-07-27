@@ -56,7 +56,10 @@ async fn start_server_and_get_client() -> Result<(
         .parse()
         .expect("hard-coded IP and u16 port should parse successfully");
 
-    let mock_read_service = MockService::build().for_unit_tests();
+    let mock_read_service = MockService::build()
+        .with_max_request_delay(Duration::from_secs(2))
+        .for_unit_tests();
+
     let (mock_chain_tip_change, mock_chain_tip_change_sender) = MockChainTip::new();
 
     let (server_task, listen_addr) =
@@ -67,8 +70,12 @@ async fn start_server_and_get_client() -> Result<(
     // wait for the server to start
     tokio::time::sleep(Duration::from_secs(1)).await;
 
+    let endpoint = tonic::transport::channel::Endpoint::new(format!("http://{listen_addr}"))
+        .unwrap()
+        .timeout(Duration::from_secs(2));
+
     // connect to the gRPC server
-    let client = IndexerClient::connect(format!("http://{listen_addr}"))
+    let client = IndexerClient::connect(endpoint)
         .await
         .expect("server should receive connection");
 
