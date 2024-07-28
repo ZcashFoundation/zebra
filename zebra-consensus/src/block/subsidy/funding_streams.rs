@@ -12,8 +12,6 @@ use zebra_chain::{
     transparent::{self, Script},
 };
 
-use crate::block::subsidy::general::block_subsidy;
-
 #[cfg(test)]
 mod tests;
 
@@ -24,6 +22,7 @@ mod tests;
 pub fn funding_stream_values(
     height: Height,
     network: &Network,
+    expected_block_subsidy: Amount<NonNegative>,
 ) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, Error> {
     let canopy_height = Canopy.activation_height(network).unwrap();
     let mut results = HashMap::new();
@@ -31,14 +30,13 @@ pub fn funding_stream_values(
     if height >= canopy_height {
         let funding_streams = network.funding_streams(height);
         if funding_streams.height_range().contains(&height) {
-            let block_subsidy = block_subsidy(height, network)?;
             for (&receiver, recipient) in funding_streams.recipients() {
                 // - Spec equation: `fs.value = floor(block_subsidy(height)*(fs.numerator/fs.denominator))`:
                 //   https://zips.z.cash/protocol/protocol.pdf#subsidies
                 // - In Rust, "integer division rounds towards zero":
                 //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
                 //   This is the same as `floor()`, because these numbers are all positive.
-                let amount_value = ((block_subsidy * recipient.numerator())?
+                let amount_value = ((expected_block_subsidy * recipient.numerator())?
                     / FUNDING_STREAM_RECEIVER_DENOMINATOR)?;
 
                 results.insert(receiver, amount_value);

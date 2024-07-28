@@ -53,7 +53,7 @@ pub use block::{
             funding_stream_address, funding_stream_recipient_info, funding_stream_values,
             new_coinbase_script,
         },
-        general::miner_subsidy,
+        general::{block_subsidy, miner_subsidy},
     },
     Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };

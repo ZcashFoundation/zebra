@@ -101,11 +101,17 @@ pub fn block_subsidy(height: Height, network: &Network) -> Result<Amount<NonNega
 /// `MinerSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn miner_subsidy(height: Height, network: &Network) -> Result<Amount<NonNegative>, Error> {
+pub fn miner_subsidy(
+    height: Height,
+    network: &Network,
+    expected_block_subsidy: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, Error> {
     let total_funding_stream_amount: Result<Amount<NonNegative>, _> =
-        funding_stream_values(height, network)?.values().sum();
+        funding_stream_values(height, network, expected_block_subsidy)?
+            .values()
+            .sum();
 
-    block_subsidy(height, network)? - total_funding_stream_amount?
+    expected_block_subsidy - total_funding_stream_amount?
 }
 
 /// Returns all output amounts in `Transaction`.
@@ -129,10 +135,13 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
         return Amount::zero();
     };
 
-    let &deferred_amount_per_block = funding_stream_values(nu6_activation_height, network)
-        .expect("we always expect a funding stream hashmap response even if empty")
-        .get(&FundingStreamReceiver::Deferred)
-        .expect("we expect a lockbox funding stream after NU5");
+    let expected_block_subsidy = block_subsidy(nu6_activation_height, network)
+        .expect("block at NU6 activation height must have valid expected subsidy");
+    let &deferred_amount_per_block =
+        funding_stream_values(nu6_activation_height, network, expected_block_subsidy)
+            .expect("we always expect a funding stream hashmap response even if empty")
+            .get(&FundingStreamReceiver::Deferred)
+            .expect("we expect a lockbox funding stream after NU5");
 
     let post_nu6_funding_stream_height_range = network.post_nu6_funding_streams().height_range();
 
