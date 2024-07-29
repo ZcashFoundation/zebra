@@ -73,6 +73,18 @@ fn funding_stream_address_index(
         ))
         .expect("no overflow should happen in this sub") as usize;
 
+    // Funding stream recipients may not have the same number of addresses on configured Testnets,
+    // the number of addresses for each recipient should be validated for a configured height range
+    // when configured Testnet parameters are built.
+    let num_addresses = funding_streams
+        .recipients()
+        .values()
+        .next()
+        // TODO: Return an Option from this function and replace `.unwrap()` with `?`
+        .unwrap()
+        .addresses()
+        .len();
+
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but
     // Zebra indices for addresses start at zero, return converted.

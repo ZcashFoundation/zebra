@@ -62,7 +62,6 @@ pub enum FundingStreamReceiver {
 
     /// The Major Grants (Zcash Community Grants) funding stream.
     MajorGrants,
-
     /// The deferred pool contribution.
     // TODO: Add link to lockbox stream ZIP
     Deferred,
