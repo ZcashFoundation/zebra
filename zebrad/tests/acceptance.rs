@@ -3421,6 +3421,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
     };
 
+    let valid_original_block_template = block_template.clone();
+
     let zebra_state::GetBlockTemplateChainInfo { history_tree, .. } =
         fetch_state_tip_and_local_time(read_state.clone()).await?;
 
@@ -3507,6 +3509,19 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         submit_block_response,
         submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
         "invalid block with insufficient coinbase output value should be rejected"
+    );
+
+    // Check that the original block template can be submitted successfully
+    let proposal_block =
+        proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::Accepted,
+        "valid block should be accepted"
     );
 
     Ok(())
