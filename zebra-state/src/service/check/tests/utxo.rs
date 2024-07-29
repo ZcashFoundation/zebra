@@ -83,7 +83,10 @@ fn reject_unshielded_coinbase_utxo_spend() {
     };
     let ordered_utxo = transparent::OrderedUtxo::new(output, created_height, 0);
 
-    let spend_restriction = transparent::CoinbaseSpendRestriction::SomeTransparentOutputs;
+    let spend_restriction = transparent::CoinbaseSpendRestriction::SomeTransparentOutputs {
+        // Use some fake height, this is only used on Regtest
+        spend_height: Height::MIN,
+    };
 
     let result = check::utxo::transparent_coinbase_spend(
         outpoint,

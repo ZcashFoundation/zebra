@@ -204,23 +204,26 @@ pub fn transparent_coinbase_spend(
         return Ok(());
     }
 
-    match spend_restriction {
-        OnlyShieldedOutputs { spend_height } => {
-            let min_spend_height = utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.into();
-            let min_spend_height =
-                min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
-            if spend_height >= min_spend_height || network.is_regtest() {
-                Ok(())
-            } else {
-                Err(ImmatureTransparentCoinbaseSpend {
-                    outpoint,
-                    spend_height,
-                    min_spend_height,
-                    created_height: utxo.height,
-                })
-            }
+    let spend_height = match spend_restriction {
+        OnlyShieldedOutputs { spend_height } => spend_height,
+        SomeTransparentOutputs { spend_height } if network.is_regtest() => spend_height,
+        SomeTransparentOutputs { .. } => {
+            return Err(UnshieldedTransparentCoinbaseSpend { outpoint })
         }
-        SomeTransparentOutputs => Err(UnshieldedTransparentCoinbaseSpend { outpoint }),
+    };
+
+    let min_spend_height = utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.into();
+    let min_spend_height =
+        min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
+    if spend_height >= min_spend_height {
+        Ok(())
+    } else {
+        Err(ImmatureTransparentCoinbaseSpend {
+            outpoint,
+            spend_height,
+            min_spend_height,
+            created_height: utxo.height,
+        })
     }
 }
 
