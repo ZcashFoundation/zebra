@@ -26,10 +26,7 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
         .expect("blossom activation height should be available");
 
     if height < network.slow_start_shift() {
-        panic!(
-            "unsupported block height {height:?}: checkpoints should handle blocks below {:?}",
-            network.slow_start_shift()
-        )
+        return None;
     } else if height < blossom_height {
         let pre_blossom_height = height - network.slow_start_shift();
         let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL;
