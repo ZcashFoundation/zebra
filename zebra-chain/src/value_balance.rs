@@ -1,17 +1,15 @@
 //! A type that can hold the four types of Zcash value pools.
 // TODO: Update the docs above.
 
-use crate::{
-    amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
-    block::Block,
-    transparent,
-};
+use crate::amount::{self, Amount, Constraint, NegativeAllowed, NonNegative};
 
 use core::fmt;
+
+#[cfg(any(test, feature = "proptest-impl"))]
 use std::{borrow::Borrow, collections::HashMap};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::{amount::MAX_MONEY, transaction::Transaction};
+use crate::{amount::MAX_MONEY, transaction::Transaction, transparent};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -119,6 +117,17 @@ where
         self
     }
 
+    /// Returns the deferred amount.
+    pub fn deferred_amount(&self) -> Amount<C> {
+        self.deferred
+    }
+
+    /// Sets the deferred amount without affecting other amounts.
+    pub fn set_deferred_amount(&mut self, deferred_amount: Amount<C>) -> &Self {
+        self.deferred = deferred_amount;
+        self
+    }
+
     /// Creates a [`ValueBalance`] where all the pools are zero.
     pub fn zero() -> Self {
         let zero = Amount::zero();
@@ -171,60 +180,6 @@ impl ValueBalance<NegativeAllowed> {
 }
 
 impl ValueBalance<NonNegative> {
-    /// Returns the sum of this value balance, and the chain value pool changes in `block`.
-    ///
-    /// `utxos` must contain the [`transparent::Utxo`]s of every input in this block,
-    /// including UTXOs created by earlier transactions in this block.
-    ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] for details.
-    ///
-    /// # Consensus
-    ///
-    /// > If the Sprout chain value pool balance would become negative in the block chain
-    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance>
-    ///
-    /// > If the Sapling chain value pool balance would become negative in the block chain
-    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
-    ///
-    /// > If the Orchard chain value pool balance would become negative in the block chain
-    /// > created as a result of accepting a block , then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
-    ///
-    /// > If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or
-    /// > "Orchard chain value pool balance" would become negative in the block chain created
-    /// > as a result of accepting a block, then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/zip-0209#specification>
-    ///
-    /// Zebra also checks that the transparent value pool is non-negative.
-    /// In Zebra, we define this pool as the sum of all unspent transaction outputs.
-    /// (Despite their encoding as an `int64`, transparent output values must be non-negative.)
-    ///
-    /// This is a consensus rule derived from Bitcoin:
-    ///
-    /// > because a UTXO can only be spent once,
-    /// > the full value of the included UTXOs must be spent or given to a miner as a transaction fee.
-    ///
-    /// <https://developer.bitcoin.org/devguide/transactions.html#transaction-fees-and-change>
-    pub fn add_block(
-        self,
-        block: impl Borrow<Block>,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
-        let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
-
-        // This will error if the chain value pool balance gets negative with the change.
-        self.add_chain_value_pool_change(chain_value_pool_change)
-    }
-
     /// Returns the sum of this value balance, and the chain value pool changes in `transaction`.
     ///
     /// `outputs` must contain the [`transparent::Output`]s of every input in this transaction,

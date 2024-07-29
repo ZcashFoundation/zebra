@@ -318,6 +318,7 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
+                deferred_balance: Some(expected_deferred_amount),
             };
 
             // Return early for proposal requests when getblocktemplate-rpcs feature is enabled

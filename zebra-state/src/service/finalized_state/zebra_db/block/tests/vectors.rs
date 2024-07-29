@@ -117,14 +117,12 @@ fn test_block_db_round_trip_with(
         // Now, use the database
         let original_block = Arc::new(original_block);
         let checkpoint_verified = if original_block.coinbase_height().is_some() {
-            original_block.clone().into()
+            CheckpointVerifiedBlock::from(original_block.clone())
         } else {
             // Fake a zero height
-            CheckpointVerifiedBlock::with_hash_and_height(
-                original_block.clone(),
-                original_block.hash(),
-                Height(0),
-            )
+            let mut checkpoint_verified = CheckpointVerifiedBlock::from(original_block.clone());
+            checkpoint_verified.height = Height(0);
+            checkpoint_verified
         };
 
         let dummy_treestate = Treestate::default();

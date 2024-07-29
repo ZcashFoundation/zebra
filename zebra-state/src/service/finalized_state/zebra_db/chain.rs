@@ -12,13 +12,15 @@
 //! each time the database format (column, serialization, etc) changes.
 
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
+    amount::{NonNegative},
+    block::Height,
+    history_tree::HistoryTree,
+    transparent,
     value_balance::ValueBalance,
 };
 
@@ -209,10 +211,11 @@ impl DiskWriteBatch {
     /// If this method returns an error, it will be propagated,
     /// and the batch should not be written to the database.
     ///
+    /// The batch is modified by this method and written by the caller.
+    ///
     /// # Errors
     ///
     /// - Propagates any errors from updating value pools
-    #[allow(clippy::unwrap_in_result)]
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &ZebraDb,
@@ -220,14 +223,18 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let chain_value_pools_cf = db.chain_value_pools_cf().with_batch_for_writing(self);
-
-        let FinalizedBlock { block, .. } = finalized;
-
-        let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
-
-        // The batch is modified by this method and written by the caller.
-        let _ = chain_value_pools_cf.zs_insert(&(), &new_pool);
+        let _ = db
+            .chain_value_pools_cf()
+            .with_batch_for_writing(self)
+            .zs_insert(
+                &(),
+                &value_pool.add_chain_value_pool_change(
+                    finalized.block.chain_value_pool_change(
+                        &utxos_spent_by_block,
+                        finalized.deferred_balance,
+                    )?,
+                )?,
+            );
 
         Ok(())
     }
