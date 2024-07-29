@@ -5,6 +5,33 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 1.9.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.9.0) - 2024-08-02
+
+TODO:
+- Add a summary of changes in this release
+- Add an entry for funding stream changes and protocol version bump
+
+### Added
+
+- Add a new `zebra-scanner` binary ([#8608](https://github.com/ZcashFoundation/zebra/pull/8608))
+- Allow configuring NU6 activation height on Regtest ([#8700](https://github.com/ZcashFoundation/zebra/pull/8700))
+- Configurable Testnet funding streams ([#8718](https://github.com/ZcashFoundation/zebra/pull/8718))
+- Adds a TrustedChainSync struct for keeping up with Zebra's non-finalized best chain from a separate process ([#8596](https://github.com/ZcashFoundation/zebra/pull/8596))
+- Add an NU6 network upgrade variant ([#8693](https://github.com/ZcashFoundation/zebra/pull/8693))
+- Add a tonic server in zebra-rpc ([#8674](https://github.com/ZcashFoundation/zebra/pull/8674))
+
+### Fixed
+
+- Return full network upgrade activation list in `getblockchaininfo` method ([#8699](https://github.com/ZcashFoundation/zebra/pull/8699))
+- Update documentation for the new `zebra-scanner` binary ([#8675](https://github.com/ZcashFoundation/zebra/pull/8675))
+- Update documentation for using Zebra with lightwalletd ([#8714](https://github.com/ZcashFoundation/zebra/pull/8714))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @dependabot[bot], @oxarbitrage, @therealyingtong and @upbqdn
+
+
 ## [Zebra 1.8.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.8.0) - 2024-07-02
 
 - Zebra now uses a default unpaid actions limit of 0, dropping transactions with
