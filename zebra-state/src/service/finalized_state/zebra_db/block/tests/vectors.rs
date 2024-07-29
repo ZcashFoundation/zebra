@@ -22,7 +22,7 @@ use zebra_chain::{
     },
     parameters::Network::{self, *},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transparent::new_ordered_outputs,
+    transparent::{new_ordered_outputs_with_height},
 };
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
@@ -127,7 +127,8 @@ fn test_block_db_round_trip_with(
                 .iter()
                 .map(|tx| tx.hash())
                 .collect();
-            let new_outputs = new_ordered_outputs(&original_block, &transaction_hashes);
+            let new_outputs =
+                new_ordered_outputs_with_height(&original_block, Height(0), &transaction_hashes);
 
             CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
                 block: original_block.clone(),

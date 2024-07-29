@@ -313,41 +313,45 @@ impl ValueBalance<NonNegative> {
 
     /// From byte array
     #[allow(clippy::unwrap_in_result)]
-    pub fn from_bytes(bytes: [u8; 40]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let transparent = Amount::from_bytes(
             bytes[0..8]
                 .try_into()
-                .expect("transparent amount must be present"),
+                .expect("transparent amount should be parsable"),
         )
         .map_err(Transparent)?;
 
         let sprout = Amount::from_bytes(
             bytes[8..16]
                 .try_into()
-                .expect("sprout amount must be present"),
+                .expect("sprout amount should be parsable"),
         )
         .map_err(Sprout)?;
 
         let sapling = Amount::from_bytes(
             bytes[16..24]
                 .try_into()
-                .expect("sapling amount must be present"),
+                .expect("sapling amount should be parsable"),
         )
         .map_err(Sapling)?;
 
         let orchard = Amount::from_bytes(
             bytes[24..32]
                 .try_into()
-                .expect("orchard amount must be present"),
+                .expect("orchard amount should be parsable"),
         )
         .map_err(Orchard)?;
 
-        let deferred = Amount::from_bytes(
-            bytes[32..40]
-                .try_into()
-                .expect("deferred amount must be present"),
-        )
-        .map_err(Deferred)?;
+        let deferred = match bytes.len() {
+            32 => Amount::zero(),
+            40 => Amount::from_bytes(
+                bytes[32..40]
+                    .try_into()
+                    .expect("deferred amount should be parsable"),
+            )
+            .map_err(Deferred)?,
+            _ => return Err(Unparsable),
+        };
 
         Ok(ValueBalance {
             transparent,
@@ -376,6 +380,9 @@ pub enum ValueBalanceError {
 
     /// deferred amount error {0}
     Deferred(amount::Error),
+
+    /// ValueBalance is unparsable
+    Unparsable,
 }
 
 impl fmt::Display for ValueBalanceError {
@@ -386,6 +393,7 @@ impl fmt::Display for ValueBalanceError {
             Sapling(e) => format!("sapling amount err: {e}"),
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
+            Unparsable => format!("value balance is unparsable"),
         })
     }
 }

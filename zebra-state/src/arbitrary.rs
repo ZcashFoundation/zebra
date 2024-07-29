@@ -3,11 +3,11 @@
 use std::sync::Arc;
 
 use zebra_chain::{
-    amount::{Amount},
+    amount::Amount,
     block::{self, Block},
     transaction::Transaction,
     transparent,
-    value_balance::{ValueBalance},
+    value_balance::ValueBalance,
 };
 
 use crate::{
