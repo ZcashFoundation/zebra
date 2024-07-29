@@ -3466,6 +3466,49 @@ async fn nu6_funding_streams() -> Result<()> {
         "invalid block with excessive coinbase output value should be rejected"
     );
 
+    // Use an invalid coinbase transaction (with an output value less than than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
+    let network = base_network_params
+        .clone()
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(100)),
+            recipients: make_configured_recipients_with_lockbox_numerator(20),
+        })
+        .to_network();
+
+    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+        &network,
+        Height(block_template.height),
+        &miner_address,
+        &[],
+        history_tree.clone(),
+        true,
+        vec![],
+    );
+
+    let block_template = GetBlockTemplate {
+        coinbase_txn,
+        block_commitments_hash: default_roots.block_commitments_hash,
+        light_client_root_hash: default_roots.block_commitments_hash,
+        final_sapling_root_hash: default_roots.block_commitments_hash,
+        default_roots,
+        ..block_template
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+
+    // Submit the invalid block with an excessive coinbase input value
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    tracing::info!(?submit_block_response, "submitted invalid block");
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        "invalid block with insufficient coinbase output value should be rejected"
+    );
+
     // Check that the original block template can be submitted successfully
     let proposal_block =
         proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
