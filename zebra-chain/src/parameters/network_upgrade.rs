@@ -216,7 +216,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Heartwood, ConsensusBranchId(0xf5b9230b)),
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
-    (Nu6, ConsensusBranchId(0xc8e71055)),
+    (Nu6, ConsensusBranchId(0x7fffffff)),
 ];
 
 /// The target block spacing before Blossom.
