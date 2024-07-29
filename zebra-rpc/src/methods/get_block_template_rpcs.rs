@@ -14,7 +14,7 @@ use zebra_chain::{
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkKind, POW_AVERAGING_WINDOW},
+    parameters::{subsidy::ParameterSubsidy, Network, NetworkKind, POW_AVERAGING_WINDOW},
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -22,10 +22,7 @@ use zebra_chain::{
     },
     work::difficulty::{ParameterDifficulty as _, U256},
 };
-use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, ParameterSubsidy as _,
-    RouterError,
-};
+use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsidy, RouterError};
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};

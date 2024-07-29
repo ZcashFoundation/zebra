@@ -6,12 +6,20 @@ use crate::{
     parameters::{
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
-        Network, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
+        subsidy::{funding_stream_address_period, FUNDING_STREAM_RECEIVER_DENOMINATOR},
+        Network, NetworkKind, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
     },
     work::difficulty::{ExpandedDifficulty, U256},
 };
 
-use super::magic::Magic;
+use super::{
+    magic::Magic,
+    subsidy::{
+        FundingStreamReceiver, FundingStreamRecipient, FundingStreams, ParameterSubsidy,
+        FIRST_HALVING_TESTNET, POST_NU6_FUNDING_STREAMS_MAINNET, POST_NU6_FUNDING_STREAMS_TESTNET,
+        PRE_NU6_FUNDING_STREAMS_MAINNET, PRE_NU6_FUNDING_STREAMS_TESTNET,
+    },
+};
 
 /// The Regtest NU5 activation height in tests
 // TODO: Serialize testnet parameters in Config then remove this and use a configured NU5 activation height.
@@ -42,9 +50,127 @@ const REGTEST_GENESIS_HASH: &str =
 const TESTNET_GENESIS_HASH: &str =
     "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38";
 
+/// Used to validate number of funding stream recipient addresses on configured Testnets.
+struct TestnetParameterSubsidyImpl;
+
+impl ParameterSubsidy for TestnetParameterSubsidyImpl {
+    fn height_for_first_halving(&self) -> Height {
+        FIRST_HALVING_TESTNET
+    }
+}
+
+/// Configurable funding stream recipient for configured Testnets.
+#[derive(Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ConfiguredFundingStreamRecipient {
+    /// Funding stream receiver, see [`FundingStreams::recipients`] for more details.
+    pub receiver: FundingStreamReceiver,
+    /// The numerator for each funding stream receiver category, see [`FundingStreamRecipient::numerator`] for more details.
+    pub numerator: u64,
+    /// Addresses for the funding stream recipient, see [`FundingStreamRecipient::addresses`] for more details.
+    pub addresses: Vec<String>,
+}
+
+impl ConfiguredFundingStreamRecipient {
+    /// Converts a [`ConfiguredFundingStreamRecipient`] to a [`FundingStreamReceiver`] and [`FundingStreamRecipient`].
+    pub fn into_recipient(self) -> (FundingStreamReceiver, FundingStreamRecipient) {
+        (
+            self.receiver,
+            FundingStreamRecipient::new(self.numerator, self.addresses),
+        )
+    }
+}
+
+/// Configurable funding streams for configured Testnets.
+#[derive(Deserialize, Clone, Default, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ConfiguredFundingStreams {
+    /// Start and end height for funding streams see [`FundingStreams::height_range`] for more details.
+    pub height_range: Option<std::ops::Range<Height>>,
+    /// Funding stream recipients, see [`FundingStreams::recipients`] for more details.
+    pub recipients: Option<Vec<ConfiguredFundingStreamRecipient>>,
+}
+
+impl ConfiguredFundingStreams {
+    /// Converts a [`ConfiguredFundingStreams`] to a [`FundingStreams`], using the provided default values
+    /// if `height_range` or `recipients` are None.
+    fn convert_with_default(self, default_funding_streams: FundingStreams) -> FundingStreams {
+        let height_range = self
+            .height_range
+            .unwrap_or(default_funding_streams.height_range().clone());
+
+        let recipients = self
+            .recipients
+            .map(|recipients| {
+                recipients
+                    .into_iter()
+                    .map(ConfiguredFundingStreamRecipient::into_recipient)
+                    .collect()
+            })
+            .unwrap_or(default_funding_streams.recipients().clone());
+
+        assert!(
+            height_range.start < height_range.end,
+            "funding stream end height must be above start height"
+        );
+
+        let funding_streams = FundingStreams::new(height_range.clone(), recipients);
+
+        // check that receivers have enough addresses.
+
+        let expected_min_num_addresses =
+            1u32.checked_add(funding_stream_address_period(
+                height_range
+                    .end
+                    .previous()
+                    .expect("end height must be above start height and genesis height"),
+                &TestnetParameterSubsidyImpl,
+            ))
+            .expect("no overflow should happen in this sum")
+            .checked_sub(funding_stream_address_period(
+                height_range.start,
+                &TestnetParameterSubsidyImpl,
+            ))
+            .expect("no overflow should happen in this sub") as usize;
+
+        for recipient in funding_streams.recipients().values() {
+            // TODO: Make an exception for the `Deferred` receiver.
+            assert!(
+                recipient.addresses().len() >= expected_min_num_addresses,
+                "recipients must have a sufficient number of addresses for height range, \
+                 minimum num addresses required: {expected_min_num_addresses}"
+            );
+
+            for address in recipient.addresses() {
+                assert_eq!(
+                    address.network_kind(),
+                    NetworkKind::Testnet,
+                    "configured funding stream addresses must be for Testnet"
+                );
+            }
+        }
+
+        // check that sum of receiver numerators is valid.
+
+        let sum_numerators: u64 = funding_streams
+            .recipients()
+            .values()
+            .map(|r| r.numerator())
+            .sum();
+
+        assert!(
+            sum_numerators <= FUNDING_STREAM_RECEIVER_DENOMINATOR,
+            "sum of funding stream numerators must not be \
+         greater than denominator of {FUNDING_STREAM_RECEIVER_DENOMINATOR}"
+        );
+
+        funding_streams
+    }
+}
+
 /// Configurable activation heights for Regtest and configured Testnets.
 #[derive(Deserialize, Default, Clone)]
-#[serde(rename_all = "PascalCase")]
+#[serde(rename_all = "PascalCase", deny_unknown_fields)]
 pub struct ConfiguredActivationHeights {
     /// Activation height for `BeforeOverwinter` network upgrade.
     pub before_overwinter: Option<u32>,
@@ -79,6 +205,10 @@ pub struct ParametersBuilder {
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Slow start interval for this network
     slow_start_interval: Height,
+    /// Pre-NU6 funding streams for this network
+    pre_nu6_funding_streams: FundingStreams,
+    /// Post-NU6 funding streams for this network
+    post_nu6_funding_streams: FundingStreams,
     /// Target difficulty limit for this network
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
@@ -113,6 +243,8 @@ impl Default for ParametersBuilder {
                 .to_expanded()
                 .expect("difficulty limits are valid expanded values"),
             disable_pow: false,
+            pre_nu6_funding_streams: PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
+            post_nu6_funding_streams: POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
         }
     }
 }
@@ -235,6 +367,26 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets pre-NU6 funding streams to be used in the [`Parameters`] being built.
+    pub fn with_pre_nu6_funding_streams(
+        mut self,
+        funding_streams: ConfiguredFundingStreams,
+    ) -> Self {
+        self.pre_nu6_funding_streams =
+            funding_streams.convert_with_default(PRE_NU6_FUNDING_STREAMS_TESTNET.clone());
+        self
+    }
+
+    /// Sets post-NU6 funding streams to be used in the [`Parameters`] being built.
+    pub fn with_post_nu6_funding_streams(
+        mut self,
+        funding_streams: ConfiguredFundingStreams,
+    ) -> Self {
+        self.post_nu6_funding_streams =
+            funding_streams.convert_with_default(POST_NU6_FUNDING_STREAMS_TESTNET.clone());
+        self
+    }
+
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
     // TODO: Accept a hex-encoded String instead?
     pub fn with_target_difficulty_limit(
@@ -263,6 +415,8 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         } = self;
@@ -273,6 +427,8 @@ impl ParametersBuilder {
             activation_heights,
             slow_start_interval,
             slow_start_shift: Height(slow_start_interval.0 / 2),
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         }
@@ -291,6 +447,8 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         } = Self::default();
@@ -299,6 +457,8 @@ impl ParametersBuilder {
             && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
+            && self.pre_nu6_funding_streams == pre_nu6_funding_streams
+            && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
     }
@@ -323,6 +483,10 @@ pub struct Parameters {
     slow_start_interval: Height,
     /// Slow start shift for this network, always half the slow start interval
     slow_start_shift: Height,
+    /// Pre-NU6 funding streams for this network
+    pre_nu6_funding_streams: FundingStreams,
+    /// Post-NU6 funding streams for this network
+    post_nu6_funding_streams: FundingStreams,
     /// Target difficulty limit for this network
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
@@ -383,23 +547,31 @@ impl Parameters {
 
     /// Returns true if the instance of [`Parameters`] represents Regtest.
     pub fn is_regtest(&self) -> bool {
+        if self.network_magic != magics::REGTEST {
+            return false;
+        }
+
         let Self {
             network_name,
-            network_magic,
+            // Already checked network magic above
+            network_magic: _,
             genesis_hash,
             // Activation heights are configurable on Regtest
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
         } = Self::new_regtest(None, None);
 
         self.network_name == network_name
-            && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
+            && self.pre_nu6_funding_streams == pre_nu6_funding_streams
+            && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
     }
@@ -432,6 +604,16 @@ impl Parameters {
     /// Returns slow start shift for this network
     pub fn slow_start_shift(&self) -> Height {
         self.slow_start_shift
+    }
+
+    /// Returns pre-NU6 funding streams for this network
+    pub fn pre_nu6_funding_streams(&self) -> &FundingStreams {
+        &self.pre_nu6_funding_streams
+    }
+
+    /// Returns post-NU6 funding streams for this network
+    pub fn post_nu6_funding_streams(&self) -> &FundingStreams {
+        &self.post_nu6_funding_streams
     }
 
     /// Returns the target difficulty limit for this network
@@ -470,6 +652,33 @@ impl Network {
             params.slow_start_shift()
         } else {
             SLOW_START_SHIFT
+        }
+    }
+
+    /// Returns pre-NU6 funding streams for this network
+    pub fn pre_nu6_funding_streams(&self) -> &FundingStreams {
+        if let Self::Testnet(params) = self {
+            params.pre_nu6_funding_streams()
+        } else {
+            &PRE_NU6_FUNDING_STREAMS_MAINNET
+        }
+    }
+
+    /// Returns post-NU6 funding streams for this network
+    pub fn post_nu6_funding_streams(&self) -> &FundingStreams {
+        if let Self::Testnet(params) = self {
+            params.post_nu6_funding_streams()
+        } else {
+            &POST_NU6_FUNDING_STREAMS_MAINNET
+        }
+    }
+
+    /// Returns post-Canopy funding streams for this network at the provided height
+    pub fn funding_streams(&self, height: Height) -> &FundingStreams {
+        if NetworkUpgrade::current(self, height) < NetworkUpgrade::Nu6 {
+            self.pre_nu6_funding_streams()
+        } else {
+            self.post_nu6_funding_streams()
         }
     }
 }

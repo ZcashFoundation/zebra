@@ -198,7 +198,7 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
                 subsidy::funding_streams::funding_stream_address(height, network, receiver);
 
             let has_expected_output =
-                subsidy::funding_streams::filter_outputs_by_address(coinbase, &address)
+                subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
                     .iter()
                     .map(zebra_chain::transparent::Output::value)
                     .any(|value| value == expected_amount);

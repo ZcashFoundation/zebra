@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub mod magic;
+pub mod subsidy;
 pub mod testnet;
 
 #[cfg(test)]

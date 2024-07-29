@@ -2,17 +2,17 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use std::{collections::HashMap, str::FromStr};
+use std::collections::HashMap;
 
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::Height,
-    parameters::{Network, NetworkUpgrade::*},
+    parameters::{subsidy::*, Network, NetworkUpgrade::*},
     transaction::Transaction,
     transparent::{self, Script},
 };
 
-use crate::{block::subsidy::general::block_subsidy, parameters::subsidy::*};
+use crate::block::subsidy::general::block_subsidy;
 
 #[cfg(test)]
 mod tests;
@@ -29,17 +29,17 @@ pub fn funding_stream_values(
     let mut results = HashMap::new();
 
     if height >= canopy_height {
-        let range = FUNDING_STREAM_HEIGHT_RANGES.get(&network.kind()).unwrap();
-        if range.contains(&height) {
+        let funding_streams = network.funding_streams(height);
+        if funding_streams.height_range().contains(&height) {
             let block_subsidy = block_subsidy(height, network)?;
-            for (&receiver, &numerator) in FUNDING_STREAM_RECEIVER_NUMERATORS.iter() {
+            for (&receiver, recipient) in funding_streams.recipients() {
                 // - Spec equation: `fs.value = floor(block_subsidy(height)*(fs.numerator/fs.denominator))`:
                 //   https://zips.z.cash/protocol/protocol.pdf#subsidies
                 // - In Rust, "integer division rounds towards zero":
                 //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
                 //   This is the same as `floor()`, because these numbers are all positive.
-                let amount_value =
-                    ((block_subsidy * numerator)? / FUNDING_STREAM_RECEIVER_DENOMINATOR)?;
+                let amount_value = ((block_subsidy * recipient.numerator())?
+                    / FUNDING_STREAM_RECEIVER_DENOMINATOR)?;
 
                 results.insert(receiver, amount_value);
             }
@@ -48,48 +48,33 @@ pub fn funding_stream_values(
     Ok(results)
 }
 
-/// Returns the address change period
-/// as described in [protocol specification §7.10][7.10]
-///
-/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-fn funding_stream_address_period(height: Height, network: &Network) -> u32 {
-    // Spec equation: `address_period = floor((height - (height_for_halving(1) - post_blossom_halving_interval))/funding_stream_address_change_interval)`,
-    // <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
-    //
-    // Note that the brackets make it so the post blossom halving interval is added to the total.
-    //
-    // In Rust, "integer division rounds towards zero":
-    // <https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators>
-    //   This is the same as `floor()`, because these numbers are all positive.
-
-    let height_after_first_halving = height - network.height_for_first_halving();
-
-    let address_period = (height_after_first_halving + POST_BLOSSOM_HALVING_INTERVAL)
-        / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
-
-    address_period
-        .try_into()
-        .expect("all values are positive and smaller than the input height")
-}
-
 /// Returns the position in the address slice for each funding stream
 /// as described in [protocol specification §7.10][7.10]
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 fn funding_stream_address_index(height: Height, network: &Network) -> usize {
-    let num_addresses = network.num_funding_streams();
+    let funding_streams = network.funding_streams(height);
 
     let index = 1u32
         .checked_add(funding_stream_address_period(height, network))
         .expect("no overflow should happen in this sum")
         .checked_sub(funding_stream_address_period(
-            FUNDING_STREAM_HEIGHT_RANGES
-                .get(&network.kind())
-                .unwrap()
-                .start,
+            funding_streams.height_range().start,
             network,
         ))
         .expect("no overflow should happen in this sub") as usize;
+
+    // Funding stream recipients may not have the same number of addresses on configured Testnets,
+    // the number of addresses for each recipient should be validated for a configured height range
+    // when configured Testnet parameters are built.
+    let num_addresses = funding_streams
+        .recipients()
+        .values()
+        .next()
+        // TODO: Return an Option from this function and replace `.unwrap()` with `?`
+        .unwrap()
+        .addresses()
+        .len();
 
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but
@@ -105,25 +90,24 @@ pub fn funding_stream_address(
     height: Height,
     network: &Network,
     receiver: FundingStreamReceiver,
-) -> transparent::Address {
+) -> &transparent::Address {
     let index = funding_stream_address_index(height, network);
-    let address = &FUNDING_STREAM_ADDRESSES
-        .get(&network.kind())
-        .expect("there is always another hash map as value for a given valid network")
-        .get(&receiver)
-        .expect("in the inner hash map there is always a vector of strings with addresses")[index];
-    transparent::Address::from_str(address).expect("address should deserialize")
+    let funding_streams = network.funding_streams(height);
+    funding_streams
+        .recipient(receiver)
+        // TODO: Change return type to option and return None here instead of panicking
+        .unwrap()
+        .addresses()
+        .get(index)
+        // TODO: Change return type to option and return None here instead of panicking
+        .unwrap()
 }
 
 /// Return a human-readable name and a specification URL for the funding stream `receiver`.
 pub fn funding_stream_recipient_info(
     receiver: FundingStreamReceiver,
 ) -> (&'static str, &'static str) {
-    let name = FUNDING_STREAM_NAMES
-        .get(&receiver)
-        .expect("all funding streams have a name");
-
-    (name, FUNDING_STREAM_SPECIFICATION)
+    (receiver.name(), FUNDING_STREAM_SPECIFICATION)
 }
 
 /// Given a funding stream P2SH address, create a script and check if it is the same

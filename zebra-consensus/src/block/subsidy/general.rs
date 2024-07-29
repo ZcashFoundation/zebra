@@ -7,11 +7,11 @@ use std::collections::HashSet;
 use zebra_chain::{
     amount::{Amount, Error, NonNegative},
     block::{Height, HeightDiff},
-    parameters::{Network, NetworkUpgrade::*},
+    parameters::{subsidy::*, Network, NetworkUpgrade::*},
     transaction::Transaction,
 };
 
-use crate::{funding_stream_values, parameters::subsidy::*};
+use crate::funding_stream_values;
 
 /// The divisor used for halvings.
 ///
