@@ -22,6 +22,7 @@ use zebra_chain::{
     },
     parameters::Network::{self, *},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
+    transparent::new_ordered_outputs,
 };
 use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
@@ -29,7 +30,7 @@ use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
     request::{FinalizedBlock, Treestate},
     service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
-    CheckpointVerifiedBlock, Config,
+    CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
 };
 
 /// Storage round-trip test for block and transaction data in the finalized state database.
@@ -120,9 +121,22 @@ fn test_block_db_round_trip_with(
             CheckpointVerifiedBlock::from(original_block.clone())
         } else {
             // Fake a zero height
-            let mut checkpoint_verified = CheckpointVerifiedBlock::from(original_block.clone());
-            checkpoint_verified.height = Height(0);
-            checkpoint_verified
+            let hash = original_block.hash();
+            let transaction_hashes: Arc<[_]> = original_block
+                .transactions
+                .iter()
+                .map(|tx| tx.hash())
+                .collect();
+            let new_outputs = new_ordered_outputs(&original_block, &transaction_hashes);
+
+            CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
+                block: original_block.clone(),
+                hash,
+                height: Height(0),
+                new_outputs,
+                transaction_hashes,
+                deferred_balance: None,
+            })
         };
 
         let dummy_treestate = Treestate::default();
