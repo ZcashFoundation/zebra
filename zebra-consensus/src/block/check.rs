@@ -263,16 +263,7 @@ pub fn miner_fees_are_valid(
     let right = (block_subsidy + block_miner_fees - expected_deferred_amount)
         .map_err(|_| SubsidyError::SumOverflow)?;
 
-    // TODO: Add link to exact coinbase balance ZIP
-    let should_allow_unclaimed_subsidy =
-        NetworkUpgrade::current(network, height) <= NetworkUpgrade::Nu5;
-    let is_invalid_miner_fee = if should_allow_unclaimed_subsidy {
-        left > right
-    } else {
-        left != right
-    };
-
-    if is_invalid_miner_fee {
+    if left > right {
         Err(SubsidyError::InvalidMinerFees)?;
     }
 

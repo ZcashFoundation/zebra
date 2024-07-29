@@ -3232,11 +3232,10 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 /// Test successful block template submission as a block proposal or submission on a custom Testnet.
 ///
 /// This test can be run locally with:
-/// `RUSTFLAGS='--cfg zcash_unstable="nu6"' cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_lockbox_funding_stream --exact --show-output`
+/// `RUSTFLAGS='--cfg zcash_unstable="nu6"' cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
 /// Note: The consensus branch id for NU6 in Zebra (defined in the `CONSENSUS_BRANCH_IDS` constant) must match the one in the `zcash_protocol` crate, currently `0xc8e71055`.
 #[tokio::test(flavor = "multi_thread")]
-// #[cfg(all(feature = "getblocktemplate-rpcs", zcash_unstable = "nu6"))]
-#[cfg(feature = "getblocktemplate-rpcs")]
+#[cfg(all(feature = "getblocktemplate-rpcs", zcash_unstable = "nu6"))]
 async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
@@ -3466,49 +3465,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         submit_block_response,
         submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
         "invalid block with excessive coinbase output value should be rejected"
-    );
-
-    // Use an invalid coinbase transaction (with an output value less than than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
-    let network = base_network_params
-        .clone()
-        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
-            height_range: Some(Height(1)..Height(100)),
-            recipients: make_configured_recipients_with_lockbox_numerator(20),
-        })
-        .to_network();
-
-    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
-        &network,
-        Height(block_template.height),
-        &miner_address,
-        &[],
-        history_tree.clone(),
-        true,
-        vec![],
-    );
-
-    let block_template = GetBlockTemplate {
-        coinbase_txn,
-        block_commitments_hash: default_roots.block_commitments_hash,
-        light_client_root_hash: default_roots.block_commitments_hash,
-        final_sapling_root_hash: default_roots.block_commitments_hash,
-        default_roots,
-        ..block_template
-    };
-
-    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
-
-    // Submit the invalid block with an excessive coinbase output value
-    let submit_block_response = get_block_template_rpc_impl
-        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
-        .await?;
-
-    tracing::info!(?submit_block_response, "submitted invalid block");
-
-    assert_eq!(
-        submit_block_response,
-        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
-        "invalid block with insufficient coinbase output value should be rejected"
     );
 
     // Check that the original block template can be submitted successfully
