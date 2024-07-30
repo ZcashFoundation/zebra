@@ -586,10 +586,8 @@ fn continuous_empty_blocks_from_test_vectors() -> impl Strategy<
         })
         .prop_map(|(network, mut blocks, finalized_blocks_count)| {
             let non_finalized_blocks = blocks.split_off(finalized_blocks_count);
-            let finalized_blocks: Vec<_> = blocks
-                .into_iter()
-                .map(CheckpointVerifiedBlock)
-                .collect();
+            let finalized_blocks: Vec<_> =
+                blocks.into_iter().map(CheckpointVerifiedBlock).collect();
 
             (
                 network,

@@ -1402,7 +1402,7 @@ impl Transaction {
     }
 
     /// Returns the value balances for this transaction.
-    /// 
+    ///
     /// These are the changes in the transaction value pool, split up into transparent, Sprout,
     /// Sapling, and Orchard values.
     ///

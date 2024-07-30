@@ -23,8 +23,7 @@ use zebra_chain::{
 use crate::{
     arbitrary::Prepare,
     service::{check, ReadStateService, StateService},
-    BoxError, ChainTipChange, Config, LatestChainTip, Request, Response,
-    SemanticallyVerifiedBlock,
+    BoxError, ChainTipChange, Config, LatestChainTip, Request, Response, SemanticallyVerifiedBlock,
 };
 
 pub use zebra_chain::block::arbitrary::MAX_PARTIAL_CHAIN_BLOCKS;

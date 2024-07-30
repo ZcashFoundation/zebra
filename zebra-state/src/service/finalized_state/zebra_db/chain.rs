@@ -17,10 +17,7 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::{NonNegative},
-    block::Height,
-    history_tree::HistoryTree,
-    transparent,
+    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
     value_balance::ValueBalance,
 };
 
