@@ -21,7 +21,7 @@ tonic = "0.12.1"
 tonic-reflection = "0.12.1"
 prost = "0.13.1"
 serde = { version = "1.0.204", features = ["serde_derive"] }
-tokio = { version = "1.39.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.39.2", features = ["macros", "rt-multi-thread"] }
 tokio-stream = "0.1.15"
 tower = { version = "0.4.13", features = ["util", "buffer", "timeout"] }
 color-eyre = "0.6.3"
