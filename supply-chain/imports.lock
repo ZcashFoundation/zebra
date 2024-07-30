@@ -9,22 +9,22 @@ user-login = "emilio"
 user-name = "Emilio Cobos Álvarez"
 
 [[publisher.clap]]
-version = "4.5.10"
-when = "2024-07-23"
+version = "4.5.11"
+when = "2024-07-25"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
 [[publisher.clap_builder]]
-version = "4.5.10"
-when = "2024-07-23"
+version = "4.5.11"
+when = "2024-07-25"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
 [[publisher.clap_derive]]
-version = "4.5.8"
-when = "2024-06-28"
+version = "4.5.11"
+when = "2024-07-25"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
@@ -44,8 +44,8 @@ user-login = "hsivonen"
 user-name = "Henri Sivonen"
 
 [[publisher.serde_json]]
-version = "1.0.120"
-when = "2024-07-01"
+version = "1.0.121"
+when = "2024-07-28"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -63,6 +63,13 @@ when = "2024-07-21"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
+
+[[publisher.tokio]]
+version = "1.39.2"
+when = "2024-07-27"
+user-id = 6741
+user-login = "Darksonn"
+user-name = "Alice Ryhl"
 
 [[publisher.unicode-normalization]]
 version = "0.1.23"

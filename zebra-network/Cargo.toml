@@ -61,7 +61,7 @@ tempfile = "3.10.1"
 thiserror = "1.0.63"
 
 futures = "0.3.30"
-tokio = { version = "1.39.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
+tokio = { version = "1.39.2", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.15", features = ["sync", "time"] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
 tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
@@ -90,8 +90,8 @@ proptest = "1.4.0"
 proptest-derive = "0.5.0"
 
 static_assertions = "1.1.0"
-tokio = { version = "1.39.0", features = ["full", "tracing", "test-util"] }
-toml = "0.8.15"
+tokio = { version = "1.39.2", features = ["full", "tracing", "test-util"] }
+toml = "0.8.16"
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
