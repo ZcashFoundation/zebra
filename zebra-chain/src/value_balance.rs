@@ -188,9 +188,6 @@ impl ValueBalance<NonNegative> {
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool.
     ///
-    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
-    /// for details.
-    ///
     /// # Consensus
     ///
     /// > If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or
@@ -229,9 +226,6 @@ impl ValueBalance<NonNegative> {
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool. Inputs remove value from the chain value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
-    /// for details.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn add_transparent_input(
         self,
