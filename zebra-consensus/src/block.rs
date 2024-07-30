@@ -302,7 +302,6 @@ where
 
             check::miner_fees_are_valid(
                 &block,
-                &network,
                 block_miner_fees,
                 expected_block_subsidy,
                 expected_deferred_amount,

@@ -387,7 +387,7 @@ impl fmt::Display for ValueBalanceError {
             Sapling(e) => format!("sapling amount err: {e}"),
             Orchard(e) => format!("orchard amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
-            Unparsable => format!("value balance is unparsable"),
+            Unparsable => "value balance is unparsable".to_string(),
         })
     }
 }

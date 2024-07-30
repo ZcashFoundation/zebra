@@ -527,7 +527,6 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             // Validate
             let result = check::miner_fees_are_valid(
                 &block,
-                &network,
                 miner_fees,
                 expected_block_subsidy,
                 expected_deferred_amount,
@@ -561,7 +560,6 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     // Validate
     let result = check::miner_fees_are_valid(
         &block,
-        &network,
         miner_fees,
         expected_block_subsidy,
         expected_deferred_amount,

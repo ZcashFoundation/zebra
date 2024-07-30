@@ -235,12 +235,10 @@ pub fn subsidy_is_valid(
 /// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
 pub fn miner_fees_are_valid(
     block: &Block,
-    network: &Network,
     block_miner_fees: Amount<NonNegative>,
     expected_block_subsidy: Amount<NonNegative>,
     expected_deferred_amount: Amount<NonNegative>,
 ) -> Result<(), BlockError> {
-    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
     let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)

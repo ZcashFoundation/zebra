@@ -237,7 +237,7 @@ impl Block {
                 deferred_balance
                     .unwrap_or(Amount::zero())
                     .constrain::<NegativeAllowed>()
-                    .map_err(|e| ValueBalanceError::Deferred(e))?,
+                    .map_err(ValueBalanceError::Deferred)?,
             ))
     }
 

@@ -612,8 +612,7 @@ where
 
         // TODO: Add link to lockbox stream ZIP
         let expected_deferred_amount =
-            funding_stream_values(height, &self.network, expected_block_subsidy)
-                .expect("we always expect a funding stream hashmap response even if empty")
+            funding_stream_values(height, &self.network, expected_block_subsidy)?
                 .remove(&FundingStreamReceiver::Deferred);
 
         // don't do precalculation until the block passes basic difficulty checks
