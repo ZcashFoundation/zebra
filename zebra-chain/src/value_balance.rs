@@ -243,12 +243,46 @@ impl ValueBalance<NonNegative> {
         self.add_chain_value_pool_change(transparent_value_pool_change)
     }
 
-    /// Returns the sum of this value balance, and the `chain_value_pool_change`.
+    /// Returns the sum of this value balance, and the given `chain_value_pool_change`.
     ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
+    /// Note that the chain value pool has the opposite sign to the transaction value pool.
     ///
-    /// See `add_block` for details.
+    /// # Consensus
+    ///
+    /// > If the Sprout chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance>
+    ///
+    /// > If the Sapling chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
+    ///
+    /// > If the Orchard chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block , then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
+    ///
+    /// > If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or
+    /// > "Orchard chain value pool balance" would become negative in the block chain created
+    /// > as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/zip-0209#specification>
+    ///
+    /// Zebra also checks that the transparent value pool is non-negative.
+    /// In Zebra, we define this pool as the sum of all unspent transaction outputs.
+    /// (Despite their encoding as an `int64`, transparent output values must be non-negative.)
+    ///
+    /// This is a consensus rule derived from Bitcoin:
+    ///
+    /// > because a UTXO can only be spent once,
+    /// > the full value of the included UTXOs must be spent or given to a miner as a transaction fee.
+    ///
+    /// <https://developer.bitcoin.org/devguide/transactions.html#transaction-fees-and-change>
+    ///
+    /// We implement the consensus rules above by constraining the returned value balance to
+    /// [`ValueBalance<NonNegative>`].
     #[allow(clippy::unwrap_in_result)]
     pub fn add_chain_value_pool_change(
         self,

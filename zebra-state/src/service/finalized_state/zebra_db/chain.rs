@@ -202,17 +202,24 @@ impl DiskWriteBatch {
 
     // Value pool methods
 
-    /// Prepare a database batch containing the chain value pool update from `finalized.block`,
-    /// and return it (without actually writing anything).
+    /// Prepares a database batch containing the chain value pool update from `finalized.block`, and
+    /// returns it without actually writing anything.
     ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
+    /// The batch is modified by this method and written by the caller. The caller should not write
+    /// the batch if this method returns an error.
     ///
-    /// The batch is modified by this method and written by the caller.
+    /// The parameter `utxos_spent_by_block` must contain the [`transparent::Utxo`]s of every input
+    /// in this block, including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note that the chain value pool has the opposite sign to the transaction value pool. See the
+    /// [`chain_value_pool_change`] and [`add_chain_value_pool_change`] methods for more details.
     ///
     /// # Errors
     ///
     /// - Propagates any errors from updating value pools
+    ///
+    /// [`chain_value_pool_change`]: zebra_chain::block::Block::chain_value_pool_change
+    /// [`add_chain_value_pool_change`]: ValueBalance::add_chain_value_pool_change
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &ZebraDb,

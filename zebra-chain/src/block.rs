@@ -205,23 +205,22 @@ impl Block {
             .expect("number of transactions must fit u64")
     }
 
-    /// Get the overall chain value pool change in this block,
-    /// the negative sum of the transaction value balances in this block.
+    /// Returns the overall chain value pool change in this block---the negative sum of the
+    /// transaction value balances in this block.
     ///
-    /// These are the changes in the transparent, Sprout, Sapling, and  Orchard chain value pools, as
+    /// These are the changes in the transparent, Sprout, Sapling, and Orchard chain value pools, as
     /// a result of this block.
     ///
-    /// Positive values are added to the corresponding chain value pool.
-    /// Negative values are removed from the corresponding pool.
+    /// Positive values are added to the corresponding chain value pool and negative values are
+    /// removed from the corresponding pool.
     ///
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
-    /// `utxos` must contain the [`transparent::Utxo`]s of every input in this block,
-    /// including UTXOs created by earlier transactions in this block.
-    /// (It can also contain unrelated UTXOs, which are ignored.)
+    /// The given `utxos` must contain the [`transparent::Utxo`]s of every input in this block,
+    /// including UTXOs created by earlier transactions in this block. It can also contain unrelated
+    /// UTXOs, which are ignored.
     ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
+    /// Note that the chain value pool has the opposite sign to the transaction value pool.
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
