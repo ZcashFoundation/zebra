@@ -348,7 +348,7 @@ impl ValueBalance<NonNegative> {
 
     /// From byte array
     #[allow(clippy::unwrap_in_result)]
-    pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let transparent = Amount::from_bytes(
             bytes[0..8]
                 .try_into()
