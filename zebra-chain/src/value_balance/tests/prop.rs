@@ -109,8 +109,7 @@ proptest! {
     fn value_balance_serialization(value_balance in any::<ValueBalance<NonNegative>>()) {
         let _init_guard = zebra_test::init();
 
-        let bytes = value_balance.to_bytes();
-        let serialized_value_balance = ValueBalance::from_bytes(bytes)?;
+        let serialized_value_balance = ValueBalance::from_bytes(&value_balance.to_bytes())?;
 
         prop_assert_eq!(value_balance, serialized_value_balance);
     }
@@ -119,9 +118,8 @@ proptest! {
     fn value_balance_deserialization(bytes in any::<[u8; 32]>()) {
         let _init_guard = zebra_test::init();
 
-        if let Ok(deserialized) = ValueBalance::<NonNegative>::from_bytes(bytes) {
-            let bytes2 = deserialized.to_bytes();
-            prop_assert_eq!(bytes, bytes2);
+        if let Ok(deserialized) = ValueBalance::<NonNegative>::from_bytes(&bytes) {
+            prop_assert_eq!(bytes, deserialized.to_bytes());
         }
     }
 }
