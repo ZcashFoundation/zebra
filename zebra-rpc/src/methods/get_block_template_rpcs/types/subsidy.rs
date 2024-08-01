@@ -5,7 +5,6 @@ use zebra_chain::{
     parameters::subsidy::FundingStreamReceiver,
     transparent,
 };
-use zebra_consensus::funding_stream_recipient_info;
 
 use crate::methods::get_block_template_rpcs::types::zec::Zec;
 
@@ -70,10 +69,10 @@ impl FundingStream {
         value: Amount<NonNegative>,
         address: Option<&transparent::Address>,
     ) -> FundingStream {
-        let (recipient, specification) = funding_stream_recipient_info(receiver);
+        let (name, specification) = receiver.info();
 
         FundingStream {
-            recipient: recipient.to_string(),
+            recipient: name.to_string(),
             specification: specification.to_string(),
             value: value.into(),
             value_zat: value,

@@ -91,14 +91,6 @@ pub fn funding_stream_address(
     funding_streams.recipient(receiver)?.addresses().get(index)
 }
 
-// TODO: Move this fn to [`FundingStreamReceiver`].
-/// Return a human-readable name and a specification URL for the funding stream `receiver`.
-pub fn funding_stream_recipient_info(
-    receiver: FundingStreamReceiver,
-) -> (&'static str, &'static str) {
-    (receiver.name(), FUNDING_STREAM_SPECIFICATION)
-}
-
 /// Given a funding stream P2SH address, create a script and check if it is the same
 /// as the given lock_script as described in [protocol specification §7.10][7.10]
 ///

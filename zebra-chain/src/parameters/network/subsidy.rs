@@ -68,18 +68,22 @@ pub enum FundingStreamReceiver {
 }
 
 impl FundingStreamReceiver {
-    /// The name for each funding stream receiver, as described in [ZIP-1014] and [`zcashd`].
+    /// Returns a human-readable name and a specification URL for the receiver, as described in
+    /// [ZIP-1014] and [`zcashd`].
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
-    pub fn name(self) -> &'static str {
-        match self {
-            FundingStreamReceiver::Ecc => "Electric Coin Company",
-            FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
-            FundingStreamReceiver::MajorGrants => "Major Grants",
-            // TODO: Find out what this should be called and update the funding stream name
-            FundingStreamReceiver::Deferred => "Deferred Fund",
-        }
+    pub fn info(&self) -> (&'static str, &'static str) {
+        (
+            match self {
+                FundingStreamReceiver::Ecc => "Electric Coin Company",
+                FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
+                FundingStreamReceiver::MajorGrants => "Major Grants",
+                // TODO: Find out what this should be called and update the funding stream name
+                FundingStreamReceiver::Deferred => "Deferred Fund",
+            },
+            FUNDING_STREAM_SPECIFICATION,
+        )
     }
 }
 
