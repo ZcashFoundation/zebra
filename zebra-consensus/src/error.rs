@@ -37,6 +37,18 @@ pub enum SubsidyError {
 
     #[error("a sum of amounts overflowed")]
     SumOverflow,
+
+    #[error("unsupported height")]
+    UnsupportedHeight,
+
+    #[error("invalid amount")]
+    InvalidAmount(amount::Error),
+}
+
+impl From<amount::Error> for SubsidyError {
+    fn from(amount: amount::Error) -> Self {
+        Self::InvalidAmount(amount)
+    }
 }
 
 /// Errors for semantic transaction validation.

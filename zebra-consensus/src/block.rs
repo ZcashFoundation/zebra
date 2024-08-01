@@ -87,7 +87,7 @@ pub enum VerifyBlockError {
     Transaction(#[from] TransactionError),
 
     #[error("invalid block subsidy")]
-    Subsidy(#[from] zebra_chain::amount::Error),
+    Subsidy(#[from] SubsidyError),
 }
 
 impl VerifyBlockError {
