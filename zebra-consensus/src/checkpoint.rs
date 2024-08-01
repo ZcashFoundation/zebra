@@ -608,7 +608,7 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
-        let expected_deferred_amount = if height > self.network.slow_start_shift() {
+        let expected_deferred_amount = if height > self.network.slow_start_interval() {
             // TODO: Add link to lockbox stream ZIP
             funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
                 .remove(&FundingStreamReceiver::Deferred)
