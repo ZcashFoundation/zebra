@@ -50,6 +50,7 @@ pub struct SemanticBlockVerifier<S, V> {
     transaction_verifier: V,
 }
 
+/// Block verification errors.
 // TODO: dedupe with crate::error::BlockError
 #[non_exhaustive]
 #[allow(missing_docs)]

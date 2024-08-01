@@ -342,7 +342,7 @@ impl ValueBalance<NonNegative> {
     pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let bytes_length = bytes.len();
 
-        // Return an error early if bytes don't have the right lenght instead of panicking later.
+        // Return an error early if bytes don't have the right length instead of panicking later.
         match bytes_length {
             32 | 40 => {}
             _ => return Err(Unparsable),
