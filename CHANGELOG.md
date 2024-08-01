@@ -7,18 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 1.9.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.9.0) - 2024-08-02
 
-TODO:
-- Add a summary of changes in this release
-- Add an entry for funding stream changes and protocol version bump
+This release includes deployment of NU6 on Testnet, configurable funding streams on custom Testnets, and updates Zebra's end-of-support (EoS)
+from 16 weeks to 14 weeks so that it will panic before the expected activation height of NU6 on Mainnet.
+
+It also replaces the `shielded-scan` compilation feature with a new `zebra-scanner` binary, adds a `TrustedChainSync` module
+for replicating Zebra's best chain state, and a gRPC server in `zebra-rpc` as steps towards zcashd deprecation.
 
 ### Added
 
-- Add a new `zebra-scanner` binary ([#8608](https://github.com/ZcashFoundation/zebra/pull/8608))
-- Allow configuring NU6 activation height on Regtest ([#8700](https://github.com/ZcashFoundation/zebra/pull/8700))
+- A `zebra-scanner` binary replacing the `shielded-scan` compilation feature in `zebrad` ([#8608](https://github.com/ZcashFoundation/zebra/pull/8608))
+- Adds a `TrustedChainSync` module for keeping up with Zebra's non-finalized best chain from a separate process ([#8596](https://github.com/ZcashFoundation/zebra/pull/8596))
+- Add a tonic server in zebra-rpc with a `chain_tip_change()` method that notifies clients when Zebra's best chain tip changes ([#8674](https://github.com/ZcashFoundation/zebra/pull/8674))
+- NU6 network upgrade variant ([#8693](https://github.com/ZcashFoundation/zebra/pull/8693), [8733](https://github.com/ZcashFoundation/zebra/pull/8733))
+- Configurable NU6 activation height on Regtest ([#8700](https://github.com/ZcashFoundation/zebra/pull/8700))
 - Configurable Testnet funding streams ([#8718](https://github.com/ZcashFoundation/zebra/pull/8718))
-- Adds a TrustedChainSync struct for keeping up with Zebra's non-finalized best chain from a separate process ([#8596](https://github.com/ZcashFoundation/zebra/pull/8596))
-- Add an NU6 network upgrade variant ([#8693](https://github.com/ZcashFoundation/zebra/pull/8693))
-- Add a tonic server in zebra-rpc ([#8674](https://github.com/ZcashFoundation/zebra/pull/8674))
+- Post-NU6 funding streams, including a lockbox funding stream ([#8694](https://github.com/ZcashFoundation/zebra/pull/8694))
 
 ### Fixed
 
