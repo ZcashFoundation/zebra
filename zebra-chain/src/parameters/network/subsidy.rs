@@ -72,12 +72,14 @@ impl FundingStreamReceiver {
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
+    // TODO: Update method documentation with a reference to https://zips.z.cash/draft-nuttycom-funding-allocation once its
+    //       status is updated to 'Proposed'.
     pub fn name(self) -> &'static str {
         match self {
             FundingStreamReceiver::Ecc => "Electric Coin Company",
             FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
             FundingStreamReceiver::MajorGrants => "Major Grants",
-            // TODO: Find out what this should be called and update the funding stream name
+            // TODO: Find out what this should be called and update the funding stream name.
             FundingStreamReceiver::Deferred => "Lockbox",
         }
     }
