@@ -78,7 +78,7 @@ impl FundingStreamReceiver {
             FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
             FundingStreamReceiver::MajorGrants => "Major Grants",
             // TODO: Find out what this should be called and update the funding stream name
-            FundingStreamReceiver::Deferred => "Deferred Fund",
+            FundingStreamReceiver::Deferred => "Lockbox",
         }
     }
 }
@@ -209,7 +209,7 @@ lazy_static! {
     // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
         // TODO: Adjust this height range and recipient list once a proposal is selected
-        height_range: Height(2_726_400)..Height(3_146_400),
+        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
@@ -252,7 +252,7 @@ lazy_static! {
     //       start and end heights for Mainnet in https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
         // TODO: Adjust this height range and recipient list once a proposal is selected
-        height_range: Height(2_942_000)..Height(3_362_000),
+        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
@@ -268,6 +268,27 @@ lazy_static! {
         .collect()
     };
 }
+
+/// The start height of post-NU6 funding streams on Mainnet
+// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
+
+/// The start height of post-NU6 funding streams on Testnet
+// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_942_000;
+
+/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet.
+const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
+
+/// The post-NU6 funding stream height range on Mainnet
+const POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET)
+        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
+
+/// The post-NU6 funding stream height range on Testnet
+const POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET)
+        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
 
 /// Address change interval function here as a constant
 /// as described in [protocol specification §7.10.1][7.10.1].
