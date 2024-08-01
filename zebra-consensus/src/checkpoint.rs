@@ -608,12 +608,13 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
-        let expected_block_subsidy = block_subsidy(height, &self.network)?;
-
         // TODO: Add link to lockbox stream ZIP
-        let expected_deferred_amount =
-            funding_stream_values(height, &self.network, expected_block_subsidy)?
-                .remove(&FundingStreamReceiver::Deferred);
+        let expected_deferred_amount = if height > self.network.slow_start_shift() {
+            funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
+                .remove(&FundingStreamReceiver::Deferred)
+        } else {
+            None
+        };
 
         // don't do precalculation until the block passes basic difficulty checks
         let block = CheckpointVerifiedBlock::new(block, Some(hash), expected_deferred_amount);
