@@ -340,6 +340,14 @@ impl ValueBalance<NonNegative> {
     /// From byte array
     #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+        let bytes_length = bytes.len();
+
+        // Return an error early if bytes don't have the right lenght instead of panicking later.
+        match bytes_length {
+            32 | 40 => {}
+            _ => return Err(Unparsable),
+        };
+
         let transparent = Amount::from_bytes(
             bytes[0..8]
                 .try_into()
@@ -368,7 +376,7 @@ impl ValueBalance<NonNegative> {
         )
         .map_err(Orchard)?;
 
-        let deferred = match bytes.len() {
+        let deferred = match bytes_length {
             32 => Amount::zero(),
             40 => Amount::from_bytes(
                 bytes[32..40]
