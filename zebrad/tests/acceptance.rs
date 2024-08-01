@@ -3228,3 +3228,256 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     Ok(())
 }
+
+/// Test successful block template submission as a block proposal or submission on a custom Testnet.
+///
+/// This test can be run locally with:
+/// `RUSTFLAGS='--cfg zcash_unstable="nu6"' cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams --exact --show-output`
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(all(feature = "getblocktemplate-rpcs", zcash_unstable = "nu6"))]
+async fn nu6_funding_streams() -> Result<()> {
+    use zebra_chain::{
+        chain_sync_status::MockSyncStatus,
+        parameters::{
+            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
+            testnet::{
+                self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+                ConfiguredFundingStreams,
+            },
+            NetworkUpgrade,
+        },
+        serialization::ZcashSerialize,
+        work::difficulty::U256,
+    };
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_node_services::mempool;
+    use zebra_rpc::methods::{
+        get_block_template_rpcs::{
+            get_block_template::{
+                fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+                proposal_block_from_template, GetBlockTemplate, GetBlockTemplateRequestMode,
+            },
+            types::get_block_template,
+            types::submit_block,
+        },
+        hex_data::HexData,
+        GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+    };
+    use zebra_test::mock_service::MockService;
+    let _init_guard = zebra_test::init();
+
+    tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
+
+    let base_network_params = testnet::Parameters::build()
+        // Regtest genesis hash
+        .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .with_disable_pow(true)
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu6: Some(1),
+            ..Default::default()
+        });
+
+    let network = base_network_params
+        .clone()
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            // Start checking funding streams from block height 1
+            height_range: Some(Height(1)..Height(100)),
+            // Use default post-NU6 recipients
+            recipients: None,
+        })
+        .to_network();
+
+    tracing::info!("built configured Testnet, starting state service and block verifier");
+
+    let default_test_config = default_test_config(&network)?;
+    let mining_config = default_test_config.mining;
+    let miner_address = mining_config
+        .miner_address
+        .clone()
+        .expect("hard-coded config should have a miner address");
+
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(&network);
+
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state.clone())
+        .await;
+
+    tracing::info!("started state service and block verifier, committing Regtest genesis block");
+
+    let genesis_hash = block_verifier_router
+        .clone()
+        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .await
+        .expect("should validate Regtest genesis block");
+
+    let mut mempool = MockService::build()
+        .with_max_request_delay(Duration::from_secs(5))
+        .for_unit_tests();
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
+        &network,
+        mining_config,
+        mempool.clone(),
+        read_state.clone(),
+        latest_chain_tip,
+        block_verifier_router,
+        mock_sync_status,
+        MockAddressBookPeers::default(),
+    );
+
+    let make_mock_mempool_request_handler = || async move {
+        mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await
+            .respond(mempool::Response::FullTransactions {
+                transactions: vec![],
+                // tip hash needs to match chain info for long poll requests
+                last_seen_tip_hash: genesis_hash,
+            });
+    };
+
+    let block_template_fut = get_block_template_rpc_impl.get_block_template(None);
+    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
+    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let get_block_template::Response::TemplateMode(block_template) =
+        block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
+
+    // Check that the block template is a valid block proposal
+    let get_block_template::Response::ProposalMode(block_proposal_result) =
+        get_block_template_rpc_impl
+            .get_block_template(Some(get_block_template::JsonParameters {
+                mode: GetBlockTemplateRequestMode::Proposal,
+                data: Some(hex_proposal_block),
+                ..Default::default()
+            }))
+            .await?
+    else {
+        panic!(
+            "this getblocktemplate call should return the `ProposalMode` variant of the response"
+        )
+    };
+
+    assert!(
+        block_proposal_result.is_valid(),
+        "block proposal should succeed"
+    );
+
+    // Submit the same block
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::Accepted,
+        "valid block should be accepted"
+    );
+
+    // Use an invalid coinbase transaction (with an output value greater than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
+
+    let make_configured_recipients_with_lockbox_numerator = |numerator| {
+        Some(vec![
+            ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Deferred,
+                numerator,
+                addresses: None,
+            },
+            ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::MajorGrants,
+                numerator: 8,
+                addresses: Some(
+                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+        ])
+    };
+
+    // Gets the next block template
+    let block_template_fut = get_block_template_rpc_impl.get_block_template(None);
+    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
+    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let get_block_template::Response::TemplateMode(block_template) =
+        block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
+
+    let valid_original_block_template = block_template.clone();
+
+    let zebra_state::GetBlockTemplateChainInfo { history_tree, .. } =
+        fetch_state_tip_and_local_time(read_state.clone()).await?;
+
+    let network = base_network_params
+        .clone()
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(100)),
+            recipients: make_configured_recipients_with_lockbox_numerator(0),
+        })
+        .to_network();
+
+    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+        &network,
+        Height(block_template.height),
+        &miner_address,
+        &[],
+        history_tree.clone(),
+        true,
+        vec![],
+    );
+
+    let block_template = GetBlockTemplate {
+        coinbase_txn,
+        block_commitments_hash: default_roots.block_commitments_hash,
+        light_client_root_hash: default_roots.block_commitments_hash,
+        final_sapling_root_hash: default_roots.block_commitments_hash,
+        default_roots,
+        ..(*block_template)
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+
+    // Submit the invalid block with an excessive coinbase output value
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    tracing::info!(?submit_block_response, "submitted invalid block");
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        "invalid block with excessive coinbase output value should be rejected"
+    );
+
+    // Check that the original block template can be submitted successfully
+    let proposal_block =
+        proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::Accepted,
+        "valid block should be accepted"
+    );
+
+    Ok(())
+}

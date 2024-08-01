@@ -62,6 +62,9 @@ pub enum FundingStreamReceiver {
 
     /// The Major Grants (Zcash Community Grants) funding stream.
     MajorGrants,
+    /// The deferred pool contribution.
+    // TODO: Add link to lockbox stream ZIP
+    Deferred,
 }
 
 impl FundingStreamReceiver {
@@ -69,11 +72,15 @@ impl FundingStreamReceiver {
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
+    // TODO: Update method documentation with a reference to https://zips.z.cash/draft-nuttycom-funding-allocation once its
+    //       status is updated to 'Proposed'.
     pub fn name(self) -> &'static str {
         match self {
             FundingStreamReceiver::Ecc => "Electric Coin Company",
             FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
             FundingStreamReceiver::MajorGrants => "Major Grants",
+            // TODO: Find out what this should be called and update the funding stream name.
+            FundingStreamReceiver::Deferred => "Lockbox",
         }
     }
 }
@@ -181,7 +188,7 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET.iter()),
+                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET),
             ),
             (
                 FundingStreamReceiver::ZcashFoundation,
@@ -199,8 +206,21 @@ lazy_static! {
     /// The post-NU6 funding streams for Mainnet
     // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        height_range: Height(2_726_400)..Height(3_146_400),
-        recipients: HashMap::new()
+        // TODO: Adjust this height range and recipient list once a proposal is selected
+        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
+        recipients: [
+            (
+                FundingStreamReceiver::Deferred,
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+            ),
+            (
+                FundingStreamReceiver::MajorGrants,
+                // TODO: Update these addresses
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
+            ),
+        ]
+        .into_iter()
+        .collect()
     };
 
     /// The pre-NU6 funding streams for Testnet as described in [protocol specification §7.10.1][7.10.1]
@@ -229,10 +249,44 @@ lazy_static! {
     // TODO: Add a reference to lockbox stream ZIP, this is currently based on the number of blocks between the
     //       start and end heights for Mainnet in https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        height_range: Height(2_942_000)..Height(3_362_000),
-        recipients: HashMap::new()
+        // TODO: Adjust this height range and recipient list once a proposal is selected
+        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
+        recipients: [
+            (
+                FundingStreamReceiver::Deferred,
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
+            ),
+            (
+                FundingStreamReceiver::MajorGrants,
+                // TODO: Update these addresses
+                FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
+            ),
+        ]
+        .into_iter()
+        .collect()
     };
 }
+
+/// The start height of post-NU6 funding streams on Mainnet
+// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
+
+/// The start height of post-NU6 funding streams on Testnet
+// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_942_000;
+
+/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet.
+const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
+
+/// The post-NU6 funding stream height range on Mainnet
+const POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET)
+        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
+
+/// The post-NU6 funding stream height range on Testnet
+const POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET)
+        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
 
 /// Address change interval function here as a constant
 /// as described in [protocol specification §7.10.1][7.10.1].
@@ -401,6 +455,18 @@ pub const FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// List of addresses for the Major Grants funding stream in the Testnet.
 pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
     ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
+
+/// Number of addresses for each post-NU6 funding stream in the Testnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
+
+/// List of addresses for the Major Grants post-NU6 funding stream in the Testnet administered by the Financial Privacy Fund (FPF).
+pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;
+    POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
+    ["t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
 
 /// Returns the address change period
 /// as described in [protocol specification §7.10][7.10]

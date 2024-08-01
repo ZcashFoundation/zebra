@@ -68,7 +68,7 @@ pub struct ConfiguredFundingStreamRecipient {
     /// The numerator for each funding stream receiver category, see [`FundingStreamRecipient::numerator`] for more details.
     pub numerator: u64,
     /// Addresses for the funding stream recipient, see [`FundingStreamRecipient::addresses`] for more details.
-    pub addresses: Vec<String>,
+    pub addresses: Option<Vec<String>>,
 }
 
 impl ConfiguredFundingStreamRecipient {
@@ -76,7 +76,7 @@ impl ConfiguredFundingStreamRecipient {
     pub fn into_recipient(self) -> (FundingStreamReceiver, FundingStreamRecipient) {
         (
             self.receiver,
-            FundingStreamRecipient::new(self.numerator, self.addresses),
+            FundingStreamRecipient::new(self.numerator, self.addresses.unwrap_or_default()),
         )
     }
 }
@@ -133,8 +133,12 @@ impl ConfiguredFundingStreams {
             ))
             .expect("no overflow should happen in this sub") as usize;
 
-        for recipient in funding_streams.recipients().values() {
-            // TODO: Make an exception for the `Deferred` receiver.
+        for (&receiver, recipient) in funding_streams.recipients() {
+            if receiver == FundingStreamReceiver::Deferred {
+                // The `Deferred` receiver doesn't need any addresses.
+                continue;
+            }
+
             assert!(
                 recipient.addresses().len() >= expected_min_num_addresses,
                 "recipients must have a sufficient number of addresses for height range, \

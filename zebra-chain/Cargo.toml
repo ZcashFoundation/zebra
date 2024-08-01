@@ -176,3 +176,7 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
+
+[lints.rust]
+# TODO: Remove this once it's no longer needed for NU6.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }

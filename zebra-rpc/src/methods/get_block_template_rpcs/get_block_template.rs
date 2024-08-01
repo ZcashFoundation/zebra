@@ -154,6 +154,7 @@ where
 // - State and syncer checks
 
 /// Returns an error if Zebra is not synced to the consensus chain tip.
+/// Returns early with `Ok(())` if Proof-of-Work is disabled on the provided `network`.
 /// This error might be incorrect if the local clock is skewed.
 pub fn check_synced_to_tip<Tip, SyncStatus>(
     network: &Network,
@@ -164,6 +165,13 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    // TODO:
+    // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
+    // - Check the field in `sync_status` so it applies to the mempool as well.
+    if network.disable_pow() {
+        return Ok(());
+    }
+
     // The tip estimate may not be the same as the one coming from the state
     // but this is ok for an estimate
     let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
@@ -376,11 +384,11 @@ pub fn standard_coinbase_outputs(
         (Amount<NonNegative>, &transparent::Address),
     > = funding_streams
         .into_iter()
-        .map(|(receiver, amount)| {
-            (
+        .filter_map(|(receiver, amount)| {
+            Some((
                 receiver,
-                (amount, funding_stream_address(height, network, receiver)),
-            )
+                (amount, funding_stream_address(height, network, receiver)?),
+            ))
         })
         .collect();
 
