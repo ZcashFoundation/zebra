@@ -1,5 +1,4 @@
-//! A type that can hold the four types of Zcash value pools.
-// TODO: Update the docs above.
+//! Balances in chain value pools and transaction value pools.
 
 use crate::amount::{self, Amount, Constraint, NegativeAllowed, NonNegative};
 
@@ -19,8 +18,7 @@ mod tests;
 
 use ValueBalanceError::*;
 
-// TODO: Update the docs.
-/// An amount spread between different Zcash pools.
+/// A balance in each chain value pool or transaction value pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,
