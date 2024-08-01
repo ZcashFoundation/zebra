@@ -151,25 +151,21 @@ pub struct FundingStreamRecipient {
 
 impl FundingStreamRecipient {
     /// Creates a new [`FundingStreamRecipient`].
-    pub fn new<I, T>(numerator: u64, addresses: Option<I>) -> Self
+    pub fn new<I, T>(numerator: u64, addresses: I) -> Self
     where
         T: ToString,
         I: IntoIterator<Item = T>,
     {
         Self {
             numerator,
-            addresses: if let Some(addresses) = addresses {
-                addresses
-                    .into_iter()
-                    .map(|addr| {
-                        let addr = addr.to_string();
-                        addr.parse()
-                            .expect("funding stream address must deserialize")
-                    })
-                    .collect()
-            } else {
-                vec![]
-            },
+            addresses: addresses
+                .into_iter()
+                .map(|addr| {
+                    let addr = addr.to_string();
+                    addr.parse()
+                        .expect("funding stream address must deserialize")
+                })
+                .collect(),
         }
     }
 
@@ -192,15 +188,15 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, Some(FUNDING_STREAM_ECC_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET),
             ),
             (
                 FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, Some(FUNDING_STREAM_ZF_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_MAINNET),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
             ),
         ]
         .into_iter()
@@ -215,12 +211,12 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
-                FundingStreamRecipient::new::<[&str; 0], &str>(12, None),
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
                 // TODO: Update these addresses
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
             ),
         ]
         .into_iter()
@@ -234,15 +230,15 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, Some(FUNDING_STREAM_ECC_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_TESTNET),
             ),
             (
                 FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, Some(FUNDING_STREAM_ZF_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_TESTNET),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
             ),
         ]
         .into_iter()
@@ -258,12 +254,12 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
-                FundingStreamRecipient::new::<[&str; 0], &str>(12, None),
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
                 // TODO: Update these addresses
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
             ),
         ]
         .into_iter()

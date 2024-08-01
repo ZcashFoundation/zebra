@@ -76,7 +76,7 @@ impl ConfiguredFundingStreamRecipient {
     pub fn into_recipient(self) -> (FundingStreamReceiver, FundingStreamRecipient) {
         (
             self.receiver,
-            FundingStreamRecipient::new(self.numerator, self.addresses),
+            FundingStreamRecipient::new(self.numerator, self.addresses.unwrap_or_default()),
         )
     }
 }
