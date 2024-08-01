@@ -264,7 +264,7 @@ lazy_static! {
             (
                 FundingStreamReceiver::MajorGrants,
                 // TODO: Update these addresses
-                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
+                FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
             ),
         ]
         .into_iter()
@@ -460,6 +460,18 @@ pub const FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// List of addresses for the Major Grants funding stream in the Testnet.
 pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
     ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
+
+/// Number of addresses for each post-NU6 funding stream in the Testnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
+
+/// List of addresses for the Major Grants post-NU6 funding stream in the Testnet administered by the Financial Privacy Fund (FPF).
+pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;
+    POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
+    ["t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
 
 /// Returns the address change period
 /// as described in [protocol specification §7.10][7.10]
