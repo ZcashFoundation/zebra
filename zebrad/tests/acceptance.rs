@@ -3232,11 +3232,11 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 /// Test successful block template submission as a block proposal or submission on a custom Testnet.
 ///
 /// This test can be run locally with:
-/// `RUSTFLAGS='--cfg zcash_unstable="nu6"' cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
+/// `RUSTFLAGS='--cfg zcash_unstable="nu6"' cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams --exact --show-output`
 /// Note: The consensus branch id for NU6 in Zebra (defined in the `CONSENSUS_BRANCH_IDS` constant) must match the one in the `zcash_protocol` crate, currently `0xc8e71055`.
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(all(feature = "getblocktemplate-rpcs", zcash_unstable = "nu6"))]
-async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
+async fn nu6_funding_streams() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{

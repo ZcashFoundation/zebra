@@ -73,6 +73,8 @@ impl FundingStreamReceiver {
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
+    // TODO: Update method documentation with a reference to https://zips.z.cash/draft-nuttycom-funding-allocation once its
+    //       status is updated to 'Proposed'.
     pub fn info(&self) -> (&'static str, &'static str) {
         (
             match self {
@@ -80,7 +82,7 @@ impl FundingStreamReceiver {
                 FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
                 FundingStreamReceiver::MajorGrants => "Major Grants",
                 // TODO: Find out what this should be called and update the funding stream name
-                FundingStreamReceiver::Deferred => "Deferred Fund",
+                FundingStreamReceiver::Deferred => "Lockbox",
             },
             FUNDING_STREAM_SPECIFICATION,
         )
@@ -154,25 +156,21 @@ pub struct FundingStreamRecipient {
 
 impl FundingStreamRecipient {
     /// Creates a new [`FundingStreamRecipient`].
-    pub fn new<I, T>(numerator: u64, addresses: Option<I>) -> Self
+    pub fn new<I, T>(numerator: u64, addresses: I) -> Self
     where
         T: ToString,
         I: IntoIterator<Item = T>,
     {
         Self {
             numerator,
-            addresses: if let Some(addresses) = addresses {
-                addresses
-                    .into_iter()
-                    .map(|addr| {
-                        let addr = addr.to_string();
-                        addr.parse()
-                            .expect("funding stream address must deserialize")
-                    })
-                    .collect()
-            } else {
-                vec![]
-            },
+            addresses: addresses
+                .into_iter()
+                .map(|addr| {
+                    let addr = addr.to_string();
+                    addr.parse()
+                        .expect("funding stream address must deserialize")
+                })
+                .collect(),
         }
     }
 
@@ -195,15 +193,15 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, Some(FUNDING_STREAM_ECC_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_MAINNET),
             ),
             (
                 FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, Some(FUNDING_STREAM_ZF_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_MAINNET),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
             ),
         ]
         .into_iter()
@@ -214,16 +212,16 @@ lazy_static! {
     // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
         // TODO: Adjust this height range and recipient list once a proposal is selected
-        height_range: Height(2_726_400)..Height(3_146_400),
+        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
-                FundingStreamRecipient::new::<[&str; 0], &str>(12, None),
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
                 // TODO: Update these addresses
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_MAINNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
             ),
         ]
         .into_iter()
@@ -237,15 +235,15 @@ lazy_static! {
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
-                FundingStreamRecipient::new(7, Some(FUNDING_STREAM_ECC_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(7, FUNDING_STREAM_ECC_ADDRESSES_TESTNET),
             ),
             (
                 FundingStreamReceiver::ZcashFoundation,
-                FundingStreamRecipient::new(5, Some(FUNDING_STREAM_ZF_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(5, FUNDING_STREAM_ZF_ADDRESSES_TESTNET),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
             ),
         ]
         .into_iter()
@@ -257,22 +255,43 @@ lazy_static! {
     //       start and end heights for Mainnet in https://zips.z.cash/draft-nuttycom-funding-allocation
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
         // TODO: Adjust this height range and recipient list once a proposal is selected
-        height_range: Height(2_942_000)..Height(3_362_000),
+        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
-                FundingStreamRecipient::new::<[&str; 0], &str>(12, None),
+                FundingStreamRecipient::new::<[&str; 0], &str>(12, []),
             ),
             (
                 FundingStreamReceiver::MajorGrants,
                 // TODO: Update these addresses
-                FundingStreamRecipient::new(8, Some(FUNDING_STREAM_MG_ADDRESSES_TESTNET)),
+                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_TESTNET),
             ),
         ]
         .into_iter()
         .collect()
     };
 }
+
+/// The start height of post-NU6 funding streams on Mainnet
+// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
+
+/// The start height of post-NU6 funding streams on Testnet
+// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_942_000;
+
+/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet.
+const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
+
+/// The post-NU6 funding stream height range on Mainnet
+const POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET)
+        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
+
+/// The post-NU6 funding stream height range on Testnet
+const POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET)
+        ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
 
 /// Address change interval function here as a constant
 /// as described in [protocol specification §7.10.1][7.10.1].

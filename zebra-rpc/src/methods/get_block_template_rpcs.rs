@@ -1202,9 +1202,9 @@ where
             })?;
             let mut funding_streams: Vec<_> = funding_streams
                 .iter()
-                .map(|(receiver, value)| {
-                    let address = funding_stream_address(height, &network, *receiver);
-                    (*receiver, FundingStream::new(*receiver, *value, address))
+                .filter_map(|(receiver, value)| {
+                    let address = funding_stream_address(height, &network, *receiver)?;
+                    Some((*receiver, FundingStream::new(*receiver, *value, address)))
                 })
                 .collect();
 

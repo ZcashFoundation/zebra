@@ -257,6 +257,12 @@ pub fn miner_fees_are_valid(
     // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
     //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    //
+    // The expected lockbox funding stream output of the coinbase transaction is also subtracted
+    // from the block subsidy value plus the transaction fees paid by transactions in this block.
+    //
+    // TODO: Update the quote from the protocol specification once its been updated to reflect the changes in
+    //       https://zips.z.cash/draft-nuttycom-funding-allocation and https://zips.z.cash/draft-hopwood-coinbase-balance.
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
         .map_err(|_| SubsidyError::SumOverflow)?;
     let right = (expected_block_subsidy + block_miner_fees - expected_deferred_amount)
