@@ -27,6 +27,7 @@ indexer-rpcs = [
     "tonic-reflection",
     "prost",
     "tokio-stream",
+    "bytes"
 ]
 
 # Production features that activate extra dependencies, or extra features in dependencies
@@ -81,6 +82,7 @@ tonic = { version = "0.12.1", optional = true }
 tonic-reflection = { version = "0.12.1", optional = true }
 prost = { version = "0.13.1", optional = true }
 tokio-stream = { version = "0.1.15", optional = true }
+bytes = { version = "1.6.1", optional = true }
 
 tracing = "0.1.39"
 

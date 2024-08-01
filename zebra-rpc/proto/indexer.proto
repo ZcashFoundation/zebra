@@ -8,3 +8,4 @@ service Indexer {
   // Notifies listeners of chain tip changes
   rpc ChainTipChange(Empty) returns (stream Empty);
 }
+
