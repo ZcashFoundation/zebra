@@ -127,7 +127,7 @@ proptest! {
         let _init_guard = zebra_test::init();
 
         if let Ok(deserialized) = ValueBalance::<NonNegative>::from_bytes(&bytes) {
-            prop_assert_eq!(bytes, deserialized.to_bytes());
+            prop_assert_eq!(bytes.to_vec(), deserialized.to_bytes());
         }
     }
 
@@ -140,7 +140,7 @@ proptest! {
 
         if let Ok(deserialized) = ValueBalance::<NonNegative>::from_bytes(&bytes) {
             let deserialized = deserialized.to_bytes();
-            let mut extended_bytes = [0u8; 40];
+            let mut extended_bytes = [0u8; 40].to_vec();
             extended_bytes[..32].copy_from_slice(&bytes);
             prop_assert_eq!(extended_bytes, deserialized);
         }

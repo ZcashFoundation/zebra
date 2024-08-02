@@ -318,26 +318,23 @@ impl ValueBalance<NonNegative> {
         fake_value_pool
     }
 
-    /// To byte array
-    pub fn to_bytes(self) -> [u8; 40] {
-        match [
-            self.transparent.to_bytes(),
-            self.sprout.to_bytes(),
-            self.sapling.to_bytes(),
-            self.orchard.to_bytes(),
-            self.deferred.to_bytes(),
-        ]
-        .concat()
-        .try_into()
-        {
-            Ok(bytes) => bytes,
-            _ => unreachable!(
-                "five [u8; 8] should always concat with no error into a single [u8; 40]"
-            ),
+    /// To byte vector
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = [self.transparent, self.sprout, self.sapling, self.orchard]
+            .map(|a| a.to_bytes())
+            .concat();
+
+        if self.deferred.zatoshis() != 0 {
+            bytes.extend(self.deferred.to_bytes());
+            debug_assert_eq!(bytes.len(), 40, "should return 40 bytes");
+        } else {
+            debug_assert_eq!(bytes.len(), 32, "should return 32 bytes");
         }
+
+        bytes
     }
 
-    /// From byte array
+    /// From byte slice
     #[allow(clippy::unwrap_in_result)]
     pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
         let bytes_length = bytes.len();
