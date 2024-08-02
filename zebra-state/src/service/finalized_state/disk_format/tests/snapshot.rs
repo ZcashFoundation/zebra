@@ -37,7 +37,7 @@ use crate::{
         disk_format::{tests::KV, RawBytes},
         FinalizedState,
     },
-    Config, ReadDisk,
+    Config, IntoDisk, ReadDisk,
 };
 
 /// Snapshot test for RocksDB column families, and their key-value data.
@@ -144,6 +144,16 @@ fn snapshot_raw_rocksdb_column_family_data(db: &DiskDb, original_cf_names: &[Str
             // But we expect them to always have cached roots,
             // because those roots are used to populate the anchor column families.
             insta::assert_ron_snapshot!(format!("{cf_name}_raw_data"), cf_data);
+        }
+
+        if cf_name == "tip_chain_value_pool" && !cf_data.is_empty() {
+            let chain_value_pool_cf = db.cf_handle("tip_chain_value_pool").unwrap();
+            let value_pool: RawBytes = db
+                .zs_get(&chain_value_pool_cf, &())
+                .expect("should have value at &()");
+
+            let cf_data = KV::new(().as_bytes(), value_pool.raw_bytes());
+            insta::assert_ron_snapshot!(format!("legacy_tip_chain_value_pool_raw_data"), cf_data);
         }
     }
 

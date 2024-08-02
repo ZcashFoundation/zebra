@@ -17,7 +17,10 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
+    amount::{Amount, NonNegative},
+    block::Height,
+    history_tree::HistoryTree,
+    transparent,
     value_balance::ValueBalance,
 };
 
@@ -60,7 +63,7 @@ pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
-pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNegative>>;
+pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, RawBytes, ValueBalance<NonNegative>>;
 
 impl ZebraDb {
     // Column family convenience methods
@@ -159,7 +162,8 @@ impl ZebraDb {
         let chain_value_pools_cf = self.chain_value_pools_cf();
 
         chain_value_pools_cf
-            .zs_get(&())
+            .zs_get(&RawBytes::new_raw_bytes(vec![1]))
+            .or_else(|| chain_value_pools_cf.zs_get(&RawBytes::new_raw_bytes(vec![])))
             .unwrap_or_else(ValueBalance::zero)
     }
 }
@@ -227,18 +231,19 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let _ = db
+        let mut value_balance = value_pool.add_chain_value_pool_change(
+            finalized
+                .block
+                .chain_value_pool_change(&utxos_spent_by_block, finalized.deferred_balance)?,
+        )?;
+
+        let batch = db
             .chain_value_pools_cf()
             .with_batch_for_writing(self)
-            .zs_insert(
-                &(),
-                &value_pool.add_chain_value_pool_change(
-                    finalized.block.chain_value_pool_change(
-                        &utxos_spent_by_block,
-                        finalized.deferred_balance,
-                    )?,
-                )?,
-            );
+            .zs_insert(&RawBytes::new_raw_bytes(vec![1]), &value_balance);
+
+        value_balance.set_deferred_amount(Amount::zero());
+        let _ = batch.zs_insert(&RawBytes::new_raw_bytes(vec![]), &value_balance);
 
         Ok(())
     }
