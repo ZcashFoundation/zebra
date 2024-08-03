@@ -159,17 +159,21 @@ use zebra_chain::{
     parameters::Network::{self, *},
 };
 use zebra_consensus::ParameterCheckpoint;
-use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
+#[cfg(not(target_os = "windows"))]
+use zebra_network::constants::PORT_IN_USE_ERROR;
+
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
-    net::random_known_port,
     prelude::*,
 };
+
+#[cfg(not(target_os = "windows"))]
+use zebra_test::net::random_known_port;
 
 mod common;
 
