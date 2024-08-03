@@ -142,6 +142,57 @@ fn test_funding_stream_values() -> Result<(), Report> {
         );
     }
 
+    // TODO: Replace this with Mainnet once there's an NU6 activation height defined for Mainnet
+    let network = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(Blossom.activation_height(network).unwrap().0),
+            nu6: Some(POST_NU6_FUNDING_STREAMS_MAINNET.height_range().start.0),
+            ..Default::default()
+        })
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            // Start checking funding streams from block height 1
+            height_range: Some(POST_NU6_FUNDING_STREAMS_MAINNET.height_range().clone()),
+            // Use default post-NU6 recipients
+            recipients: Some(
+                POST_NU6_FUNDING_STREAMS_TESTNET
+                    .recipients()
+                    .iter()
+                    .map(|(&receiver, recipient)| ConfiguredFundingStreamRecipient {
+                        receiver,
+                        numerator: recipient.numerator(),
+                        addresses: Some(
+                            recipient
+                                .addresses()
+                                .iter()
+                                .map(|addr| addr.to_string())
+                                .collect(),
+                        ),
+                    })
+                    .collect(),
+            ),
+        })
+        .to_network();
+
+    let mut hash_map = HashMap::new();
+    hash_map.insert(
+        FundingStreamReceiver::Deferred,
+        Amount::try_from(18_750_000)?,
+    );
+    hash_map.insert(
+        FundingStreamReceiver::MajorGrants,
+        Amount::try_from(12_500_000)?,
+    );
+
+    let nu6_height = Nu6.activation_height(&network).unwrap();
+
+    for height in [
+        nu6_height,
+        Height(nu6_height.0 + 1),
+        Height(nu6_height.0 + 1),
+    ] {
+        assert_eq!(funding_stream_values(height, &network).unwrap(), hash_map);
+    }
+
     Ok(())
 }
 

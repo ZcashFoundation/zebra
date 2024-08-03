@@ -26,6 +26,8 @@ use tokio::{io::AsyncWriteExt, net::TcpStream, task::JoinHandle};
 use tower::{service_fn, Layer, Service, ServiceExt};
 
 use zebra_chain::{chain_tip::NoChainTip, parameters::Network, serialization::DateTime32};
+
+#[cfg(not(target_os = "windows"))]
 use zebra_test::net::random_known_port;
 
 use crate::{
