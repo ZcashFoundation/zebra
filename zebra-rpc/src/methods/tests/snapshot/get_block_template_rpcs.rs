@@ -187,6 +187,16 @@ pub async fn test_responses<State, ReadState>(
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("future_height", get_block_subsidy, &settings);
 
+    if network.is_default_testnet() {
+        let fake_future_nu6_block_height =
+            NetworkUpgrade::Nu6.activation_height(network).unwrap().0 + 100_000;
+        let get_block_subsidy = get_block_template_rpc
+            .get_block_subsidy(Some(fake_future_nu6_block_height))
+            .await
+            .expect("We should have a success response");
+        snapshot_rpc_getblocksubsidy("future_nu6_height", get_block_subsidy, &settings);
+    }
+
     let get_block_subsidy = get_block_template_rpc
         .get_block_subsidy(None)
         .await

@@ -14,7 +14,9 @@ use zebra_chain::{
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{subsidy::ParameterSubsidy, Network, NetworkKind, POW_AVERAGING_WINDOW},
+    parameters::{
+        subsidy::ParameterSubsidy, Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
+    },
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -1190,11 +1192,12 @@ where
                     message: error.to_string(),
                     data: None,
                 })?;
+
             let mut funding_streams: Vec<_> = funding_streams
                 .iter()
-                .filter_map(|(receiver, value)| {
-                    let address = funding_stream_address(height, &network, *receiver)?;
-                    Some((*receiver, FundingStream::new(*receiver, *value, address)))
+                .map(|(receiver, value)| {
+                    let address = funding_stream_address(height, &network, *receiver);
+                    (*receiver, FundingStream::new(*receiver, *value, address))
                 })
                 .collect();
 
@@ -1207,10 +1210,31 @@ where
 
             let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
 
+            // At this point we all kind of stream recipients in the the `funding_streams` vector, but we need to change the stream
+            // object name if we are on testnet and the height is >= than the activation height of NU6.
+
+            // Mark the final stream objects as optional.
+            let mut optional_lockbox_streams = None;
+            let mut optional_funding_streams = None;
+
+            // Check if we are in the testnet and in NU6 heights to change the object name.
+            // TODO: Remove testnet check after NU6 gets an activation height in Mainnet.
+            if network.is_default_testnet()
+                && height
+                    >= NetworkUpgrade::Nu6
+                        .activation_height(&network)
+                        .expect("Testnet has a Nu6 activation height")
+            {
+                optional_lockbox_streams = Some(funding_streams);
+            } else {
+                optional_funding_streams = Some(funding_streams);
+            }
+
             Ok(BlockSubsidy {
                 miner: miner.into(),
                 founders: founders.into(),
-                funding_streams,
+                funding_streams: optional_funding_streams,
+                lockbox_streams: optional_lockbox_streams,
             })
         }
         .boxed()

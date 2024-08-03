@@ -13,9 +13,14 @@ use crate::methods::get_block_template_rpcs::types::zec::Zec;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockSubsidy {
     /// An array of funding stream descriptions.
-    /// Always present, because Zebra returns an error for heights before the first halving.
-    #[serde(rename = "fundingstreams")]
-    pub funding_streams: Vec<FundingStream>,
+    /// Always present befoe NU6, Zebra returns an error for heights before the first halving.
+    #[serde(rename = "fundingstreams", skip_serializing_if = "Option::is_none")]
+    pub funding_streams: Option<Vec<FundingStream>>,
+
+    /// An array of lockbox stream descriptions.
+    /// Always present after NU6.
+    #[serde(rename = "lockboxstreams", skip_serializing_if = "Option::is_none")]
+    pub lockbox_streams: Option<Vec<FundingStream>>,
 
     /// The mining reward amount in ZEC.
     ///
@@ -32,7 +37,8 @@ pub struct BlockSubsidy {
 impl Default for BlockSubsidy {
     fn default() -> Self {
         Self {
-            funding_streams: vec![],
+            funding_streams: None,
+            lockbox_streams: None,
             miner: Zec::from_lossy_zec(0.0).unwrap(),
             founders: Zec::from_lossy_zec(0.0).unwrap(),
         }
@@ -59,7 +65,10 @@ pub struct FundingStream {
     ///
     /// The current Zcash funding streams only use transparent addresses,
     /// so Zebra doesn't support Sapling addresses in this RPC.
-    pub address: transparent::Address,
+    ///
+    /// This is optional so we can support funding streams with no addresses (lockbox streams).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<transparent::Address>,
 }
 
 impl FundingStream {
@@ -67,7 +76,7 @@ impl FundingStream {
     pub fn new(
         receiver: FundingStreamReceiver,
         value: Amount<NonNegative>,
-        address: &transparent::Address,
+        address: Option<&transparent::Address>,
     ) -> FundingStream {
         let (recipient, specification) = funding_stream_recipient_info(receiver);
 
@@ -76,7 +85,7 @@ impl FundingStream {
             specification: specification.to_string(),
             value: value.into(),
             value_zat: value,
-            address: address.clone(),
+            address: address.cloned(),
         }
     }
 }

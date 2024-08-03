@@ -1,0 +1,23 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: get_block_subsidy
+---
+{
+  "lockboxstreams": [
+    {
+      "recipient": "Lockbox",
+      "specification": "https://zips.z.cash/zip-0214",
+      "value": 0.1875,
+      "valueZat": 18750000
+    },
+    {
+      "recipient": "Major Grants",
+      "specification": "https://zips.z.cash/zip-0214",
+      "value": 0.125,
+      "valueZat": 12500000,
+      "address": "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"
+    }
+  ],
+  "miner": 1.25,
+  "founders": 0.0
+}
