@@ -145,7 +145,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
     // TODO: Replace this with Mainnet once there's an NU6 activation height defined for Mainnet
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            blossom: Some(Blossom.activation_height(network).unwrap().0),
+            blossom: Some(Blossom.activation_height(&network).unwrap().0),
             nu6: Some(POST_NU6_FUNDING_STREAMS_MAINNET.height_range().start.0),
             ..Default::default()
         })
@@ -190,7 +190,10 @@ fn test_funding_stream_values() -> Result<(), Report> {
         Height(nu6_height.0 + 1),
         Height(nu6_height.0 + 1),
     ] {
-        assert_eq!(funding_stream_values(height, &network).unwrap(), hash_map);
+        assert_eq!(
+            funding_stream_values(height, &network, block_subsidy(height, &network)?).unwrap(),
+            hash_map
+        );
     }
 
     Ok(())
