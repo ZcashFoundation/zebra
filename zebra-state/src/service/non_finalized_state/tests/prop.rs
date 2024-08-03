@@ -7,7 +7,6 @@ use zebra_test::prelude::*;
 use zebra_chain::{
     amount::NonNegative,
     block::{self, arbitrary::allow_all_transparent_coinbase_spends, Block, Height},
-    fmt::DisplayToDebug,
     history_tree::{HistoryTree, NonEmptyHistoryTree},
     parameters::NetworkUpgrade::*,
     parameters::*,
@@ -18,12 +17,7 @@ use zebra_chain::{
 use crate::{
     arbitrary::Prepare,
     request::ContextuallyVerifiedBlock,
-    service::{
-        arbitrary::PreparedChain,
-        finalized_state::FinalizedState,
-        non_finalized_state::{Chain, NonFinalizedState},
-    },
-    Config,
+    service::{arbitrary::PreparedChain, non_finalized_state::Chain},
 };
 
 /// The default number of proptest cases for long partial chain tests.
@@ -453,6 +447,13 @@ fn finalized_equals_pushed_history_tree() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 fn rejection_restores_internal_state_genesis() -> Result<()> {
+    use zebra_chain::fmt::DisplayToDebug;
+
+    use crate::{
+        service::{finalized_state::FinalizedState, non_finalized_state::NonFinalizedState},
+        Config,
+    };
+
     let _init_guard = zebra_test::init();
 
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
