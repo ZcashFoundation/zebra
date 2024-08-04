@@ -19,5 +19,8 @@ expression: get_block_subsidy
     }
   ],
   "miner": 1.25,
-  "founders": 0.0
+  "founders": 0.0,
+  "fundingstreamstotal": 0.0,
+  "lockboxtotal": 0.3125,
+  "totalblocksubsidy": 1.5625
 }

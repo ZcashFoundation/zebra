@@ -1186,6 +1186,10 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
+            let mut streams_total = Amount::zero();
+            let mut funding_streams_total = Amount::zero();
+            let mut lockbox_total = Amount::zero();
+
             let funding_streams =
                 funding_stream_values(height, &network).map_err(|error| Error {
                     code: ErrorCode::ServerError(0),
@@ -1196,6 +1200,7 @@ where
             let mut funding_streams: Vec<_> = funding_streams
                 .iter()
                 .map(|(receiver, value)| {
+                    streams_total = (streams_total + *value).expect("total is always valid");
                     let address = funding_stream_address(height, &network, *receiver);
                     (*receiver, FundingStream::new(*receiver, *value, address))
                 })
@@ -1226,15 +1231,23 @@ where
                         .expect("Testnet has a Nu6 activation height")
             {
                 optional_lockbox_streams = Some(funding_streams);
+                lockbox_total = streams_total;
             } else {
                 optional_funding_streams = Some(funding_streams);
+                funding_streams_total = streams_total;
             }
+
+            let total_block_subsidy = (miner + founders + funding_streams_total + lockbox_total)
+                .expect("total is always valid");
 
             Ok(BlockSubsidy {
                 miner: miner.into(),
                 founders: founders.into(),
                 funding_streams: optional_funding_streams,
                 lockbox_streams: optional_lockbox_streams,
+                funding_streams_total: funding_streams_total.into(),
+                lockbox_total: lockbox_total.into(),
+                total_block_subsidy: total_block_subsidy.into(),
             })
         }
         .boxed()

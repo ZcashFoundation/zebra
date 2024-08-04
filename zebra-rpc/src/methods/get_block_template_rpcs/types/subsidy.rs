@@ -32,6 +32,20 @@ pub struct BlockSubsidy {
     /// Zebra returns an error when asked for founders reward heights,
     /// because it checkpoints those blocks instead.
     pub founders: Zec<NonNegative>,
+
+    /// The total funding stream amount in ZEC.
+    #[serde(rename = "fundingstreamstotal")]
+    pub funding_streams_total: Zec<NonNegative>,
+
+    /// The total lockbox stream amount in ZEC.
+    #[serde(rename = "lockboxtotal")]
+    pub lockbox_total: Zec<NonNegative>,
+
+    /// The total block subsidy amount in ZEC.
+    ///
+    /// This does not include the miner fee.
+    #[serde(rename = "totalblocksubsidy")]
+    pub total_block_subsidy: Zec<NonNegative>,
 }
 
 impl Default for BlockSubsidy {
@@ -41,6 +55,9 @@ impl Default for BlockSubsidy {
             lockbox_streams: None,
             miner: Zec::from_lossy_zec(0.0).unwrap(),
             founders: Zec::from_lossy_zec(0.0).unwrap(),
+            funding_streams_total: Zec::from_lossy_zec(0.0).unwrap(),
+            lockbox_total: Zec::from_lossy_zec(0.0).unwrap(),
+            total_block_subsidy: Zec::from_lossy_zec(0.0).unwrap(),
         }
     }
 }
