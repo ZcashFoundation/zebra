@@ -49,14 +49,15 @@ impl ZebraDb {
         let sapling_anchors = self.db().cf_handle("sapling_anchors").unwrap();
         let orchard_anchors = self.db().cf_handle("orchard_anchors").unwrap();
 
+        let sprout_tree = sprout::tree::NoteCommitmentTree::default();
+        // Calculate the root so we pass the tree with a cached root to the database. We need to do
+        // that because the database checks if the tree has a cached root.
+        sprout_tree.root();
+
         for transaction in block.transactions.iter() {
             // Sprout
             for joinsplit in transaction.sprout_groth16_joinsplits() {
-                batch.zs_insert(
-                    &sprout_anchors,
-                    joinsplit.anchor,
-                    sprout::tree::NoteCommitmentTree::default(),
-                );
+                batch.zs_insert(&sprout_anchors, joinsplit.anchor, sprout_tree.clone());
             }
 
             // Sapling
