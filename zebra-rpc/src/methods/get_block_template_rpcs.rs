@@ -1213,11 +1213,11 @@ where
                     .position(|zcashd_receiver| zcashd_receiver == receiver)
             });
 
-            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
+            let (_receivers, lockbox_or_funding_streams): (Vec<_>, _) =
+                funding_streams.into_iter().unzip();
 
-            // Mark the final stream objects as optional.
-            let mut optional_lockbox_streams = None;
-            let mut optional_funding_streams = None;
+            let mut lockbox_streams = vec![];
+            let mut funding_streams = vec![];
 
             // Check if we are in the testnet and in NU6 heights to change the object name and totals.
             // TODO: Remove testnet check after NU6 gets an activation height in Mainnet.
@@ -1227,10 +1227,10 @@ where
                         .activation_height(&network)
                         .expect("Testnet has a Nu6 activation height")
             {
-                optional_lockbox_streams = Some(funding_streams);
+                lockbox_streams = lockbox_or_funding_streams;
                 lockbox_total = streams_total;
             } else {
-                optional_funding_streams = Some(funding_streams);
+                funding_streams = lockbox_or_funding_streams;
                 funding_streams_total = streams_total;
             }
 
@@ -1240,8 +1240,8 @@ where
             Ok(BlockSubsidy {
                 miner: miner.into(),
                 founders: founders.into(),
-                funding_streams: optional_funding_streams,
-                lockbox_streams: optional_lockbox_streams,
+                funding_streams,
+                lockbox_streams,
                 funding_streams_total: funding_streams_total.into(),
                 lockbox_total: lockbox_total.into(),
                 total_block_subsidy: total_block_subsidy.into(),

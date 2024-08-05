@@ -14,13 +14,13 @@ use crate::methods::get_block_template_rpcs::types::zec::Zec;
 pub struct BlockSubsidy {
     /// An array of funding stream descriptions.
     /// Always present befoe NU6, Zebra returns an error for heights before the first halving.
-    #[serde(rename = "fundingstreams", skip_serializing_if = "Option::is_none")]
-    pub funding_streams: Option<Vec<FundingStream>>,
+    #[serde(rename = "fundingstreams", skip_serializing_if = "Vec::is_empty")]
+    pub funding_streams: Vec<FundingStream>,
 
     /// An array of lockbox stream descriptions.
     /// Always present after NU6.
-    #[serde(rename = "lockboxstreams", skip_serializing_if = "Option::is_none")]
-    pub lockbox_streams: Option<Vec<FundingStream>>,
+    #[serde(rename = "lockboxstreams", skip_serializing_if = "Vec::is_empty")]
+    pub lockbox_streams: Vec<FundingStream>,
 
     /// The mining reward amount in ZEC.
     ///
@@ -51,8 +51,8 @@ pub struct BlockSubsidy {
 impl Default for BlockSubsidy {
     fn default() -> Self {
         Self {
-            funding_streams: None,
-            lockbox_streams: None,
+            funding_streams: vec![],
+            lockbox_streams: vec![],
             miner: Zec::from_lossy_zec(0.0).unwrap(),
             founders: Zec::from_lossy_zec(0.0).unwrap(),
             funding_streams_total: Zec::from_lossy_zec(0.0).unwrap(),
