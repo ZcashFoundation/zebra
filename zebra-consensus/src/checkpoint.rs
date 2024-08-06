@@ -28,21 +28,22 @@ use tower::{Service, ServiceExt};
 use tracing::instrument;
 
 use zebra_chain::{
+    amount,
     block::{self, Block},
-    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::{subsidy::FundingStreamReceiver, Network, GENESIS_PREVIOUS_BLOCK_HASH},
     work::equihash,
 };
 use zebra_state::{self as zs, CheckpointVerifiedBlock};
 
 use crate::{
     block::VerifyBlockError,
+    block_subsidy,
     checkpoint::types::{
-        Progress,
-        Progress::*,
+        Progress::{self, *},
         TargetHeight::{self, *},
     },
     error::BlockError,
-    BoxError, ParameterCheckpoint as _,
+    funding_stream_values, BoxError, ParameterCheckpoint as _,
 };
 
 pub(crate) mod list;
@@ -607,8 +608,16 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
+        let expected_deferred_amount = if height > self.network.slow_start_interval() {
+            // TODO: Add link to lockbox stream ZIP
+            funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
+                .remove(&FundingStreamReceiver::Deferred)
+        } else {
+            None
+        };
+
         // don't do precalculation until the block passes basic difficulty checks
-        let block = CheckpointVerifiedBlock::with_hash(block, hash);
+        let block = CheckpointVerifiedBlock::new(block, Some(hash), expected_deferred_amount);
 
         crate::block::check::merkle_root_validity(
             &self.network,
@@ -981,6 +990,8 @@ pub enum VerifyCheckpointError {
     CheckpointList(BoxError),
     #[error(transparent)]
     VerifyBlock(VerifyBlockError),
+    #[error("invalid block subsidy")]
+    SubsidyError(#[from] amount::Error),
     #[error("too many queued blocks at this height")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]

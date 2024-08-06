@@ -21,7 +21,13 @@ use thiserror::Error;
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
-use zebra_chain::{amount::Amount, block, parameters::Network, transparent, work::equihash};
+use zebra_chain::{
+    amount::Amount,
+    block,
+    parameters::{subsidy::FundingStreamReceiver, Network},
+    transparent,
+    work::equihash,
+};
 use zebra_state as zs;
 
 use crate::{error::*, transaction as tx, BoxError};
@@ -78,6 +84,9 @@ pub enum VerifyBlockError {
 
     #[error("invalid transaction")]
     Transaction(#[from] TransactionError),
+
+    #[error("invalid block subsidy")]
+    Subsidy(#[from] zebra_chain::amount::Error),
 }
 
 impl VerifyBlockError {
@@ -205,7 +214,10 @@ where
             check::time_is_valid_at(&block.header, now, &height, &hash)
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
-            check::subsidy_is_valid(&block, &network)?;
+
+            let expected_block_subsidy = subsidy::general::block_subsidy(height, &network)?;
+
+            check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
 
             // Now do the slower checks
 
@@ -271,13 +283,29 @@ where
                 })?;
             }
 
+            // TODO: Add link to lockbox stream ZIP
+            let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
+                height,
+                &network,
+                expected_block_subsidy,
+            )
+            .expect("we always expect a funding stream hashmap response even if empty")
+            .remove(&FundingStreamReceiver::Deferred)
+            .unwrap_or_default();
+
             let block_miner_fees =
                 block_miner_fees.map_err(|amount_error| BlockError::SummingMinerFees {
                     height,
                     hash,
                     source: amount_error,
                 })?;
-            check::miner_fees_are_valid(&block, &network, block_miner_fees)?;
+
+            check::miner_fees_are_valid(
+                &block,
+                block_miner_fees,
+                expected_block_subsidy,
+                expected_deferred_amount,
+            )?;
 
             // Finally, submit the block for contextual verification.
             let new_outputs = Arc::into_inner(known_utxos)
@@ -289,6 +317,7 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
+                deferred_balance: Some(expected_deferred_amount),
             };
 
             // Return early for proposal requests when getblocktemplate-rpcs feature is enabled

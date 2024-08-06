@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 use halo2::pasta::pallas;
 
 use crate::{
-    amount::NegativeAllowed,
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     orchard,
@@ -205,34 +205,39 @@ impl Block {
             .expect("number of transactions must fit u64")
     }
 
-    /// Get the overall chain value pool change in this block,
-    /// the negative sum of the transaction value balances in this block.
+    /// Returns the overall chain value pool change in this block---the negative sum of the
+    /// transaction value balances in this block.
     ///
-    /// These are the changes in the transparent, sprout, sapling, and orchard
-    /// chain value pools, as a result of this block.
+    /// These are the changes in the transparent, Sprout, Sapling, Orchard, and
+    /// Deferred chain value pools, as a result of this block.
     ///
-    /// Positive values are added to the corresponding chain value pool.
-    /// Negative values are removed from the corresponding pool.
+    /// Positive values are added to the corresponding chain value pool and negative values are
+    /// removed from the corresponding pool.
     ///
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
-    /// `utxos` must contain the [`transparent::Utxo`]s of every input in this block,
-    /// including UTXOs created by earlier transactions in this block.
-    /// (It can also contain unrelated UTXOs, which are ignored.)
+    /// The given `utxos` must contain the [`transparent::Utxo`]s of every input in this block,
+    /// including UTXOs created by earlier transactions in this block. It can also contain unrelated
+    /// UTXOs, which are ignored.
     ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
+    /// Note that the chain value pool has the opposite sign to the transaction value pool.
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        deferred_balance: Option<Amount<NonNegative>>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
-        let transaction_value_balance_total = self
+        Ok(*self
             .transactions
             .iter()
             .flat_map(|t| t.value_balance(utxos))
-            .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?;
-
-        Ok(transaction_value_balance_total.neg())
+            .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?
+            .neg()
+            .set_deferred_amount(
+                deferred_balance
+                    .unwrap_or(Amount::zero())
+                    .constrain::<NegativeAllowed>()
+                    .map_err(ValueBalanceError::Deferred)?,
+            ))
     }
 
     /// Compute the root of the authorizing data Merkle tree,

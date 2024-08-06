@@ -144,7 +144,11 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
 /// Returns `Ok(())` if the block subsidy in `block` is valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
-pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockError> {
+pub fn subsidy_is_valid(
+    block: &Block,
+    network: &Network,
+    expected_block_subsidy: Amount<NonNegative>,
+) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
@@ -182,8 +186,12 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         // funding stream amount values
-        let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
-            .expect("We always expect a funding stream hashmap response even if empty");
+        let funding_streams = subsidy::funding_streams::funding_stream_values(
+            height,
+            network,
+            expected_block_subsidy,
+        )
+        .expect("We always expect a funding stream hashmap response even if empty");
 
         // # Consensus
         //
@@ -227,10 +235,10 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
 /// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
 pub fn miner_fees_are_valid(
     block: &Block,
-    network: &Network,
     block_miner_fees: Amount<NonNegative>,
+    expected_block_subsidy: Amount<NonNegative>,
+    expected_deferred_amount: Amount<NonNegative>,
 ) -> Result<(), BlockError> {
-    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
     let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
@@ -241,15 +249,6 @@ pub fn miner_fees_are_valid(
         .expect("positive value always fit in `NegativeAllowed`");
     let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase.orchard_value_balance().orchard_amount();
-
-    let block_subsidy = subsidy::general::block_subsidy(height, network)
-        .expect("a valid block subsidy for this height and network");
-
-    // TODO: Add link to lockbox stream ZIP
-    let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(height, network)
-        .expect("we always expect a funding stream hashmap response even if empty")
-        .remove(&FundingStreamReceiver::Deferred)
-        .unwrap_or_default();
 
     // # Consensus
     //
@@ -266,7 +265,7 @@ pub fn miner_fees_are_valid(
     //       https://zips.z.cash/draft-nuttycom-funding-allocation and https://zips.z.cash/draft-hopwood-coinbase-balance.
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
         .map_err(|_| SubsidyError::SumOverflow)?;
-    let right = (block_subsidy + block_miner_fees - expected_deferred_amount)
+    let right = (expected_block_subsidy + block_miner_fees - expected_deferred_amount)
         .map_err(|_| SubsidyError::SumOverflow)?;
 
     // TODO: Add link to exact coinbase balance ZIP
