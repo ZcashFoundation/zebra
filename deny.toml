@@ -12,7 +12,8 @@
 multiple-versions = "deny"
 
 # Don't allow wildcard ("any version") dependencies
-wildcards = "deny"
+# TODO: Change to `deny` after weupgrade to crates.io version of the ECC dependencies (#8746).
+wildcards = "allow"
 # Allow private and dev wildcard dependencies.
 # Switch this to `false` when #6924 is implemented.
 allow-wildcard-paths = true
@@ -92,6 +93,15 @@ skip-tree = [
     { name = "http", version = "=0.2.12" },
     { name = "http-body", version = "=0.4.6" },
     { name = "hyper", version = "=0.14.30" },
+
+    # Remove this after we upgrade ECC dependencies to a crates.io version (#8746)
+    { name = "equihash", version = "=0.2.0" },
+    { name = "f4jumble", version = "=0.1.0" },
+    { name = "secp256k1", version = "=0.26.0" },
+    { name = "zcash_address", version = "=0.3.2" },
+    { name = "zcash_encoding", version = "=0.2.0" },
+    { name = "zcash_primitives", version = "=0.15.1" },
+    { name = "zcash_protocol", version = "=0.1.1" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
