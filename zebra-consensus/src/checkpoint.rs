@@ -42,7 +42,7 @@ use crate::{
         Progress::{self, *},
         TargetHeight::{self, *},
     },
-    error::BlockError,
+    error::{BlockError, SubsidyError},
     funding_stream_values, BoxError, ParameterCheckpoint as _,
 };
 
@@ -608,6 +608,8 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
+        // We can't get the block subsidy for blocks with heights in the slow start interval, so we
+        // omit the calculation of the expected deferred amount.
         let expected_deferred_amount = if height > self.network.slow_start_interval() {
             // TODO: Add link to lockbox stream ZIP
             funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
@@ -991,7 +993,9 @@ pub enum VerifyCheckpointError {
     #[error(transparent)]
     VerifyBlock(VerifyBlockError),
     #[error("invalid block subsidy")]
-    SubsidyError(#[from] amount::Error),
+    SubsidyError(#[from] SubsidyError),
+    #[error("invalid amount")]
+    AmountError(#[from] amount::Error),
     #[error("too many queued blocks at this height")]
     QueuedLimit,
     #[error("the block hash does not match the chained checkpoint hash, expected {expected:?} found {found:?}")]
