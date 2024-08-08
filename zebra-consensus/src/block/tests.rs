@@ -509,8 +509,12 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
     for (&height, block) in block_iter {
         let height = Height(height);
         if height > network.slow_start_shift() {
-            let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
+            let coinbase_tx = check::coinbase_is_first(
+                &Block::zcash_deserialize(&block[..]).expect("block should deserialize"),
+            )?;
+
             let expected_block_subsidy = block_subsidy(height, &network)?;
+
             // TODO: Add link to lockbox stream ZIP
             let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
                 height,
@@ -521,17 +525,16 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             .remove(&FundingStreamReceiver::Deferred)
             .unwrap_or_default();
 
-            // fake the miner fee to a big amount
-            let miner_fees = Amount::try_from(MAX_MONEY / 2).unwrap();
-
-            // Validate
-            let result = check::miner_fees_are_valid(
-                &block,
-                miner_fees,
+            assert!(check::miner_fees_are_valid(
+                &coinbase_tx,
+                height,
+                // Set the miner fees to a high-enough amount.
+                Amount::try_from(MAX_MONEY / 2).unwrap(),
                 expected_block_subsidy,
                 expected_deferred_amount,
-            );
-            assert!(result.is_ok());
+                &network,
+            )
+            .is_ok(),);
         }
     }
 
@@ -542,9 +545,8 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
 fn miner_fees_validation_failure() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
     let network = Network::Mainnet;
-    let block =
-        Arc::<Block>::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_347499_BYTES[..])
-            .expect("block should deserialize");
+    let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_347499_BYTES[..])
+        .expect("block should deserialize");
     let height = block.coinbase_height().expect("valid coinbase height");
     let expected_block_subsidy = block_subsidy(height, &network)?;
     // TODO: Add link to lockbox stream ZIP
@@ -554,21 +556,20 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
             .remove(&FundingStreamReceiver::Deferred)
             .unwrap_or_default();
 
-    // fake the miner fee to a small amount
-    let miner_fees = Amount::zero();
-
-    // Validate
-    let result = check::miner_fees_are_valid(
-        &block,
-        miner_fees,
-        expected_block_subsidy,
-        expected_deferred_amount,
+    assert_eq!(
+        check::miner_fees_are_valid(
+            check::coinbase_is_first(&block)?.as_ref(),
+            height,
+            // Set the miner fee to an invalid amount.
+            Amount::zero(),
+            expected_block_subsidy,
+            expected_deferred_amount,
+            &network
+        ),
+        Err(BlockError::Transaction(TransactionError::Subsidy(
+            SubsidyError::InvalidMinerFees,
+        )))
     );
-
-    let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
-        SubsidyError::InvalidMinerFees,
-    )));
-    assert_eq!(expected, result);
 
     Ok(())
 }
