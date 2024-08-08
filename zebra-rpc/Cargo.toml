@@ -88,13 +88,13 @@ hex = { version = "0.4.3", features = ["serde"] }
 serde = { version = "1.0.204", features = ["serde_derive"] }
 
 
-# TODO: Revert to a release once librustzcash is released.
+# TODO: Revert to a release once librustzcash is released (#8749).
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", branch = "main", features = ["transparent-inputs"] }
 
 # Experimental feature getblocktemplate-rpcs
 rand = { version = "0.8.5", optional = true }
 # ECC deps used by getblocktemplate-rpcs feature
-# TODO: Revert to a release once librustzcash is released.
+# TODO: Revert to a release once librustzcash is released (#8749).
 zcash_address = { git = "https://github.com/zcash/librustzcash.git", branch = "main",  optional = true}
 
 # Test-only feature proptest-impl

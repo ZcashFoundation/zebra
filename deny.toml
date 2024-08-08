@@ -12,7 +12,7 @@
 multiple-versions = "deny"
 
 # Don't allow wildcard ("any version") dependencies
-# TODO: Change to `deny` after weupgrade to crates.io version of the ECC dependencies (#8746).
+# TODO: Change to `deny` after we upgrade to crates.io version of the ECC dependencies (#8749).
 wildcards = "allow"
 # Allow private and dev wildcard dependencies.
 # Switch this to `false` when #6924 is implemented.
@@ -94,7 +94,7 @@ skip-tree = [
     { name = "http-body", version = "=0.4.6" },
     { name = "hyper", version = "=0.14.30" },
 
-    # Remove this after we upgrade ECC dependencies to a crates.io version (#8746)
+    # Remove this after we upgrade ECC dependencies to a crates.io version (#8749)
     { name = "equihash", version = "=0.2.0" },
     { name = "f4jumble", version = "=0.1.0" },
     { name = "secp256k1", version = "=0.26.0" },
