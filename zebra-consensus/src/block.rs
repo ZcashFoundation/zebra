@@ -302,10 +302,12 @@ where
                 })?;
 
             check::miner_fees_are_valid(
-                &block,
+                &coinbase_tx,
+                height,
                 block_miner_fees,
                 expected_block_subsidy,
                 expected_deferred_amount,
+                &network,
             )?;
 
             // Finally, submit the block for contextual verification.
