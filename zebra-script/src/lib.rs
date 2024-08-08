@@ -6,19 +6,12 @@
 #![allow(unsafe_code)]
 
 use core::fmt;
-use std::{
-    ffi::{c_int, c_uint, c_void},
-    sync::Arc,
-};
+use std::sync::Arc;
 
 use thiserror::Error;
 
-use zcash_script::{
-    zcash_script_error_t, zcash_script_error_t_zcash_script_ERR_OK,
-    zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE,
-    zcash_script_error_t_zcash_script_ERR_TX_INDEX,
-    zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH,
-};
+use zcash_script;
+use zcash_script::ZcashScript;
 
 use zebra_chain::{
     parameters::ConsensusBranchId,
@@ -33,46 +26,35 @@ pub enum Error {
     /// script verification failed
     #[non_exhaustive]
     ScriptInvalid,
-    /// could not deserialize tx
-    #[non_exhaustive]
-    TxDeserialize,
     /// input index out of bounds
     #[non_exhaustive]
     TxIndex,
-    /// tx has an invalid size
-    #[non_exhaustive]
-    TxSizeMismatch,
     /// tx is a coinbase transaction and should not be verified
     #[non_exhaustive]
     TxCoinbase,
     /// unknown error from zcash_script: {0}
     #[non_exhaustive]
-    Unknown(zcash_script_error_t),
+    Unknown(zcash_script::Error),
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&match self {
             Error::ScriptInvalid => "script verification failed".to_owned(),
-            Error::TxDeserialize => "could not deserialize tx".to_owned(),
             Error::TxIndex => "input index out of bounds".to_owned(),
-            Error::TxSizeMismatch => "tx has an invalid size".to_owned(),
             Error::TxCoinbase => {
                 "tx is a coinbase transaction and should not be verified".to_owned()
             }
-            Error::Unknown(e) => format!("unknown error from zcash_script: {e}"),
+            Error::Unknown(e) => format!("unknown error from zcash_script: {:?}", e),
         })
     }
 }
 
-impl From<zcash_script_error_t> for Error {
+impl From<zcash_script::Error> for Error {
     #[allow(non_upper_case_globals)]
-    fn from(err_code: zcash_script_error_t) -> Error {
+    fn from(err_code: zcash_script::Error) -> Error {
         match err_code {
-            zcash_script_error_t_zcash_script_ERR_OK => Error::ScriptInvalid,
-            zcash_script_error_t_zcash_script_ERR_TX_DESERIALIZE => Error::TxDeserialize,
-            zcash_script_error_t_zcash_script_ERR_TX_INDEX => Error::TxIndex,
-            zcash_script_error_t_zcash_script_ERR_TX_SIZE_MISMATCH => Error::TxSizeMismatch,
+            zcash_script::Error::Ok => Error::ScriptInvalid,
             unknown => Error::Unknown(unknown),
         }
     }
@@ -90,41 +72,6 @@ pub struct CachedFfiTransaction {
     /// The outputs from previous transactions that match each input in the transaction
     /// being verified.
     all_previous_outputs: Vec<transparent::Output>,
-}
-
-/// A sighash context used for the zcash_script sighash callback.
-struct SigHashContext<'a> {
-    /// The index of the input being verified.
-    input_index: usize,
-    /// The SigHasher for the transaction being verified.
-    sighasher: SigHasher<'a>,
-}
-
-/// The sighash callback to use with zcash_script.
-extern "C" fn sighash(
-    sighash_out: *mut u8,
-    sighash_out_len: c_uint,
-    ctx: *const c_void,
-    script_code: *const u8,
-    script_code_len: c_uint,
-    hash_type: c_int,
-) {
-    // SAFETY: `ctx` is a valid SigHashContext because it is always passed to
-    // `zcash_script_verify_callback` which simply forwards it to the callback.
-    // `script_code` and `sighash_out` are valid buffers since they are always
-    //  specified when the callback is called.
-    unsafe {
-        let ctx = ctx as *const SigHashContext;
-        let script_code_vec =
-            std::slice::from_raw_parts(script_code, script_code_len as usize).to_vec();
-        let sighash = (*ctx).sighasher.sighash(
-            HashType::from_bits_truncate(hash_type as u32),
-            Some(((*ctx).input_index, script_code_vec)),
-        );
-        // Sanity check; must always be true.
-        assert_eq!(sighash_out_len, sighash.0.len() as c_uint);
-        std::ptr::copy_nonoverlapping(sighash.0.as_ptr(), sighash_out, sighash.0.len());
-    }
 }
 
 impl CachedFfiTransaction {
@@ -168,27 +115,11 @@ impl CachedFfiTransaction {
         } = previous_output;
         let script_pub_key: &[u8] = lock_script.as_raw_bytes();
 
-        // This conversion is useful on some platforms, but not others.
-        #[allow(clippy::useless_conversion)]
-        let n_in = input_index
-            .try_into()
-            .expect("transaction indexes are much less than c_uint::MAX");
+        let flags = zcash_script::VerificationFlags::P2SH
+            | zcash_script::VerificationFlags::CHECKLOCKTIMEVERIFY;
 
-        let flags = zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_P2SH
-            | zcash_script::zcash_script_SCRIPT_FLAGS_VERIFY_CHECKLOCKTIMEVERIFY;
-        // This conversion is useful on some platforms, but not others.
-        #[allow(clippy::useless_conversion)]
-        let flags = flags
-            .try_into()
-            .expect("zcash_script_SCRIPT_FLAGS_VERIFY_* enum values fit in a c_uint");
-
-        let mut err = 0;
         let lock_time = self.transaction.raw_lock_time() as i64;
-        let is_final = if self.transaction.inputs()[input_index].sequence() == u32::MAX {
-            1
-        } else {
-            0
-        };
+        let is_final = self.transaction.inputs()[input_index].sequence() == u32::MAX;
         let signature_script = match &self.transaction.inputs()[input_index] {
             transparent::Input::PrevOut {
                 outpoint: _,
@@ -198,31 +129,26 @@ impl CachedFfiTransaction {
             transparent::Input::Coinbase { .. } => Err(Error::TxCoinbase)?,
         };
 
-        let ctx = Box::new(SigHashContext {
-            input_index: n_in,
-            sighasher: SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs),
-        });
-        // SAFETY: The `script_*` fields are created from a valid Rust `slice`.
-        let ret = unsafe {
-            zcash_script::zcash_script_verify_callback(
-                (&*ctx as *const SigHashContext) as *const c_void,
-                Some(sighash),
-                lock_time,
-                is_final,
-                script_pub_key.as_ptr(),
-                script_pub_key.len() as u32,
-                signature_script.as_ptr(),
-                signature_script.len() as u32,
-                flags,
-                &mut err,
+        let calculate_sighash = |script_code: &[u8], hash_type: zcash_script::HashType| {
+            let script_code_vec = script_code.to_vec();
+            Some(
+                SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs)
+                    .sighash(
+                        HashType::from_bits_truncate(hash_type.bits() as u32),
+                        Some((input_index, script_code_vec)),
+                    )
+                    .0,
             )
         };
-
-        if ret == 1 {
-            Ok(())
-        } else {
-            Err(Error::from(err))
-        }
+        zcash_script::Cxx::verify_callback(
+            &calculate_sighash,
+            lock_time,
+            is_final,
+            script_pub_key,
+            signature_script,
+            flags,
+        )
+        .map_err(Error::from)
     }
 
     /// Returns the number of transparent signature operations in the
@@ -239,13 +165,7 @@ impl CachedFfiTransaction {
                     sequence: _,
                 } => {
                     let script = unlock_script.as_raw_bytes();
-                    // SAFETY: `script` is created from a valid Rust `slice`.
-                    unsafe {
-                        zcash_script::zcash_script_legacy_sigop_count_script(
-                            script.as_ptr(),
-                            script.len() as u32,
-                        )
-                    }
+                    zcash_script::Cxx::legacy_sigop_count_script(script).map_err(Error::from)?
                 }
                 transparent::Input::Coinbase { .. } => 0,
             } as u64;
@@ -253,13 +173,7 @@ impl CachedFfiTransaction {
 
         for output in self.transaction.outputs() {
             let script = output.lock_script.as_raw_bytes();
-            // SAFETY: `script` is created from a valid Rust `slice`.
-            let ret = unsafe {
-                zcash_script::zcash_script_legacy_sigop_count_script(
-                    script.as_ptr(),
-                    script.len() as u32,
-                )
-            };
+            let ret = zcash_script::Cxx::legacy_sigop_count_script(script).map_err(Error::from)?;
             count += ret as u64;
         }
         Ok(count)
