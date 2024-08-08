@@ -50,6 +50,7 @@ pub struct SemanticBlockVerifier<S, V> {
     transaction_verifier: V,
 }
 
+/// Block verification errors.
 // TODO: dedupe with crate::error::BlockError
 #[non_exhaustive]
 #[allow(missing_docs)]
@@ -86,7 +87,7 @@ pub enum VerifyBlockError {
     Transaction(#[from] TransactionError),
 
     #[error("invalid block subsidy")]
-    Subsidy(#[from] zebra_chain::amount::Error),
+    Subsidy(#[from] SubsidyError),
 }
 
 impl VerifyBlockError {
