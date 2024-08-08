@@ -3239,7 +3239,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 /// `cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
 #[tokio::test(flavor = "multi_thread")]
 #[cfg(feature = "getblocktemplate-rpcs")]
-async fn nu6_funding_streams() -> Result<()> {
+async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
