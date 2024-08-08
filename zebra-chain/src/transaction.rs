@@ -1390,10 +1390,7 @@ impl Transaction {
             .map(|shielded_data| &mut shielded_data.value_balance)
     }
 
-    /// Get the value balances for this transaction,
-    /// using the transparent outputs spent in this transaction.
-    ///
-    /// See `value_balance` for details.
+    /// Returns the value balances for this transaction using the provided transparent outputs.
     pub(crate) fn value_balance_from_outputs(
         &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
@@ -1404,25 +1401,26 @@ impl Transaction {
             + self.orchard_value_balance()
     }
 
-    /// Get the value balances for this transaction.
-    /// These are the changes in the transaction value pool,
-    /// split up into transparent, sprout, sapling, and orchard values.
+    /// Returns the value balances for this transaction.
     ///
-    /// Calculated as the sum of the inputs and outputs from each pool,
-    /// or the sum of the value balances from each pool.
+    /// These are the changes in the transaction value pool, split up into transparent, Sprout,
+    /// Sapling, and Orchard values.
     ///
-    /// Positive values are added to this transaction's value pool,
-    /// and removed from the corresponding chain value pool.
-    /// Negative values are removed from this transaction,
-    /// and added to the corresponding pool.
+    /// Calculated as the sum of the inputs and outputs from each pool, or the sum of the value
+    /// balances from each pool.
+    ///
+    /// Positive values are added to this transaction's value pool, and removed from the
+    /// corresponding chain value pool. Negative values are removed from this transaction, and added
+    /// to the corresponding pool.
     ///
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     ///
-    /// `utxos` must contain the utxos of every input in the transaction,
-    /// including UTXOs created by earlier transactions in this block.
+    /// `utxos` must contain the utxos of every input in the transaction, including UTXOs created by
+    /// earlier transactions in this block.
     ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
+    /// ## Note
+    ///
+    /// The chain value pool has the opposite sign to the transaction value pool.
     pub fn value_balance(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,

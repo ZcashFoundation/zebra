@@ -19,7 +19,9 @@ use zebra_chain::{
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
-use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsidy};
+use zebra_consensus::{
+    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
+};
 use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -375,7 +377,8 @@ pub fn standard_coinbase_outputs(
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
-    let funding_streams = funding_stream_values(height, network)
+    let expected_block_subsidy = block_subsidy(height, network).expect("valid block subsidy");
+    let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
         .expect("funding stream value calculations are valid for reasonable chain heights");
 
     // Optional TODO: move this into a zebra_consensus function?
@@ -392,7 +395,7 @@ pub fn standard_coinbase_outputs(
         })
         .collect();
 
-    let miner_reward = miner_subsidy(height, network)
+    let miner_reward = miner_subsidy(height, network, expected_block_subsidy)
         .expect("reward calculations are valid for reasonable chain heights")
         + miner_fee;
     let miner_reward =

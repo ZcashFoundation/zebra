@@ -24,7 +24,9 @@ use zebra_chain::{
     },
     work::difficulty::{ParameterDifficulty as _, U256},
 };
-use zebra_consensus::{funding_stream_address, funding_stream_values, miner_subsidy, RouterError};
+use zebra_consensus::{
+    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
+};
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
@@ -1178,11 +1180,6 @@ where
                 });
             }
 
-            let miner = miner_subsidy(height, &network).map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
@@ -1190,12 +1187,26 @@ where
             let mut funding_streams_total = Amount::zero();
             let mut lockbox_total = Amount::zero();
 
-            let funding_streams =
-                funding_stream_values(height, &network).map_err(|error| Error {
+            let expected_block_subsidy =
+                block_subsidy(height, &network).map_err(|error| Error {
                     code: ErrorCode::ServerError(0),
                     message: error.to_string(),
                     data: None,
                 })?;
+
+            let miner_subsidy =
+                miner_subsidy(height, &network, expected_block_subsidy).map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+
+            let funding_streams = funding_stream_values(height, &network, expected_block_subsidy)
+                .map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
 
             let mut funding_streams: Vec<_> = funding_streams
                 .iter()
@@ -1234,11 +1245,12 @@ where
                 funding_streams_total = streams_total;
             }
 
-            let total_block_subsidy = (miner + founders + funding_streams_total + lockbox_total)
-                .expect("total is always valid");
+            let total_block_subsidy =
+                (miner_subsidy + founders + funding_streams_total + lockbox_total)
+                    .expect("total is always valid");
 
             Ok(BlockSubsidy {
-                miner: miner.into(),
+                miner: miner_subsidy.into(),
                 founders: founders.into(),
                 funding_streams,
                 lockbox_streams,

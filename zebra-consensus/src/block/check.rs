@@ -8,7 +8,7 @@ use zebra_chain::{
     amount::{Amount, Error as AmountError, NonNegative},
     block::{Block, Hash, Header, Height},
     parameters::{subsidy::FundingStreamReceiver, Network, NetworkUpgrade},
-    transaction,
+    transaction::{self, Transaction},
     work::{
         difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
         equihash,
@@ -144,7 +144,11 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
 /// Returns `Ok(())` if the block subsidy in `block` is valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
-pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockError> {
+pub fn subsidy_is_valid(
+    block: &Block,
+    network: &Network,
+    expected_block_subsidy: Amount<NonNegative>,
+) -> Result<(), BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
@@ -182,8 +186,12 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         // funding stream amount values
-        let funding_streams = subsidy::funding_streams::funding_stream_values(height, network)
-            .expect("We always expect a funding stream hashmap response even if empty");
+        let funding_streams = subsidy::funding_streams::funding_stream_values(
+            height,
+            network,
+            expected_block_subsidy,
+        )
+        .expect("We always expect a funding stream hashmap response even if empty");
 
         // # Consensus
         //
@@ -226,31 +234,24 @@ pub fn subsidy_is_valid(block: &Block, network: &Network) -> Result<(), BlockErr
 ///
 /// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
 pub fn miner_fees_are_valid(
-    block: &Block,
-    network: &Network,
+    coinbase_tx: &Transaction,
+    height: Height,
     block_miner_fees: Amount<NonNegative>,
+    expected_block_subsidy: Amount<NonNegative>,
+    expected_deferred_amount: Amount<NonNegative>,
+    network: &Network,
 ) -> Result<(), BlockError> {
-    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
-    let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
-
-    let transparent_value_balance: Amount = subsidy::general::output_amounts(coinbase)
+    let transparent_value_balance = subsidy::general::output_amounts(coinbase_tx)
         .iter()
         .sum::<Result<Amount<NonNegative>, AmountError>>()
         .map_err(|_| SubsidyError::SumOverflow)?
         .constrain()
         .expect("positive value always fit in `NegativeAllowed`");
-    let sapling_value_balance = coinbase.sapling_value_balance().sapling_amount();
-    let orchard_value_balance = coinbase.orchard_value_balance().orchard_amount();
+    let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
+    let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 
-    let block_subsidy = subsidy::general::block_subsidy(height, network)
-        .expect("a valid block subsidy for this height and network");
-
-    // TODO: Add link to lockbox stream ZIP
-    let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(height, network)
-        .expect("we always expect a funding stream hashmap response even if empty")
-        .remove(&FundingStreamReceiver::Deferred)
-        .unwrap_or_default();
-
+    // TODO: Update the quote below once its been updated for NU6.
+    //
     // # Consensus
     //
     // > The total value in zatoshi of transparent outputs from a coinbase transaction,
@@ -261,17 +262,26 @@ pub fn miner_fees_are_valid(
     //
     // The expected lockbox funding stream output of the coinbase transaction is also subtracted
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
-    //
-    // TODO: Update the quote from the protocol specification once its been updated to reflect the changes in
-    //       https://zips.z.cash/draft-nuttycom-funding-allocation and https://zips.z.cash/draft-hopwood-coinbase-balance.
     let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
         .map_err(|_| SubsidyError::SumOverflow)?;
-    let right = (block_subsidy + block_miner_fees - expected_deferred_amount)
+    let right = (expected_block_subsidy + block_miner_fees - expected_deferred_amount)
         .map_err(|_| SubsidyError::SumOverflow)?;
 
-    if left > right {
-        Err(SubsidyError::InvalidMinerFees)?;
-    }
+    // TODO: Updadte the quotes below if the final phrasing changes in the spec for NU6.
+    //
+    // # Consensus
+    //
+    // > [Pre-NU6] The total output of a coinbase transaction MUST NOT be greater than its total
+    // input.
+    //
+    // > [NU6 onward] The total output of a coinbase transaction MUST be equal to its total input.
+    if if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu6 {
+        left > right
+    } else {
+        left != right
+    } {
+        Err(SubsidyError::InvalidMinerFees)?
+    };
 
     Ok(())
 }
