@@ -369,6 +369,7 @@ pub fn allow_all_transparent_coinbase_spends(
     _: transparent::OutPoint,
     _: transparent::CoinbaseSpendRestriction,
     _: &transparent::Utxo,
+    _: &Network,
 ) -> Result<(), ()> {
     Ok(())
 }
@@ -396,6 +397,7 @@ impl Block {
                 transparent::OutPoint,
                 transparent::CoinbaseSpendRestriction,
                 &transparent::Utxo,
+                &Network,
             ) -> Result<(), E>
             + Copy
             + 'static,
@@ -564,6 +566,7 @@ where
             transparent::OutPoint,
             transparent::CoinbaseSpendRestriction,
             &transparent::Utxo,
+            &Network,
         ) -> Result<(), E>
         + Copy
         + 'static,
@@ -645,6 +648,7 @@ where
             transparent::OutPoint,
             transparent::CoinbaseSpendRestriction,
             &transparent::Utxo,
+            &Network,
         ) -> Result<(), E>
         + Copy
         + 'static,
@@ -668,6 +672,7 @@ where
             *candidate_outpoint,
             *spend_restriction,
             candidate_utxo.as_ref(),
+            &Network::Mainnet,
         )
         .is_ok()
         {
@@ -677,6 +682,7 @@ where
                 *candidate_outpoint,
                 delete_transparent_outputs,
                 candidate_utxo.as_ref(),
+                &Network::Mainnet,
             )
             .is_ok()
         {

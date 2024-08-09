@@ -480,6 +480,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
     height: Height,
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
     spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
+    network: &Network,
 ) -> Result<(), TransactionError> {
     for spend in tx.spent_outpoints() {
         let utxo = block_new_outputs
@@ -490,7 +491,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
 
         let spend_restriction = tx.coinbase_spend_restriction(height);
 
-        zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
+        zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo, network)?;
     }
 
     Ok(())
