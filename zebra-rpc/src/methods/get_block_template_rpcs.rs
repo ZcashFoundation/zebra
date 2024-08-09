@@ -14,7 +14,9 @@ use zebra_chain::{
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{subsidy::ParameterSubsidy, Network, NetworkKind, POW_AVERAGING_WINDOW},
+    parameters::{
+        subsidy::ParameterSubsidy, Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
+    },
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -1178,6 +1180,13 @@ where
                 });
             }
 
+            // Always zero for post-halving blocks
+            let founders = Amount::zero();
+
+            let mut streams_total = Amount::zero();
+            let mut funding_streams_total = Amount::zero();
+            let mut lockbox_total = Amount::zero();
+
             let expected_block_subsidy =
                 block_subsidy(height, &network).map_err(|error| Error {
                     code: ErrorCode::ServerError(0),
@@ -1191,8 +1200,6 @@ where
                     message: error.to_string(),
                     data: None,
                 })?;
-            // Always zero for post-halving blocks
-            let founders = Amount::zero();
 
             let funding_streams = funding_stream_values(height, &network, expected_block_subsidy)
                 .map_err(|error| Error {
@@ -1200,11 +1207,13 @@ where
                 message: error.to_string(),
                 data: None,
             })?;
+
             let mut funding_streams: Vec<_> = funding_streams
                 .iter()
-                .filter_map(|(receiver, value)| {
-                    let address = funding_stream_address(height, &network, *receiver)?;
-                    Some((*receiver, FundingStream::new(*receiver, *value, address)))
+                .map(|(receiver, value)| {
+                    streams_total = (streams_total + *value).expect("total is always valid");
+                    let address = funding_stream_address(height, &network, *receiver);
+                    (*receiver, FundingStream::new(*receiver, *value, address))
                 })
                 .collect();
 
@@ -1215,12 +1224,39 @@ where
                     .position(|zcashd_receiver| zcashd_receiver == receiver)
             });
 
-            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
+            let (_receivers, lockbox_or_funding_streams): (Vec<_>, _) =
+                funding_streams.into_iter().unzip();
+
+            let mut lockbox_streams = vec![];
+            let mut funding_streams = vec![];
+
+            // Check if we are in the testnet and in NU6 heights to change the object name and totals.
+            // TODO: Remove testnet check after NU6 gets an activation height in Mainnet.
+            if network.is_default_testnet()
+                && height
+                    >= NetworkUpgrade::Nu6
+                        .activation_height(&network)
+                        .expect("Testnet has a Nu6 activation height")
+            {
+                lockbox_streams = lockbox_or_funding_streams;
+                lockbox_total = streams_total;
+            } else {
+                funding_streams = lockbox_or_funding_streams;
+                funding_streams_total = streams_total;
+            }
+
+            let total_block_subsidy =
+                (miner_subsidy + founders + funding_streams_total + lockbox_total)
+                    .expect("total is always valid");
 
             Ok(BlockSubsidy {
                 miner: miner_subsidy.into(),
                 founders: founders.into(),
                 funding_streams,
+                lockbox_streams,
+                funding_streams_total: funding_streams_total.into(),
+                lockbox_total: lockbox_total.into(),
+                total_block_subsidy: total_block_subsidy.into(),
             })
         }
         .boxed()
