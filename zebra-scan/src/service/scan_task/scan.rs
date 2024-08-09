@@ -556,7 +556,7 @@ pub fn dfvk_to_ufvk(dfvk: &DiversifiableFullViewingKey) -> Result<UnifiedFullVie
     .map_err(|e| eyre!(e))
 }
 
-/// Returns the `zcash_primitives::consensus::Network` for this network.
+/// Returns the [`zcash_primitives::consensus::Network`] for this network.
 pub fn zp_network(network: &Network) -> zcash_primitives::consensus::Network {
     match network {
         Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
