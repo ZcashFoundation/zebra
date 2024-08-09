@@ -2,6 +2,8 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
+// TODO: Move the contents of this mod to the parent mod and remove this mod.
+
 use std::collections::HashSet;
 
 use zebra_chain::{
