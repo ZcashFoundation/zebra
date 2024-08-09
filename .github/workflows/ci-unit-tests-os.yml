@@ -254,7 +254,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
-        uses: EmbarkStudios/cargo-deny-action@v1
+        uses: EmbarkStudios/cargo-deny-action@v2
         with:
           # --all-features spuriously activates openssl, but we want to ban that dependency in
           # all of zebrad's production features for security reasons. But the --all-features job is
