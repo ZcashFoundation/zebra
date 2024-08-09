@@ -15,7 +15,8 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
-        subsidy::ParameterSubsidy, Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
+        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        Network, NetworkKind, POW_AVERAGING_WINDOW,
     },
     primitives,
     serialization::ZcashDeserializeInto,
@@ -1183,9 +1184,8 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let mut streams_total = Amount::zero();
-            let mut funding_streams_total = Amount::zero();
             let mut lockbox_total = Amount::zero();
+            let mut funding_streams_total = Amount::zero();
 
             let expected_block_subsidy =
                 block_subsidy(height, &network).map_err(|error| Error {
@@ -1201,21 +1201,35 @@ where
                     data: None,
                 })?;
 
-            let funding_streams = funding_stream_values(height, &network, expected_block_subsidy)
-                .map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
+            let all_funding_stream =
+                funding_stream_values(height, &network, expected_block_subsidy).map_err(
+                    |error| Error {
+                        code: ErrorCode::ServerError(0),
+                        message: error.to_string(),
+                        data: None,
+                    },
+                )?;
 
-            let mut funding_streams: Vec<_> = funding_streams
-                .iter()
-                .map(|(receiver, value)| {
-                    streams_total = (streams_total + *value).expect("total is always valid");
-                    let address = funding_stream_address(height, &network, *receiver);
-                    (*receiver, FundingStream::new(*receiver, *value, address))
-                })
-                .collect();
+            // Separate the funding streams into deferred and non-deferred streams
+            let mut funding_streams: Vec<_> = Vec::new();
+            let mut lockbox_streams: Vec<_> = Vec::new();
+
+            for (receiver, value) in all_funding_stream.iter() {
+                let address = funding_stream_address(height, &network, *receiver);
+                let funding_stream = FundingStream::new(*receiver, *value, address);
+
+                match receiver {
+                    FundingStreamReceiver::Deferred => {
+                        lockbox_total = (lockbox_total + *value).expect("total is always valid");
+                        lockbox_streams.push((*receiver, funding_stream));
+                    }
+                    _ => {
+                        funding_streams_total =
+                            (funding_streams_total + *value).expect("total is always valid");
+                        funding_streams.push((*receiver, funding_stream));
+                    }
+                }
+            }
 
             // Use the same funding stream order as zcashd
             funding_streams.sort_by_key(|(receiver, _funding_stream)| {
@@ -1224,30 +1238,15 @@ where
                     .position(|zcashd_receiver| zcashd_receiver == receiver)
             });
 
-            let (_receivers, lockbox_or_funding_streams): (Vec<_>, _) =
-                funding_streams.into_iter().unzip();
+            // Format the funding streams and lockbox streams
+            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
+            let (_receivers, lockbox_streams): (Vec<_>, _) = lockbox_streams.into_iter().unzip();
 
-            let mut lockbox_streams = vec![];
-            let mut funding_streams = vec![];
-
-            // Check if we are in the testnet and in NU6 heights to change the object name and totals.
-            // TODO: Remove testnet check after NU6 gets an activation height in Mainnet.
-            if network.is_default_testnet()
-                && height
-                    >= NetworkUpgrade::Nu6
-                        .activation_height(&network)
-                        .expect("Testnet has a Nu6 activation height")
-            {
-                lockbox_streams = lockbox_or_funding_streams;
-                lockbox_total = streams_total;
-            } else {
-                funding_streams = lockbox_or_funding_streams;
-                funding_streams_total = streams_total;
-            }
-
+            // Calculate block subsidy and make sure it is the same as expected block subsidy.
             let total_block_subsidy =
                 (miner_subsidy + founders + funding_streams_total + lockbox_total)
                     .expect("total is always valid");
+            assert_eq!(total_block_subsidy, expected_block_subsidy);
 
             Ok(BlockSubsidy {
                 miner: miner_subsidy.into(),
