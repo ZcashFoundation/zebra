@@ -97,10 +97,13 @@ orchard = "0.8.0"
 zcash_encoding = "0.2.0"
 zcash_history = "0.4.0"
 zcash_note_encryption = "0.4.0"
-zcash_primitives = { version = "0.15.0", features = ["transparent-inputs"] }
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_primitives = { git = "https://github.com/zcash/librustzcash/", branch = "main", features = ["transparent-inputs"] }
 sapling = { package = "sapling-crypto", version = "0.1" }
-zcash_protocol = { version = "0.1.1" }
-zcash_address = { version = "0.3.2" }
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_protocol = { git = "https://github.com/zcash/librustzcash/", branch = "main"}
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_address = { git = "https://github.com/zcash/librustzcash/", branch = "main"}
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
@@ -176,7 +179,3 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
-
-[lints.rust]
-# TODO: Remove this once it's no longer needed for NU6.
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }

@@ -531,7 +531,6 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
-            #[cfg(zcash_unstable = "nu6")]
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
         }
     }
