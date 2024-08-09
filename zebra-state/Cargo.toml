@@ -54,17 +54,17 @@ hex = "0.4.3"
 hex-literal = "0.4.1"
 humantime-serde = "1.1.1"
 human_bytes = { version = "0.4.3", default-features = false }
-indexmap = "2.2.6"
+indexmap = "2.3.0"
 itertools = "0.13.0"
 lazy_static = "1.4.0"
 metrics = "0.23.0"
 mset = "0.1.1"
-regex = "1.10.4"
+regex = "1.10.6"
 rlimit = "0.10.1"
 rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
 semver = "1.0.23"
 serde = { version = "1.0.204", features = ["serde_derive"] }
-tempfile = "3.10.1"
+tempfile = "3.11.0"
 thiserror = "1.0.63"
 
 rayon = "1.10.0"
@@ -75,7 +75,7 @@ tracing = "0.1.39"
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
-serde_json = { version = "1.0.121", package = "serde_json", optional = true }
+serde_json = { version = "1.0.122", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = ["async-error"] }
 
