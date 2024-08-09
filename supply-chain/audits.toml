@@ -16,6 +16,11 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.6.0 -> 1.6.1"
 
+[[audits.bytes]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.6.1 -> 1.7.1"
+
 [[audits.clap_derive]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -76,10 +81,20 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.3.1 -> 1.4.1"
 
+[[audits.indexmap]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "2.2.6 -> 2.3.0"
+
 [[audits.inferno]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.11.19 -> 0.11.20"
+
+[[audits.inferno]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.20 -> 0.11.21"
 
 [[audits.libgit2-sys]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -141,6 +156,11 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.12.6 -> 0.13.1"
 
+[[audits.regex]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.10.5 -> 1.10.6"
+
 [[audits.serde_spanned]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -165,6 +185,11 @@ delta = "3.8.1 -> 3.8.3"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "3.8.3 -> 3.9.0"
+
+[[audits.tempfile]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.10.1 -> 3.11.0"
 
 [[audits.thiserror]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -201,10 +226,20 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.8.15 -> 0.8.16"
 
+[[audits.toml]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.16 -> 0.8.19"
+
 [[audits.toml_datetime]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.6 -> 0.6.7"
+
+[[audits.toml_datetime]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.7 -> 0.6.8"
 
 [[audits.toml_edit]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -215,6 +250,11 @@ delta = "0.22.14 -> 0.22.16"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.22.16 -> 0.22.17"
+
+[[audits.toml_edit]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.22.17 -> 0.22.20"
 
 [[audits.tonic]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -235,6 +275,11 @@ delta = "0.12.0 -> 0.12.1"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "8.3.1 -> 8.3.2"
+
+[[audits.winnow]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.13 -> 0.6.18"
 
 [[trusted.clap]]
 criteria = "safe-to-deploy"
