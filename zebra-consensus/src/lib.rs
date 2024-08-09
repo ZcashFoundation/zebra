@@ -49,11 +49,8 @@ pub use block::check::difficulty_is_valid;
 
 pub use block::{
     subsidy::{
-        funding_streams::{
-            funding_stream_address, funding_stream_recipient_info, funding_stream_values,
-            new_coinbase_script,
-        },
-        general::miner_subsidy,
+        funding_streams::{funding_stream_address, funding_stream_values, new_coinbase_script},
+        general::{block_subsidy, miner_subsidy},
     },
     Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };

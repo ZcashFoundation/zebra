@@ -22,7 +22,8 @@ use proptest_derive::Arbitrary;
 /// Workaround for format string identifier rules.
 const MAX_EXPIRY_HEIGHT: block::Height = block::Height::MAX_EXPIRY_HEIGHT;
 
-#[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
+/// Block subsidy errors.
+#[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[allow(missing_docs)]
 pub enum SubsidyError {
     #[error("no coinbase transaction in block")]
@@ -36,8 +37,21 @@ pub enum SubsidyError {
 
     #[error("a sum of amounts overflowed")]
     SumOverflow,
+
+    #[error("unsupported height")]
+    UnsupportedHeight,
+
+    #[error("invalid amount")]
+    InvalidAmount(amount::Error),
 }
 
+impl From<amount::Error> for SubsidyError {
+    fn from(amount: amount::Error) -> Self {
+        Self::InvalidAmount(amount)
+    }
+}
+
+/// Errors for semantic transaction validation.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(missing_docs)]

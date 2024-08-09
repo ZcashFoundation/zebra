@@ -541,6 +541,14 @@ impl DbFormatChange {
             timer.finish(module_path!(), line!(), "tree keys and caches upgrade");
         }
 
+        let version_for_upgrading_value_balance_format =
+            Version::parse("26.0.0").expect("hard-coded version string should be valid");
+
+        // Check if we need to do the upgrade.
+        if older_disk_version < &version_for_upgrading_value_balance_format {
+            Self::mark_as_upgraded_to(db, &version_for_upgrading_value_balance_format)
+        }
+
         // # New Upgrades Usually Go Here
         //
         // New code goes above this comment!
