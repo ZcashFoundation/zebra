@@ -1000,10 +1000,14 @@ impl DiskDb {
             let new_db_exists = DB::list_cf(&opts, &new_path).is_ok_and(|cf| !cf.is_empty());
 
             if old_db_exists && !new_db_exists {
-                // Create the required folder path for the destination. This is because we can't
-                // directly rename e.g. `state/v25/mainnet/` to `state/v26/mainnet/` with
-                // `fs::rename()` because `state/v26/` does not exist.
-                match fs::create_dir_all(&new_path) {
+                // Create the parent directory for the new db. This is because we can't directly
+                // rename e.g. `state/v25/mainnet/` to `state/v26/mainnet/` with `fs::rename()` if
+                // `state/v26/` does not exist.
+                match fs::create_dir_all(
+                    new_path
+                        .parent()
+                        .expect("new state cache must have a parent path"),
+                ) {
                     Ok(()) => info!("created new directory for state cache at {new_path:?}"),
                     Err(e) => {
                         warn!(
