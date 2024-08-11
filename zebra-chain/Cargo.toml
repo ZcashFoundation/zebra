@@ -92,18 +92,13 @@ uint = "0.9.5"
 x25519-dalek = { version = "2.0.1", features = ["serde"] }
 
 # ECC deps
-#halo2 = { package = "halo2_proofs", version = "0.3.0" }
-halo2 = { package = "halo2_proofs", git = "https://github.com/QED-it/halo2", rev = "7f5c0babd61f8ca46c9165a1adfac298d3fd3a11", version = "0.3.0" }
-#orchard = { version = "0.8.0", default-features = false, git = "https://github.com/QED-it/orchard", branch = "zsa1" }
-orchard = { version = "0.8.0", default-features = false, path = "../../orchard", features = ["multicore"] }
+halo2 = { package = "halo2_proofs", version = "0.3.0" }
+orchard = "0.8.0"
 zcash_encoding = "0.2.0"
 zcash_history = "0.4.0"
 zcash_note_encryption = "0.4.0"
-#zcash_primitives = { version = "0.15.0", features = ["transparent-inputs"] }
-#zcash_primitives = { version = "0.15", git = "https://github.com/QED-it/librustzcash", branch = "txv6-separate-bundles-rebased-dd1", features = ["transparent-inputs"] }
-zcash_primitives = { version = "0.15", path = "../../librustzcash/zcash_primitives", features = ["transparent-inputs"] }
-#sapling = { package = "sapling-crypto", version = "0.1" }
-sapling = { package = "sapling-crypto", version = "0.1.3" }
+zcash_primitives = { version = "0.15.0", features = ["transparent-inputs"] }
+sapling = { package = "sapling-crypto", version = "0.1" }
 zcash_protocol = { version = "0.1.1" }
 zcash_address = { version = "0.3.2" }
 
@@ -181,8 +176,3 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
-
-[patch.crates-io]
-#zcash_primitives = { version = "0.15", git = "https://github.com/QED-it/librustzcash", branch = "txv6-separate-bundles-rebased-dd1" }
-zcash_note_encryption = { version = "0.4", git = "https://github.com/QED-it/zcash_note_encryption", branch = "fix-sapling-constants" }
-sapling = { package = "sapling-crypto", version = "0.1.3", git = "https://github.com/QED-it/sapling-crypto", branch = "orchard-backward-compatibility" }

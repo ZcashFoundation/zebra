@@ -10,7 +10,7 @@ use std::{
 
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
-use orchard::circuit::VerifyingKey;
+use orchard::{circuit::VerifyingKey, orchard_flavor::OrchardVanilla};
 use rand::{thread_rng, CryptoRng, RngCore};
 
 use thiserror::Error;
@@ -75,7 +75,8 @@ pub type ItemVerifyingKey = VerifyingKey;
 
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key.
-    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build();
+    // FIXME: support OrchardZSA?
+    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
 }
 
 // === TEMPORARY BATCH HALO2 SUBSTITUTE ===
@@ -143,6 +144,15 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
             .flags
             .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
 
+        // FIXME: simplify the flags creation - make `Flags::from_parts` method pub?
+        // FIXME: support OrchardZSA?
+        let flags = match (enable_spend, enable_output) {
+            (false, false) => orchard::builder::BundleType::DISABLED.flags(),
+            (false, true) => orchard::bundle::Flags::SPENDS_DISABLED_WITHOUT_ZSA,
+            (true, false) => orchard::bundle::Flags::OUTPUTS_DISABLED,
+            (true, true) => orchard::bundle::Flags::ENABLED_WITHOUT_ZSA,
+        };
+
         let instances = shielded_data
             .actions()
             .map(|action| {
@@ -155,8 +165,7 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
                     ))
                     .expect("should be a valid redpallas spendauth verification key"),
                     note::ExtractedNoteCommitment::from_bytes(&action.cm_x.into()).unwrap(),
-                    enable_spend,
-                    enable_output,
+                    flags,
                 )
             })
             .collect();
