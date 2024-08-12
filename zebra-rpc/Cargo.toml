@@ -65,7 +65,7 @@ jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.122", features = ["preserve_order"] }
+serde_json = { version = "1.0.124", features = ["preserve_order"] }
 indexmap = { version = "2.3.0", features = ["serde"] }
 
 tokio = { version = "1.39.2", features = [
@@ -85,7 +85,7 @@ tokio-stream = { version = "0.1.15", optional = true }
 tracing = "0.1.39"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.204", features = ["serde_derive"] }
+serde = { version = "1.0.206", features = ["serde_derive"] }
 
 
 # TODO: Revert to a release once librustzcash is released (#8749).
