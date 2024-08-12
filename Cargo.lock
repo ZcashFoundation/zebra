@@ -12,7 +12,7 @@ dependencies = [
  "arc-swap",
  "backtrace",
  "canonical-path",
- "clap 4.5.11",
+ "clap 4.5.13",
  "color-eyre",
  "fs-err",
  "once_cell",
@@ -443,6 +443,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bip32"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa13fae8b6255872fd86f7faf4b41168661d7d78609f7bfe6771b85c6739a15b"
+dependencies = [
+ "bs58",
+ "hmac",
+ "rand_core 0.6.4",
+ "ripemd",
+ "secp256k1 0.27.0",
+ "sha2",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -590,9 +606,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.6.1"
+version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a12916984aab3fa6e39d655a33e09c0071eb36d6ab3aea5c2d78551f1df6d952"
+checksum = "8318a53db07bb3f8dca91a600466bdb3f2eaadeedfdbcf02e1accbad9271ba50"
 
 [[package]]
 name = "bzip2-sys"
@@ -793,9 +809,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.11"
+version = "4.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35723e6a11662c2afb578bcf0b88bf6ea8e21282a953428f240574fcc3a2b5b3"
+checksum = "0fbb260a053428790f3de475e304ff84cdbc4face759ea7a3e64c1edd938a7fc"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -803,9 +819,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.11"
+version = "4.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49eb96cbfa7cfa35017b7cd548c75b14c3118c98b423041d70562665e07fb0fa"
+checksum = "64b17d7ea74e9f833c7dbf2cbe4fb12ff26783eda4782a8975b72f895c9b4d99"
 dependencies = [
  "anstream",
  "anstyle",
@@ -815,9 +831,9 @@ dependencies = [
 
 [[package]]
 name = "clap_derive"
-version = "4.5.11"
+version = "4.5.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d029b67f89d30bbb547c89fd5161293c0aec155fc691d7924b64550662db93e"
+checksum = "501d359d5f3dcaf6ecdeee48833ae73ec6e42723a1e52419c79abf9507eec0a0"
 dependencies = [
  "heck 0.5.0",
  "proc-macro2",
@@ -972,7 +988,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.5.11",
+ "clap 4.5.13",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -1313,6 +1329,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash/?branch=main#5a4a3e06dcd2cf5bdf79a7cd48709b58693c65f0"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1343,6 +1368,14 @@ name = "f4jumble"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0a83e8d7fd0c526af4aad893b7c9fe41e2699ed8a776a6c74aecdeafe05afc75"
+dependencies = [
+ "blake2b_simd",
+]
+
+[[package]]
+name = "f4jumble"
+version = "0.1.0"
+source = "git+https://github.com/zcash/librustzcash/?branch=main#5a4a3e06dcd2cf5bdf79a7cd48709b58693c65f0"
 dependencies = [
  "blake2b_simd",
 ]
@@ -1408,7 +1441,7 @@ dependencies = [
  "futures-sink",
  "nanorand",
  "pin-project",
- "spin 0.9.8",
+ "spin",
 ]
 
 [[package]]
@@ -1640,7 +1673,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "http 0.2.12",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "slab",
  "tokio",
  "tokio-util 0.7.11",
@@ -1659,7 +1692,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "http 1.1.0",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "slab",
  "tokio",
  "tokio-util 0.7.11",
@@ -1743,19 +1776,6 @@ dependencies = [
  "flate2",
  "nom",
  "num-traits",
-]
-
-[[package]]
-name = "hdwallet"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a03ba7d4c9ea41552cd4351965ff96883e629693ae85005c501bb4b9e1c48a7"
-dependencies = [
- "lazy_static",
- "rand_core 0.6.4",
- "ring 0.16.20",
- "secp256k1",
- "thiserror",
 ]
 
 [[package]]
@@ -2112,9 +2132,9 @@ dependencies = [
 
 [[package]]
 name = "indexmap"
-version = "2.2.6"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "168fb715dda47215e360912c096649d23d58bf392ac62f73919e831745e40f26"
+checksum = "de3fc2e30ba82dd1b3911c8de1ffc143c74a914a14e99514d7637e3099df5ea0"
 dependencies = [
  "equivalent",
  "hashbrown 0.14.5",
@@ -2136,9 +2156,9 @@ dependencies = [
 
 [[package]]
 name = "inferno"
-version = "0.11.20"
+version = "0.11.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c77a3ae7d4761b9c64d2c030f70746ceb8cfba32dce0325a56792e0a4816c31"
+checksum = "232929e1d75fe899576a3d5c7416ad0d88dbfbb3c3d6aa00873a7408a50ddb88"
 dependencies = [
  "ahash",
  "is-terminal",
@@ -2360,7 +2380,7 @@ version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 dependencies = [
- "spin 0.9.8",
+ "spin",
 ]
 
 [[package]]
@@ -2544,7 +2564,7 @@ dependencies = [
  "http-body-util",
  "hyper 1.4.1",
  "hyper-util",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "ipnet",
  "metrics",
  "metrics-util",
@@ -3009,7 +3029,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
 dependencies = [
  "fixedbitset",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
 ]
 
 [[package]]
@@ -3565,9 +3585,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.5"
+version = "1.10.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b91213439dad192326a0d7c6ee3955910425f441d7038e0d6933b0aec5c4517f"
+checksum = "4219d74c6b67a3654a9fbebc4b419e22126d13d2f3c4a07ee0cb61ff79a79619"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -3661,21 +3681,6 @@ dependencies = [
 
 [[package]]
 name = "ring"
-version = "0.16.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3053cf52e236a3ed746dfc745aa9cacf1b791d846bdaf412f60a8d7d6e17c8fc"
-dependencies = [
- "cc",
- "libc",
- "once_cell",
- "spin 0.5.2",
- "untrusted 0.7.1",
- "web-sys",
- "winapi",
-]
-
-[[package]]
-name = "ring"
 version = "0.17.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c17fa4cb658e3583423e915b9f3acc01cceaee1860e33d59ebae66adc3a2dc0d"
@@ -3684,8 +3689,8 @@ dependencies = [
  "cfg-if 1.0.0",
  "getrandom 0.2.15",
  "libc",
- "spin 0.9.8",
- "untrusted 0.9.0",
+ "spin",
+ "untrusted",
  "windows-sys 0.52.0",
 ]
 
@@ -3784,7 +3789,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f56a14d1f48b391359b22f731fd4bd7e43c97f3c50eee276f3aa09c94784d3e"
 dependencies = [
  "log",
- "ring 0.17.8",
+ "ring",
  "rustls-webpki",
  "sct",
 ]
@@ -3804,8 +3809,8 @@ version = "0.101.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b6275d1ee7a1cd780b64aca7726599a1dbc893b1e64144529e55c3c2f745765"
 dependencies = [
- "ring 0.17.8",
- "untrusted 0.9.0",
+ "ring",
+ "untrusted",
 ]
 
 [[package]]
@@ -3885,8 +3890,8 @@ version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "da046153aa2352493d6cb7da4b6e5c0c057d8a1d0a9aa8560baffdd945acd414"
 dependencies = [
- "ring 0.17.8",
- "untrusted 0.9.0",
+ "ring",
+ "untrusted",
 ]
 
 [[package]]
@@ -3897,6 +3902,15 @@ checksum = "4124a35fe33ae14259c490fd70fa199a32b9ce9502f2ee6bc4f81ec06fa65894"
 dependencies = [
  "secp256k1-sys",
  "serde",
+]
+
+[[package]]
+name = "secp256k1"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
+dependencies = [
+ "secp256k1-sys",
 ]
 
 [[package]]
@@ -4059,11 +4073,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.121"
+version = "1.0.122"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ab380d7d9f22ef3f21ad3e6c1ebe8e4fc7a2000ccba2e4d71fc96f15b2cb609"
+checksum = "784b6203951c57ff748476b126ccb5e8e2959a5c19e5c617ab1956be3dbc68da"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "itoa",
  "memchr",
  "ryu",
@@ -4111,7 +4125,7 @@ dependencies = [
  "chrono",
  "hex",
  "indexmap 1.9.3",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "serde",
  "serde_derive",
  "serde_json",
@@ -4149,7 +4163,7 @@ version = "0.9.34+deprecated"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "itoa",
  "ryu",
  "serde",
@@ -4270,12 +4284,6 @@ dependencies = [
  "quote",
  "syn 1.0.109",
 ]
-
-[[package]]
-name = "spin"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e63cff320ae2c57904679ba7cb63280a3dc4613885beafb148ee7bf9aa9042d"
 
 [[package]]
 name = "spin"
@@ -4431,12 +4439,13 @@ checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
 
 [[package]]
 name = "tempfile"
-version = "3.10.1"
+version = "3.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85b77fafb263dd9d05cbeac119526425676db3784113aa9295c88498cbf8bff1"
+checksum = "b8fcd239983515c23a32fb82099f97d0b11b8c72f654ed659363a95c3dad7a53"
 dependencies = [
  "cfg-if 1.0.0",
  "fastrand",
+ "once_cell",
  "rustix",
  "windows-sys 0.52.0",
 ]
@@ -4664,21 +4673,21 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.8.16"
+version = "0.8.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81967dd0dd2c1ab0bc3468bd7caecc32b8a4aa47d0c8c695d8c2b2108168d62c"
+checksum = "a1ed1f98e3fdc28d6d910e6737ae6ab1a93bf1985935a1193e68f93eeb68d24e"
 dependencies = [
  "serde",
  "serde_spanned",
  "toml_datetime",
- "toml_edit 0.22.17",
+ "toml_edit 0.22.20",
 ]
 
 [[package]]
 name = "toml_datetime"
-version = "0.6.7"
+version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8fb9f64314842840f1d940ac544da178732128f1c78c21772e876579e0da1db"
+checksum = "0dd7358ecb8fc2f8d014bf86f6f638ce72ba252a2c3a2572f2a795f1d23efb41"
 dependencies = [
  "serde",
 ]
@@ -4689,22 +4698,22 @@ version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6a8534fd7f78b5405e860340ad6575217ce99f38d4d5c8f2442cb5ecb50090e1"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "toml_datetime",
  "winnow 0.5.40",
 ]
 
 [[package]]
 name = "toml_edit"
-version = "0.22.17"
+version = "0.22.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8d9f8729f5aea9562aac1cc0441f5d6de3cff1ee0c5d67293eeca5eb36ee7c16"
+checksum = "583c44c02ad26b0c3f3066fe629275e50627026c51ac2e595cca4c230ce1ce1d"
 dependencies = [
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "serde",
  "serde_spanned",
  "toml_datetime",
- "winnow 0.6.13",
+ "winnow 0.6.18",
 ]
 
 [[package]]
@@ -5114,12 +5123,6 @@ name = "unsafe-libyaml"
 version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
-
-[[package]]
-name = "untrusted"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a156c684c91ea7d62626509bce3cb4e1d9ed5c4d978f7b4352658f96a4c26b4a"
 
 [[package]]
 name = "untrusted"
@@ -5599,9 +5602,9 @@ dependencies = [
 
 [[package]]
 name = "winnow"
-version = "0.6.13"
+version = "0.6.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59b5e5f6c299a3c7890b876a2a587f3115162487e704907d9b6cd29473052ba1"
+checksum = "68a9bda4691f099d435ad181000724da8e5899daa10713c2d432552b9ccd3a6f"
 dependencies = [
  "memchr",
 ]
@@ -5651,9 +5654,21 @@ checksum = "827c17a1f7e3a69f0d44e991ff610c7a842228afdc9dc2325ffdd1a67fee01e9"
 dependencies = [
  "bech32",
  "bs58",
- "f4jumble",
- "zcash_encoding",
- "zcash_protocol",
+ "f4jumble 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_protocol 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "zcash_address"
+version = "0.3.2"
+source = "git+https://github.com/zcash/librustzcash/?branch=main#5a4a3e06dcd2cf5bdf79a7cd48709b58693c65f0"
+dependencies = [
+ "bech32",
+ "bs58",
+ "f4jumble 0.1.0 (git+https://github.com/zcash/librustzcash/?branch=main)",
+ "zcash_encoding 0.2.0 (git+https://github.com/zcash/librustzcash/?branch=main)",
+ "zcash_protocol 0.1.1 (git+https://github.com/zcash/librustzcash/?branch=main)",
 ]
 
 [[package]]
@@ -5686,12 +5701,12 @@ dependencies = [
  "tonic-build 0.10.2",
  "tracing",
  "which",
- "zcash_address",
- "zcash_encoding",
+ "zcash_address 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_keys",
  "zcash_note_encryption",
- "zcash_primitives",
- "zcash_protocol",
+ "zcash_primitives 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_protocol 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zip32",
 ]
 
@@ -5700,6 +5715,15 @@ name = "zcash_encoding"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f03391b81727875efa6ac0661a20883022b6fba92365dc121c48fa9b00c5aac0"
+dependencies = [
+ "byteorder",
+ "nonempty",
+]
+
+[[package]]
+name = "zcash_encoding"
+version = "0.2.0"
+source = "git+https://github.com/zcash/librustzcash/?branch=main#5a4a3e06dcd2cf5bdf79a7cd48709b58693c65f0"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -5735,10 +5759,10 @@ dependencies = [
  "secrecy",
  "subtle",
  "tracing",
- "zcash_address",
- "zcash_encoding",
- "zcash_primitives",
- "zcash_protocol",
+ "zcash_address 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_primitives 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_protocol 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zip32",
 ]
 
@@ -5766,11 +5790,46 @@ dependencies = [
  "blake2b_simd",
  "byteorder",
  "document-features",
- "equihash",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "ff",
  "fpe",
  "group",
- "hdwallet",
+ "hex",
+ "incrementalmerkletree",
+ "jubjub",
+ "memuse",
+ "nonempty",
+ "orchard",
+ "rand 0.8.5",
+ "rand_core 0.6.4",
+ "redjubjub",
+ "sapling-crypto",
+ "sha2",
+ "subtle",
+ "tracing",
+ "zcash_address 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_note_encryption",
+ "zcash_protocol 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_spec",
+ "zip32",
+]
+
+[[package]]
+name = "zcash_primitives"
+version = "0.15.1"
+source = "git+https://github.com/zcash/librustzcash/?branch=main#5a4a3e06dcd2cf5bdf79a7cd48709b58693c65f0"
+dependencies = [
+ "aes",
+ "bip32",
+ "blake2b_simd",
+ "bs58",
+ "byteorder",
+ "document-features",
+ "equihash 0.2.0 (git+https://github.com/zcash/librustzcash/?branch=main)",
+ "ff",
+ "fpe",
+ "group",
  "hex",
  "incrementalmerkletree",
  "jubjub",
@@ -5782,14 +5841,14 @@ dependencies = [
  "redjubjub",
  "ripemd",
  "sapling-crypto",
- "secp256k1",
+ "secp256k1 0.27.0",
  "sha2",
  "subtle",
  "tracing",
- "zcash_address",
- "zcash_encoding",
+ "zcash_address 0.3.2 (git+https://github.com/zcash/librustzcash/?branch=main)",
+ "zcash_encoding 0.2.0 (git+https://github.com/zcash/librustzcash/?branch=main)",
  "zcash_note_encryption",
- "zcash_protocol",
+ "zcash_protocol 0.1.1 (git+https://github.com/zcash/librustzcash/?branch=main)",
  "zcash_spec",
  "zip32",
 ]
@@ -5814,7 +5873,7 @@ dependencies = [
  "sapling-crypto",
  "tracing",
  "xdg",
- "zcash_primitives",
+ "zcash_primitives 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -5822,6 +5881,15 @@ name = "zcash_protocol"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f8189d4a304e8aa3aef3b75e89f3874bb0dc84b1cd623316a84e79e06cddabc"
+dependencies = [
+ "document-features",
+ "memuse",
+]
+
+[[package]]
+name = "zcash_protocol"
+version = "0.1.1"
+source = "git+https://github.com/zcash/librustzcash/?branch=main#5a4a3e06dcd2cf5bdf79a7cd48709b58693c65f0"
 dependencies = [
  "document-features",
  "memuse",
@@ -5862,7 +5930,7 @@ dependencies = [
  "color-eyre",
  "criterion",
  "ed25519-zebra",
- "equihash",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "group",
  "halo2_proofs",
@@ -5885,7 +5953,7 @@ dependencies = [
  "redjubjub",
  "ripemd",
  "sapling-crypto",
- "secp256k1",
+ "secp256k1 0.26.0",
  "serde",
  "serde-big-array",
  "serde_json",
@@ -5899,13 +5967,13 @@ dependencies = [
  "tracing",
  "uint",
  "x25519-dalek",
- "zcash_address",
+ "zcash_address 0.3.2 (git+https://github.com/zcash/librustzcash/?branch=main)",
  "zcash_client_backend",
- "zcash_encoding",
+ "zcash_encoding 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_history",
  "zcash_note_encryption",
- "zcash_primitives",
- "zcash_protocol",
+ "zcash_primitives 0.15.1 (git+https://github.com/zcash/librustzcash/?branch=main)",
+ "zcash_protocol 0.1.1 (git+https://github.com/zcash/librustzcash/?branch=main)",
  "zebra-test",
 ]
 
@@ -5970,7 +6038,7 @@ dependencies = [
  "tonic-build 0.12.1",
  "tonic-reflection",
  "tower",
- "zcash_primitives",
+ "zcash_primitives 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zebra-chain",
  "zebra-node-services",
  "zebra-state",
@@ -5990,7 +6058,7 @@ dependencies = [
  "hex",
  "howudoin",
  "humantime-serde",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "itertools 0.13.0",
  "lazy_static",
  "metrics",
@@ -6009,7 +6077,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.11",
- "toml 0.8.16",
+ "toml 0.8.19",
  "tower",
  "tracing",
  "tracing-error",
@@ -6038,7 +6106,7 @@ dependencies = [
  "chrono",
  "futures",
  "hex",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "insta",
  "jsonrpc-core",
  "jsonrpc-derive",
@@ -6056,8 +6124,8 @@ dependencies = [
  "tonic-reflection",
  "tower",
  "tracing",
- "zcash_address",
- "zcash_primitives",
+ "zcash_address 0.3.2 (git+https://github.com/zcash/librustzcash/?branch=main)",
+ "zcash_primitives 0.15.1 (git+https://github.com/zcash/librustzcash/?branch=main)",
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",
@@ -6078,7 +6146,7 @@ dependencies = [
  "futures",
  "group",
  "hex",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "insta",
  "itertools 0.13.0",
  "jsonrpc",
@@ -6094,16 +6162,16 @@ dependencies = [
  "structopt",
  "tempfile",
  "tokio",
- "toml 0.8.16",
+ "toml 0.8.19",
  "tonic",
  "tower",
  "tracing",
  "tracing-subscriber",
- "zcash_address",
+ "zcash_address 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_client_backend",
  "zcash_keys",
  "zcash_note_encryption",
- "zcash_primitives",
+ "zcash_primitives 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zebra-chain",
  "zebra-grpc",
  "zebra-node-services",
@@ -6141,7 +6209,7 @@ dependencies = [
  "howudoin",
  "human_bytes",
  "humantime-serde",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "insta",
  "itertools 0.13.0",
  "jubjub",
@@ -6178,7 +6246,7 @@ dependencies = [
  "futures",
  "hex",
  "humantime",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "insta",
  "itertools 0.13.0",
  "lazy_static",
@@ -6221,8 +6289,8 @@ dependencies = [
  "tracing-error",
  "tracing-subscriber",
  "zcash_client_backend",
- "zcash_primitives",
- "zcash_protocol",
+ "zcash_primitives 0.15.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_protocol 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "zebra-chain",
  "zebra-node-services",
  "zebra-rpc",
@@ -6236,7 +6304,7 @@ dependencies = [
  "atty",
  "bytes",
  "chrono",
- "clap 4.5.11",
+ "clap 4.5.13",
  "color-eyre",
  "console-subscriber",
  "dirs",
@@ -6248,7 +6316,7 @@ dependencies = [
  "humantime-serde",
  "hyper 1.4.1",
  "hyper-util",
- "indexmap 2.2.6",
+ "indexmap 2.3.0",
  "indicatif",
  "inferno",
  "insta",
@@ -6276,7 +6344,7 @@ dependencies = [
  "tinyvec",
  "tokio",
  "tokio-stream",
- "toml 0.8.16",
+ "toml 0.8.19",
  "tonic",
  "tonic-build 0.12.1",
  "tower",

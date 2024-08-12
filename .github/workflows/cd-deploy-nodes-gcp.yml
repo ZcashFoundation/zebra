@@ -228,14 +228,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.3
+        uses: google-github-actions/auth@v2.1.4
         with:
-          retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.0
+        uses: google-github-actions/setup-gcloud@v2.1.1
 
       # TODO we should implement the fixes from https://github.com/ZcashFoundation/zebra/pull/5670 here
       # but the implementation is failing as it's requiring the disk names, contrary to what is stated in the official documentation
@@ -330,14 +329,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.3
+        uses: google-github-actions/auth@v2.1.4
         with:
-          retries: '3'
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.0
+        uses: google-github-actions/setup-gcloud@v2.1.1
 
       # Create instance template from container image
       - name: Manual deploy of a single ${{ inputs.network }} instance running zebrad
