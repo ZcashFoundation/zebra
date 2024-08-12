@@ -122,6 +122,9 @@ const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL: u32 = 160;
 pub const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA: u32 =
     MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL - 2;
 
+/// These database versions can be recreated from their directly preceding versions.
+pub const RESTORABLE_DB_VERSIONS: [u64; 1] = [26];
+
 lazy_static! {
     /// Regex that matches the RocksDB error when its lock file is already open.
     pub static ref LOCK_FILE_ERROR: Regex = Regex::new("(lock file).*(temporarily unavailable)|(in use)|(being used by another process)").expect("regex is valid");

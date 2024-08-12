@@ -124,7 +124,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.3
+        uses: google-github-actions/auth@v2.1.4
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
@@ -159,7 +159,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v6.5.0
+        uses: docker/build-push-action@v6.6.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
