@@ -19,6 +19,7 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     config::database_format_version_on_disk,
+    constants::RESTORABLE_DB_VERSIONS,
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -105,6 +106,14 @@ impl ZebraDb {
             network,
         )
         .expect("unable to read database format version file");
+
+        DiskDb::try_reusing_previous_db_after_major_upgrade(
+            &RESTORABLE_DB_VERSIONS,
+            format_version_in_code,
+            config,
+            &db_kind,
+            network,
+        );
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
