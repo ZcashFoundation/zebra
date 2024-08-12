@@ -5,8 +5,8 @@ expression: get_block_subsidy
 {
   "fundingstreams": [
     {
-      "recipient": "Major Grants",
-      "specification": "https://zips.z.cash/zip-0214",
+      "recipient": "Zcash Community Grants NU6",
+      "specification": "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model",
       "value": 0.125,
       "valueZat": 12500000,
       "address": "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"
@@ -14,8 +14,8 @@ expression: get_block_subsidy
   ],
   "lockboxstreams": [
     {
-      "recipient": "Lockbox",
-      "specification": "https://zips.z.cash/zip-0214",
+      "recipient": "Lockbox NU6",
+      "specification": "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model",
       "value": 0.1875,
       "valueZat": 18750000
     }

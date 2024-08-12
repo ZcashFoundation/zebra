@@ -75,17 +75,28 @@ impl FundingStreamReceiver {
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
     // TODO: Update method documentation with a reference to https://zips.z.cash/draft-nuttycom-funding-allocation once its
     //       status is updated to 'Proposed'.
-    pub fn info(&self) -> (&'static str, &'static str) {
-        (
-            match self {
-                FundingStreamReceiver::Ecc => "Electric Coin Company",
-                FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
-                FundingStreamReceiver::MajorGrants => "Major Grants",
-                // TODO: Find out what this should be called and update the funding stream name
-                FundingStreamReceiver::Deferred => "Lockbox",
-            },
-            FUNDING_STREAM_SPECIFICATION,
-        )
+    pub fn info(&self, is_nu6: bool) -> (&'static str, &'static str) {
+        if is_nu6 {
+            (
+                match self {
+                    FundingStreamReceiver::Ecc => "Electric Coin Company",
+                    FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
+                    FundingStreamReceiver::MajorGrants => "Zcash Community Grants NU6",
+                    FundingStreamReceiver::Deferred => "Lockbox NU6",
+                },
+                LOCKBOX_SPECIFICATION,
+            )
+        } else {
+            (
+                match self {
+                    FundingStreamReceiver::Ecc => "Electric Coin Company",
+                    FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
+                    FundingStreamReceiver::MajorGrants => "Major Grants",
+                    FundingStreamReceiver::Deferred => "Lockbox NU6",
+                },
+                FUNDING_STREAM_SPECIFICATION,
+            )
+        }
     }
 }
 
@@ -99,6 +110,9 @@ pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 ///
 /// [ZIP-214]: https://zips.z.cash/zip-0214
 pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
+
+/// ...
+pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model";
 
 /// Funding stream recipients and height ranges.
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]

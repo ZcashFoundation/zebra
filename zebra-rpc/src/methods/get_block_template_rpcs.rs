@@ -16,7 +16,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{
         subsidy::{FundingStreamReceiver, ParameterSubsidy},
-        Network, NetworkKind, POW_AVERAGING_WINDOW,
+        Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
     serialization::ZcashDeserializeInto,
@@ -1213,10 +1213,14 @@ where
             // Separate the funding streams into deferred and non-deferred streams
             let mut funding_streams: Vec<_> = Vec::new();
             let mut lockbox_streams: Vec<_> = Vec::new();
+            let is_nu6 = NetworkUpgrade::Nu6
+                .activation_height(&network)
+                .unwrap_or(Height::MAX)
+                < height;
 
             for (receiver, value) in all_funding_stream.iter() {
                 let address = funding_stream_address(height, &network, *receiver);
-                let funding_stream = FundingStream::new(*receiver, *value, address);
+                let funding_stream = FundingStream::new(is_nu6, *receiver, *value, address);
 
                 match receiver {
                     FundingStreamReceiver::Deferred => {

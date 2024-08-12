@@ -90,11 +90,12 @@ pub struct FundingStream {
 impl FundingStream {
     /// Convert a `receiver`, `value`, and `address` into a `FundingStream` response.
     pub fn new(
+        is_nu6: bool,
         receiver: FundingStreamReceiver,
         value: Amount<NonNegative>,
         address: Option<&transparent::Address>,
     ) -> FundingStream {
-        let (name, specification) = receiver.info();
+        let (name, specification) = receiver.info(is_nu6);
 
         FundingStream {
             recipient: name.to_string(),
