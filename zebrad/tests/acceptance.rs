@@ -3236,9 +3236,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 /// Test successful block template submission as a block proposal or submission on a custom Testnet.
 ///
 /// This test can be run locally with:
-/// `RUSTFLAGS='--cfg zcash_unstable="nu6"' cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
+/// `cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(all(feature = "getblocktemplate-rpcs", zcash_unstable = "nu6"))]
+#[cfg(feature = "getblocktemplate-rpcs")]
 async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
