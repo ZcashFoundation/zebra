@@ -1216,7 +1216,7 @@ where
             let is_nu6 = NetworkUpgrade::Nu6
                 .activation_height(&network)
                 .unwrap_or(Height::MAX)
-                < height;
+                <= height;
 
             for (receiver, value) in all_funding_stream.iter() {
                 let address = funding_stream_address(height, &network, *receiver);
