@@ -12,7 +12,7 @@ use crate::methods::get_block_template_rpcs::types::zec::Zec;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BlockSubsidy {
     /// An array of funding stream descriptions.
-    /// Always present befoe NU6, Zebra returns an error for heights before the first halving.
+    /// Always present before NU6, because Zebra returns an error for heights before the first halving.
     #[serde(rename = "fundingstreams", skip_serializing_if = "Vec::is_empty")]
     pub funding_streams: Vec<FundingStream>,
 

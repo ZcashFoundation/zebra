@@ -71,7 +71,6 @@ impl FundingStreamReceiver {
     /// Returns a human-readable name and a specification URL for the receiver, as described in
     /// [ZIP-1014] and [`zcashd`] before NU6. After NU6, the specification is in the [ZIP-lockbox].
     ///
-    ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
     /// [ZIP-lockbox]: https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model
