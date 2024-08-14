@@ -107,14 +107,6 @@ impl ZebraDb {
         )
         .expect("unable to read database format version file");
 
-        DiskDb::try_reusing_previous_db_after_major_upgrade(
-            &RESTORABLE_DB_VERSIONS,
-            format_version_in_code,
-            config,
-            &db_kind,
-            network,
-        );
-
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
@@ -128,24 +120,61 @@ impl ZebraDb {
         let debug_skip_format_upgrades = read_only
             || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
 
-        // Open the database and do initial checks.
-        let mut db = ZebraDb {
-            config: Arc::new(config.clone()),
-            debug_skip_format_upgrades,
-            format_change_handle: None,
-            // After the database directory is created, a newly created database temporarily
-            // changes to the default database version. Then we set the correct version in the
-            // upgrade thread. We need to do the version change in this order, because the version
-            // file can only be changed while we hold the RocksDB database lock.
-            db: DiskDb::new(
-                config,
-                db_kind,
-                format_version_in_code,
-                network,
-                column_families_in_code,
-                read_only,
-            ),
+        let db_kind = db_kind.as_ref();
+        let column_families_in_code: Vec<_> = column_families_in_code.into_iter().collect();
+        let new_db = |format_version| {
+            ZebraDb {
+                config: Arc::new(config.clone()),
+                debug_skip_format_upgrades,
+                format_change_handle: None,
+                // After the database directory is created, a newly created database temporarily
+                // changes to the default database version. Then we set the correct version in the
+                // upgrade thread. We need to do the version change in this order, because the version
+                // file can only be changed while we hold the RocksDB database lock.
+                db: DiskDb::new(
+                    config,
+                    db_kind,
+                    &format_version,
+                    network,
+                    column_families_in_code.clone(),
+                    read_only,
+                ),
+            }
         };
+
+        match format_change.clone() {
+            DbFormatChange::Upgrade {
+                older_disk_version,
+                newer_running_version,
+            } if !debug_skip_format_upgrades
+                && newer_running_version.major == (older_disk_version.major + 1)
+                && RESTORABLE_DB_VERSIONS.contains(&newer_running_version.major) =>
+            {
+                warn!("upgrading database format to the next major version, this may take a few minutes");
+                let db = new_db(Version::new(older_disk_version.major, u64::MAX, u64::MAX));
+                let finalized_tip = db.finalized_tip_height();
+
+                // It's fine to mark the database format as upgraded later if the database is empty
+                if finalized_tip.is_some() {
+                    let (_cancel_tx, cancel_rx) = std::sync::mpsc::channel();
+                    format_change
+                        .run_format_change_or_check(&db, finalized_tip, &cancel_rx)
+                        .expect("should not return an error without a cancellation message");
+                }
+
+                DiskDb::try_reusing_previous_db_after_major_upgrade(
+                    &RESTORABLE_DB_VERSIONS,
+                    format_version_in_code,
+                    config,
+                    db_kind,
+                    network,
+                );
+            }
+            _ => {}
+        }
+
+        // Open the database and do initial checks.
+        let mut db = new_db(format_version_in_code.clone());
 
         db.spawn_format_change(format_change);
 
