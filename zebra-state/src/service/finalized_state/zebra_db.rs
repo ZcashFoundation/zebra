@@ -150,12 +150,13 @@ impl ZebraDb {
                 && newer_running_version.major == (older_disk_version.major + 1)
                 && RESTORABLE_DB_VERSIONS.contains(&newer_running_version.major) =>
             {
-                warn!("upgrading database format to the next major version, this may take a few minutes");
+                warn!("upgrading database format to the next major version");
                 let db = new_db(Version::new(older_disk_version.major, u64::MAX, u64::MAX));
                 let finalized_tip = db.finalized_tip_height();
 
                 // It's fine to mark the database format as upgraded later if the database is empty
                 if finalized_tip.is_some() {
+                    warn!("applying minor database format upgrades ahead of major format version bump, this may take a few minutes");
                     let (_cancel_tx, cancel_rx) = std::sync::mpsc::channel();
                     format_change
                         .run_format_change_or_check(&db, finalized_tip, &cancel_rx)
