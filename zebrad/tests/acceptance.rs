@@ -2957,7 +2957,7 @@ fn external_address() -> Result<()> {
 // TODO: Test this with an NU5 activation height too once config can be serialized.
 #[tokio::test]
 #[cfg(feature = "getblocktemplate-rpcs")]
-async fn regtest_submit_blocks() -> Result<()> {
+async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     common::regtest::submit_blocks_test().await?;
     Ok(())
 }
