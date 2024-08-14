@@ -15,7 +15,7 @@ use tracing::Span;
 use zebra_chain::parameters::Network;
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, RESTORABLE_DB_VERSIONS, STATE_DATABASE_KIND},
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
     state_database_format_version_in_code, BoxError,
 };
 
@@ -314,15 +314,6 @@ fn check_and_delete_database(
     let dir_major_version = parse_major_version(&dir_name)?;
 
     if dir_major_version >= major_version {
-        return None;
-    }
-
-    // Don't delete databases that can be reused.
-    if RESTORABLE_DB_VERSIONS
-        .iter()
-        .map(|v| v - 1)
-        .any(|v| v == dir_major_version)
-    {
         return None;
     }
 
