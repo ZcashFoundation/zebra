@@ -1059,6 +1059,9 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::ValidBlockProposal`] when successful, or an error if
     /// the block fails contextual validation.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    /// Get the value pools for a given block.
+    ValuePools(HashOrHeight),
 }
 
 impl ReadRequest {
@@ -1093,6 +1096,7 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            ReadRequest::ValuePools(_) => "value_pools",
         }
     }
 

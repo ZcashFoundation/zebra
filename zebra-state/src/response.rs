@@ -3,13 +3,14 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Block},
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -217,6 +218,9 @@ pub enum ReadResponse {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
     ValidBlockProposal,
+
+    /// Response to [`ReadRequest::ValuePools`]
+    ValuePools(ValueBalance<NegativeAllowed>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -294,7 +298,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
-            | ReadResponse::AddressUtxos(_) => {
+            | ReadResponse::AddressUtxos(_)
+            | ReadResponse::ValuePools(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 

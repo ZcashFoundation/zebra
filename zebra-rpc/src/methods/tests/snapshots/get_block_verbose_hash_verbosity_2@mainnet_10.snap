@@ -9,5 +9,32 @@ expression: block
   "tx": [
     "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609"
   ],
-  "trees": {}
+  "trees": {},
+  "valuePools": [
+    {
+      "id": "lockbox",
+      "valueDelta": 0.0,
+      "valueDeltaZat": 0
+    },
+    {
+      "id": "orchard",
+      "valueDelta": 0.0,
+      "valueDeltaZat": 0
+    },
+    {
+      "id": "sapling",
+      "valueDelta": 0.0,
+      "valueDeltaZat": 0
+    },
+    {
+      "id": "sprout",
+      "valueDelta": 0.0,
+      "valueDeltaZat": 0
+    },
+    {
+      "id": "transparent",
+      "valueDelta": 0.000625,
+      "valueDeltaZat": 62500
+    }
+  ]
 }

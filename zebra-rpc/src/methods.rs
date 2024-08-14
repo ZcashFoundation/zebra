@@ -10,6 +10,7 @@ use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, FutureExt, StreamExt, TryFutureExt};
+use get_block_template_rpcs::types::zec::Zec;
 use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
@@ -20,6 +21,7 @@ use tracing::Instrument;
 
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
+    amount::{Amount, NegativeAllowed},
     block::{self, Height, SerializedBlock},
     chain_tip::ChainTip,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -27,6 +29,7 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
+    value_balance::ValueBalance,
 };
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
@@ -724,6 +727,7 @@ where
                 // later discovered to be on a side chain.
 
                 let should_read_block_header = verbosity == 2;
+                let should_read_value_pools = verbosity == 2;
 
                 let hash = match hash_or_height {
                     HashOrHeight::Hash(hash) => hash,
@@ -784,6 +788,11 @@ where
                 if should_read_block_header {
                     // Block header
                     requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
+                }
+
+                if should_read_value_pools {
+                    // Value pools
+                    requests.push(zebra_state::ReadRequest::ValuePools(hash.into()))
                 }
 
                 let mut futs = FuturesOrdered::new();
@@ -847,6 +856,18 @@ where
                     None
                 };
 
+                let value_pools = if should_read_value_pools {
+                    let value_pools_response =
+                        futs.next().await.expect("`futs` should not be empty");
+
+                    match value_pools_response.map_server_error()? {
+                        zebra_state::ReadResponse::ValuePools(pools) => create_value_pools(pools),
+                        _ => unreachable!("unmatched response to a ValuePools request"),
+                    }
+                } else {
+                    vec![]
+                };
+
                 let sapling = SaplingTrees {
                     size: sapling_note_commitment_tree_count,
                 };
@@ -864,6 +885,7 @@ where
                     time,
                     tx,
                     trees,
+                    value_pools,
                 })
             } else {
                 Err(Error {
@@ -1536,6 +1558,10 @@ pub enum GetBlock {
 
         /// Information about the note commitment trees.
         trees: GetBlockTrees,
+
+        /// Information about the value pools of the requested block.
+        #[serde(skip_serializing_if = "Vec::is_empty", rename = "valuePools")]
+        value_pools: Vec<ValuePool>,
     },
 }
 
@@ -1548,6 +1574,7 @@ impl Default for GetBlock {
             time: None,
             tx: Vec::new(),
             trees: GetBlockTrees::default(),
+            value_pools: vec![],
         }
     }
 }
@@ -1746,6 +1773,16 @@ impl OrchardTrees {
     }
 }
 
+/// The value pool section of a block in response to `getblock` RPC.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct ValuePool {
+    id: String,
+    #[serde(rename = "valueDelta")]
+    value_delta: Zec<NegativeAllowed>,
+    #[serde(rename = "valueDeltaZat")]
+    value_delta_zat: Amount<NegativeAllowed>,
+}
+
 /// Check if provided height range is valid for address indexes.
 fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
     if start == Height(0) || end == Height(0) {
@@ -1811,4 +1848,35 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
 
         Ok(Height(sanitized_height))
     }
+}
+
+/// Create a list of `ValuePool` objects from a `ValueBalance`.
+pub fn create_value_pools(value_balance: ValueBalance<NegativeAllowed>) -> Vec<ValuePool> {
+    vec![
+        ValuePool {
+            id: "lockbox".to_string(),
+            value_delta: Zec::from(value_balance.deferred_amount()),
+            value_delta_zat: value_balance.deferred_amount(),
+        },
+        ValuePool {
+            id: "orchard".to_string(),
+            value_delta: Zec::from(value_balance.orchard_amount()),
+            value_delta_zat: value_balance.orchard_amount(),
+        },
+        ValuePool {
+            id: "sapling".to_string(),
+            value_delta: Zec::from(value_balance.sapling_amount()),
+            value_delta_zat: value_balance.sapling_amount(),
+        },
+        ValuePool {
+            id: "sprout".to_string(),
+            value_delta: Zec::from(value_balance.sprout_amount()),
+            value_delta_zat: value_balance.sprout_amount(),
+        },
+        ValuePool {
+            id: "transparent".to_string(),
+            value_delta: Zec::from(value_balance.transparent_amount()),
+            value_delta_zat: value_balance.transparent_amount(),
+        },
+    ]
 }

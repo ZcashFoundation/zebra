@@ -37,6 +37,7 @@ use zebra_chain::{
     diagnostic::{task::WaitForPanics, CodeTimer},
     parameters::{Network, NetworkUpgrade},
     subtree::NoteCommitmentSubtreeIndex,
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -1869,6 +1870,33 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         Ok(ReadResponse::ValidBlockProposal)
+                    })
+                })
+                .wait_for_panics()
+            }
+            ReadRequest::ValuePools(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        let value_pool_change = block
+                            .map(|b| b.chain_value_pool_change(&HashMap::new(), None))
+                            .unwrap_or(Ok(ValueBalance::zero()));
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::ValuePools");
+
+                        Ok(ReadResponse::ValuePools(value_pool_change?))
                     })
                 })
                 .wait_for_panics()

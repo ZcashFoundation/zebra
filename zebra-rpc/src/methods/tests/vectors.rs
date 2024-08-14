@@ -145,6 +145,7 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                value_pools: vec![],
             }
         );
     }
@@ -169,6 +170,7 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                value_pools: vec![],
             }
         );
     }
@@ -193,6 +195,11 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                value_pools: create_value_pools(
+                    block
+                        .chain_value_pool_change(&std::collections::HashMap::new(), None)
+                        .unwrap()
+                ),
             }
         );
     }
@@ -217,6 +224,11 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                value_pools: create_value_pools(
+                    block
+                        .chain_value_pool_change(&std::collections::HashMap::new(), None)
+                        .unwrap()
+                ),
             }
         );
     }
@@ -241,6 +253,7 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                value_pools: vec![],
             }
         );
     }
@@ -265,6 +278,7 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                value_pools: vec![],
             }
         );
     }
