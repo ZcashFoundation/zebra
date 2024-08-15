@@ -15,6 +15,7 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     orchard,
     parameters::{
+        subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
         Network::Mainnet,
     },
@@ -43,7 +44,7 @@ async fn test_rpc_response_data() {
     let nu6_testnet = testnet::Parameters::build()
         .with_network_name("NU6Testnet")
         .with_activation_heights(ConfiguredActivationHeights {
-            nu6: Some(2_000_000),
+            nu6: Some(POST_NU6_FUNDING_STREAMS_TESTNET.height_range().start.0),
             ..Default::default()
         })
         .to_network();

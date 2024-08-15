@@ -3,9 +3,26 @@ source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
 expression: get_block_subsidy
 ---
 {
-  "miner": 1.5625,
+  "fundingstreams": [
+    {
+      "recipient": "Zcash Community Grants NU6",
+      "specification": "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model",
+      "value": 0.0625,
+      "valueZat": 6250000,
+      "address": "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"
+    }
+  ],
+  "lockboxstreams": [
+    {
+      "recipient": "Lockbox NU6",
+      "specification": "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model",
+      "value": 0.09375,
+      "valueZat": 9375000
+    }
+  ],
+  "miner": 0.625,
   "founders": 0.0,
-  "fundingstreamstotal": 0.0,
-  "lockboxtotal": 0.0,
-  "totalblocksubsidy": 1.5625
+  "fundingstreamstotal": 0.0625,
+  "lockboxtotal": 0.09375,
+  "totalblocksubsidy": 0.78125
 }
