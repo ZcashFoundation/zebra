@@ -148,6 +148,18 @@ pub async fn test_responses<State, ReadState>(
         mock_address_book,
     );
 
+    if network.is_a_test_network() && !network.is_default_testnet() {
+        let fake_future_nu6_block_height =
+            NetworkUpgrade::Nu6.activation_height(network).unwrap().0 + 100_000;
+        let get_block_subsidy = get_block_template_rpc
+            .get_block_subsidy(Some(fake_future_nu6_block_height))
+            .await
+            .expect("We should have a success response");
+        snapshot_rpc_getblocksubsidy("future_nu6_height", get_block_subsidy, &settings);
+        // We only want a snapshot of the `getblocksubsidy` method for the non-default Testnet (with an NU6 activation height).
+        return;
+    }
+
     // `getblockcount`
     let get_block_count = get_block_template_rpc
         .get_block_count()
@@ -186,16 +198,6 @@ pub async fn test_responses<State, ReadState>(
         .await
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("future_height", get_block_subsidy, &settings);
-
-    if network.is_default_testnet() {
-        let fake_future_nu6_block_height =
-            NetworkUpgrade::Nu6.activation_height(network).unwrap().0 + 100_000;
-        let get_block_subsidy = get_block_template_rpc
-            .get_block_subsidy(Some(fake_future_nu6_block_height))
-            .await
-            .expect("We should have a success response");
-        snapshot_rpc_getblocksubsidy("future_nu6_height", get_block_subsidy, &settings);
-    }
 
     let get_block_subsidy = get_block_template_rpc
         .get_block_subsidy(None)

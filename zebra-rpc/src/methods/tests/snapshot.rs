@@ -15,7 +15,7 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     orchard,
     parameters::{
-        testnet::{ConfiguredActivationHeights, Parameters},
+        testnet::{self, ConfiguredActivationHeights, Parameters},
         Network::Mainnet,
     },
     sapling,
@@ -40,10 +40,18 @@ pub const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
 async fn test_rpc_response_data() {
     let _init_guard = zebra_test::init();
     let default_testnet = Network::new_default_testnet();
+    let nu6_testnet = testnet::Parameters::build()
+        .with_network_name("NU6Testnet")
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu6: Some(2_000_000),
+            ..Default::default()
+        })
+        .to_network();
 
     tokio::join!(
         test_rpc_response_data_for_network(&Mainnet),
         test_rpc_response_data_for_network(&default_testnet),
+        test_rpc_response_data_for_network(&nu6_testnet),
         test_mocked_rpc_response_data_for_network(&Mainnet),
         test_mocked_rpc_response_data_for_network(&default_testnet),
     );
@@ -183,6 +191,11 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         settings.clone(),
     )
     .await;
+
+    // We only want a snapshot of the `getblocksubsidy` method for the non-default Testnet (with an NU6 activation height).
+    if network.is_a_test_network() && !network.is_default_testnet() {
+        return;
+    }
 
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
