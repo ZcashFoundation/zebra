@@ -9,7 +9,7 @@ use zebra_chain::{
 use crate::methods::get_block_template_rpcs::types::zec::Zec;
 
 /// A response to a `getblocksubsidy` RPC request
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct BlockSubsidy {
     /// An array of funding stream descriptions.
     /// Always present before NU6, because Zebra returns an error for heights before the first halving.
@@ -45,20 +45,6 @@ pub struct BlockSubsidy {
     /// This does not include the miner fee.
     #[serde(rename = "totalblocksubsidy")]
     pub total_block_subsidy: Zec<NonNegative>,
-}
-
-impl Default for BlockSubsidy {
-    fn default() -> Self {
-        Self {
-            funding_streams: vec![],
-            lockbox_streams: vec![],
-            miner: Zec::from_lossy_zec(0.0).unwrap(),
-            founders: Zec::from_lossy_zec(0.0).unwrap(),
-            funding_streams_total: Zec::from_lossy_zec(0.0).unwrap(),
-            lockbox_total: Zec::from_lossy_zec(0.0).unwrap(),
-            total_block_subsidy: Zec::from_lossy_zec(0.0).unwrap(),
-        }
-    }
 }
 
 /// A single funding stream's information in a  `getblocksubsidy` RPC request
