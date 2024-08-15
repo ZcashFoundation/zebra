@@ -10,11 +10,14 @@ use tower::{Service, ServiceExt};
 use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{self, Amount, NonNegative},
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{subsidy::ParameterSubsidy, Network, NetworkKind, POW_AVERAGING_WINDOW},
+    parameters::{
+        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
+    },
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -31,6 +34,7 @@ use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
+    errors::MapServerError,
     get_block_template_rpcs::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
@@ -1178,35 +1182,27 @@ where
                 });
             }
 
-            let expected_block_subsidy =
-                block_subsidy(height, &network).map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-
-            let miner_subsidy =
-                miner_subsidy(height, &network, expected_block_subsidy).map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let funding_streams = funding_stream_values(height, &network, expected_block_subsidy)
-                .map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
-            let mut funding_streams: Vec<_> = funding_streams
-                .iter()
-                .filter_map(|(receiver, value)| {
-                    let address = funding_stream_address(height, &network, *receiver)?;
-                    Some((*receiver, FundingStream::new(*receiver, *value, address)))
-                })
-                .collect();
+            let total_block_subsidy = block_subsidy(height, &network).map_server_error()?;
+            let miner_subsidy =
+                miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
+
+            let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
+                funding_stream_values(height, &network, total_block_subsidy)
+                    .map_server_error()?
+                    .into_iter()
+                    // Separate the funding streams into deferred and non-deferred streams
+                    .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
+
+            let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
+
+            let [lockbox_total, funding_streams_total]: [std::result::Result<
+                Amount<NonNegative>,
+                amount::Error,
+            >; 2] = [&lockbox_streams, &funding_streams]
+                .map(|streams| streams.iter().map(|&(_, amount)| amount).sum());
 
             // Use the same funding stream order as zcashd
             funding_streams.sort_by_key(|(receiver, _funding_stream)| {
@@ -1215,12 +1211,26 @@ where
                     .position(|zcashd_receiver| zcashd_receiver == receiver)
             });
 
-            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
+            // Format the funding streams and lockbox streams
+            let [funding_streams, lockbox_streams]: [Vec<_>; 2] =
+                [funding_streams, lockbox_streams].map(|streams| {
+                    streams
+                        .into_iter()
+                        .map(|(receiver, value)| {
+                            let address = funding_stream_address(height, &network, receiver);
+                            FundingStream::new(is_nu6, receiver, value, address)
+                        })
+                        .collect()
+                });
 
             Ok(BlockSubsidy {
                 miner: miner_subsidy.into(),
                 founders: founders.into(),
                 funding_streams,
+                lockbox_streams,
+                funding_streams_total: funding_streams_total.map_server_error()?.into(),
+                lockbox_total: lockbox_total.map_server_error()?.into(),
+                total_block_subsidy: total_block_subsidy.into(),
             })
         }
         .boxed()
