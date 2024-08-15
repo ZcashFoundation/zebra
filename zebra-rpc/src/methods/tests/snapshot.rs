@@ -194,11 +194,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     )
     .await;
 
-    // We only want a snapshot of the `getblocksubsidy` method for the non-default Testnet (with an NU6 activation height).
-    if network.is_a_test_network() && !network.is_default_testnet() {
-        return;
-    }
-
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "RPC test",
@@ -211,6 +206,16 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         latest_chain_tip,
     );
 
+    // We only want a snapshot of the `getblocksubsidy` and `getblockchaininfo` methods for the non-default Testnet (with an NU6 activation height).
+    if network.is_a_test_network() && !network.is_default_testnet() {
+        let get_blockchain_info = rpc
+            .get_blockchain_info()
+            .expect("We should have a GetBlockChainInfo struct");
+        snapshot_rpc_getblockchaininfo("_future_nu6_height", get_blockchain_info, &settings);
+
+        return;
+    }
+
     // `getinfo`
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
     snapshot_rpc_getinfo(get_info, &settings);
@@ -219,7 +224,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_blockchain_info = rpc
         .get_blockchain_info()
         .expect("We should have a GetBlockChainInfo struct");
-    snapshot_rpc_getblockchaininfo(get_blockchain_info, &settings);
+    snapshot_rpc_getblockchaininfo("", get_blockchain_info, &settings);
 
     // get the first transaction of the first block which is not the genesis
     let first_block_first_transaction = &blocks[1].transactions[0];
@@ -546,9 +551,13 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
 }
 
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, settings: &insta::Settings) {
+fn snapshot_rpc_getblockchaininfo(
+    variant_suffix: &str,
+    info: GetBlockChainInfo,
+    settings: &insta::Settings,
+) {
     settings.bind(|| {
-        insta::assert_json_snapshot!("get_blockchain_info", info, {
+        insta::assert_json_snapshot!(format!("get_blockchain_info{variant_suffix}"), info, {
             ".estimatedheight" => dynamic_redaction(|value, _path| {
                 // assert that the value looks like a valid height here
                 assert!(u32::try_from(value.as_u64().unwrap()).unwrap() < Height::MAX_AS_U32);
