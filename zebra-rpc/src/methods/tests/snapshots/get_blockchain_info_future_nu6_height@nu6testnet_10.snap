@@ -10,12 +10,12 @@ expression: info
   "upgrades": {
     "5ba81b19": {
       "name": "Overwinter",
-      "activationheight": 207500,
+      "activationheight": 584000,
       "status": "pending"
     },
     "76b809bb": {
       "name": "Sapling",
-      "activationheight": 280000,
+      "activationheight": 584000,
       "status": "pending"
     },
     "2bb40e60": {
@@ -25,17 +25,22 @@ expression: info
     },
     "f5b9230b": {
       "name": "Heartwood",
-      "activationheight": 903800,
+      "activationheight": 2942000,
       "status": "pending"
     },
     "e9ff75a6": {
       "name": "Canopy",
-      "activationheight": 1028500,
+      "activationheight": 2942000,
       "status": "pending"
     },
     "c2d6d0b4": {
       "name": "NU5",
-      "activationheight": 1842420,
+      "activationheight": 2942000,
+      "status": "pending"
+    },
+    "c8e71055": {
+      "name": "Nu6",
+      "activationheight": 2942000,
       "status": "pending"
     }
   },

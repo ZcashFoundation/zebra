@@ -10,7 +10,7 @@ use tower::{Service, ServiceExt};
 use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{self, Amount, NonNegative},
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
@@ -34,6 +34,7 @@ use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
+    errors::MapServerError,
     get_block_template_rpcs::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
@@ -1184,56 +1185,24 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let mut lockbox_total = Amount::zero();
-            let mut funding_streams_total = Amount::zero();
-
-            let expected_block_subsidy =
-                block_subsidy(height, &network).map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-
+            let total_block_subsidy = block_subsidy(height, &network).map_server_error()?;
             let miner_subsidy =
-                miner_subsidy(height, &network, expected_block_subsidy).map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
 
-            let all_funding_stream =
-                funding_stream_values(height, &network, expected_block_subsidy).map_err(
-                    |error| Error {
-                        code: ErrorCode::ServerError(0),
-                        message: error.to_string(),
-                        data: None,
-                    },
-                )?;
+            let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
+                funding_stream_values(height, &network, total_block_subsidy)
+                    .map_server_error()?
+                    .into_iter()
+                    // Separate the funding streams into deferred and non-deferred streams
+                    .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
-            // Separate the funding streams into deferred and non-deferred streams
-            let mut funding_streams: Vec<_> = Vec::new();
-            let mut lockbox_streams: Vec<_> = Vec::new();
-            let is_nu6 = NetworkUpgrade::Nu6
-                .activation_height(&network)
-                .unwrap_or(Height::MAX)
-                <= height;
+            let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
 
-            for (receiver, value) in all_funding_stream.iter() {
-                let address = funding_stream_address(height, &network, *receiver);
-                let funding_stream = FundingStream::new(is_nu6, *receiver, *value, address);
-
-                match receiver {
-                    FundingStreamReceiver::Deferred => {
-                        lockbox_total = (lockbox_total + *value).expect("total is always valid");
-                        lockbox_streams.push((*receiver, funding_stream));
-                    }
-                    _ => {
-                        funding_streams_total =
-                            (funding_streams_total + *value).expect("total is always valid");
-                        funding_streams.push((*receiver, funding_stream));
-                    }
-                }
-            }
+            let [lockbox_total, funding_streams_total]: [std::result::Result<
+                Amount<NonNegative>,
+                amount::Error,
+            >; 2] = [&lockbox_streams, &funding_streams]
+                .map(|streams| streams.iter().map(|&(_, amount)| amount).sum());
 
             // Use the same funding stream order as zcashd
             funding_streams.sort_by_key(|(receiver, _funding_stream)| {
@@ -1243,22 +1212,24 @@ where
             });
 
             // Format the funding streams and lockbox streams
-            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
-            let (_receivers, lockbox_streams): (Vec<_>, _) = lockbox_streams.into_iter().unzip();
-
-            // Calculate block subsidy and make sure it is the same as expected block subsidy.
-            let total_block_subsidy =
-                (miner_subsidy + founders + funding_streams_total + lockbox_total)
-                    .expect("total is always valid");
-            assert_eq!(total_block_subsidy, expected_block_subsidy);
+            let [funding_streams, lockbox_streams]: [Vec<_>; 2] =
+                [funding_streams, lockbox_streams].map(|streams| {
+                    streams
+                        .into_iter()
+                        .map(|(receiver, value)| {
+                            let address = funding_stream_address(height, &network, receiver);
+                            FundingStream::new(is_nu6, receiver, value, address)
+                        })
+                        .collect()
+                });
 
             Ok(BlockSubsidy {
                 miner: miner_subsidy.into(),
                 founders: founders.into(),
                 funding_streams,
                 lockbox_streams,
-                funding_streams_total: funding_streams_total.into(),
-                lockbox_total: lockbox_total.into(),
+                funding_streams_total: funding_streams_total.map_server_error()?.into(),
+                lockbox_total: lockbox_total.map_server_error()?.into(),
                 total_block_subsidy: total_block_subsidy.into(),
             })
         }
