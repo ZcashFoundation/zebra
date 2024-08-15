@@ -69,23 +69,33 @@ pub enum FundingStreamReceiver {
 
 impl FundingStreamReceiver {
     /// Returns a human-readable name and a specification URL for the receiver, as described in
-    /// [ZIP-1014] and [`zcashd`].
+    /// [ZIP-1014] and [`zcashd`] before NU6. After NU6, the specification is in the [ZIP-lockbox].
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
-    // TODO: Update method documentation with a reference to https://zips.z.cash/draft-nuttycom-funding-allocation once its
-    //       status is updated to 'Proposed'.
-    pub fn info(&self) -> (&'static str, &'static str) {
-        (
-            match self {
-                FundingStreamReceiver::Ecc => "Electric Coin Company",
-                FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
-                FundingStreamReceiver::MajorGrants => "Major Grants",
-                // TODO: Find out what this should be called and update the funding stream name
-                FundingStreamReceiver::Deferred => "Lockbox",
-            },
-            FUNDING_STREAM_SPECIFICATION,
-        )
+    /// [ZIP-lockbox]: https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model
+    pub fn info(&self, is_nu6: bool) -> (&'static str, &'static str) {
+        if is_nu6 {
+            (
+                match self {
+                    FundingStreamReceiver::Ecc => "Electric Coin Company",
+                    FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
+                    FundingStreamReceiver::MajorGrants => "Zcash Community Grants NU6",
+                    FundingStreamReceiver::Deferred => "Lockbox NU6",
+                },
+                LOCKBOX_SPECIFICATION,
+            )
+        } else {
+            (
+                match self {
+                    FundingStreamReceiver::Ecc => "Electric Coin Company",
+                    FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
+                    FundingStreamReceiver::MajorGrants => "Major Grants",
+                    FundingStreamReceiver::Deferred => "Lockbox NU6",
+                },
+                FUNDING_STREAM_SPECIFICATION,
+            )
+        }
     }
 }
 
@@ -94,11 +104,15 @@ impl FundingStreamReceiver {
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 
-// TODO: Update the link for post-NU6 funding streams.
-/// The specification for all current funding stream receivers, a URL that links to [ZIP-214].
+/// The specification for pre-NU6 funding stream receivers, a URL that links to [ZIP-214].
 ///
 /// [ZIP-214]: https://zips.z.cash/zip-0214
 pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
+
+/// The specification for post-NU6 funding stream and lockbox receivers, a URL that links to [ZIP-lockbox].
+///
+/// [ZIP-lockbox]: https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model
+pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model";
 
 /// Funding stream recipients and height ranges.
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
