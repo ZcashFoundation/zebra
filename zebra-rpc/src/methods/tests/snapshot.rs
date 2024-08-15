@@ -44,6 +44,7 @@ async fn test_rpc_response_data() {
     let nu6_testnet = testnet::Parameters::build()
         .with_network_name("NU6Testnet")
         .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(584_000),
             nu6: Some(POST_NU6_FUNDING_STREAMS_TESTNET.height_range().start.0),
             ..Default::default()
         })
