@@ -1,6 +1,6 @@
 //! Randomised property tests for RPC methods.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
 use hex::ToHex;
@@ -11,7 +11,7 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{Block, Height},
+    block::{self, Block, Height},
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::{
         Network::{self, *},
@@ -20,6 +20,7 @@ use zebra_chain::{
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
+    value_balance::ValueBalance,
 };
 use zebra_node_services::mempool;
 use zebra_state::BoxError;
@@ -553,11 +554,25 @@ proptest! {
             NoChainTip,
         );
 
+
         runtime.block_on(async move {
-            let response = rpc.get_blockchain_info().await;
+            let response_fut = rpc.get_blockchain_info();
+            let mock_state_handler = {
+                let mut state = state.clone();
+                async move {
+                    state
+                        .expect_request(zebra_state::ReadRequest::TipPoolValues)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(Err(BoxError::from("no chain tip available yet")));
+                }
+            };
+
+            let (response, _) = tokio::join!(response_fut, mock_state_handler);
+
             prop_assert_eq!(
                 &response.err().unwrap().message,
-                "No Chain tip available yet"
+                "no chain tip available yet"
             );
 
             // The queue task should continue without errors or panics
@@ -566,6 +581,7 @@ proptest! {
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -581,16 +597,10 @@ proptest! {
         let mut mempool = MockService::build().for_prop_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-        // get block data
+        // get arbitrary chain tip data
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
         let block_time = block.header.time;
-
-        // create a mocked `ChainTip`
-        let (chain_tip, mock_chain_tip_sender) = MockChainTip::new();
-        mock_chain_tip_sender.send_best_tip_height(block_height);
-        mock_chain_tip_sender.send_best_tip_hash(block_hash);
-        mock_chain_tip_sender.send_best_tip_block_time(block_time);
 
         // Start RPC with the mocked `ChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -601,12 +611,43 @@ proptest! {
             true,
             mempool.clone(),
             Buffer::new(state.clone(), 1),
-            chain_tip,
+            NoChainTip,
         );
 
         // check no requests were made during this test
         runtime.block_on(async move {
-            let response = rpc.get_blockchain_info().await;
+            let response_fut = rpc.get_blockchain_info();
+            let mock_state_handler = {
+                let mut state = state.clone();
+                async move {
+                    state
+                        .expect_request(zebra_state::ReadRequest::TipPoolValues)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::TipPoolValues {
+                            tip_height: block_height,
+                            tip_hash: block_hash,
+                            value_balance: ValueBalance::default(),
+                        });
+
+                    state
+                        .expect_request(zebra_state::ReadRequest::BlockHeader(block_hash.into()))
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::BlockHeader(Some(Arc::new(block::Header {
+                            time: block_time,
+                            version: Default::default(),
+                            previous_block_hash: Default::default(),
+                            merkle_root: Default::default(),
+                            commitment_bytes: Default::default(),
+                            difficulty_threshold: Default::default(),
+                            nonce: Default::default(),
+                            solution: Default::default()
+                        }))));
+                }
+            };
+
+            let (response, _) = tokio::join!(response_fut, mock_state_handler);
 
             // Check response
             match response {
