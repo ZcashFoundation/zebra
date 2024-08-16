@@ -2,7 +2,7 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review -p zebra-rpc --lib -- test_rpc_response_data
+//! cargo insta test --review --release -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
 use std::collections::BTreeMap;
