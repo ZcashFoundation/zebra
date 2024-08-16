@@ -553,17 +553,17 @@ proptest! {
             NoChainTip,
         );
 
-        let response = rpc.get_blockchain_info();
-        prop_assert_eq!(
-            &response.err().unwrap().message,
-            "No Chain tip available yet"
-        );
-
-        // The queue task should continue without errors or panics
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(rpc_tx_queue_task_result.is_none());
-
         runtime.block_on(async move {
+            let response = rpc.get_blockchain_info().await;
+            prop_assert_eq!(
+                &response.err().unwrap().message,
+                "No Chain tip available yet"
+            );
+
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(rpc_tx_queue_task_result.is_none());
+
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
             Ok::<_, TestCaseError>(())
@@ -603,48 +603,49 @@ proptest! {
             Buffer::new(state.clone(), 1),
             chain_tip,
         );
-        let response = rpc.get_blockchain_info();
-
-        // Check response
-        match response {
-            Ok(info) => {
-                prop_assert_eq!(info.chain, network.bip70_network_name());
-                prop_assert_eq!(info.blocks, block_height);
-                prop_assert_eq!(info.best_block_hash, block_hash);
-                prop_assert!(info.estimated_height < Height::MAX);
-
-                prop_assert_eq!(
-                    info.consensus.chain_tip.0,
-                    NetworkUpgrade::current(&network, block_height)
-                        .branch_id()
-                        .unwrap()
-                );
-                prop_assert_eq!(
-                    info.consensus.next_block.0,
-                    NetworkUpgrade::current(&network, (block_height + 1).unwrap())
-                        .branch_id()
-                        .unwrap()
-                );
-
-                for u in info.upgrades {
-                    let mut status = NetworkUpgradeStatus::Active;
-                    if block_height < u.1.activation_height {
-                        status = NetworkUpgradeStatus::Pending;
-                    }
-                    prop_assert_eq!(u.1.status, status);
-                }
-            }
-            Err(_) => {
-                unreachable!("Test should never error with the data we are feeding it")
-            }
-        };
-
-        // The queue task should continue without errors or panics
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(rpc_tx_queue_task_result.is_none());
 
         // check no requests were made during this test
         runtime.block_on(async move {
+            let response = rpc.get_blockchain_info().await;
+
+            // Check response
+            match response {
+                Ok(info) => {
+                    prop_assert_eq!(info.chain, network.bip70_network_name());
+                    prop_assert_eq!(info.blocks, block_height);
+                    prop_assert_eq!(info.best_block_hash, block_hash);
+                    prop_assert!(info.estimated_height < Height::MAX);
+
+                    prop_assert_eq!(
+                        info.consensus.chain_tip.0,
+                        NetworkUpgrade::current(&network, block_height)
+                            .branch_id()
+                            .unwrap()
+                    );
+                    prop_assert_eq!(
+                        info.consensus.next_block.0,
+                        NetworkUpgrade::current(&network, (block_height + 1).unwrap())
+                            .branch_id()
+                            .unwrap()
+                    );
+
+                    for u in info.upgrades {
+                        let mut status = NetworkUpgradeStatus::Active;
+                        if block_height < u.1.activation_height {
+                            status = NetworkUpgradeStatus::Pending;
+                        }
+                        prop_assert_eq!(u.1.status, status);
+                    }
+                }
+                Err(_) => {
+                    unreachable!("Test should never error with the data we are feeding it")
+                }
+            };
+
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(rpc_tx_queue_task_result.is_none());
+
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 

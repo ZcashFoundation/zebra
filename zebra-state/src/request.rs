@@ -815,6 +815,10 @@ pub enum ReadRequest {
     /// with the current best chain tip.
     Tip,
 
+    /// Returns [`ReadResponse::TipPoolValues(Option<(Height, block::Hash, ValueBalance)>)`](ReadResponse::TipPoolValues)
+    /// with the current best chain tip.
+    TipPoolValues,
+
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
     /// Returns
@@ -1065,6 +1069,7 @@ impl ReadRequest {
     fn variant_name(&self) -> &'static str {
         match self {
             ReadRequest::Tip => "tip",
+            ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
             ReadRequest::BlockHeader(_) => "block_header",
