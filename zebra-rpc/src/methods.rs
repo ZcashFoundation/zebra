@@ -87,7 +87,7 @@ pub trait Rpc {
     /// Some fields from the zcashd reference are missing from Zebra's [`GetBlockChainInfo`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
     #[rpc(name = "getblockchaininfo")]
-    fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+    fn get_blockchain_info(&self) -> BoxFuture<Result<GetBlockChainInfo>>;
 
     /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
     ///
@@ -504,94 +504,97 @@ where
 
     // TODO: use a generic error constructor (#5548)
     #[allow(clippy::unwrap_in_result)]
-    fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
-        let network = &self.network;
+    fn get_blockchain_info(&self) -> BoxFuture<Result<GetBlockChainInfo>> {
+        let network = self.network.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
+        let debug_force_finished_sync = self.debug_force_finished_sync;
+        let _state = self.state.clone();
 
-        // `chain` field
-        let chain = self.network.bip70_network_name();
+        async move {
+            // `chain` field
+            let chain = network.bip70_network_name();
 
-        // `blocks` and `best_block_hash` fields
-        let (tip_height, tip_hash) = self
-            .latest_chain_tip
-            .best_tip_height_and_hash()
-            .ok_or_server_error("No Chain tip available yet")?;
+            // `blocks` and `best_block_hash` fields
+            let (tip_height, tip_hash) = latest_chain_tip
+                .best_tip_height_and_hash()
+                .ok_or_server_error("No Chain tip available yet")?;
 
-        // `estimated_height` field
-        let current_block_time = self
-            .latest_chain_tip
-            .best_tip_block_time()
-            .ok_or_server_error("No Chain tip available yet")?;
+            // `estimated_height` field
+            let current_block_time = latest_chain_tip
+                .best_tip_block_time()
+                .ok_or_server_error("No Chain tip available yet")?;
 
-        let zebra_estimated_height = self
-            .latest_chain_tip
-            .estimate_network_chain_tip_height(network, Utc::now())
-            .ok_or_server_error("No Chain tip available yet")?;
+            let zebra_estimated_height = latest_chain_tip
+                .estimate_network_chain_tip_height(&network, Utc::now())
+                .ok_or_server_error("No Chain tip available yet")?;
 
-        let mut estimated_height =
-            if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
-                tip_height
-            } else {
-                zebra_estimated_height
+            let mut estimated_height =
+                if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
+                    tip_height
+                } else {
+                    zebra_estimated_height
+                };
+
+            // If we're testing the mempool, force the estimated height to be the actual tip height.
+            if debug_force_finished_sync {
+                estimated_height = tip_height;
+            }
+
+            // `upgrades` object
+            //
+            // Get the network upgrades in height order, like `zcashd`.
+            let mut upgrades = IndexMap::new();
+            for (activation_height, network_upgrade) in network.full_activation_list() {
+                // Zebra defines network upgrades based on incompatible consensus rule changes,
+                // but zcashd defines them based on ZIPs.
+                //
+                // All the network upgrades with a consensus branch ID are the same in Zebra and zcashd.
+                if let Some(branch_id) = network_upgrade.branch_id() {
+                    // zcashd's RPC seems to ignore Disabled network upgrades, so Zebra does too.
+                    let status = if tip_height >= activation_height {
+                        NetworkUpgradeStatus::Active
+                    } else {
+                        NetworkUpgradeStatus::Pending
+                    };
+
+                    let upgrade = NetworkUpgradeInfo {
+                        name: network_upgrade,
+                        activation_height,
+                        status,
+                    };
+                    upgrades.insert(ConsensusBranchIdHex(branch_id), upgrade);
+                }
+            }
+
+            // `consensus` object
+            let next_block_height =
+                (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
+            let consensus = TipConsensusBranch {
+                chain_tip: ConsensusBranchIdHex(
+                    NetworkUpgrade::current(&network, tip_height)
+                        .branch_id()
+                        .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
+                ),
+                next_block: ConsensusBranchIdHex(
+                    NetworkUpgrade::current(&network, next_block_height)
+                        .branch_id()
+                        .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
+                ),
             };
 
-        // If we're testing the mempool, force the estimated height to be the actual tip height.
-        if self.debug_force_finished_sync {
-            estimated_height = tip_height;
+            let response = GetBlockChainInfo {
+                chain,
+                blocks: tip_height,
+                best_block_hash: tip_hash,
+                estimated_height,
+                value_pools: types::ValuePoolBalance::zero_pools(),
+                upgrades,
+                consensus,
+            };
+
+            Ok(response)
         }
-
-        // `upgrades` object
-        //
-        // Get the network upgrades in height order, like `zcashd`.
-        let mut upgrades = IndexMap::new();
-        for (activation_height, network_upgrade) in network.full_activation_list() {
-            // Zebra defines network upgrades based on incompatible consensus rule changes,
-            // but zcashd defines them based on ZIPs.
-            //
-            // All the network upgrades with a consensus branch ID are the same in Zebra and zcashd.
-            if let Some(branch_id) = network_upgrade.branch_id() {
-                // zcashd's RPC seems to ignore Disabled network upgrades, so Zebra does too.
-                let status = if tip_height >= activation_height {
-                    NetworkUpgradeStatus::Active
-                } else {
-                    NetworkUpgradeStatus::Pending
-                };
-
-                let upgrade = NetworkUpgradeInfo {
-                    name: network_upgrade,
-                    activation_height,
-                    status,
-                };
-                upgrades.insert(ConsensusBranchIdHex(branch_id), upgrade);
-            }
-        }
-
-        // `consensus` object
-        let next_block_height =
-            (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
-        let consensus = TipConsensusBranch {
-            chain_tip: ConsensusBranchIdHex(
-                NetworkUpgrade::current(network, tip_height)
-                    .branch_id()
-                    .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
-            ),
-            next_block: ConsensusBranchIdHex(
-                NetworkUpgrade::current(network, next_block_height)
-                    .branch_id()
-                    .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
-            ),
-        };
-
-        let response = GetBlockChainInfo {
-            chain,
-            blocks: tip_height,
-            best_block_hash: tip_hash,
-            estimated_height,
-            value_pools: types::ValuePoolBalance::zero_pools(),
-            upgrades,
-            consensus,
-        };
-
-        Ok(response)
+        .boxed()
     }
 
     // TODO: use a generic error constructor (#5548)
