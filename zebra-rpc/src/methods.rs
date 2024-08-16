@@ -45,6 +45,8 @@ use errors::{MapServerError, OkOrServerError};
 // We don't use a types/ module here, because it is redundant.
 pub mod trees;
 
+pub mod types;
+
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
 
@@ -584,6 +586,7 @@ where
             blocks: tip_height,
             best_block_hash: tip_hash,
             estimated_height,
+            value_pools: types::ValuePoolBalance::zero_pools(),
             upgrades,
             consensus,
         };
@@ -1372,6 +1375,10 @@ pub struct GetBlockChainInfo {
     #[serde(rename = "estimatedheight")]
     estimated_height: Height,
 
+    /// Value pool balances
+    #[serde(rename = "valuePools")]
+    value_pools: [types::ValuePoolBalance; 5],
+
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
 
@@ -1386,6 +1393,7 @@ impl Default for GetBlockChainInfo {
             blocks: Height(1),
             best_block_hash: block::Hash([0; 32]),
             estimated_height: Height(1),
+            value_pools: types::ValuePoolBalance::zero_pools(),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
