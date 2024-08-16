@@ -2,7 +2,7 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review -p zebra-rpc --lib -- test_rpc_response_data
+//! cargo insta test --review --release -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
 use std::collections::BTreeMap;
@@ -210,6 +210,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     if network.is_a_test_network() && !network.is_default_testnet() {
         let get_blockchain_info = rpc
             .get_blockchain_info()
+            .await
             .expect("We should have a GetBlockChainInfo struct");
         snapshot_rpc_getblockchaininfo("_future_nu6_height", get_blockchain_info, &settings);
 
@@ -223,6 +224,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // `getblockchaininfo`
     let get_blockchain_info = rpc
         .get_blockchain_info()
+        .await
         .expect("We should have a GetBlockChainInfo struct");
     snapshot_rpc_getblockchaininfo("", get_blockchain_info, &settings);
 
