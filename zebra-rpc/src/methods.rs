@@ -528,17 +528,17 @@ where
                 .estimate_network_chain_tip_height(&network, Utc::now())
                 .ok_or_server_error("No Chain tip available yet")?;
 
-            let mut estimated_height =
-                if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
-                    tip_height
-                } else {
-                    zebra_estimated_height
-                };
-
-            // If we're testing the mempool, force the estimated height to be the actual tip height.
-            if debug_force_finished_sync {
-                estimated_height = tip_height;
-            }
+            // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
+            // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
+            // later than the current time on the local clock.
+            let estimated_height = if current_block_time > Utc::now()
+                || zebra_estimated_height < tip_height
+                || debug_force_finished_sync
+            {
+                tip_height
+            } else {
+                zebra_estimated_height
+            };
 
             // `upgrades` object
             //
