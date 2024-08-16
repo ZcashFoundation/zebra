@@ -551,7 +551,6 @@ where
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>> {
         let mut state = self.state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
@@ -567,11 +566,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_server_error()?;
 
             match response {
                 zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHash(hash)),
@@ -586,7 +581,6 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_block_template(
         &self,
         parameters: Option<get_block_template::JsonParameters>,
@@ -830,11 +824,7 @@ where
                                     Is Zebra shutting down?"
                                 );
 
-                                return Err(Error {
-                                    code: ErrorCode::ServerError(0),
-                                    message: recv_error.to_string(),
-                                    data: None,
-                                });
+                                return Err(recv_error).map_server_error();
                             }
                         }
                     }

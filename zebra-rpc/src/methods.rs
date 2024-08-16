@@ -502,7 +502,6 @@ where
         Ok(response)
     }
 
-    // TODO: use a generic error constructor (#5548)
     #[allow(clippy::unwrap_in_result)]
     fn get_blockchain_info(&self) -> BoxFuture<Result<GetBlockChainInfo>> {
         let network = self.network.clone();
@@ -617,8 +616,6 @@ where
         }
         .boxed()
     }
-
-    // TODO: use a generic error constructor (#5548)
     fn get_address_balance(
         &self,
         address_strings: AddressStrings,
@@ -642,7 +639,6 @@ where
     }
 
     // TODO: use HexData or GetRawTransaction::Bytes to handle the transaction data argument
-    //       use a generic error constructor (#5548)
     fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
@@ -990,7 +986,6 @@ where
     }
 
     // TODO: use HexData or SentTransactionHash to handle the transaction ID
-    //       use a generic error constructor (#5548)
     fn get_raw_transaction(
         &self,
         txid_hex: String,
@@ -1224,7 +1219,6 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_address_tx_ids(
         &self,
         request: GetAddressTxIdsRequest,
@@ -1285,7 +1279,6 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_address_utxos(
         &self,
         address_strings: AddressStrings,
