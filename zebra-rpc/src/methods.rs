@@ -21,7 +21,7 @@ use tracing::Instrument;
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
-    chain_tip::ChainTip,
+    chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::ZcashDeserialize,
     subtree::NoteCommitmentSubtreeIndex,
@@ -506,32 +506,53 @@ where
     #[allow(clippy::unwrap_in_result)]
     fn get_blockchain_info(&self) -> BoxFuture<Result<GetBlockChainInfo>> {
         let network = self.network.clone();
-        let latest_chain_tip = self.latest_chain_tip.clone();
         let debug_force_finished_sync = self.debug_force_finished_sync;
-        let _state = self.state.clone();
+        let mut state = self.state.clone();
 
         async move {
             // `chain` field
             let chain = network.bip70_network_name();
 
-            // `blocks` and `best_block_hash` fields
-            let (tip_height, tip_hash) = latest_chain_tip
-                .best_tip_height_and_hash()
-                .ok_or_server_error("No Chain tip available yet")?;
+            let request = zebra_state::ReadRequest::TipPoolValues;
+            let response: zebra_state::ReadResponse = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_server_error()?;
 
-            // `estimated_height` field
-            let current_block_time = latest_chain_tip
-                .best_tip_block_time()
-                .ok_or_server_error("No Chain tip available yet")?;
+            let zebra_state::ReadResponse::TipPoolValues {
+                tip_height,
+                tip_hash,
+                value_balance,
+            } = response
+            else {
+                unreachable!("unmatched response to a TipPoolValues request")
+            };
 
-            let zebra_estimated_height = latest_chain_tip
-                .estimate_network_chain_tip_height(&network, Utc::now())
-                .ok_or_server_error("No Chain tip available yet")?;
+            let request = zebra_state::ReadRequest::BlockHeader(tip_hash.into());
+            let response: zebra_state::ReadResponse = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_server_error()?;
+
+            let zebra_state::ReadResponse::BlockHeader(block_header) = response else {
+                unreachable!("unmatched response to a BlockHeader request")
+            };
+
+            let tip_block_time = block_header
+                .ok_or_server_error("unexpectedly could not read best chain tip block header")?
+                .time;
+
+            let now = Utc::now();
+            let zebra_estimated_height =
+                NetworkChainTipHeightEstimator::new(tip_block_time, tip_height, &network)
+                    .estimate_height_at(now);
 
             // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
             // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
             // later than the current time on the local clock.
-            let estimated_height = if current_block_time > Utc::now()
+            let estimated_height = if tip_block_time > now
                 || zebra_estimated_height < tip_height
                 || debug_force_finished_sync
             {
@@ -587,7 +608,7 @@ where
                 blocks: tip_height,
                 best_block_hash: tip_hash,
                 estimated_height,
-                value_pools: types::ValuePoolBalance::zero_pools(),
+                value_pools: types::ValuePoolBalance::from_value_balance(value_balance),
                 upgrades,
                 consensus,
             };
