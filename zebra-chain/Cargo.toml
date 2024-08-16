@@ -147,7 +147,7 @@ rand = { version = "0.8.5", optional = true }
 rand_chacha = { version = "0.3.1", optional = true }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.38", optional = true }
-
+equihash-solver = { version = "0.2.0", git = "https://github.com/ZcashFoundation/librustzcash.git", branch = "equihash-solver-tromp", features = ["solver"], package = "equihash" }
 [dev-dependencies]
 # Benchmarks
 criterion = { version = "0.5.1", features = ["html_reports"] }
