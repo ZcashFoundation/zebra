@@ -252,6 +252,31 @@ impl StartCmd {
             config.network.network.clone(),
         );
 
+        // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
+        //       any related unit tests sometimes crash with memory errors
+        #[cfg(feature = "indexer-rpcs")]
+        let indexer_rpc_task_handle =
+            if let Some(indexer_listen_addr) = config.rpc.indexer_listen_addr {
+                info!("spawning indexer RPC server");
+                let (indexer_rpc_task_handle, _listen_addr) = zebra_rpc::indexer::server::init(
+                    indexer_listen_addr,
+                    read_only_state_service.clone(),
+                    latest_chain_tip.clone(),
+                )
+                .await
+                .map_err(|err| eyre!(err))?;
+
+                indexer_rpc_task_handle
+            } else {
+                warn!("configure an indexer_listen_addr to start the indexer RPC server");
+                tokio::spawn(std::future::pending().in_current_span())
+            };
+
+        #[cfg(not(feature = "indexer-rpcs"))]
+        // Spawn a dummy indexer rpc task which doesn't do anything and never finishes.
+        let indexer_rpc_task_handle: tokio::task::JoinHandle<Result<(), tower::BoxError>> =
+            tokio::spawn(std::future::pending().in_current_span());
+
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
         let block_gossip_task_handle = tokio::spawn(
@@ -367,6 +392,7 @@ impl StartCmd {
 
         // ongoing tasks
         pin!(rpc_task_handle);
+        pin!(indexer_rpc_task_handle);
         pin!(rpc_tx_queue_task_handle);
         pin!(syncer_task_handle);
         pin!(block_gossip_task_handle);
@@ -397,6 +423,13 @@ impl StartCmd {
                     rpc_result
                         .expect("unexpected panic in the rpc task");
                     info!("rpc task exited");
+                    Ok(())
+                }
+
+                indexer_rpc_join_result = &mut indexer_rpc_task_handle => {
+                    let indexer_rpc_server_result = indexer_rpc_join_result
+                        .expect("unexpected panic in the rpc task");
+                    info!(?indexer_rpc_server_result, "indexer rpc task exited");
                     Ok(())
                 }
 

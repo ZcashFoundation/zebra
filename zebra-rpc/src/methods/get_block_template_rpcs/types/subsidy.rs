@@ -2,9 +2,9 @@
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
+    parameters::subsidy::FundingStreamReceiver,
     transparent,
 };
-use zebra_consensus::{funding_stream_recipient_info, FundingStreamReceiver};
 
 use crate::methods::get_block_template_rpcs::types::zec::Zec;
 
@@ -66,16 +66,16 @@ impl FundingStream {
     pub fn new(
         receiver: FundingStreamReceiver,
         value: Amount<NonNegative>,
-        address: transparent::Address,
+        address: &transparent::Address,
     ) -> FundingStream {
-        let (recipient, specification) = funding_stream_recipient_info(receiver);
+        let (name, specification) = receiver.info();
 
         FundingStream {
-            recipient: recipient.to_string(),
+            recipient: name.to_string(),
             specification: specification.to_string(),
             value: value.into(),
             value_zat: value,
-            address,
+            address: address.clone(),
         }
     }
 }

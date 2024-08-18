@@ -1,4 +1,318 @@
 
 # cargo-vet audits file
 
-[audits]
+[[audits.axum]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.20 -> 0.7.5"
+
+[[audits.axum-core]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.4 -> 0.4.3"
+
+[[audits.bytes]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.6.0 -> 1.6.1"
+
+[[audits.bytes]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.6.1 -> 1.7.1"
+
+[[audits.clap_derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "4.5.5 -> 4.5.8"
+
+[[audits.clap_derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-run"
+delta = "4.5.5 -> 4.5.8"
+
+[[audits.clap_derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-run"
+delta = "4.5.5 -> 4.5.8"
+
+[[audits.clap_derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-run"
+delta = "4.5.5 -> 4.5.8"
+
+[[audits.clap_derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-run"
+delta = "4.5.5 -> 4.5.8"
+
+[[audits.console-api]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.0 -> 0.7.0"
+
+[[audits.console-api]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.0 -> 0.8.0"
+
+[[audits.console-subscriber]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.3.0"
+
+[[audits.console-subscriber]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.4.0"
+
+[[audits.git2]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.18.3 -> 0.19.0"
+
+[[audits.hyper]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.29 -> 0.14.30"
+
+[[audits.hyper]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.3.1 -> 1.4.1"
+
+[[audits.indexmap]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "2.2.6 -> 2.3.0"
+
+[[audits.inferno]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.19 -> 0.11.20"
+
+[[audits.inferno]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.20 -> 0.11.21"
+
+[[audits.libgit2-sys]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.2+1.7.2 -> 0.17.0+1.8.1"
+
+[[audits.log]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.21 -> 0.4.22"
+
+[[audits.metrics]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.22.3 -> 0.23.0"
+
+[[audits.metrics-exporter-prometheus]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.15.1"
+
+[[audits.metrics-exporter-prometheus]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.15.1 -> 0.15.3"
+
+[[audits.metrics-util]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.3 -> 0.17.0"
+
+[[audits.mio]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.11 -> 1.0.1"
+
+[[audits.proptest-derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.5.0"
+
+[[audits.prost]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.6 -> 0.13.1"
+
+[[audits.prost-build]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.6 -> 0.13.1"
+
+[[audits.prost-derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.6 -> 0.13.1"
+
+[[audits.prost-types]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.6 -> 0.13.1"
+
+[[audits.regex]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.10.5 -> 1.10.6"
+
+[[audits.serde_spanned]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.6 -> 0.6.7"
+
+[[audits.serde_with]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.8.1 -> 3.8.3"
+
+[[audits.serde_with]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.8.3 -> 3.9.0"
+
+[[audits.serde_with_macros]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.8.1 -> 3.8.3"
+
+[[audits.serde_with_macros]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.8.3 -> 3.9.0"
+
+[[audits.tempfile]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.10.1 -> 3.11.0"
+
+[[audits.thiserror]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.61 -> 1.0.62"
+
+[[audits.thiserror-impl]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.63 -> 1.0.62"
+
+[[audits.tokio]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.38.0 -> 1.38.1"
+
+[[audits.tokio]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.38.1 -> 1.39.0"
+
+[[audits.tokio-macros]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "2.3.0 -> 2.4.0"
+
+[[audits.toml]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.14 -> 0.8.15"
+
+[[audits.toml]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.15 -> 0.8.16"
+
+[[audits.toml]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.16 -> 0.8.19"
+
+[[audits.toml_datetime]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.6 -> 0.6.7"
+
+[[audits.toml_datetime]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.7 -> 0.6.8"
+
+[[audits.toml_edit]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.22.14 -> 0.22.16"
+
+[[audits.toml_edit]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.22.16 -> 0.22.17"
+
+[[audits.toml_edit]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.22.17 -> 0.22.20"
+
+[[audits.tonic]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.0 -> 0.12.0"
+
+[[audits.tonic-reflection]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.0 -> 0.12.0"
+
+[[audits.tonic-reflection]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.0 -> 0.12.1"
+
+[[audits.vergen]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "8.3.1 -> 8.3.2"
+
+[[audits.winnow]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.6.13 -> 0.6.18"
+
+[[trusted.clap]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2021-12-08"
+end = "2025-07-09"
+
+[[trusted.clap_builder]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2023-03-28"
+end = "2025-07-09"
+
+[[trusted.clap_derive]]
+criteria = "safe-to-deploy"
+user-id = 6743 # Ed Page (epage)
+start = "2021-12-08"
+end = "2025-07-09"
+
+[[trusted.serde_json]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-02-28"
+end = "2025-07-09"
+
+[[trusted.syn]]
+criteria = "safe-to-deploy"
+user-id = 3618 # David Tolnay (dtolnay)
+start = "2019-03-01"
+end = "2025-07-09"
+
+[[trusted.tokio]]
+criteria = "safe-to-deploy"
+user-id = 6741 # Alice Ryhl (Darksonn)
+start = "2020-12-25"
+end = "2025-07-29"

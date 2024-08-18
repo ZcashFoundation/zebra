@@ -12,10 +12,22 @@ homepage = "https://zfnd.org/zebra/"
 # crates.io is limited to 5 keywords and categories
 keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
-categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding", "network-programming"]
+categories = [
+    "asynchronous",
+    "cryptography::cryptocurrencies",
+    "encoding",
+    "network-programming",
+]
 
 [features]
-default = []
+
+indexer-rpcs = [
+    "tonic-build",
+    "tonic",
+    "tonic-reflection",
+    "prost",
+    "tokio-stream",
+]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -42,27 +54,39 @@ proptest-impl = [
 ]
 
 [dependencies]
-chrono = { version = "0.4.38", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.38", default-features = false, features = [
+    "clock",
+    "std",
+] }
 futures = "0.3.30"
-
-# lightwalletd sends JSON-RPC requests over HTTP 1.1
-hyper = { version = "0.14.28", features = ["http1", "server"] }
 
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.117", features = ["preserve_order"] }
-indexmap = { version = "2.2.6", features = ["serde"] }
+serde_json = { version = "1.0.122", features = ["preserve_order"] }
+indexmap = { version = "2.3.0", features = ["serde"] }
 
-tokio = { version = "1.37.0", features = ["time", "rt-multi-thread", "macros", "tracing"] }
+tokio = { version = "1.39.2", features = [
+    "time",
+    "rt-multi-thread",
+    "macros",
+    "tracing",
+] }
 tower = "0.4.13"
+
+# indexer-rpcs dependencies
+tonic = { version = "0.12.1", optional = true }
+tonic-reflection = { version = "0.12.1", optional = true }
+prost = { version = "0.13.1", optional = true }
+tokio-stream = { version = "0.1.15", optional = true }
 
 tracing = "0.1.39"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.203", features = ["serde_derive"] }
+serde = { version = "1.0.204", features = ["serde_derive"] }
+
 
 zcash_primitives = { version = "0.15.0" }
 
@@ -74,24 +98,39 @@ zcash_address = { version = "0.3.2", optional = true }
 # Test-only feature proptest-impl
 proptest = { version = "1.4.0", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = ["json-conversion"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = [
+    "json-conversion",
+] }
 zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.38" }
 zebra-network = { path = "../zebra-network", version = "1.0.0-beta.38" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38", features = [
+    "rpc-client",
+] }
 zebra-script = { path = "../zebra-script", version = "1.0.0-beta.38" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38" }
+
+[build-dependencies]
+tonic-build = { version = "0.12.1", optional = true }
 
 [dev-dependencies]
 insta = { version = "1.39.0", features = ["redactions", "json", "ron"] }
 
 proptest = "1.4.0"
 
-thiserror = "1.0.61"
-tokio = { version = "1.37.0", features = ["full", "tracing", "test-util"] }
+thiserror = "1.0.63"
+tokio = { version = "1.39.2", features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.38", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.38", features = ["proptest-impl"] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38", features = [
+    "proptest-impl",
+] }
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.38", features = [
+    "proptest-impl",
+] }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.38", features = [
+    "proptest-impl",
+] }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.38", features = [
+    "proptest-impl",
+] }
 
 zebra-test = { path = "../zebra-test", version = "1.0.0-beta.38" }

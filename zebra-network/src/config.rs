@@ -16,7 +16,7 @@ use tracing::Span;
 
 use zebra_chain::{
     parameters::{
-        testnet::{self, ConfiguredActivationHeights},
+        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
         Magic, Network, NetworkKind,
     },
     work::difficulty::U256,
@@ -641,6 +641,7 @@ impl<'de> Deserialize<'de> for Config {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct DTestnetParameters {
             network_name: Option<String>,
             network_magic: Option<[u8; 4]>,
@@ -649,6 +650,8 @@ impl<'de> Deserialize<'de> for Config {
             disable_pow: Option<bool>,
             genesis_hash: Option<String>,
             activation_heights: Option<ConfiguredActivationHeights>,
+            pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+            post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
         }
 
         #[derive(Deserialize)]
@@ -719,11 +722,12 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let nu5_activation_height = testnet_parameters
+                let (nu5_activation_height, nu6_activation_height) = testnet_parameters
                     .and_then(|params| params.activation_heights)
-                    .and_then(|activation_height| activation_height.nu5);
+                    .map(|ConfiguredActivationHeights { nu5, nu6, .. }| (nu5, nu6))
+                    .unwrap_or_default();
 
-                Network::new_regtest(nu5_activation_height)
+                Network::new_regtest(nu5_activation_height, nu6_activation_height)
             }
             (
                 NetworkKind::Testnet,
@@ -735,6 +739,8 @@ impl<'de> Deserialize<'de> for Config {
                     disable_pow,
                     genesis_hash,
                     activation_heights,
+                    pre_nu6_funding_streams,
+                    post_nu6_funding_streams,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
@@ -755,6 +761,14 @@ impl<'de> Deserialize<'de> for Config {
                     params_builder = params_builder.with_slow_start_interval(
                         slow_start_interval.try_into().map_err(de::Error::custom)?,
                     );
+                }
+
+                if let Some(funding_streams) = pre_nu6_funding_streams {
+                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
+                }
+
+                if let Some(funding_streams) = post_nu6_funding_streams {
+                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
                 }
 
                 if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {

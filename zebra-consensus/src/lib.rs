@@ -36,7 +36,6 @@
 
 mod block;
 mod checkpoint;
-mod parameters;
 mod primitives;
 mod script;
 
@@ -50,11 +49,8 @@ pub use block::check::difficulty_is_valid;
 
 pub use block::{
     subsidy::{
-        funding_streams::{
-            funding_stream_address, funding_stream_recipient_info, funding_stream_values,
-            new_coinbase_script,
-        },
-        general::miner_subsidy,
+        funding_streams::{funding_stream_address, funding_stream_values, new_coinbase_script},
+        general::{block_subsidy, miner_subsidy},
     },
     Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
@@ -64,7 +60,6 @@ pub use checkpoint::{
 };
 pub use config::Config;
 pub use error::BlockError;
-pub use parameters::{FundingStreamReceiver, ParameterSubsidy};
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};
 pub use router::RouterError;
 

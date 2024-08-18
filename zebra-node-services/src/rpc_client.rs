@@ -1,12 +1,12 @@
 //! A client for calling Zebra's JSON-RPC methods.
 //!
-//! Only used in tests and tools.
+//! Used in the rpc sync scanning functionality and in various tests and tools.
 
 use std::net::SocketAddr;
 
 use reqwest::Client;
 
-use color_eyre::{eyre::eyre, Result};
+use crate::BoxError;
 
 /// An HTTP client for making JSON-RPC requests.
 #[derive(Clone, Debug)]
@@ -99,7 +99,7 @@ impl RpcRequestClient {
         &self,
         method: impl AsRef<str>,
         params: impl AsRef<str>,
-    ) -> Result<T> {
+    ) -> std::result::Result<T, BoxError> {
         Self::json_result_from_response_text(&self.text_from_call(method, params).await?)
     }
 
@@ -107,13 +107,13 @@ impl RpcRequestClient {
     /// Returns `Ok` with a deserialized `result` value in the expected type, or an error report.
     fn json_result_from_response_text<T: serde::de::DeserializeOwned>(
         response_text: &str,
-    ) -> Result<T> {
+    ) -> std::result::Result<T, BoxError> {
         use jsonrpc_core::Output;
 
         let output: Output = serde_json::from_str(response_text)?;
         match output {
             Output::Success(success) => Ok(serde_json::from_value(success.result)?),
-            Output::Failure(failure) => Err(eyre!("RPC call failed with: {failure:?}")),
+            Output::Failure(failure) => Err(failure.error.into()),
         }
     }
 }

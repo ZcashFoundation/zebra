@@ -1,16 +1,14 @@
-//! A type that can hold the four types of Zcash value pools.
+//! Balances in chain value pools and transaction value pools.
 
-use crate::{
-    amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
-    block::Block,
-    transparent,
-};
+use crate::amount::{self, Amount, Constraint, NegativeAllowed, NonNegative};
 
 use core::fmt;
+
+#[cfg(any(test, feature = "proptest-impl"))]
 use std::{borrow::Borrow, collections::HashMap};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::{amount::MAX_MONEY, transaction::Transaction};
+use crate::{amount::MAX_MONEY, transaction::Transaction, transparent};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -20,13 +18,14 @@ mod tests;
 
 use ValueBalanceError::*;
 
-/// An amount spread between different Zcash pools.
+/// A balance in each chain value pool or transaction value pool.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,
     sprout: Amount<C>,
     sapling: Amount<C>,
     orchard: Amount<C>,
+    deferred: Amount<C>,
 }
 
 impl<C> ValueBalance<C>
@@ -116,6 +115,17 @@ where
         self
     }
 
+    /// Returns the deferred amount.
+    pub fn deferred_amount(&self) -> Amount<C> {
+        self.deferred
+    }
+
+    /// Sets the deferred amount without affecting other amounts.
+    pub fn set_deferred_amount(&mut self, deferred_amount: Amount<C>) -> &Self {
+        self.deferred = deferred_amount;
+        self
+    }
+
     /// Creates a [`ValueBalance`] where all the pools are zero.
     pub fn zero() -> Self {
         let zero = Amount::zero();
@@ -124,6 +134,7 @@ where
             sprout: zero,
             sapling: zero,
             orchard: zero,
+            deferred: zero,
         }
     }
 
@@ -138,6 +149,7 @@ where
             sprout: self.sprout.constrain().map_err(Sprout)?,
             sapling: self.sapling.constrain().map_err(Sapling)?,
             orchard: self.orchard.constrain().map_err(Orchard)?,
+            deferred: self.deferred.constrain().map_err(Deferred)?,
         })
     }
 }
@@ -166,60 +178,6 @@ impl ValueBalance<NegativeAllowed> {
 }
 
 impl ValueBalance<NonNegative> {
-    /// Returns the sum of this value balance, and the chain value pool changes in `block`.
-    ///
-    /// `utxos` must contain the [`transparent::Utxo`]s of every input in this block,
-    /// including UTXOs created by earlier transactions in this block.
-    ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] for details.
-    ///
-    /// # Consensus
-    ///
-    /// > If the Sprout chain value pool balance would become negative in the block chain
-    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance>
-    ///
-    /// > If the Sapling chain value pool balance would become negative in the block chain
-    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
-    ///
-    /// > If the Orchard chain value pool balance would become negative in the block chain
-    /// > created as a result of accepting a block , then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
-    ///
-    /// > If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or
-    /// > "Orchard chain value pool balance" would become negative in the block chain created
-    /// > as a result of accepting a block, then all nodes MUST reject the block as invalid.
-    ///
-    /// <https://zips.z.cash/zip-0209#specification>
-    ///
-    /// Zebra also checks that the transparent value pool is non-negative.
-    /// In Zebra, we define this pool as the sum of all unspent transaction outputs.
-    /// (Despite their encoding as an `int64`, transparent output values must be non-negative.)
-    ///
-    /// This is a consensus rule derived from Bitcoin:
-    ///
-    /// > because a UTXO can only be spent once,
-    /// > the full value of the included UTXOs must be spent or given to a miner as a transaction fee.
-    ///
-    /// <https://developer.bitcoin.org/devguide/transactions.html#transaction-fees-and-change>
-    pub fn add_block(
-        self,
-        block: impl Borrow<Block>,
-        utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-    ) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
-        let chain_value_pool_change = block.borrow().chain_value_pool_change(utxos)?;
-
-        // This will error if the chain value pool balance gets negative with the change.
-        self.add_chain_value_pool_change(chain_value_pool_change)
-    }
-
     /// Returns the sum of this value balance, and the chain value pool changes in `transaction`.
     ///
     /// `outputs` must contain the [`transparent::Output`]s of every input in this transaction,
@@ -227,9 +185,6 @@ impl ValueBalance<NonNegative> {
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
-    /// for details.
     ///
     /// # Consensus
     ///
@@ -269,9 +224,6 @@ impl ValueBalance<NonNegative> {
     ///
     /// Note: the chain value pool has the opposite sign to the transaction
     /// value pool. Inputs remove value from the chain value pool.
-    ///
-    /// See [`Block::chain_value_pool_change`] and [`Transaction::value_balance`]
-    /// for details.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn add_transparent_input(
         self,
@@ -289,12 +241,46 @@ impl ValueBalance<NonNegative> {
         self.add_chain_value_pool_change(transparent_value_pool_change)
     }
 
-    /// Returns the sum of this value balance, and the `chain_value_pool_change`.
+    /// Returns the sum of this value balance, and the given `chain_value_pool_change`.
     ///
-    /// Note: the chain value pool has the opposite sign to the transaction
-    /// value pool.
+    /// Note that the chain value pool has the opposite sign to the transaction value pool.
     ///
-    /// See `add_block` for details.
+    /// # Consensus
+    ///
+    /// > If the Sprout chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#joinsplitbalance>
+    ///
+    /// > If the Sapling chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#saplingbalance>
+    ///
+    /// > If the Orchard chain value pool balance would become negative in the block chain
+    /// > created as a result of accepting a block , then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
+    ///
+    /// > If any of the "Sprout chain value pool balance", "Sapling chain value pool balance", or
+    /// > "Orchard chain value pool balance" would become negative in the block chain created
+    /// > as a result of accepting a block, then all nodes MUST reject the block as invalid.
+    ///
+    /// <https://zips.z.cash/zip-0209#specification>
+    ///
+    /// Zebra also checks that the transparent value pool is non-negative.
+    /// In Zebra, we define this pool as the sum of all unspent transaction outputs.
+    /// (Despite their encoding as an `int64`, transparent output values must be non-negative.)
+    ///
+    /// This is a consensus rule derived from Bitcoin:
+    ///
+    /// > because a UTXO can only be spent once,
+    /// > the full value of the included UTXOs must be spent or given to a miner as a transaction fee.
+    ///
+    /// <https://developer.bitcoin.org/devguide/transactions.html#transaction-fees-and-change>
+    ///
+    /// We implement the consensus rules above by constraining the returned value balance to
+    /// [`ValueBalance<NonNegative>`].
     #[allow(clippy::unwrap_in_result)]
     pub fn add_chain_value_pool_change(
         self,
@@ -333,55 +319,80 @@ impl ValueBalance<NonNegative> {
     }
 
     /// To byte array
-    pub fn to_bytes(self) -> [u8; 32] {
-        let transparent = self.transparent.to_bytes();
-        let sprout = self.sprout.to_bytes();
-        let sapling = self.sapling.to_bytes();
-        let orchard = self.orchard.to_bytes();
-        match [transparent, sprout, sapling, orchard].concat().try_into() {
+    pub fn to_bytes(self) -> [u8; 40] {
+        match [
+            self.transparent.to_bytes(),
+            self.sprout.to_bytes(),
+            self.sapling.to_bytes(),
+            self.orchard.to_bytes(),
+            self.deferred.to_bytes(),
+        ]
+        .concat()
+        .try_into()
+        {
             Ok(bytes) => bytes,
             _ => unreachable!(
-                "Four [u8; 8] should always concat with no error into a single [u8; 32]"
+                "five [u8; 8] should always concat with no error into a single [u8; 40]"
             ),
         }
     }
 
     /// From byte array
     #[allow(clippy::unwrap_in_result)]
-    pub fn from_bytes(bytes: [u8; 32]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+    pub fn from_bytes(bytes: &[u8]) -> Result<ValueBalance<NonNegative>, ValueBalanceError> {
+        let bytes_length = bytes.len();
+
+        // Return an error early if bytes don't have the right length instead of panicking later.
+        match bytes_length {
+            32 | 40 => {}
+            _ => return Err(Unparsable),
+        };
+
         let transparent = Amount::from_bytes(
             bytes[0..8]
                 .try_into()
-                .expect("Extracting the first quarter of a [u8; 32] should always succeed"),
+                .expect("transparent amount should be parsable"),
         )
         .map_err(Transparent)?;
 
         let sprout = Amount::from_bytes(
             bytes[8..16]
                 .try_into()
-                .expect("Extracting the second quarter of a [u8; 32] should always succeed"),
+                .expect("sprout amount should be parsable"),
         )
         .map_err(Sprout)?;
 
         let sapling = Amount::from_bytes(
             bytes[16..24]
                 .try_into()
-                .expect("Extracting the third quarter of a [u8; 32] should always succeed"),
+                .expect("sapling amount should be parsable"),
         )
         .map_err(Sapling)?;
 
         let orchard = Amount::from_bytes(
             bytes[24..32]
                 .try_into()
-                .expect("Extracting the last quarter of a [u8; 32] should always succeed"),
+                .expect("orchard amount should be parsable"),
         )
         .map_err(Orchard)?;
+
+        let deferred = match bytes_length {
+            32 => Amount::zero(),
+            40 => Amount::from_bytes(
+                bytes[32..40]
+                    .try_into()
+                    .expect("deferred amount should be parsable"),
+            )
+            .map_err(Deferred)?,
+            _ => return Err(Unparsable),
+        };
 
         Ok(ValueBalance {
             transparent,
             sprout,
             sapling,
             orchard,
+            deferred,
         })
     }
 }
@@ -400,6 +411,12 @@ pub enum ValueBalanceError {
 
     /// orchard amount error {0}
     Orchard(amount::Error),
+
+    /// deferred amount error {0}
+    Deferred(amount::Error),
+
+    /// ValueBalance is unparsable
+    Unparsable,
 }
 
 impl fmt::Display for ValueBalanceError {
@@ -409,6 +426,8 @@ impl fmt::Display for ValueBalanceError {
             Sprout(e) => format!("sprout amount err: {e}"),
             Sapling(e) => format!("sapling amount err: {e}"),
             Orchard(e) => format!("orchard amount err: {e}"),
+            Deferred(e) => format!("deferred amount err: {e}"),
+            Unparsable => "value balance is unparsable".to_string(),
         })
     }
 }
@@ -424,6 +443,7 @@ where
             sprout: (self.sprout + rhs.sprout).map_err(Sprout)?,
             sapling: (self.sapling + rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
+            deferred: (self.deferred + rhs.deferred).map_err(Deferred)?,
         })
     }
 }
@@ -472,6 +492,7 @@ where
             sprout: (self.sprout - rhs.sprout).map_err(Sprout)?,
             sapling: (self.sapling - rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
+            deferred: (self.deferred - rhs.deferred).map_err(Deferred)?,
         })
     }
 }
@@ -540,6 +561,7 @@ where
             sprout: self.sprout.neg(),
             sapling: self.sapling.neg(),
             orchard: self.orchard.neg(),
+            deferred: self.deferred.neg(),
         }
     }
 }

@@ -6,8 +6,14 @@ use zcash_protocol::consensus::NetworkConstants as _;
 use crate::{
     block::Height,
     parameters::{
+        subsidy::{
+            FundingStreamReceiver, FUNDING_STREAM_ECC_ADDRESSES_MAINNET,
+            FUNDING_STREAM_ECC_ADDRESSES_TESTNET, POST_NU6_FUNDING_STREAMS_TESTNET,
+            PRE_NU6_FUNDING_STREAMS_TESTNET,
+        },
         testnet::{
-            self, ConfiguredActivationHeights, MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
+            self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+            ConfiguredFundingStreams, MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
         },
         Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, NETWORK_UPGRADES_IN_ORDER,
         TESTNET_ACTIVATION_HEIGHTS,
@@ -103,7 +109,7 @@ fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            nu5: Some(expected_activation_height),
+            nu6: Some(expected_activation_height),
             ..Default::default()
         })
         .to_network();
@@ -141,7 +147,7 @@ fn activates_network_upgrades_correctly() {
         (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
         (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
         (
-            Network::new_regtest(None),
+            Network::new_regtest(None, None),
             expected_default_regtest_activation_heights,
         ),
     ] {
@@ -192,7 +198,7 @@ fn check_configured_network_name() {
         "Mainnet should be displayed as 'Mainnet'"
     );
     assert_eq!(
-        Network::new_regtest(None).to_string(),
+        Network::new_regtest(None, None).to_string(),
         "Regtest",
         "Regtest should be displayed as 'Regtest'"
     );
@@ -269,4 +275,178 @@ fn check_network_name() {
         expected_name,
         "network must be displayed as configured network name"
     );
+}
+
+#[test]
+fn check_full_activation_list() {
+    let network = testnet::Parameters::build()
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu5: Some(1),
+            ..Default::default()
+        })
+        .to_network();
+
+    // We expect the first 8 network upgrades to be included, up to NU5
+    let expected_network_upgrades = &NETWORK_UPGRADES_IN_ORDER[..8];
+    let full_activation_list_network_upgrades: Vec<_> = network
+        .full_activation_list()
+        .into_iter()
+        .map(|(_, nu)| nu)
+        .collect();
+
+    for expected_network_upgrade in expected_network_upgrades {
+        assert!(
+            full_activation_list_network_upgrades.contains(expected_network_upgrade),
+            "full activation list should contain expected network upgrade"
+        );
+    }
+}
+
+/// Tests that a set of constraints are enforced when building Testnet parameters,
+/// and that funding stream configurations that should be valid can be built.
+#[test]
+fn check_configured_funding_stream_constraints() {
+    let configured_funding_streams = [
+        Default::default(),
+        ConfiguredFundingStreams {
+            height_range: Some(Height(2_000_000)..Height(2_200_000)),
+            ..Default::default()
+        },
+        ConfiguredFundingStreams {
+            height_range: Some(Height(20)..Height(30)),
+            recipients: None,
+        },
+        ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Ecc,
+                numerator: 20,
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
+            }]),
+            ..Default::default()
+        },
+        ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Ecc,
+                numerator: 100,
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
+            }]),
+            ..Default::default()
+        },
+    ];
+
+    for configured_funding_streams in configured_funding_streams {
+        for is_pre_nu6 in [false, true] {
+            let (network_funding_streams, default_funding_streams) = if is_pre_nu6 {
+                (
+                    testnet::Parameters::build()
+                        .with_pre_nu6_funding_streams(configured_funding_streams.clone())
+                        .to_network()
+                        .pre_nu6_funding_streams()
+                        .clone(),
+                    PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
+                )
+            } else {
+                (
+                    testnet::Parameters::build()
+                        .with_post_nu6_funding_streams(configured_funding_streams.clone())
+                        .to_network()
+                        .post_nu6_funding_streams()
+                        .clone(),
+                    POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
+                )
+            };
+
+            let expected_height_range = configured_funding_streams
+                .height_range
+                .clone()
+                .unwrap_or(default_funding_streams.height_range().clone());
+
+            assert_eq!(
+                network_funding_streams.height_range().clone(),
+                expected_height_range,
+                "should use default start height when unconfigured"
+            );
+
+            let expected_recipients = configured_funding_streams
+                .recipients
+                .clone()
+                .map(|recipients| {
+                    recipients
+                        .into_iter()
+                        .map(ConfiguredFundingStreamRecipient::into_recipient)
+                        .collect()
+                })
+                .unwrap_or(default_funding_streams.recipients().clone());
+
+            assert_eq!(
+                network_funding_streams.recipients().clone(),
+                expected_recipients,
+                "should use default start height when unconfigured"
+            );
+        }
+    }
+
+    std::panic::set_hook(Box::new(|_| {}));
+
+    // should panic when there are fewer addresses than the max funding stream address index.
+    let expected_panic_num_addresses = std::panic::catch_unwind(|| {
+        testnet::Parameters::build().with_pre_nu6_funding_streams(ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Ecc,
+                numerator: 10,
+                addresses: Some(vec![]),
+            }]),
+            ..Default::default()
+        });
+    });
+
+    // should panic when sum of numerators is greater than funding stream denominator.
+    let expected_panic_numerator = std::panic::catch_unwind(|| {
+        testnet::Parameters::build().with_pre_nu6_funding_streams(ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Ecc,
+                numerator: 101,
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_TESTNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
+            }]),
+            ..Default::default()
+        });
+    });
+
+    // should panic when recipient addresses are for Mainnet.
+    let expected_panic_wrong_addr_network = std::panic::catch_unwind(|| {
+        testnet::Parameters::build().with_pre_nu6_funding_streams(ConfiguredFundingStreams {
+            recipients: Some(vec![ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Ecc,
+                numerator: 10,
+                addresses: Some(
+                    FUNDING_STREAM_ECC_ADDRESSES_MAINNET
+                        .map(Into::into)
+                        .to_vec(),
+                ),
+            }]),
+            ..Default::default()
+        });
+    });
+
+    // drop panic hook before expecting errors.
+    let _ = std::panic::take_hook();
+
+    expected_panic_num_addresses.expect_err("should panic when there are too few addresses");
+    expected_panic_numerator.expect_err(
+        "should panic when sum of numerators is greater than funding stream denominator",
+    );
+    expected_panic_wrong_addr_network
+        .expect_err("should panic when recipient addresses are for Mainnet");
 }

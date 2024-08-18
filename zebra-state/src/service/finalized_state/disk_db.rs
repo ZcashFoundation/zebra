@@ -12,8 +12,8 @@
 
 use std::{
     collections::{BTreeMap, HashMap},
-    fmt::Debug,
-    fmt::Write,
+    fmt::{Debug, Write},
+    fs,
     ops::RangeBounds,
     path::Path,
     sync::Arc,
@@ -27,6 +27,7 @@ use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
 use crate::{
+    constants::DATABASE_FORMAT_VERSION_FILE_NAME,
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
@@ -522,7 +523,9 @@ impl DiskDb {
         let db_options = DiskDb::options();
         let column_families = DiskDb::construct_column_families(&db_options, db.path(), &[]);
         let mut column_families_log_string = String::from("");
+
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
+
         for cf_descriptor in column_families.iter() {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
@@ -565,6 +568,11 @@ impl DiskDb {
             "Total Database Memory Size: {}",
             human_bytes::human_bytes(total_size_in_mem as f64)
         );
+    }
+
+    /// When called with a secondary DB instance, tries to catch up with the primary DB instance
+    pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
+        self.db.try_catch_up_with_primary()
     }
 
     /// Returns a forward iterator over the items in `cf` in `range`.
@@ -834,7 +842,23 @@ impl DiskDb {
             .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
 
         let db_result = if read_only {
-            DB::open_cf_descriptors_read_only(&db_options, &path, column_families, false)
+            // Use a tempfile for the secondary instance cache directory
+            let secondary_config = Config {
+                ephemeral: true,
+                ..config.clone()
+            };
+            let secondary_path =
+                secondary_config.db_path("secondary_state", format_version_in_code.major, network);
+            let create_dir_result = std::fs::create_dir_all(&secondary_path);
+
+            info!(?create_dir_result, "creating secondary db directory");
+
+            DB::open_cf_descriptors_as_secondary(
+                &db_options,
+                &path,
+                &secondary_path,
+                column_families,
+            )
         } else {
             DB::open_cf_descriptors(&db_options, &path, column_families)
         };
@@ -918,6 +942,123 @@ impl DiskDb {
     }
 
     // Private methods
+
+    /// Tries to reuse an existing db after a major upgrade.
+    ///
+    /// If the current db version belongs to `restorable_db_versions`, the function moves a previous
+    /// db to a new path so it can be used again. It does so by merely trying to rename the path
+    /// corresponding to the db version directly preceding the current version to the path that is
+    /// used by the current db. If successful, it also deletes the db version file.
+    pub(crate) fn try_reusing_previous_db_after_major_upgrade(
+        restorable_db_versions: &[u64],
+        format_version_in_code: &Version,
+        config: &Config,
+        db_kind: impl AsRef<str>,
+        network: &Network,
+    ) {
+        if let Some(&major_db_ver) = restorable_db_versions
+            .iter()
+            .find(|v| **v == format_version_in_code.major)
+        {
+            let db_kind = db_kind.as_ref();
+
+            let old_path = config.db_path(db_kind, major_db_ver - 1, network);
+            let new_path = config.db_path(db_kind, major_db_ver, network);
+
+            let old_path = match fs::canonicalize(&old_path) {
+                Ok(canonicalized_old_path) => canonicalized_old_path,
+                Err(e) => {
+                    warn!("could not canonicalize {old_path:?}: {e}");
+                    return;
+                }
+            };
+
+            let cache_path = match fs::canonicalize(&config.cache_dir) {
+                Ok(canonicalized_cache_path) => canonicalized_cache_path,
+                Err(e) => {
+                    warn!("could not canonicalize {:?}: {e}", config.cache_dir);
+                    return;
+                }
+            };
+
+            // # Correctness
+            //
+            // Check that the path we're about to move is inside the cache directory.
+            //
+            // If the user has symlinked the state directory to a non-cache directory, we don't want
+            // to move it, because it might contain other files.
+            //
+            // We don't attempt to guard against malicious symlinks created by attackers
+            // (TOCTOU attacks). Zebra should not be run with elevated privileges.
+            if !old_path.starts_with(&cache_path) {
+                info!("skipped reusing previous state cache: state is outside cache directory");
+                return;
+            }
+
+            let opts = DiskDb::options();
+            let old_db_exists = DB::list_cf(&opts, &old_path).is_ok_and(|cf| !cf.is_empty());
+            let new_db_exists = DB::list_cf(&opts, &new_path).is_ok_and(|cf| !cf.is_empty());
+
+            if old_db_exists && !new_db_exists {
+                // Create the parent directory for the new db. This is because we can't directly
+                // rename e.g. `state/v25/mainnet/` to `state/v26/mainnet/` with `fs::rename()` if
+                // `state/v26/` does not exist.
+                match fs::create_dir_all(
+                    new_path
+                        .parent()
+                        .expect("new state cache must have a parent path"),
+                ) {
+                    Ok(()) => info!("created new directory for state cache at {new_path:?}"),
+                    Err(e) => {
+                        warn!(
+                            "could not create new directory for state cache at {new_path:?}: {e}"
+                        );
+                        return;
+                    }
+                };
+
+                match fs::rename(&old_path, &new_path) {
+                    Ok(()) => {
+                        info!("moved state cache from {old_path:?} to {new_path:?}");
+
+                        match fs::remove_file(new_path.join(DATABASE_FORMAT_VERSION_FILE_NAME)) {
+                            Ok(()) => info!("removed version file at {new_path:?}"),
+                            Err(e) => {
+                                warn!("could not remove version file at {new_path:?}: {e}")
+                            }
+                        }
+
+                        // Get the parent of the old path, e.g. `state/v25/` and delete it if it is
+                        // empty.
+                        let old_path = old_path
+                            .parent()
+                            .expect("old state cache must have parent path");
+
+                        if fs::read_dir(old_path)
+                            .expect("cached state dir needs to be readable")
+                            .next()
+                            .is_none()
+                        {
+                            match fs::remove_dir_all(old_path) {
+                                Ok(()) => {
+                                    info!("removed empty old state cache directory at {old_path:?}")
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "could not remove empty old state cache directory \
+                                           at {old_path:?}: {e}"
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        warn!("could not move state cache from {old_path:?} to {new_path:?}: {e}")
+                    }
+                }
+            }
+        }
+    }
 
     /// Returns the database options for the finalized state database.
     fn options() -> rocksdb::Options {

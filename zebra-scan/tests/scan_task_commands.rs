@@ -5,13 +5,14 @@
 //!
 //! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! cargo test scan_task_commands --features="shielded-scan" -- --ignored --nocapture
+#![allow(dead_code)]
 
 use std::{fs, time::Duration};
 
 use color_eyre::{eyre::eyre, Result};
-
 use tokio::sync::mpsc::error::TryRecvError;
-use tower::ServiceBuilder;
+use tower::{util::BoxService, Service};
+
 use zebra_chain::{
     block::Height,
     chain_tip::ChainTip,
@@ -21,13 +22,12 @@ use zebra_chain::{
 use zebra_scan::{
     service::ScanTask,
     storage::{db::SCANNER_DATABASE_KIND, Storage},
-    tests::ZECPAGES_SAPLING_VIEWING_KEY,
 };
 
-use crate::common::{
-    cached_state::start_state_service_with_cache_dir, launch::can_spawn_zebrad_for_test_type,
-    test_type::TestType,
-};
+use zebra_state::{ChainTipChange, LatestChainTip};
+
+pub type BoxStateService =
+    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
 /// The minimum required tip height for the cached state in this test.
 const REQUIRED_MIN_TIP_HEIGHT: Height = Height(1_000_000);
@@ -39,6 +39,9 @@ const WAIT_FOR_RESULTS_DURATION: Duration = Duration::from_secs(60);
 /// A block height where a scan result can be found with the [`ZECPAGES_SAPLING_VIEWING_KEY`]
 const EXPECTED_RESULT_HEIGHT: Height = Height(780_532);
 
+/// The extended Sapling viewing key of [ZECpages](https://zecpages.com/boardinfo)
+const ZECPAGES_SAPLING_VIEWING_KEY: &str = "zxviews1q0duytgcqqqqpqre26wkl45gvwwwd706xw608hucmvfalr759ejwf7qshjf5r9aa7323zulvz6plhttp5mltqcgs9t039cx2d09mgq05ts63n8u35hyv6h9nc9ctqqtue2u7cer2mqegunuulq2luhq3ywjcz35yyljewa4mgkgjzyfwh6fr6jd0dzd44ghk0nxdv2hnv4j5nxfwv24rwdmgllhe0p8568sgqt9ckt02v2kxf5ahtql6s0ltjpkckw8gtymxtxuu9gcr0swvz";
+
 /// Initialize Zebra's state service with a cached state, then:
 /// - Start the scan task,
 /// - Add a new key,
@@ -49,24 +52,23 @@ const EXPECTED_RESULT_HEIGHT: Height = Height(780_532);
 pub(crate) async fn run() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let test_type = TestType::UpdateZebraCachedStateNoRpc;
-    let test_name = "scan_task_commands";
     let network = Network::Mainnet;
 
-    // Skip the test unless the user specifically asked for it and there is a zebrad_state_path
-    if !can_spawn_zebrad_for_test_type(test_name, test_type, true) {
-        return Ok(());
-    }
+    // Logs the network as zebrad would as part of the metadata when starting up.
+    // This is currently needed for the 'Check startup logs' step in CI to pass.
+    tracing::info!("Zcash network: {network}");
 
-    tracing::info!(
-        ?network,
-        ?test_type,
-        "running scan_subscribe_results test using zebra state service",
-    );
+    let zebrad_state_path = match std::env::var_os("ZEBRA_CACHED_STATE_DIR") {
+        None => {
+            tracing::error!("ZEBRA_CACHED_STATE_DIR is not set");
+            return Ok(());
+        }
+        Some(path) => std::path::PathBuf::from(path),
+    };
 
-    let zebrad_state_path = test_type
-        .zebrad_state_path(test_name)
-        .expect("already checked that there is a cached state path");
+    // Remove the scan directory before starting.
+    let scan_db_path = zebrad_state_path.join(SCANNER_DATABASE_KIND);
+    fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
 
     let mut scan_config = zebra_scan::Config::default();
     scan_config
@@ -74,16 +76,15 @@ pub(crate) async fn run() -> Result<()> {
         .cache_dir
         .clone_from(&zebrad_state_path);
 
-    // Logs the network as zebrad would as part of the metadata when starting up.
-    // This is currently needed for the 'Check startup logs' step in CI to pass.
-    tracing::info!("Zcash network: {network}");
-
-    // Remove the scan directory before starting.
-    let scan_db_path = zebrad_state_path.join(SCANNER_DATABASE_KIND);
-    fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
-
-    let (state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
+    let (_state_service, _read_state_service, latest_chain_tip, chain_tip_change) =
         start_state_service_with_cache_dir(&network, zebrad_state_path.clone()).await?;
+
+    let state_config = zebra_state::Config {
+        cache_dir: zebrad_state_path.clone(),
+        ..zebra_state::Config::default()
+    };
+
+    let (read_state, _, _) = zebra_state::init_read_only(state_config.clone(), &network);
 
     let chain_tip_height = latest_chain_tip
         .best_tip_height()
@@ -105,11 +106,9 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!("opened state service with valid chain tip height, starting scan task",);
 
-    let state = ServiceBuilder::new().buffer(10).service(state_service);
-
     // Create an ephemeral `Storage` instance
     let storage = Storage::new(&scan_config, &network, false);
-    let mut scan_task = ScanTask::spawn(storage, state, chain_tip_change);
+    let mut scan_task = ScanTask::spawn(storage, read_state, chain_tip_change);
 
     tracing::info!("started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",);
 
@@ -155,11 +154,32 @@ pub(crate) async fn run() -> Result<()> {
                     TryRecvError::Disconnected,
                     "any result senders should have been dropped"
                 );
-
                 break;
             }
         }
     }
 
     Ok(())
+}
+
+pub async fn start_state_service_with_cache_dir(
+    network: &Network,
+    cache_dir: impl Into<std::path::PathBuf>,
+) -> Result<(
+    BoxStateService,
+    impl Service<
+        zebra_state::ReadRequest,
+        Response = zebra_state::ReadResponse,
+        Error = zebra_state::BoxError,
+    >,
+    LatestChainTip,
+    ChainTipChange,
+)> {
+    let config = zebra_state::Config {
+        cache_dir: cache_dir.into(),
+        ..zebra_state::Config::default()
+    };
+
+    // These tests don't need UTXOs to be verified efficiently, because they use cached states.
+    Ok(zebra_state::init(config, network, Height::MAX, 0))
 }

@@ -1,12 +1,10 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 125
 expression: cf_data
-
 ---
 [
   KV(
     k: "",
-    v: "6cdc020000000000000000000000000000000000000000000000000000000000",
+    v: "6cdc0200000000000000000000000000000000000000000000000000000000000000000000000000",
   ),
 ]

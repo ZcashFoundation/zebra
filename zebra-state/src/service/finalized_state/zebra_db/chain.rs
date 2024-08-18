@@ -12,7 +12,6 @@
 //! each time the database format (column, serialization, etc) changes.
 
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, HashMap},
     sync::Arc,
 };
@@ -203,16 +202,24 @@ impl DiskWriteBatch {
 
     // Value pool methods
 
-    /// Prepare a database batch containing the chain value pool update from `finalized.block`,
-    /// and return it (without actually writing anything).
+    /// Prepares a database batch containing the chain value pool update from `finalized.block`, and
+    /// returns it without actually writing anything.
     ///
-    /// If this method returns an error, it will be propagated,
-    /// and the batch should not be written to the database.
+    /// The batch is modified by this method and written by the caller. The caller should not write
+    /// the batch if this method returns an error.
+    ///
+    /// The parameter `utxos_spent_by_block` must contain the [`transparent::Utxo`]s of every input
+    /// in this block, including UTXOs created by earlier transactions in this block.
+    ///
+    /// Note that the chain value pool has the opposite sign to the transaction value pool. See the
+    /// [`chain_value_pool_change`] and [`add_chain_value_pool_change`] methods for more details.
     ///
     /// # Errors
     ///
     /// - Propagates any errors from updating value pools
-    #[allow(clippy::unwrap_in_result)]
+    ///
+    /// [`chain_value_pool_change`]: zebra_chain::block::Block::chain_value_pool_change
+    /// [`add_chain_value_pool_change`]: ValueBalance::add_chain_value_pool_change
     pub fn prepare_chain_value_pools_batch(
         &mut self,
         db: &ZebraDb,
@@ -220,14 +227,18 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let chain_value_pools_cf = db.chain_value_pools_cf().with_batch_for_writing(self);
-
-        let FinalizedBlock { block, .. } = finalized;
-
-        let new_pool = value_pool.add_block(block.borrow(), &utxos_spent_by_block)?;
-
-        // The batch is modified by this method and written by the caller.
-        let _ = chain_value_pools_cf.zs_insert(&(), &new_pool);
+        let _ = db
+            .chain_value_pools_cf()
+            .with_batch_for_writing(self)
+            .zs_insert(
+                &(),
+                &value_pool.add_chain_value_pool_change(
+                    finalized.block.chain_value_pool_change(
+                        &utxos_spent_by_block,
+                        finalized.deferred_balance,
+                    )?,
+                )?,
+            );
 
         Ok(())
     }

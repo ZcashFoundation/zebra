@@ -21,7 +21,7 @@ use zebra_chain::{
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 impl IntoDisk for ValueBalance<NonNegative> {
-    type Bytes = [u8; 32];
+    type Bytes = [u8; 40];
 
     fn as_bytes(&self) -> Self::Bytes {
         self.to_bytes()
@@ -30,8 +30,7 @@ impl IntoDisk for ValueBalance<NonNegative> {
 
 impl FromDisk for ValueBalance<NonNegative> {
     fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
-        let array = bytes.as_ref().try_into().unwrap();
-        ValueBalance::from_bytes(array).unwrap()
+        ValueBalance::from_bytes(bytes.as_ref()).expect("ValueBalance should be parsable")
     }
 }
 

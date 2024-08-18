@@ -37,11 +37,6 @@ path = "src/bin/block-template-to-proposal/main.rs"
 required-features = ["getblocktemplate-rpcs"]
 
 [[bin]]
-name = "scanning-results-reader"
-path = "src/bin/scanning-results-reader/main.rs"
-required-features = ["shielded-scan"]
-
-[[bin]]
 name = "openapi-generator"
 path = "src/bin/openapi-generator/main.rs"
 required-features = ["openapi-generator"]
@@ -76,7 +71,6 @@ shielded-scan = [
     "jsonrpc",
     "zcash_primitives",
     "zcash_client_backend",
-    "zebra-scan"
 ]
 
 openapi-generator = [
@@ -91,18 +85,17 @@ openapi-generator = [
 color-eyre = "0.6.3"
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.6.0", features = ["rustc_1_55"] }
+tinyvec = { version = "1.8.0", features = ["rustc_1_55"] }
 
 structopt = "0.3.26"
 hex = "0.4.3"
-serde_json = "1.0.117"
+serde_json = "1.0.122"
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.18"
-thiserror = "1.0.61"
+thiserror = "1.0.63"
 
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.38" }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.38" }
-zebra-scan = { path = "../zebra-scan", version = "0.1.0-alpha.7", optional = true }
 
 # These crates are needed for the block-template-to-proposal binary
 zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.38", optional = true }
@@ -111,12 +104,12 @@ zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.38", optional = true 
 itertools = { version = "0.13.0", optional = true }
 
 # These crates are needed for the search-issue-refs binary
-regex = { version = "1.10.4", optional = true }
+regex = { version = "1.10.6", optional = true }
 # Avoid default openssl dependency to reduce the dependency tree and security alerts. 
 reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
-tokio = { version = "1.37.0", features = ["full"], optional = true }
+tokio = { version = "1.39.2", features = ["full"], optional = true }
 
 jsonrpc = { version = "0.18.0", optional = true }
 
@@ -126,7 +119,7 @@ zcash_protocol = { version = "0.1.1" }
 
 # For the openapi generator
 rand = "0.8.5"
-syn = { version = "2.0.66", features = ["full"], optional = true }
+syn = { version = "2.0.72", features = ["full"], optional = true }
 quote = { version = "1.0.36", optional = true }
 serde_yaml = { version = "0.9.34+deprecated", optional = true }
-serde = { version = "1.0.203", features = ["serde_derive"], optional = true }
+serde = { version = "1.0.204", features = ["serde_derive"], optional = true }

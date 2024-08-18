@@ -14,7 +14,7 @@ use zebra_chain::{
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkKind, POW_AVERAGING_WINDOW},
+    parameters::{subsidy::ParameterSubsidy, Network, NetworkKind, POW_AVERAGING_WINDOW},
     primitives,
     serialization::ZcashDeserializeInto,
     transparent::{
@@ -23,8 +23,7 @@ use zebra_chain::{
     work::difficulty::{ParameterDifficulty as _, U256},
 };
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, ParameterSubsidy as _,
-    RouterError,
+    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
 };
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
@@ -46,7 +45,6 @@ use crate::methods::{
         types::{
             get_block_template::GetBlockTemplate,
             get_mining_info,
-            hex_data::HexData,
             long_poll::LongPollInput,
             peer_info::PeerInfo,
             submit_block,
@@ -54,7 +52,9 @@ use crate::methods::{
             unified_address, validate_address, z_validate_address,
         },
     },
-    height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+    height_from_signed_int,
+    hex_data::HexData,
+    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod constants;
@@ -638,12 +638,7 @@ where
                 //
                 // Optional TODO:
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-                // TODO:
-                // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
-                // - Check the field in `sync_status` so it applies to the mempool as well.
-                if !network.disable_pow() {
-                    check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
-                }
+                check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
                 // TODO: return an error if we have no peers, like `zcashd` does,
                 //       and add a developer config that mines regardless of how many peers we have.
                 // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
@@ -1183,25 +1178,33 @@ where
                 });
             }
 
-            let miner = miner_subsidy(height, &network).map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
-            // Always zero for post-halving blocks
-            let founders = Amount::zero();
-
-            let funding_streams =
-                funding_stream_values(height, &network).map_err(|error| Error {
+            let expected_block_subsidy =
+                block_subsidy(height, &network).map_err(|error| Error {
                     code: ErrorCode::ServerError(0),
                     message: error.to_string(),
                     data: None,
                 })?;
+
+            let miner_subsidy =
+                miner_subsidy(height, &network, expected_block_subsidy).map_err(|error| Error {
+                    code: ErrorCode::ServerError(0),
+                    message: error.to_string(),
+                    data: None,
+                })?;
+            // Always zero for post-halving blocks
+            let founders = Amount::zero();
+
+            let funding_streams = funding_stream_values(height, &network, expected_block_subsidy)
+                .map_err(|error| Error {
+                code: ErrorCode::ServerError(0),
+                message: error.to_string(),
+                data: None,
+            })?;
             let mut funding_streams: Vec<_> = funding_streams
                 .iter()
-                .map(|(receiver, value)| {
-                    let address = funding_stream_address(height, &network, *receiver);
-                    (*receiver, FundingStream::new(*receiver, *value, address))
+                .filter_map(|(receiver, value)| {
+                    let address = funding_stream_address(height, &network, *receiver)?;
+                    Some((*receiver, FundingStream::new(*receiver, *value, address)))
                 })
                 .collect();
 
@@ -1215,7 +1218,7 @@ where
             let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
 
             Ok(BlockSubsidy {
-                miner: miner.into(),
+                miner: miner_subsidy.into(),
                 founders: founders.into(),
                 funding_streams,
             })
