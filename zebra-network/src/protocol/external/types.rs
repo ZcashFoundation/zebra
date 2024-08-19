@@ -95,6 +95,9 @@ impl Version {
             (Mainnet, Nu5) => 170_100,
             (Testnet(params), Nu6) if params.is_default_testnet() => 170_050,
             (Mainnet, Nu6) => 170_100,
+            // FIXME: use proper values for Nu7
+            (Testnet(params), Nu7) if params.is_default_testnet() => 170_051,
+            (Mainnet, Nu7) => 170_101,
 
             // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
             (Testnet(_params), _) => CURRENT_NETWORK_PROTOCOL_VERSION.0,
