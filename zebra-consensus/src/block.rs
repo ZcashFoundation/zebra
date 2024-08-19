@@ -216,7 +216,28 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
+            #[cfg(not(feature = "zsf"))]
             let expected_block_subsidy = subsidy::general::block_subsidy(height, &network)?;
+            #[cfg(feature = "zsf")]
+            let expected_block_subsidy = {
+                let zsf_balance = match state_service
+                    .ready()
+                    .await
+                    .map_err(|source| VerifyBlockError::Depth { source, hash })?
+                    .call(zs::Request::TipPoolValues)
+                    .await
+                    .map_err(|source| VerifyBlockError::Depth { source, hash })?
+                {
+                    zs::Response::TipPoolValues {
+                        tip_hash: _,
+                        tip_height: _,
+                        value_balance,
+                    } => value_balance.zsf_balance(),
+                    _ => unreachable!("wrong response to Request::KnownBlock"),
+                };
+
+                subsidy::general::block_subsidy(height, &network, zsf_balance)?
+            };
 
             check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
 
@@ -301,7 +322,7 @@ where
                     source: amount_error,
                 })?;
 
-            check::miner_fees_are_valid(
+            check::transaction_miner_fees_are_valid(
                 &coinbase_tx,
                 height,
                 block_miner_fees,

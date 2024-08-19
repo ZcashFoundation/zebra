@@ -395,6 +395,15 @@ impl ValueBalance<NonNegative> {
             deferred,
         })
     }
+
+    #[cfg(feature = "zsf")]
+    pub fn zsf_balance(&self) -> Amount<NonNegative> {
+        let max_money: Amount<NonNegative> = MAX_MONEY
+            .try_into()
+            .expect("MAX_MONEY should be a valid amount");
+        (max_money - self.transparent - self.sprout - self.sapling - self.orchard - self.deferred)
+            .expect("Expected non-negative value")
+    }
 }
 
 #[derive(thiserror::Error, Debug, Clone, PartialEq, Eq)]

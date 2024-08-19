@@ -59,10 +59,35 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
     }
 }
 
+#[cfg(feature = "zsf")]
+pub fn block_subsidy(
+    height: Height,
+    network: &Network,
+    zsf_balance: Amount<NonNegative>,
+) -> Result<Amount<NonNegative>, SubsidyError> {
+    let zsf_activation_height = ZFuture
+        .activation_height(network)
+        .expect("ZFuture activation height should be available");
+
+    if height < zsf_activation_height {
+        block_subsidy_pre_zsf(height, network)
+    } else {
+        let subsidy = ((zsf_balance * 4126).map_err(|e| SubsidyError::InvalidAmount(e))?
+            / 10_000_000_000)
+            .map_err(|e| SubsidyError::InvalidAmount(e))?;
+
+        if subsidy == 0 && zsf_balance > Amount::<NonNegative>::zero() {
+            Ok(1.try_into().expect("1 should fit in Amount"))
+        } else {
+            Ok(subsidy)
+        }
+    }
+}
+
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn block_subsidy(
+pub fn block_subsidy_pre_zsf(
     height: Height,
     network: &Network,
 ) -> Result<Amount<NonNegative>, SubsidyError> {
@@ -132,7 +157,7 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
         return Amount::zero();
     };
 
-    let expected_block_subsidy = block_subsidy(nu6_activation_height, network)
+    let expected_block_subsidy = block_subsidy_pre_zsf(nu6_activation_height, network)
         .expect("block at NU6 activation height must have valid expected subsidy");
     let &deferred_amount_per_block =
         funding_stream_values(nu6_activation_height, network, expected_block_subsidy)
@@ -308,32 +333,32 @@ mod test {
         // https://z.cash/support/faq/#what-is-slow-start-mining
         assert_eq!(
             Amount::<NonNegative>::try_from(1_250_000_000)?,
-            block_subsidy((network.slow_start_interval() + 1).unwrap(), network)?
+            block_subsidy_pre_zsf((network.slow_start_interval() + 1).unwrap(), network)?
         );
         assert_eq!(
             Amount::<NonNegative>::try_from(1_250_000_000)?,
-            block_subsidy((blossom_height - 1).unwrap(), network)?
+            block_subsidy_pre_zsf((blossom_height - 1).unwrap(), network)?
         );
 
         // After Blossom the block subsidy is reduced to 6.25 ZEC without halving
         // https://z.cash/upgrade/blossom/
         assert_eq!(
             Amount::<NonNegative>::try_from(625_000_000)?,
-            block_subsidy(blossom_height, network)?
+            block_subsidy_pre_zsf(blossom_height, network)?
         );
 
         // After the 1st halving, the block subsidy is reduced to 3.125 ZEC
         // https://z.cash/upgrade/canopy/
         assert_eq!(
             Amount::<NonNegative>::try_from(312_500_000)?,
-            block_subsidy(first_halving_height, network)?
+            block_subsidy_pre_zsf(first_halving_height, network)?
         );
 
         // After the 2nd halving, the block subsidy is reduced to 1.5625 ZEC
         // See "7.8 Calculation of Block Subsidy and Founders' Reward"
         assert_eq!(
             Amount::<NonNegative>::try_from(156_250_000)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + POST_BLOSSOM_HALVING_INTERVAL).unwrap(),
                 network
             )?
@@ -343,7 +368,7 @@ mod test {
         // Check that the block subsidy rounds down correctly, and there are no errors
         assert_eq!(
             Amount::<NonNegative>::try_from(4_882_812)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 6)).unwrap(),
                 network
             )?
@@ -353,7 +378,7 @@ mod test {
         // Check that the block subsidy is calculated correctly at the limit
         assert_eq!(
             Amount::<NonNegative>::try_from(1)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 28)).unwrap(),
                 network
             )?
@@ -363,7 +388,7 @@ mod test {
         // Check that there are no errors
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 29)).unwrap(),
                 network
             )?
@@ -371,7 +396,7 @@ mod test {
 
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 39)).unwrap(),
                 network
             )?
@@ -379,7 +404,7 @@ mod test {
 
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 49)).unwrap(),
                 network
             )?
@@ -387,7 +412,7 @@ mod test {
 
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 59)).unwrap(),
                 network
             )?
@@ -396,7 +421,7 @@ mod test {
         // The largest possible integer divisor
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 62)).unwrap(),
                 network
             )?
@@ -405,7 +430,7 @@ mod test {
         // Other large divisors which should also result in zero
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 63)).unwrap(),
                 network
             )?
@@ -413,7 +438,7 @@ mod test {
 
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(
+            block_subsidy_pre_zsf(
                 (first_halving_height + (POST_BLOSSOM_HALVING_INTERVAL * 64)).unwrap(),
                 network
             )?
@@ -421,17 +446,17 @@ mod test {
 
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(Height(Height::MAX_AS_U32 / 4), network)?
+            block_subsidy_pre_zsf(Height(Height::MAX_AS_U32 / 4), network)?
         );
 
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(Height(Height::MAX_AS_U32 / 2), network)?
+            block_subsidy_pre_zsf(Height(Height::MAX_AS_U32 / 2), network)?
         );
 
         assert_eq!(
             Amount::<NonNegative>::try_from(0)?,
-            block_subsidy(Height::MAX, network)?
+            block_subsidy_pre_zsf(Height::MAX, network)?
         );
 
         Ok(())

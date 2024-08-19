@@ -18,6 +18,7 @@ pub mod address;
 pub mod block;
 pub mod find;
 pub mod tree;
+pub mod value_pools;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod difficulty;

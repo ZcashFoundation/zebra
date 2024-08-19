@@ -413,6 +413,18 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                #[cfg(feature = "zsf")]
+                Transaction::ZFuture {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                     .. } => Self::verify_zfuture_transaction(
+                    &req,
+                    &network,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )?,
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -476,6 +488,7 @@ where
                     Response::Mempool { transaction }
                 },
             };
+            tracing::trace!(?tx_id, "Verification finished");
 
             Ok(rsp)
         }
@@ -687,6 +700,9 @@ where
                 transaction.version(),
                 network_upgrade,
             )),
+
+            #[cfg(feature = "zsf")]
+            NetworkUpgrade::ZFuture => Ok(()),
         }
     }
 
@@ -767,6 +783,8 @@ where
             // Note: Here we verify the transaction version number of the above rule, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => Ok(()),
+            #[cfg(feature = "zsf")]
+            NetworkUpgrade::ZFuture => Ok(()),
 
             // Does not support V5 transactions
             NetworkUpgrade::Genesis
@@ -782,6 +800,51 @@ where
         }
     }
 
+    /// Verify a ZFUTURE transaction.
+    #[cfg(feature = "zsf")]
+    fn verify_zfuture_transaction(
+        request: &Request,
+        network: &Network,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let transaction = request.transaction();
+        let upgrade = request.upgrade(network);
+
+        if upgrade != NetworkUpgrade::ZFuture {
+            return Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                upgrade,
+            ));
+        }
+
+        let shielded_sighash = transaction.sighash(
+            upgrade
+                .branch_id()
+                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
+            HashType::ALL,
+            cached_ffi_transaction.all_previous_outputs(),
+            None,
+        );
+
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            request,
+            network,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_shielded_data(
+            sapling_shielded_data,
+            &shielded_sighash,
+        )?)
+        .and(Self::verify_orchard_shielded_data(
+            orchard_shielded_data,
+            &shielded_sighash,
+        )?))
+    }
+
     /// Verifies if a transaction's transparent inputs are valid using the provided
     /// `script_verifier` and `cached_ffi_transaction`.
     ///
@@ -792,6 +855,7 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
+        println!("verify_transparent_inputs_and_outputs");
         let transaction = request.transaction();
 
         if transaction.is_coinbase() {

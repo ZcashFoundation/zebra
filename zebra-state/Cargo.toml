@@ -16,6 +16,12 @@ categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
 
 [features]
 
+default = []
+
+zsf = [
+    "zebra-chain/zsf",
+]
+
 # Production features that activate extra dependencies, or extra features in dependencies
 
 progress-bar = [

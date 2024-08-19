@@ -17,7 +17,6 @@ proptest! {
         best_tip.send_best_tip_height(block_height);
 
         let expected_minimum_version = Version::min_remote_for_height(&network, block_height);
-
         prop_assert_eq!(minimum_peer_version.current(), expected_minimum_version);
     }
 

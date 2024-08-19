@@ -20,12 +20,13 @@ use tracing::Instrument;
 
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
+    amount::Amount,
     block::{self, Height, SerializedBlock},
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::ZcashDeserialize,
     subtree::NoteCommitmentSubtreeIndex,
-    transaction::{self, SerializedTransaction, Transaction, UnminedTx},
+    transaction::{self, LockTime, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
 };
 use zebra_node_services::mempool;

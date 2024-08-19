@@ -39,6 +39,15 @@ pub enum Response {
     //       `LatestChainTip::best_tip_height_and_hash()`
     Tip(Option<(block::Height, block::Hash)>),
 
+    TipPoolValues {
+        /// The current best chain tip height.
+        tip_height: block::Height,
+        /// The current best chain tip hash.
+        tip_hash: block::Hash,
+        /// The value pool balance at the current best chain tip.
+        value_balance: ValueBalance<NonNegative>,
+    },
+
     /// Response to [`Request::BlockLocator`] with a block locator object.
     BlockLocator(Vec<block::Hash>),
 
@@ -78,6 +87,9 @@ pub enum Response {
 
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
+
+    /// Response to [`Request::ValuePools`] with the total value balance of the chain.
+    ValuePools(ValueBalance<NonNegative>),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`]
@@ -217,6 +229,8 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainBlockHash`] with the specified block hash.
     BlockHash(Option<block::Hash>),
 
+    ValuePools(ValueBalance<NonNegative>),
+
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::ChainInfo`] with the state
     /// information needed by the `getblocktemplate` RPC method.
@@ -310,6 +324,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressUtxos(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            ReadResponse::ValuePools(value_pools) => Ok(Response::ValuePools(value_pools)),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
