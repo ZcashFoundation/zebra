@@ -553,11 +553,11 @@ dependencies = [
 
 [[package]]
 name = "bridgetree"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbfcb6c5a091e80cb3d3b0c1a7f126af4631cd5065b1f9929b139f1be8f3fb62"
+checksum = "f62227647af796dd9f1637da0392676a2e200973b817b082fc9be89bf93ddd74"
 dependencies = [
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
 ]
 
 [[package]]
@@ -2114,6 +2114,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "incrementalmerkletree"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75346da3bd8e3d8891d02508245ed2df34447ca6637e343829f8d08986e9cde2"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2798,7 +2807,7 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.5.1",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -3864,7 +3873,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.5.1",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -4198,7 +4207,7 @@ checksum = "3b3cdd24424ce0b381646737fedddc33c4dcf7dcd2d545056b53f7982097bef5"
 dependencies = [
  "bitflags 2.6.0",
  "either",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.5.1",
  "tracing",
 ]
 
@@ -5685,7 +5694,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.5.1",
  "memuse",
  "nom",
  "nonempty",
@@ -5795,7 +5804,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.5.1",
  "jubjub",
  "memuse",
  "nonempty",
@@ -5831,7 +5840,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.5.1",
  "jubjub",
  "memuse",
  "nonempty",
@@ -5936,7 +5945,7 @@ dependencies = [
  "halo2_proofs",
  "hex",
  "humantime",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "itertools 0.13.0",
  "jubjub",
  "lazy_static",
