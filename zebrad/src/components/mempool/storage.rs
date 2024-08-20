@@ -295,7 +295,7 @@ impl Storage {
     ///   Maintains the order in which the other unmined transactions have been inserted into the mempool.
     ///
     /// Reject and remove transactions from the mempool that contain any outpoints or nullifiers in
-    /// the `spent_outpoints` or `nullifiers` collections that are passed in.
+    /// the `spent_outpoints` or `nullifiers` collections that are obtained from the passed in transaction.
     ///
     /// Returns the number of transactions that were removed.
     pub fn reject_and_remove_same_effects(
