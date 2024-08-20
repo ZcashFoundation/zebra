@@ -27,7 +27,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 use tokio_stream::StreamExt;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
@@ -560,7 +560,7 @@ impl Service<Request> for Mempool {
                 for tx in tx_retries {
                     // This is just an efficiency optimisation, so we don't care if queueing
                     // transaction requests fails.
-                    let _result = tx_downloads.download_if_needed_and_verify(tx);
+                    let _result = tx_downloads.download_if_needed_and_verify(tx, None);
                 }
             }
 
@@ -608,8 +608,8 @@ impl Service<Request> for Mempool {
                             tracing::trace!("chain grew during tx verification, retrying ..",);
 
                             // We don't care if re-queueing the transaction request fails.
-                            let _result =
-                                tx_downloads.download_if_needed_and_verify(tx.transaction.into());
+                            let _result = tx_downloads
+                                .download_if_needed_and_verify(tx.transaction.into(), None);
                         }
                     }
                     Ok(Err((txid, error))) => {
@@ -762,7 +762,7 @@ impl Service<Request> for Mempool {
                         .into_iter()
                         .map(|gossiped_tx| -> Result<(), MempoolError> {
                             storage.should_download_or_verify(gossiped_tx.id())?;
-                            tx_downloads.download_if_needed_and_verify(gossiped_tx)?;
+                            tx_downloads.download_if_needed_and_verify(gossiped_tx, None)?;
 
                             Ok(())
                         })
@@ -773,6 +773,47 @@ impl Service<Request> for Mempool {
                     self.update_metrics();
 
                     async move { Ok(Response::Queued(rsp)) }.boxed()
+                }
+
+                // Queue mempool candidates
+                Request::QueueRpc(unmined_txs) => {
+                    trace!(req_count = ?unmined_txs.len(), "got mempool QueueRpc request");
+
+                    let results: Vec<Result<oneshot::Receiver<Result<(), BoxError>>, BoxError>> =
+                        unmined_txs
+                            .into_iter()
+                            .map(Gossip::Tx)
+                            .map(
+                                |unmined_tx| -> Result<
+                                    oneshot::Receiver<Result<(), BoxError>>,
+                                    MempoolError,
+                                > {
+                                    let (rsp_tx, rsp_rx) = oneshot::channel();
+                                    storage.should_download_or_verify(unmined_tx.id())?;
+                                    tx_downloads
+                                        .download_if_needed_and_verify(unmined_tx, Some(rsp_tx))?;
+                                    Ok(rsp_rx)
+                                },
+                            )
+                            .map(|result| result.map_err(BoxError::from))
+                            .collect();
+
+                    // We've added transactions to the queue
+                    self.update_metrics();
+
+                    async move {
+                        let mut rsp = vec![];
+
+                        for result in results {
+                            rsp.push(match result {
+                                Ok(rsp_rx) => rsp_rx.await?,
+                                Err(err) => Err(err),
+                            })
+                        }
+
+                        Ok(Response::Queued(rsp))
+                    }
+                    .boxed()
                 }
 
                 // Store successfully downloaded and verified transactions in the mempool
@@ -816,6 +857,15 @@ impl Service<Request> for Mempool {
                         // because the inbound service ignores inner errors.
                         iter::repeat(MempoolError::Disabled)
                             .take(gossiped_txs.len())
+                            .map(BoxError::from)
+                            .map(Err)
+                            .collect(),
+                    ),
+
+                    // Don't queue mempool candidates, because there is no queue.
+                    Request::QueueRpc(unmined_txs) => Response::Queued(
+                        iter::repeat(MempoolError::Disabled)
+                            .take(unmined_txs.len())
                             .map(BoxError::from)
                             .map(Err)
                             .collect(),
