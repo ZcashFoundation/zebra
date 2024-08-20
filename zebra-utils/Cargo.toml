@@ -123,3 +123,5 @@ syn = { version = "2.0.72", features = ["full"], optional = true }
 quote = { version = "1.0.36", optional = true }
 serde_yaml = { version = "0.9.34+deprecated", optional = true }
 serde = { version = "1.0.204", features = ["serde_derive"], optional = true }
+indexmap = "2.3.0"
+
