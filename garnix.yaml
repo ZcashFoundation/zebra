@@ -1,0 +1,7 @@
+builds:
+  exclude:
+  # This system isn’t actually supported by garnix (see garnix-io/issues#94)
+  - "*.x86_64-darwin-example"
+  include:
+  - '*.*'
+  - '*.*.*'
