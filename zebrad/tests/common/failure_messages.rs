@@ -121,7 +121,7 @@ pub const LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES: &[&str] = &[
     //
     // This log matches the "error with" RPC error message,
     // but we expect Zebra to start with an empty state.
-    r#"No Chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
+    r#"no chain tip available yet","level":"warning","msg":"error with getblockchaininfo rpc, retrying"#,
 ];
 
 /// Failure log messages from `zebra-checkpoints`.
