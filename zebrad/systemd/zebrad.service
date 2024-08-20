@@ -6,7 +6,7 @@
 # sudo cp target/release/zebrad /usr/bin
 # 3- Replace AssertPathExists and ExecStart with the location of your binary if needed.
 # 4- Place this file in systemd system folder, with the other systemd files:
-# cp zebrad/systemd/zebrad.service /lib/systemd/system/ 
+# cp zebrad/systemd/zebrad.service /lib/systemd/system/
 # 5- Start zebrad from systemd for the first time:
 # systemctl start zebrad.service
 # 6- Check status:
@@ -26,5 +26,4 @@ StandardOutput=journal
 StandardError=journal
 
 [Install]
-Alias=zebrad
 WantedBy=default.target
