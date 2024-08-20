@@ -60,7 +60,7 @@ proptest! {
             let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
 
             let unmined_transaction = UnminedTx::from(transaction);
-            let expected_request = mempool::Request::QueueRpc(vec![unmined_transaction.into()]);
+            let expected_request = mempool::Request::QueueRpc(vec![unmined_transaction]);
             let response = mempool::Response::Queued(vec![Ok(())]);
 
             mempool
@@ -114,7 +114,7 @@ proptest! {
             let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
 
             let unmined_transaction = UnminedTx::from(transaction);
-            let expected_request = mempool::Request::QueueRpc(vec![unmined_transaction.into()]);
+            let expected_request = mempool::Request::QueueRpc(vec![unmined_transaction]);
 
             mempool
                 .expect_request(expected_request)
@@ -174,7 +174,7 @@ proptest! {
             let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
 
             let unmined_transaction = UnminedTx::from(transaction);
-            let expected_request = mempool::Request::QueueRpc(vec![unmined_transaction.into()]);
+            let expected_request = mempool::Request::QueueRpc(vec![unmined_transaction]);
             let response = mempool::Response::Queued(vec![Err(DummyError.into())]);
 
             mempool
@@ -857,7 +857,7 @@ proptest! {
             let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
 
             let tx_unmined = UnminedTx::from(tx);
-            let expected_request = mempool::Request::QueueRpc(vec![tx_unmined.clone().into()]);
+            let expected_request = mempool::Request::QueueRpc(vec![tx_unmined.clone()]);
 
             // fail the mempool insertion
             mempool
@@ -949,7 +949,7 @@ proptest! {
                 let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
 
                 let tx_unmined = UnminedTx::from(tx.clone());
-                let expected_request = mempool::Request::QueueRpc(vec![tx_unmined.clone().into()]);
+                let expected_request = mempool::Request::QueueRpc(vec![tx_unmined.clone()]);
 
                 // insert to hs we will use later
                 transactions_hash_set.insert(tx_unmined.id);
