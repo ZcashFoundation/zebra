@@ -1,9 +1,13 @@
 //! Common functions used in Zebra.
 
-use std::{ffi::OsString, io, path::PathBuf};
+use std::{
+    ffi::OsString,
+    fs,
+    io::{self, Write},
+    path::PathBuf,
+};
 
-use tempfile::{NamedTempFile, PersistError};
-use tokio::io::AsyncWriteExt as _;
+use tempfile::PersistError;
 use tracing::Span;
 
 /// Returns Zebra's default cache directory path.
@@ -23,17 +27,16 @@ pub fn default_cache_dir() -> PathBuf {
 ///
 /// # Concurrency
 ///
-/// We want to use async code to avoid blocking the tokio executor on filesystem operations,
-/// but `tempfile` is implemented using non-asyc methods. So we wrap its filesystem
-/// operations in `tokio::spawn_blocking()`.
+/// This function blocks on filesystem operations and should be called in a blocking task
+/// if being used from an async environment. See [`spawn_atomic_write_to_tmp_file`].
 ///
 /// # Panics
 ///
 /// If the provided `file_path` is a directory path.
-pub async fn atomic_write_to_tmp_file(
+pub fn atomic_write_to_tmp_file(
     file_path: PathBuf,
     data: &[u8],
-) -> io::Result<Result<PathBuf, PersistError<tokio::fs::File>>> {
+) -> io::Result<Result<PathBuf, PersistError<fs::File>>> {
     // Get the file's parent directory, or use Zebra's default cache directory
     let file_dir = file_path
         .parent()
@@ -41,7 +44,7 @@ pub async fn atomic_write_to_tmp_file(
         .unwrap_or_else(default_cache_dir);
 
     // Create the directory if needed.
-    tokio::fs::create_dir_all(&file_dir).await?;
+    fs::create_dir_all(&file_dir)?;
 
     // Give the temporary file a similar name to the permanent file,
     // but hide it in directory listings.
@@ -52,42 +55,37 @@ pub async fn atomic_write_to_tmp_file(
             .expect("file path must have a file name"),
     );
 
-    // Create the temporary file.
-    // Do blocking filesystem operations on a dedicated thread.
-    let span = Span::current();
-    let tmp_file = tokio::task::spawn_blocking(move || {
-        span.in_scope(move || {
-            // Put the temporary file in the same directory as the permanent file,
-            // so atomic filesystem operations are possible.
-            tempfile::Builder::new()
-                .prefix(&tmp_file_prefix)
-                .tempfile_in(file_dir)
-        })
-    })
-    .await
-    .expect("unexpected panic creating temporary file")?;
+    // Create the temporary file in the same directory as the permanent file,
+    // so atomic filesystem operations are possible.
+    let mut tmp_file = tempfile::Builder::new()
+        .prefix(&tmp_file_prefix)
+        .tempfile_in(file_dir)?;
 
     // Write data to the file asynchronously, by extracting the inner file, using it,
     // then combining it back into a type that will correctly drop the file on error.
-    let (tmp_file, tmp_path) = tmp_file.into_parts();
-    let mut tmp_file = tokio::fs::File::from_std(tmp_file);
-    tmp_file.write_all(data).await?;
-
-    let tmp_file = NamedTempFile::from_parts(tmp_file, tmp_path);
+    tmp_file.write_all(data)?;
 
     // Atomically replace the current file with the temporary file.
     // Do blocking filesystem operations on a dedicated thread.
+    let persist_result = tmp_file
+        .persist(&file_path)
+        // Drops the temp file and returns the file path if needed.
+        .map(|_| file_path);
+    Ok(persist_result)
+}
+
+/// Calls [`atomic_write_to_tmp_file`] with the provided file path and data
+/// from a blocking task to avoid blocking the tokio executor on filesystem
+/// operations when the caller is in an async environment.
+pub async fn spawn_atomic_write_to_tmp_file(
+    file_path: PathBuf,
+    data: &[u8],
+) -> io::Result<Result<PathBuf, PersistError<fs::File>>> {
+    let data = data.to_vec();
     let span = Span::current();
-    let persist_result = tokio::task::spawn_blocking(move || {
-        span.in_scope(move || {
-            tmp_file
-                .persist(&file_path)
-                // Drops the temp file and returns the file path if needed.
-                .map(|_| file_path)
-        })
+    tokio::task::spawn_blocking(move || {
+        span.in_scope(move || atomic_write_to_tmp_file(file_path, &data))
     })
     .await
-    .expect("unexpected panic making temporary file permanent");
-
-    Ok(persist_result)
+    .expect("unexpected panic creating temporary file")
 }

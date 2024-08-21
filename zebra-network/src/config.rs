@@ -12,7 +12,7 @@ use serde::{de, Deserialize, Deserializer};
 use tokio::fs;
 
 use zebra_chain::{
-    common::atomic_write_to_tmp_file,
+    common::spawn_atomic_write_to_tmp_file,
     parameters::{
         testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
         Magic, Network, NetworkKind,
@@ -503,7 +503,7 @@ impl Config {
 
         // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
         // at the same time.
-        match atomic_write_to_tmp_file(peer_cache_file, peer_data.as_bytes()).await? {
+        match spawn_atomic_write_to_tmp_file(peer_cache_file, peer_data.as_bytes()).await? {
             Ok(peer_cache_file) => {
                 info!(
                     cached_ip_count = ?peer_list.len(),
