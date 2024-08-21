@@ -467,6 +467,8 @@ pub(crate) use hidden::{
 pub(crate) mod hidden {
     #![allow(dead_code)]
 
+    use zebra_chain::common::atomic_write_to_tmp_file;
+
     use super::*;
 
     /// Writes `changed_version` to the on-disk state database after the format is changed.
@@ -508,10 +510,9 @@ pub(crate) mod hidden {
 
         let version = format!("{}.{}", changed_version.minor, changed_version.patch);
 
-        // # Concurrency
-        //
-        // The caller handles locking for this file write.
-        fs::write(version_path, version.as_bytes())?;
+        // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
+        // at the same time.
+        atomic_write_to_tmp_file(version_path, version.as_bytes())??;
 
         Ok(())
     }
