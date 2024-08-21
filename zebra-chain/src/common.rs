@@ -8,7 +8,6 @@ use std::{
 };
 
 use tempfile::PersistError;
-use tracing::Span;
 
 /// Returns Zebra's default cache directory path.
 pub fn default_cache_dir() -> PathBuf {
@@ -28,7 +27,7 @@ pub fn default_cache_dir() -> PathBuf {
 /// # Concurrency
 ///
 /// This function blocks on filesystem operations and should be called in a blocking task
-/// if being used from an async environment. See [`spawn_atomic_write_to_tmp_file`].
+/// when calling from an async environment.
 ///
 /// # Panics
 ///
@@ -72,20 +71,4 @@ pub fn atomic_write_to_tmp_file(
         // Drops the temp file and returns the file path if needed.
         .map(|_| file_path);
     Ok(persist_result)
-}
-
-/// Calls [`atomic_write_to_tmp_file`] with the provided file path and data
-/// from a blocking task to avoid blocking the tokio executor on filesystem
-/// operations when the caller is in an async environment.
-pub async fn spawn_atomic_write_to_tmp_file(
-    file_path: PathBuf,
-    data: &[u8],
-) -> io::Result<Result<PathBuf, PersistError<fs::File>>> {
-    let data = data.to_vec();
-    let span = Span::current();
-    tokio::task::spawn_blocking(move || {
-        span.in_scope(move || atomic_write_to_tmp_file(file_path, &data))
-    })
-    .await
-    .expect("unexpected panic creating temporary file")
 }

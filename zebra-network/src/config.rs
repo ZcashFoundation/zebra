@@ -11,8 +11,9 @@ use indexmap::IndexSet;
 use serde::{de, Deserialize, Deserializer};
 use tokio::fs;
 
+use tracing::Span;
 use zebra_chain::{
-    common::spawn_atomic_write_to_tmp_file,
+    common::atomic_write_to_tmp_file,
     parameters::{
         testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
         Magic, Network, NetworkKind,
@@ -503,7 +504,14 @@ impl Config {
 
         // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
         // at the same time.
-        match spawn_atomic_write_to_tmp_file(peer_cache_file, peer_data.as_bytes()).await? {
+        let span = Span::current();
+        let write_result = tokio::task::spawn_blocking(move || {
+            span.in_scope(move || atomic_write_to_tmp_file(peer_cache_file, peer_data.as_bytes()))
+        })
+        .await
+        .expect("unexpected panic creating temporary file")?;
+
+        match write_result {
             Ok(peer_cache_file) => {
                 info!(
                     cached_ip_count = ?peer_list.len(),
