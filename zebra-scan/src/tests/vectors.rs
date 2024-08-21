@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use color_eyre::Result;
 
-use sapling::{
+use sapling_crypto::{
     zip32::{DiversifiableFullViewingKey, ExtendedSpendingKey},
     Nullifier,
 };

@@ -27,7 +27,7 @@ use zcash_client_backend::{
 };
 use zcash_primitives::zip32::{AccountId, Scope};
 
-use sapling::zip32::DiversifiableFullViewingKey;
+use sapling_crypto::zip32::DiversifiableFullViewingKey;
 
 use zebra_chain::{
     block::{Block, Height},

@@ -21,6 +21,20 @@ resolver = "2"
 
 # `cargo release` settings
 
+[workspace.dependencies]
+incrementalmerkletree = "0.6.0"
+orchard = "0.9.0"
+sapling-crypto = "0.2.0"
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_address = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+zcash_client_backend = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+zcash_history = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash/", branch = "main" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
