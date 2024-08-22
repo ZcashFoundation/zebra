@@ -170,6 +170,8 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
+    return Ok(());
+
     // TODO:
     // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
     // - Check the field in `sync_status` so it applies to the mempool as well.
