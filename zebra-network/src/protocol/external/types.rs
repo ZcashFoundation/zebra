@@ -93,7 +93,7 @@ impl Version {
             (Mainnet, Canopy) => 170_013,
             (Testnet(params), Nu5) if params.is_default_testnet() => 170_050,
             (Mainnet, Nu5) => 170_100,
-            (Testnet(_), Nu6) => 170_110,
+            (Testnet(params), Nu6) if params.is_default_testnet() => 170_110,
             (Mainnet, Nu6) => 170_120,
 
             // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
