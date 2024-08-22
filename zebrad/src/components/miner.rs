@@ -142,7 +142,7 @@ where
 {
     // TODO: change this to `config.internal_miner_threads` when internal miner feature is added back.
     //       https://github.com/ZcashFoundation/zebra/issues/8183
-    let configured_threads = 1;
+    let configured_threads = 32;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
         .map(usize::from)

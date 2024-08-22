@@ -99,10 +99,14 @@ orchard.workspace = true
 zcash_encoding.workspace = true
 zcash_history.workspace = true
 zcash_note_encryption = "0.4.0"
-zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_primitives = { git = "https://github.com/nuttycom/librustzcash", branch = "private-testnet", workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
-zcash_protocol.workspace = true
-zcash_address.workspace = true
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_protocol = { git = "https://github.com/nuttycom/librustzcash", branch = "private-testnet", workspace = true}
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_address = { git = "https://github.com/nuttycom/librustzcash/", branch = "private-testnet", workspace = true}
+
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }

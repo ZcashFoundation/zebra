@@ -113,9 +113,9 @@ tokio = { version = "1.39.2", features = ["full"], optional = true }
 
 jsonrpc = { version = "0.18.0", optional = true }
 
-zcash_primitives = { workspace = true, optional = true }
-zcash_client_backend = { workspace = true, optional = true }
-zcash_protocol.workspace = true
+zcash_primitives = { git = "https://github.com/nuttycom/librustzcash", branch = "private-testnet", workspace = true, optional = true }
+zcash_client_backend = { version = "0.12.1", workspace = true, optional = true }
+zcash_protocol = { git = "https://github.com/nuttycom/librustzcash", branch = "private-testnet", workspace = true}
 
 # For the openapi generator
 rand = "0.8.5"
