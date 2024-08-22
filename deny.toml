@@ -102,6 +102,12 @@ skip-tree = [
     { name = "zcash_encoding", version = "=0.2.0" },
     { name = "zcash_primitives", version = "=0.15.1" },
     { name = "zcash_protocol", version = "=0.1.1" },
+
+    # wait for structopt-derive to update heck
+    { name = "heck", version = "=0.3.3" },
+
+    # wait for librocksdb-sys to update bindgen to one that uses newer itertools
+    { name = "itertools", version = "=0.12.1" }
 ]
 
 # This section is considered when running `cargo deny check sources`.
