@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ## [Zebra 1.9.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.9.0) - 2024-08-02
 
 This release includes deployment of NU6 on Testnet, configurable funding streams on custom Testnets, and updates Zebra's end-of-support (EoS)
-from 16 weeks to 14 weeks so that it will panic before the expected activation height of NU6 on Mainnet.
+from 16 weeks to 10 weeks so that it will panic before the expected activation height of NU6 on Mainnet.
 
 It also replaces the `shielded-scan` compilation feature with a new `zebra-scanner` binary, adds a `TrustedChainSync` module
 for replicating Zebra's best chain state, and a gRPC server in `zebra-rpc` as steps towards zcashd deprecation.
@@ -22,6 +22,10 @@ for replicating Zebra's best chain state, and a gRPC server in `zebra-rpc` as st
 - Configurable NU6 activation height on Regtest ([#8700](https://github.com/ZcashFoundation/zebra/pull/8700))
 - Configurable Testnet funding streams ([#8718](https://github.com/ZcashFoundation/zebra/pull/8718))
 - Post-NU6 funding streams, including a lockbox funding stream ([#8694](https://github.com/ZcashFoundation/zebra/pull/8694))
+
+### Changed
+
+- Reduced the end-of-support halt time from 16 weeks to 10 weeks ([#8734](https://github.com/ZcashFoundation/zebra/pull/8734))
 
 ### Fixed
 
