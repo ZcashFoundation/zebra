@@ -1,4 +1,3 @@
-//! Test that we can scan the Zebra blockchain using the external `zcash_client_backend` crate
 //! scanning functionality.
 //!
 //! This tests belong to the proof of concept stage of the external wallet support functionality.
@@ -21,7 +20,7 @@ use zcash_client_backend::{
 use zcash_note_encryption::Domain;
 use zcash_primitives::{block::BlockHash, consensus::BlockHeight, memo::MemoBytes};
 
-use ::sapling::{
+use ::sapling_crypto::{
     constants::SPENDING_KEY_GENERATOR,
     note_encryption::{sapling_note_encryption, SaplingDomain},
     util::generate_random_rseed,
@@ -170,7 +169,10 @@ pub fn fake_compact_block(
 
     // Create a fake Note for the account
     let mut rng = OsRng;
-    let rseed = generate_random_rseed(::sapling::note_encryption::Zip212Enforcement::Off, &mut rng);
+    let rseed = generate_random_rseed(
+        ::sapling_crypto::note_encryption::Zip212Enforcement::Off,
+        &mut rng,
+    );
 
     let note = Note::from_parts(to, NoteValue::from_raw(value), rseed);
     let encryptor = sapling_note_encryption::<_>(
