@@ -58,9 +58,6 @@ skip-tree = [
     # wait for `color-eyre` to upgrade
     { name = "owo-colors", version = "=3.5.0" },
 
-    # wait for hdwallet to upgrade
-    { name = "ring", version = "=0.16.20" },
-
     # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
 
@@ -73,13 +70,6 @@ skip-tree = [
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
-
-    # wait for console-subscriber to update tonic.
-    { name = "tonic", version = "=0.11.0" },
-    { name = "tonic-build", version = "=0.10.2" },
-    { name = "axum", version = "=0.6.20" },
-    { name = "axum-core", version = "=0.3.4" },
-    { name = "hyper-timeout", version = "=0.4.1" },
 
     # wait for elasticsearch to update base64, darling, rustc_version, serde_with
     { name = "elasticsearch", version = "=8.5.0-alpha.1" },
@@ -98,10 +88,9 @@ skip-tree = [
     { name = "equihash", version = "=0.2.0" },
     { name = "f4jumble", version = "=0.1.0" },
     { name = "secp256k1", version = "=0.26.0" },
-    { name = "zcash_address", version = "=0.3.2" },
-    { name = "zcash_encoding", version = "=0.2.0" },
-    { name = "zcash_primitives", version = "=0.15.1" },
-    { name = "zcash_protocol", version = "=0.1.1" },
+    { name = "zcash_address", version = "=0.5.0" },
+    { name = "zcash_client_backend", version = "=0.13.0" },
+
 
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
