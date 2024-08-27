@@ -7,6 +7,7 @@ use futures::{future, FutureExt, TryFutureExt};
 use tokio::sync::watch;
 
 use crate::{
+    amount::NonNegative,
     block,
     chain_tip::{BestTipChanged, ChainTip},
     parameters::Network,

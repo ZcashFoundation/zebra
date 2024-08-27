@@ -139,6 +139,10 @@ impl Commitment {
             (Nu5 | Nu6, _) => Ok(ChainHistoryBlockTxAuthCommitment(
                 ChainHistoryBlockTxAuthCommitmentHash(bytes),
             )),
+            #[cfg(feature = "zsf")]
+            (ZFuture, _) => Ok(ChainHistoryBlockTxAuthCommitment(
+                ChainHistoryBlockTxAuthCommitmentHash(bytes),
+            )),
         }
     }
 

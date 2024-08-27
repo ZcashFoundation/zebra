@@ -1,7 +1,7 @@
 //! Fixed test vectors for the network consensus parameters.
 
+use zcash_primitives::consensus::NetworkConstants as _;
 use zcash_primitives::consensus::{self as zp_consensus, Parameters};
-use zcash_protocol::consensus::NetworkConstants as _;
 
 use crate::{
     block::Height,
@@ -31,6 +31,8 @@ fn check_parameters_impl() {
         zp_consensus::NetworkUpgrade::Heartwood,
         zp_consensus::NetworkUpgrade::Canopy,
         zp_consensus::NetworkUpgrade::Nu5,
+        #[cfg(feature = "zsf")]
+        zp_consensus::NetworkUpgrade::ZFuture,
     ];
 
     for (network, zp_network) in [
@@ -109,7 +111,10 @@ fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
+            #[cfg(not(feature = "zsf"))]
             nu6: Some(expected_activation_height),
+            #[cfg(feature = "zsf")]
+            zfuture: Some(expected_activation_height),
             ..Default::default()
         })
         .to_network();
@@ -141,6 +146,8 @@ fn activates_network_upgrades_correctly() {
         (Height(1), NetworkUpgrade::Canopy),
         // TODO: Remove this once the testnet parameters are being serialized.
         (Height(100), NetworkUpgrade::Nu5),
+        #[cfg(feature = "zsf")]
+        (Height(101), NetworkUpgrade::ZFuture),
     ];
 
     for (network, expected_activation_heights) in [

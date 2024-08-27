@@ -43,6 +43,9 @@ pub enum SubsidyError {
 
     #[error("invalid amount")]
     InvalidAmount(amount::Error),
+
+    #[error("ZSF deposit amount needs to be >= than 60% of transaction fees")]
+    InvalidZsfDepositAmount,
 }
 
 impl From<amount::Error> for SubsidyError {

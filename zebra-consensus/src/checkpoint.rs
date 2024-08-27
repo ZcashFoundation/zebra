@@ -36,7 +36,7 @@ use zebra_chain::{
 use zebra_state::{self as zs, CheckpointVerifiedBlock};
 
 use crate::{
-    block::VerifyBlockError,
+    block::{subsidy::general::block_subsidy_pre_zsf, VerifyBlockError},
     block_subsidy,
     checkpoint::types::{
         Progress::{self, *},
@@ -612,8 +612,12 @@ where
         // omit the calculation of the expected deferred amount.
         let expected_deferred_amount = if height > self.network.slow_start_interval() {
             // TODO: Add link to lockbox stream ZIP
-            funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
-                .remove(&FundingStreamReceiver::Deferred)
+            funding_stream_values(
+                height,
+                &self.network,
+                block_subsidy_pre_zsf(height, &self.network)?,
+            )?
+            .remove(&FundingStreamReceiver::Deferred)
         } else {
             None
         };

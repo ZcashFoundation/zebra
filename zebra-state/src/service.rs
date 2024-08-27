@@ -1112,6 +1112,24 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            #[cfg(feature = "zsf")]
+            Request::TipPoolValues => {
+                // Redirect the request to the concurrent ReadStateService
+                let read_service = self.read_service.clone();
+
+                async move {
+                    let req = req
+                        .try_into()
+                        .expect("ReadRequest conversion should not fail");
+
+                    let rsp = read_service.oneshot(req).await?;
+                    let rsp = rsp.try_into().expect("Response conversion should not fail");
+
+                    Ok(rsp)
+                }
+                .boxed()
+            }
+
             #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => {
                 // Redirect the request to the concurrent ReadStateService

@@ -17,6 +17,8 @@ categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 [features]
 default = []
 
+zsf = []
+
 # Production features that activate extra functionality
 
 # Consensus-critical conversion from JSON to Zcash types

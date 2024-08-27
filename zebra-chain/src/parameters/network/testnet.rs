@@ -194,6 +194,9 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU6` network upgrade.
     #[serde(rename = "NU6")]
     pub nu6: Option<u32>,
+    #[cfg(feature = "zsf")]
+    #[serde(rename = "ZFuture")]
+    pub zfuture: Option<u32>,
 }
 
 /// Builder for the [`Parameters`] struct.
@@ -314,6 +317,8 @@ impl ParametersBuilder {
             canopy,
             nu5,
             nu6,
+            #[cfg(feature = "zsf")]
+            zfuture,
         }: ConfiguredActivationHeights,
     ) -> Self {
         use NetworkUpgrade::*;
@@ -322,7 +327,7 @@ impl ParametersBuilder {
         //
         // These must be in order so that later network upgrades overwrite prior ones
         // if multiple network upgrades are configured with the same activation height.
-        let activation_heights: BTreeMap<_, _> = before_overwinter
+        let activation_heights = before_overwinter
             .into_iter()
             .map(|h| (h, BeforeOverwinter))
             .chain(overwinter.into_iter().map(|h| (h, Overwinter)))
@@ -331,7 +336,13 @@ impl ParametersBuilder {
             .chain(heartwood.into_iter().map(|h| (h, Heartwood)))
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
             .chain(nu5.into_iter().map(|h| (h, Nu5)))
-            .chain(nu6.into_iter().map(|h| (h, Nu6)))
+            .chain(nu6.into_iter().map(|h| (h, Nu6)));
+
+        #[cfg(feature = "zsf")]
+        let activation_heights =
+            activation_heights.chain(zfuture.into_iter().map(|h| (h, ZFuture)));
+
+        let activation_heights: BTreeMap<_, _> = activation_heights
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();
 
@@ -538,6 +549,8 @@ impl Parameters {
                     canopy: Some(1),
                     nu5: nu5_activation_height,
                     nu6: nu6_activation_height,
+                    #[cfg(feature = "zsf")]
+                    zfuture: nu5_activation_height.map(|height| height + 1),
                     ..Default::default()
                 })
                 .finish()

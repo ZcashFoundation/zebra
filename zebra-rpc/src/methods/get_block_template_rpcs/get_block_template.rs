@@ -6,7 +6,7 @@ use jsonrpc_core::{Error, ErrorCode, Result};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    amount::{self, Amount, NegativeOrZero, NonNegative},
+    amount::{self, Amount, NegativeOrZero, NonNegative, MAX_MONEY},
     block::{
         self,
         merkle::{self, AuthDataRoot},
@@ -376,7 +376,9 @@ pub fn standard_coinbase_outputs(
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
-    let expected_block_subsidy = block_subsidy(height, network).expect("valid block subsidy");
+    let max_money = MAX_MONEY.try_into().expect("MAX_MONEY is a valid amount");
+    let expected_block_subsidy =
+        block_subsidy(height, network, max_money).expect("valid block subsidy");
     let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
         .expect("funding stream value calculations are valid for reasonable chain heights");
 
