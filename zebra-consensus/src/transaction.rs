@@ -855,7 +855,6 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
     ) -> Result<AsyncChecks, TransactionError> {
-        println!("verify_transparent_inputs_and_outputs");
         let transaction = request.transaction();
 
         if transaction.is_coinbase() {
