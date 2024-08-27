@@ -1,5 +1,6 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 562
 expression: info
 ---
 {
@@ -37,12 +38,12 @@ expression: info
   "upgrades": {
     "5ba81b19": {
       "name": "Overwinter",
-      "activationheight": 584000,
+      "activationheight": 207500,
       "status": "pending"
     },
     "76b809bb": {
       "name": "Sapling",
-      "activationheight": 584000,
+      "activationheight": 280000,
       "status": "pending"
     },
     "2bb40e60": {
@@ -52,17 +53,17 @@ expression: info
     },
     "f5b9230b": {
       "name": "Heartwood",
-      "activationheight": 2976000,
+      "activationheight": 903800,
       "status": "pending"
     },
     "e9ff75a6": {
       "name": "Canopy",
-      "activationheight": 2976000,
+      "activationheight": 1028500,
       "status": "pending"
     },
     "c2d6d0b4": {
       "name": "NU5",
-      "activationheight": 2976000,
+      "activationheight": 1842420,
       "status": "pending"
     },
     "c8e71055": {
