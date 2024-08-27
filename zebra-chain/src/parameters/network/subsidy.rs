@@ -292,7 +292,7 @@ const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
 
 /// The start height of post-NU6 funding streams on Testnet
 // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
-const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_942_000;
+const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
 
 /// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet.
 const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
