@@ -590,7 +590,6 @@ impl ConsensusBranchId {
     ///
     /// Returns None if the network has no branch id at this height.
     pub fn current(network: &Network, height: block::Height) -> Option<ConsensusBranchId> {
-        let c = NetworkUpgrade::current(network, height);
         NetworkUpgrade::current(network, height).branch_id()
     }
 }

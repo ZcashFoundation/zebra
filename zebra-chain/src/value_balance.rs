@@ -7,7 +7,7 @@ use core::fmt;
 #[cfg(any(test, feature = "proptest-impl"))]
 use std::{borrow::Borrow, collections::HashMap};
 
-#[cfg(any(test, feature = "proptest-impl"))]
+#[cfg(any(test, feature = "proptest-impl", feature = "zsf"))]
 use crate::{amount::MAX_MONEY, transaction::Transaction, transparent};
 
 #[cfg(any(test, feature = "proptest-impl"))]

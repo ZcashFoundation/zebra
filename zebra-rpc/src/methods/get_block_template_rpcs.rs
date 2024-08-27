@@ -1155,6 +1155,7 @@ where
     fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>> {
         let latest_chain_tip = self.latest_chain_tip.clone();
         let network = self.network.clone();
+        let mut state_service = self.state.clone();
 
         async move {
             let height = if let Some(height) = height {
@@ -1176,16 +1177,24 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let zsf_balance = match self
-                .state
-                .ready()
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-                .call(Request::TipPoolValues)
-                .await
-                .map_err(|source| VerifyBlockError::Depth { source, hash })?
-            {
-                Response::TipPoolValues {
+            let service = state_service.ready().await.map_err(|_| Error {
+                code: ErrorCode::InternalError,
+                message: "".into(),
+                data: None,
+            })?;
+
+            let tip_pool_values =
+                service
+                    .call(ReadRequest::TipPoolValues)
+                    .await
+                    .map_err(|_| Error {
+                        code: ErrorCode::InternalError,
+                        message: "".into(),
+                        data: None,
+                    });
+
+            let zsf_balance = match tip_pool_values? {
+                ReadResponse::TipPoolValues {
                     tip_hash: _,
                     tip_height: _,
                     value_balance,
