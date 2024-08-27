@@ -199,12 +199,11 @@ ARG GID=10001
 
 RUN addgroup --system --gid ${GID} ${USER} \
     && adduser \
-    --no-log-init \
     --system \
     --disabled-login \
     --shell /bin/bash \
     --uid "${UID}" \
-    --gid "{GID}" \
+    --gid "${GID}" \
     ${USER}
 
 # Config settings for zebrad
