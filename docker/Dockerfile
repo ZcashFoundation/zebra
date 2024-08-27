@@ -187,15 +187,21 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    rocksdb-tools
+    rocksdb-tools \
+    gosu \
+    && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Create a non-privileged user that the app will run under.
 # Running as root inside the container is running as root in the Docker host
 # If an attacker manages to break out of the container, they will have root access to the host
 # See https://docs.docker.com/go/dockerfile-user-best-practices/
 ARG USER=zebra
+ENV USER=${USER}
 ARG UID=10001
+ENV UID=${UID}
 ARG GID=10001
+ENV GID=${GID}
 
 RUN addgroup --system --gid ${GID} ${USER} \
     && adduser \
@@ -216,8 +222,6 @@ ENV ZEBRA_CONF_FILE=${ZEBRA_CONF_FILE:-zebrad.toml}
 
 COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
 COPY --from=release /entrypoint.sh /
-
-USER ${USER}
 
 # Expose configured ports
 EXPOSE 8233 18233
