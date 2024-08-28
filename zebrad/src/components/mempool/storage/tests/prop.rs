@@ -446,6 +446,7 @@ enum SpendConflictTestInput {
 
         conflict: SpendConflictForTransactionV5,
     },
+    // FIXME: add and use V6?
 }
 
 impl SpendConflictTestInput {
@@ -567,7 +568,7 @@ impl SpendConflictTestInput {
                 }
 
                 // No JoinSplits
-                Transaction::V1 { .. } | Transaction::V5 { .. } => {}
+                Transaction::V1 { .. } | Transaction::V5 { .. } | Transaction::V6 { .. } => {}
             }
         }
     }
@@ -632,6 +633,10 @@ impl SpendConflictTestInput {
                 }
 
                 Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                }
+                | Transaction::V6 {
                     sapling_shielded_data,
                     ..
                 } => {
@@ -705,6 +710,10 @@ impl SpendConflictTestInput {
         for transaction in [first, second] {
             match transaction {
                 Transaction::V5 {
+                    orchard_shielded_data,
+                    ..
+                }
+                | Transaction::V6 {
                     orchard_shielded_data,
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
