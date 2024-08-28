@@ -28,7 +28,7 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
-            Transaction::V5 { .. } => self.txid_v5(),
+            Transaction::V5 { .. } | Transaction::V6 { .. } => self.txid_v5_v6(),
         }
     }
 
@@ -43,10 +43,14 @@ impl<'a> TxIdBuilder<'a> {
         Ok(Hash(hash_writer.finish()))
     }
 
-    /// Compute the Transaction ID for a V5 transaction in the given network upgrade.
+    // FIXME: it looks like the updated zcash_primitives in librustzcash
+    // auto-detects the transaction version by the first byte, so the same function
+    // can be used here for both V5 and V6.
+    // FIXME: fix spec refs below for V6
+    /// Compute the Transaction ID for a V5/V6 transaction in the given network upgrade.
     /// In this case it's the hash of a tree of hashes of specific parts of the
     /// transaction, as specified in ZIP-244 and ZIP-225.
-    fn txid_v5(self) -> Result<Hash, io::Error> {
+    fn txid_v5_v6(self) -> Result<Hash, io::Error> {
         // The v5 txid (from ZIP-244) is computed using librustzcash. Convert the zebra
         // transaction to a librustzcash transaction.
         let alt_tx: zcash_primitives::transaction::Transaction = self.trans.try_into()?;

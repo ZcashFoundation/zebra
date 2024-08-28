@@ -991,6 +991,10 @@ fn binding_signatures_for_network(network: Network) {
                 Transaction::V5 {
                     sapling_shielded_data,
                     ..
+                }
+                | Transaction::V6 {
+                    sapling_shielded_data,
+                    ..
                 } => {
                     if let Some(sapling_shielded_data) = sapling_shielded_data {
                         let shielded_sighash =

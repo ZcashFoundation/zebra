@@ -63,6 +63,7 @@ pub fn transparent_spend(
                 finalized_state,
             )?;
 
+            // FIXME: what about v6?
             // The state service returns UTXOs from pending blocks,
             // which can be rejected by later contextual checks.
             // This is a particular issue for v5 transactions,

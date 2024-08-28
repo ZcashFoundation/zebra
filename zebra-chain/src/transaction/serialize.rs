@@ -11,7 +11,10 @@ use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
-    parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
+    parameters::{
+        OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID,
+        TX_V6_VERSION_GROUP_ID,
+    },
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
@@ -673,6 +676,54 @@ impl ZcashSerialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
+
+            // FIXME: implement a proper serialization for V6
+            Transaction::V6 {
+                network_upgrade,
+                lock_time,
+                expiry_height,
+                inputs,
+                outputs,
+                sapling_shielded_data,
+                orchard_shielded_data,
+            } => {
+                // Transaction V6 spec:
+                // FIXME: specify a proper ref
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
+                writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
+
+                // Denoted as `nConsensusBranchId` in the spec.
+                writer.write_u32::<LittleEndian>(u32::from(
+                    network_upgrade
+                        .branch_id()
+                        .expect("valid transactions must have a network upgrade with a branch id"),
+                ))?;
+
+                // Denoted as `lock_time` in the spec.
+                lock_time.zcash_serialize(&mut writer)?;
+
+                // Denoted as `nExpiryHeight` in the spec.
+                writer.write_u32::<LittleEndian>(expiry_height.0)?;
+
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
+                inputs.zcash_serialize(&mut writer)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
+                outputs.zcash_serialize(&mut writer)?;
+
+                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
+                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
+                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
+                // `bindingSigSapling`.
+                sapling_shielded_data.zcash_serialize(&mut writer)?;
+
+                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
+                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
+                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
+                orchard_shielded_data.zcash_serialize(&mut writer)?;
+            }
         }
         Ok(())
     }
@@ -920,6 +971,60 @@ impl ZcashDeserialize for Transaction {
                 let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
                 Ok(Transaction::V5 {
+                    network_upgrade,
+                    lock_time,
+                    expiry_height,
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                })
+            }
+            // FIXME: implement a proper deserialization for V6
+            (6, true) => {
+                // Transaction V6 spec:
+                // FIXME: specify a proper ref
+                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+
+                // Denoted as `nVersionGroupId` in the spec.
+                let id = limited_reader.read_u32::<LittleEndian>()?;
+                if id != TX_V6_VERSION_GROUP_ID {
+                    return Err(SerializationError::Parse("expected TX_V6_VERSION_GROUP_ID"));
+                }
+                // Denoted as `nConsensusBranchId` in the spec.
+                // Convert it to a NetworkUpgrade
+                let network_upgrade =
+                    NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
+                        .ok_or_else(|| {
+                            SerializationError::Parse(
+                                "expected a valid network upgrade from the consensus branch id",
+                            )
+                        })?;
+
+                // Denoted as `lock_time` in the spec.
+                let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `nExpiryHeight` in the spec.
+                let expiry_height = block::Height(limited_reader.read_u32::<LittleEndian>()?);
+
+                // Denoted as `tx_in_count` and `tx_in` in the spec.
+                let inputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // Denoted as `tx_out_count` and `tx_out` in the spec.
+                let outputs = Vec::zcash_deserialize(&mut limited_reader)?;
+
+                // A bundle of fields denoted in the spec as `nSpendsSapling`, `vSpendsSapling`,
+                // `nOutputsSapling`,`vOutputsSapling`, `valueBalanceSapling`, `anchorSapling`,
+                // `vSpendProofsSapling`, `vSpendAuthSigsSapling`, `vOutputProofsSapling` and
+                // `bindingSigSapling`.
+                let sapling_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+
+                // A bundle of fields denoted in the spec as `nActionsOrchard`, `vActionsOrchard`,
+                // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
+                // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
+                let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
+
+                Ok(Transaction::V6 {
                     network_upgrade,
                     lock_time,
                     expiry_height,

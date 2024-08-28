@@ -405,7 +405,13 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } => Self::verify_v5_transaction(
+                }
+                // FIXME: implement proper V6 verification
+                | Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                }=> Self::verify_v5_transaction(
                     &req,
                     &network,
                     script_verifier,

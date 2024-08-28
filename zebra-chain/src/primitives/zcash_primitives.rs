@@ -148,12 +148,15 @@ impl TryFrom<&Transaction> for zp_tx::Transaction {
     ///
     /// # Panics
     ///
-    /// If the transaction is not V5. (Currently there is no need for this
+    /// If the transaction is not V5/V6. (Currently there is no need for this
     /// conversion for other versions.)
     #[allow(clippy::unwrap_in_result)]
     fn try_from(trans: &Transaction) -> Result<Self, Self::Error> {
         let network_upgrade = match trans {
             Transaction::V5 {
+                network_upgrade, ..
+            }
+            | Transaction::V6 {
                 network_upgrade, ..
             } => network_upgrade,
             Transaction::V1 { .. }
