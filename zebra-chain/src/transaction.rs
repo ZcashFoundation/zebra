@@ -142,6 +142,28 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
     },
+    // FIXME: implement V6 properly (now it's just a coipy of V5)
+    /// A `version = 6` transaction , which supports Orchard ZSA, Orchard Vanille, Sapling and
+    /// transparent, but not Sprout.
+    V6 {
+        /// The Network Upgrade for this transaction.
+        ///
+        /// Derived from the ConsensusBranchId field.
+        network_upgrade: NetworkUpgrade,
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+        /// The latest block height that this transaction can be added to the chain.
+        expiry_height: block::Height,
+        /// The transparent inputs to the transaction.
+        inputs: Vec<transparent::Input>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<transparent::Output>,
+        /// The sapling shielded data for this transaction, if any.
+        sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        /// The orchard data for this transaction, if any.
+        orchard_shielded_data: Option<orchard::ShieldedData>,
+    },
 }
 
 impl fmt::Display for Transaction {
@@ -180,7 +202,7 @@ impl Transaction {
 
     /// Compute the hash (mined transaction ID) of this transaction.
     ///
-    /// The hash uniquely identifies mined v5 transactions,
+    /// The hash uniquely identifies mined v5/v6 transactions,
     /// and all v1-v4 transactions, whether mined or unmined.
     pub fn hash(&self) -> Hash {
         Hash::from(self)
@@ -247,7 +269,7 @@ impl Transaction {
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => None,
-            Transaction::V5 { .. } => Some(AuthDigest::from(self)),
+            Transaction::V5 { .. } | Transaction::V6 { .. } => Some(AuthDigest::from(self)),
         }
     }
 
@@ -320,7 +342,10 @@ impl Transaction {
     pub fn is_overwintered(&self) -> bool {
         match self {
             Transaction::V1 { .. } | Transaction::V2 { .. } => false,
-            Transaction::V3 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => true,
+            Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => true,
         }
     }
 
@@ -332,6 +357,7 @@ impl Transaction {
             Transaction::V3 { .. } => 3,
             Transaction::V4 { .. } => 4,
             Transaction::V5 { .. } => 5,
+            Transaction::V6 { .. } => 6,
         }
     }
 
@@ -342,7 +368,8 @@ impl Transaction {
             | Transaction::V2 { lock_time, .. }
             | Transaction::V3 { lock_time, .. }
             | Transaction::V4 { lock_time, .. }
-            | Transaction::V5 { lock_time, .. } => *lock_time,
+            | Transaction::V5 { lock_time, .. }
+            | Transaction::V6 { lock_time, .. } => *lock_time,
         };
 
         // `zcashd` checks that the block height is greater than the lock height.
@@ -389,7 +416,8 @@ impl Transaction {
             | Transaction::V2 { lock_time, .. }
             | Transaction::V3 { lock_time, .. }
             | Transaction::V4 { lock_time, .. }
-            | Transaction::V5 { lock_time, .. } => *lock_time,
+            | Transaction::V5 { lock_time, .. }
+            | Transaction::V6 { lock_time, .. } => *lock_time,
         };
         let mut lock_time_bytes = Vec::new();
         lock_time
@@ -419,7 +447,8 @@ impl Transaction {
             Transaction::V1 { .. } | Transaction::V2 { .. } => None,
             Transaction::V3 { expiry_height, .. }
             | Transaction::V4 { expiry_height, .. }
-            | Transaction::V5 { expiry_height, .. } => match expiry_height {
+            | Transaction::V5 { expiry_height, .. }
+            | Transaction::V6 { expiry_height, .. } => match expiry_height {
                 // Consensus rule:
                 // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
                 // https://zips.z.cash/zip-0203#specification
@@ -451,6 +480,10 @@ impl Transaction {
             | Transaction::V5 {
                 ref mut expiry_height,
                 ..
+            }
+            | Transaction::V6 {
+                ref mut expiry_height,
+                ..
             } => expiry_height,
         }
     }
@@ -467,6 +500,9 @@ impl Transaction {
             | Transaction::V4 { .. } => None,
             Transaction::V5 {
                 network_upgrade, ..
+            }
+            | Transaction::V6 {
+                network_upgrade, ..
             } => Some(*network_upgrade),
         }
     }
@@ -481,6 +517,7 @@ impl Transaction {
             Transaction::V3 { ref inputs, .. } => inputs,
             Transaction::V4 { ref inputs, .. } => inputs,
             Transaction::V5 { ref inputs, .. } => inputs,
+            Transaction::V6 { ref inputs, .. } => inputs,
         }
     }
 
@@ -493,6 +530,7 @@ impl Transaction {
             Transaction::V3 { ref mut inputs, .. } => inputs,
             Transaction::V4 { ref mut inputs, .. } => inputs,
             Transaction::V5 { ref mut inputs, .. } => inputs,
+            Transaction::V6 { ref mut inputs, .. } => inputs,
         }
     }
 
@@ -511,6 +549,7 @@ impl Transaction {
             Transaction::V3 { ref outputs, .. } => outputs,
             Transaction::V4 { ref outputs, .. } => outputs,
             Transaction::V5 { ref outputs, .. } => outputs,
+            Transaction::V6 { ref outputs, .. } => outputs,
         }
     }
 
@@ -531,6 +570,9 @@ impl Transaction {
                 ref mut outputs, ..
             } => outputs,
             Transaction::V5 {
+                ref mut outputs, ..
+            } => outputs,
+            Transaction::V6 {
                 ref mut outputs, ..
             } => outputs,
         }
@@ -580,7 +622,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -615,7 +658,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => 0,
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => 0,
         }
     }
 
@@ -654,7 +698,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -690,7 +735,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => None,
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => None,
         }
     }
 
@@ -698,7 +744,7 @@ impl Transaction {
     pub fn has_sprout_joinsplit_data(&self) -> bool {
         match self {
             // No JoinSplits
-            Transaction::V1 { .. } | Transaction::V5 { .. } => false,
+            Transaction::V1 { .. } | Transaction::V5 { .. } | Transaction::V6 { .. } => false,
 
             // JoinSplits-on-BCTV14
             Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
@@ -745,7 +791,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V1 { .. }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -767,6 +814,11 @@ impl Transaction {
                 ..
             } => Box::new(sapling_shielded_data.anchors()),
 
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.anchors()),
+
             // No Spends
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
@@ -778,6 +830,10 @@ impl Transaction {
             | Transaction::V5 {
                 sapling_shielded_data: None,
                 ..
+            }
+            | Transaction::V6 {
+                sapling_shielded_data: None,
+                ..
             } => Box::new(std::iter::empty()),
         }
     }
@@ -786,8 +842,8 @@ impl Transaction {
     /// returning `Spend<PerSpendAnchor>` regardless of the underlying
     /// transaction version.
     ///
-    /// Shared anchors in V5 transactions are copied into each sapling spend.
-    /// This allows the same code to validate spends from V4 and V5 transactions.
+    /// Shared anchors in V5/V6 transactions are copied into each sapling spend.
+    /// This allows the same code to validate spends from V4 and V5/V6 transactions.
     ///
     /// # Correctness
     ///
@@ -804,6 +860,10 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.spends_per_anchor()),
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.spends_per_anchor()),
 
             // No Spends
             Transaction::V1 { .. }
@@ -814,6 +874,10 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -832,6 +896,10 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.outputs()),
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.outputs()),
 
             // No Outputs
             Transaction::V1 { .. }
@@ -842,6 +910,10 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -862,6 +934,10 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.nullifiers()),
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.nullifiers()),
 
             // No Spends
             Transaction::V1 { .. }
@@ -872,6 +948,10 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -892,6 +972,10 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.note_commitments()),
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.note_commitments()),
 
             // No Spends
             Transaction::V1 { .. }
@@ -902,6 +986,10 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -920,6 +1008,10 @@ impl Transaction {
                 sapling_shielded_data,
                 ..
             } => sapling_shielded_data.is_some(),
+            Transaction::V6 {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data.is_some(),
         }
     }
 
@@ -931,6 +1023,12 @@ impl Transaction {
         match self {
             // Maybe Orchard shielded data
             Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref(),
+
+            // FIXME: Support V6/OrchardZSA propetly.
+            Transaction::V6 {
                 orchard_shielded_data,
                 ..
             } => orchard_shielded_data.as_ref(),
@@ -953,11 +1051,21 @@ impl Transaction {
                 ..
             } => Some(orchard_shielded_data),
 
+            // FIXME: Support V6/OrchardZSA propetly.
+            Transaction::V6 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(orchard_shielded_data),
+
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. }
             | Transaction::V5 {
+                orchard_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
                 orchard_shielded_data: None,
                 ..
             } => None,
@@ -1086,7 +1194,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1135,7 +1244,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1182,7 +1292,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1231,7 +1342,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1272,7 +1384,8 @@ impl Transaction {
                 joinsplit_data: None,
                 ..
             }
-            | Transaction::V5 { .. } => Box::new(iter::empty()),
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => Box::new(iter::empty()),
         };
 
         joinsplit_value_balances.map(ValueBalance::from_sprout_amount)
@@ -1314,6 +1427,10 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => sapling_shielded_data.value_balance,
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => sapling_shielded_data.value_balance,
 
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
@@ -1323,6 +1440,10 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
                 sapling_shielded_data: None,
                 ..
             } => Amount::zero(),
@@ -1346,6 +1467,10 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Some(&mut sapling_shielded_data.value_balance),
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(&mut sapling_shielded_data.value_balance),
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
@@ -1354,6 +1479,10 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
                 sapling_shielded_data: None,
                 ..
             } => None,
