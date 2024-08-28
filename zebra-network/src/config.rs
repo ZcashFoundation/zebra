@@ -13,7 +13,7 @@ use tokio::fs;
 
 use tracing::Span;
 use zebra_chain::{
-    common::atomic_write_to_tmp_file,
+    common::atomic_write,
     parameters::{
         testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
         Magic, Network, NetworkKind,
@@ -502,14 +502,14 @@ impl Config {
         // Make a newline-separated list
         let peer_data = peer_list.join("\n");
 
-        // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
-        // at the same time.
+        // Write the peer cache file atomically so the cache is not corrupted if Zebra shuts down
+        // or crashes.
         let span = Span::current();
         let write_result = tokio::task::spawn_blocking(move || {
-            span.in_scope(move || atomic_write_to_tmp_file(peer_cache_file, peer_data.as_bytes()))
+            span.in_scope(move || atomic_write(peer_cache_file, peer_data.as_bytes()))
         })
         .await
-        .expect("unexpected panic creating temporary file")?;
+        .expect("could not write the peer cache file")?;
 
         match write_result {
             Ok(peer_cache_file) => {

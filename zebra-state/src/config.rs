@@ -467,7 +467,7 @@ pub(crate) use hidden::{
 pub(crate) mod hidden {
     #![allow(dead_code)]
 
-    use zebra_chain::common::atomic_write_to_tmp_file;
+    use zebra_chain::common::atomic_write;
 
     use super::*;
 
@@ -510,9 +510,9 @@ pub(crate) mod hidden {
 
         let version = format!("{}.{}", changed_version.minor, changed_version.patch);
 
-        // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
-        // at the same time.
-        atomic_write_to_tmp_file(version_path, version.as_bytes())??;
+        // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
+        // crashes.
+        atomic_write(version_path, version.as_bytes())??;
 
         Ok(())
     }

@@ -32,7 +32,7 @@ pub fn default_cache_dir() -> PathBuf {
 /// # Panics
 ///
 /// If the provided `file_path` is a directory path.
-pub fn atomic_write_to_tmp_file(
+pub fn atomic_write(
     file_path: PathBuf,
     data: &[u8],
 ) -> io::Result<Result<PathBuf, PersistError<fs::File>>> {
@@ -60,15 +60,12 @@ pub fn atomic_write_to_tmp_file(
         .prefix(&tmp_file_prefix)
         .tempfile_in(file_dir)?;
 
-    // Write data to the file asynchronously, by extracting the inner file, using it,
-    // then combining it back into a type that will correctly drop the file on error.
     tmp_file.write_all(data)?;
 
-    // Atomically replace the current file with the temporary file.
-    // Do blocking filesystem operations on a dedicated thread.
+    // Atomically write the temp file to `file_path`.
     let persist_result = tmp_file
         .persist(&file_path)
-        // Drops the temp file and returns the file path if needed.
+        // Drops the temp file and returns the file path.
         .map(|_| file_path);
     Ok(persist_result)
 }
