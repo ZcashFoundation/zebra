@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 /// A cache directory config field.
 ///
@@ -56,12 +56,7 @@ impl CacheDir {
     /// Returns the `zebra-network` base cache directory, if enabled.
     pub fn cache_dir(&self) -> Option<PathBuf> {
         match self {
-            Self::IsEnabled(is_enabled) => is_enabled.then(|| {
-                dirs::cache_dir()
-                    .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
-                    .join("zebra")
-            }),
-
+            Self::IsEnabled(is_enabled) => is_enabled.then(default_cache_dir),
             Self::CustomPath(cache_dir) => Some(cache_dir.to_owned()),
         }
     }
