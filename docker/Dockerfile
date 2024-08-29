@@ -19,10 +19,14 @@ ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ARG EXPERIMENTAL_FEATURES=""
 
+ARG APP_HOME="/opt/zebrad"
 # This stage implements cargo-chef for docker layer caching
 FROM rust:bookworm as chef
 RUN cargo install cargo-chef --locked
-WORKDIR /opt/zebrad
+
+ARG APP_HOME
+ENV APP_HOME=${APP_HOME}
+WORKDIR ${APP_HOME}
 
 # Analyze the current project to determine the minimum subset of files
 # (Cargo.lock and Cargo.toml manifests) required to build it and cache dependencies
@@ -38,7 +42,7 @@ RUN cargo chef prepare --recipe-path recipe.json
 # We set defaults for the arguments, in case the build does not include this information.
 FROM chef AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
-COPY --from=planner /opt/zebrad/recipe.json recipe.json
+COPY --from=planner ${APP_HOME}/recipe.json recipe.json
 
 # Install zebra build deps and Dockerfile deps
 RUN apt-get -qq update && \
@@ -90,7 +94,7 @@ ARG SHORT_SHA
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
 ENV SHORT_SHA=${SHORT_SHA:-}
 
-ENV CARGO_HOME="/opt/zebrad/.cargo/"
+ENV CARGO_HOME="${APP_HOME}/.cargo/"
 
 # In this stage we build tests (without running then)
 #
@@ -128,17 +132,16 @@ RUN cargo chef cook --tests --release --features "${ENTRYPOINT_FEATURES}" --work
 # Undo the source file changes made by cargo-chef.
 # rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
 # This makes sure the fake empty binaries created by cargo-chef are rebuilt.
-COPY --from=planner /opt/zebrad zebra-original
+COPY --from=planner ${APP_HOME} zebra-original
 RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
 RUN rm -r zebra-original
 
 # Build Zebra test binaries, but don't run them
 RUN cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run
-RUN cp /opt/zebrad/target/release/zebrad /usr/local/bin
-RUN cp /opt/zebrad/target/release/zebra-checkpoints /usr/local/bin
+RUN cp ${APP_HOME}/target/release/zebrad /usr/local/bin
+RUN cp ${APP_HOME}/target/release/zebra-checkpoints /usr/local/bin
 
-COPY ./docker/entrypoint.sh /
-RUN chmod u+x /entrypoint.sh
+COPY ./docker/entrypoint.sh /etc/zebrad/entrypoint.sh
 
 # Entrypoint environment variables
 ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
@@ -147,7 +150,7 @@ ARG EXPERIMENTAL_FEATURES="shielded-scan journald prometheus filter-reload"
 ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
-ENTRYPOINT [ "/entrypoint.sh" ]
+ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
@@ -167,21 +170,25 @@ ARG FEATURES
 RUN cargo chef cook --release --features "${FEATURES}" --package zebrad --bin zebrad --recipe-path recipe.json
 
 # Undo the source file changes made by cargo-chef, so the fake empty zebrad binary is rebuilt.
-COPY --from=planner /opt/zebrad zebra-original
+COPY --from=planner ${APP_HOME} zebra-original
 RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
 RUN rm -r zebra-original
 
 # Build zebrad
 RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
 
-COPY ./docker/entrypoint.sh /
-RUN chmod u+x /entrypoint.sh
+COPY ./docker/entrypoint.sh ./
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #
 # To save space, this step starts from scratch using debian, and only adds the resulting
 # binary from the `release` stage
 FROM debian:bookworm-slim AS runtime
+
+# Set the default path for the zebrad binary
+ARG APP_HOME
+ENV APP_HOME=${APP_HOME}
+WORKDIR ${APP_HOME}
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -220,13 +227,16 @@ ENV FEATURES=${FEATURES}
 ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR:-/etc/zebrad}
 ENV ZEBRA_CONF_FILE=${ZEBRA_CONF_FILE:-zebrad.toml}
 
-COPY --from=release /opt/zebrad/target/release/zebrad /usr/local/bin
-COPY --from=release /entrypoint.sh /
+RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${UID}:${UID} ${ZEBRA_CONF_DIR} \
+    && chown ${UID}:${UID} ${APP_HOME}
+
+COPY --from=release ${APP_HOME}/target/release/zebrad /usr/local/bin
+COPY --from=release ${APP_HOME}/entrypoint.sh /etc/zebrad
 
 # Expose configured ports
 EXPOSE 8233 18233
 
 # Update the config file based on the Docker run variables,
 # and launch zebrad with it
-ENTRYPOINT [ "/entrypoint.sh" ]
+ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]
 CMD ["zebrad"]
