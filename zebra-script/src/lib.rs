@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use zcash_script;
 use zcash_script as zscript;
 use zcash_script::ZcashScript;
 
@@ -138,13 +137,15 @@ impl CachedFfiTransaction {
             sighasher: SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs),
         });
         let ret = zcash_script::Cxx::verify_callback(
-            &|script_code, hash_type| {
+            &|script_code: &[u8], hash_type: zcash_script::HashType| {
                 let script_code_vec = script_code.to_vec();
                 Some(
-                    (*ctx).sighasher.sighash(
-                        HashType::from_bits_truncate(hash_type.bits() as u32),
-                        Some(((*ctx).input_index, script_code_vec)),
-                    ).0
+                    ctx.sighasher
+                        .sighash(
+                            HashType::from_bits_truncate(hash_type.bits() as u32),
+                            Some((ctx.input_index, script_code_vec)),
+                        )
+                        .0,
                 )
             },
             lock_time,

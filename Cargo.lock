@@ -5829,7 +5829,7 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bindgen",
  "bitflags 2.6.0",
