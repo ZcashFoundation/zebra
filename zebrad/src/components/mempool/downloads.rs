@@ -387,10 +387,12 @@ where
 
             // Send the result to responder channel if one was provided.
             if let Some(rsp_tx) = rsp_tx {
-                let _ =
-                    rsp_tx.send(result.as_ref().map(|_| ()).map_err(|(err, id)| {
-                        format!("failed to verify tx {id}, err: {err}").into()
-                    }));
+                let _ = rsp_tx.send(
+                    result
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|(err, _)| err.clone().into()),
+                );
             }
 
             result

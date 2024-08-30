@@ -656,10 +656,11 @@ where
             let transaction_hash = raw_transaction.hash();
 
             // send transaction to the rpc queue, ignore any error.
-            let unmined_transaction = UnminedTx::from(raw_transaction);
-            let _ = queue_sender.send(unmined_transaction.clone());
+            let unmined_transaction = UnminedTx::from(raw_transaction.clone());
+            let _ = queue_sender.send(unmined_transaction);
 
-            let request = mempool::Request::QueueRpc(vec![unmined_transaction]);
+            let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
+            let request = mempool::Request::Queue(vec![transaction_parameter]);
 
             let response = mempool.oneshot(request).await.map_server_error()?;
 

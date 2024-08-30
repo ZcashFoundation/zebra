@@ -58,11 +58,6 @@ pub enum Request {
     /// The transaction downloader checks for duplicates across IDs and transactions.
     Queue(Vec<Gossip>),
 
-    /// Queue a list of unmined transactions submitted via the `sendrawtransaction` RPC method,
-    /// and wait for them to be verified, rejected, or for their verification task to be cancelled if
-    /// the transaction id is mined into the best chain.
-    QueueRpc(Vec<UnminedTx>),
-
     /// Check for newly verified transactions.
     ///
     /// The transaction downloader does not push transactions into the mempool.

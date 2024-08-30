@@ -758,40 +758,19 @@ impl Service<Request> for Mempool {
                 Request::Queue(gossiped_txs) => {
                     trace!(req_count = ?gossiped_txs.len(), "got mempool Queue request");
 
-                    let rsp: Vec<Result<(), BoxError>> = gossiped_txs
-                        .into_iter()
-                        .map(|gossiped_tx| -> Result<(), MempoolError> {
-                            storage.should_download_or_verify(gossiped_tx.id())?;
-                            tx_downloads.download_if_needed_and_verify(gossiped_tx, None)?;
-
-                            Ok(())
-                        })
-                        .map(|result| result.map_err(BoxError::from))
-                        .collect();
-
-                    // We've added transactions to the queue
-                    self.update_metrics();
-
-                    async move { Ok(Response::Queued(rsp)) }.boxed()
-                }
-
-                // Queue mempool candidates
-                Request::QueueRpc(unmined_txs) => {
-                    trace!(req_count = ?unmined_txs.len(), "got mempool QueueRpc request");
-
                     let results: Vec<Result<oneshot::Receiver<Result<(), BoxError>>, BoxError>> =
-                        unmined_txs
+                        gossiped_txs
                             .into_iter()
-                            .map(Gossip::Tx)
                             .map(
-                                |unmined_tx| -> Result<
+                                |gossiped_tx| -> Result<
                                     oneshot::Receiver<Result<(), BoxError>>,
                                     MempoolError,
                                 > {
                                     let (rsp_tx, rsp_rx) = oneshot::channel();
-                                    storage.should_download_or_verify(unmined_tx.id())?;
+                                    storage.should_download_or_verify(gossiped_tx.id())?;
                                     tx_downloads
-                                        .download_if_needed_and_verify(unmined_tx, Some(rsp_tx))?;
+                                        .download_if_needed_and_verify(gossiped_tx, Some(rsp_tx))?;
+
                                     Ok(rsp_rx)
                                 },
                             )
@@ -857,15 +836,6 @@ impl Service<Request> for Mempool {
                         // because the inbound service ignores inner errors.
                         iter::repeat(MempoolError::Disabled)
                             .take(gossiped_txs.len())
-                            .map(BoxError::from)
-                            .map(Err)
-                            .collect(),
-                    ),
-
-                    // Don't queue mempool candidates, because there is no queue.
-                    Request::QueueRpc(unmined_txs) => Response::Queued(
-                        iter::repeat(MempoolError::Disabled)
-                            .take(unmined_txs.len())
                             .map(BoxError::from)
                             .map(Err)
                             .collect(),
