@@ -1,16 +1,22 @@
 # System Requirements
 
-We recommend the following requirements for compiling and running `zebrad`:
+Zebra has the following hardware requirements.
+
+## Recommended Requirements
 
 - 4 CPU cores
 - 16 GB RAM
-- 300 GB available disk space for building binaries and storing cached chain
-  state
+- 300 GB available disk space 
 - 100 Mbps network connection, with 300 GB of uploads and downloads per month
 
-Zebra's tests can take over an hour, depending on your machine. Note that you
-might be able to build and run Zebra on slower systems — we haven't tested its
-exact limits yet.
+## Minimal Requirements
+
+- 2 CPU cores
+- 4 GB RAM
+- 300 GB available disk space 
+
+You can run Zebra fine on a computer such as Orange Pi Zero 2W with a 512 GB
+microSD card.
 
 ## Disk Requirements
 
