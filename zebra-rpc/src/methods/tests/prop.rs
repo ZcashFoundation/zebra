@@ -7,6 +7,7 @@ use hex::ToHex;
 use jsonrpc_core::{Error, ErrorCode};
 use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
@@ -61,7 +62,9 @@ proptest! {
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
-            let response = mempool::Response::Queued(vec![Ok(())]);
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Ok(()));
+            let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);
 
             mempool
                 .expect_request(expected_request)
@@ -897,7 +900,9 @@ proptest! {
             // now a retry will be sent to the mempool
             let expected_request =
                 mempool::Request::Queue(vec![mempool::Gossip::Tx(tx_unmined.clone())]);
-            let response = mempool::Response::Queued(vec![Ok(())]);
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Ok(()));
+            let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);
 
             mempool
                 .expect_request(expected_request)
@@ -997,7 +1002,9 @@ proptest! {
             for tx in txs.clone() {
                 let expected_request =
                     mempool::Request::Queue(vec![mempool::Gossip::Tx(UnminedTx::from(tx))]);
-                let response = mempool::Response::Queued(vec![Ok(())]);
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let _ = rsp_tx.send(Ok(()));
+                let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);
 
                 mempool
                     .expect_request(expected_request)

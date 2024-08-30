@@ -758,7 +758,7 @@ impl Service<Request> for Mempool {
                 Request::Queue(gossiped_txs) => {
                     trace!(req_count = ?gossiped_txs.len(), "got mempool Queue request");
 
-                    let results: Vec<Result<oneshot::Receiver<Result<(), BoxError>>, BoxError>> =
+                    let rsp: Vec<Result<oneshot::Receiver<Result<(), BoxError>>, BoxError>> =
                         gossiped_txs
                             .into_iter()
                             .map(
@@ -780,19 +780,7 @@ impl Service<Request> for Mempool {
                     // We've added transactions to the queue
                     self.update_metrics();
 
-                    async move {
-                        let mut rsp = vec![];
-
-                        for result in results {
-                            rsp.push(match result {
-                                Ok(rsp_rx) => rsp_rx.await?,
-                                Err(err) => Err(err),
-                            })
-                        }
-
-                        Ok(Response::Queued(rsp))
-                    }
-                    .boxed()
+                    async move { Ok(Response::Queued(rsp)) }.boxed()
                 }
 
                 // Store successfully downloaded and verified transactions in the mempool
