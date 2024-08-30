@@ -49,6 +49,7 @@ pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check, init, init_read_only,
     non_finalized_state::NonFinalizedState,
+    pending_utxos::PendingUtxos,
     spawn_init, spawn_init_read_only,
     watch_receiver::WatchReceiver,
     OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,

@@ -19,6 +19,7 @@ use thiserror::Error;
 use zebra_chain::transaction::{
     self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
 };
+use zebra_state::PendingUtxos;
 
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{config, downloads::TransactionDownloadVerifyError, MempoolError};
@@ -116,6 +117,11 @@ pub struct Storage {
     /// The set of verified transactions in the mempool.
     verified: VerifiedSet,
 
+    // Pending UTXO Request Tracking
+    //
+    /// The set of outpoints with pending requests for their associated transparent::Output.
+    pending_utxos: PendingUtxos,
+
     /// The set of transactions rejected due to bad authorizations, or for other
     /// reasons, and their rejection reasons. These rejections only apply to the
     /// current tip.
@@ -163,6 +169,7 @@ impl Storage {
     pub(crate) fn new(config: &config::Config) -> Self {
         Self {
             tx_cost_limit: config.tx_cost_limit,
+            pending_utxos: PendingUtxos::default(),
             eviction_memory_time: config.eviction_memory_time,
             verified: Default::default(),
             tip_rejected_exact: Default::default(),
