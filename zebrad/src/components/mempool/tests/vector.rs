@@ -445,12 +445,17 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
         .call(Request::Queue(vec![txid.into()]))
         .await
         .unwrap();
-    let queued_responses = match response {
+    let mut queued_responses = match response {
         Response::Queued(queue_responses) => queue_responses,
         _ => unreachable!("will never happen in this test"),
     };
     assert_eq!(queued_responses.len(), 1);
-    assert!(queued_responses[0].is_ok());
+
+    let queued_response = queued_responses
+        .pop()
+        .expect("already checked that there is exactly 1 item in Vec")
+        .expect("initial queue checks result should be Ok");
+
     assert_eq!(mempool.tx_downloads().in_flight(), 1);
 
     // Push block 2 to the state
@@ -488,6 +493,14 @@ async fn mempool_cancel_mined() -> Result<(), Report> {
 
     // Check if download was cancelled.
     assert_eq!(mempool.tx_downloads().in_flight(), 0);
+
+    assert!(
+        queued_response
+            .await
+            .expect("channel should not be closed")
+            .is_err(),
+        "queued tx should fail to download and verify due to chain tip change"
+    );
 
     Ok(())
 }
