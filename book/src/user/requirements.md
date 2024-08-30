@@ -48,9 +48,6 @@ networks.
 - Ongoing updates: 10 MB - 10 GB upload and download per day, depending on
   user-created transaction size and peer requests.
 
-Zebra performs an initial sync every time its internal database version changes,
-so some version upgrades might require a full download of the whole chain.
-
 Zebra needs some peers which have a round-trip latency of 2 seconds or less. If
 this is a problem for you, please [open a
 ticket.](https://github.com/ZcashFoundation/zebra/issues/new/choose)
