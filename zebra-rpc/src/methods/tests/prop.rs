@@ -114,10 +114,10 @@ proptest! {
                 .expect("Transaction serializes successfully");
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex.clone()));
 
             let unmined_transaction = UnminedTx::from(transaction);
-            let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
+            let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
             mempool
                 .expect_request(expected_request)
@@ -125,6 +125,32 @@ proptest! {
                 .respond(Err(DummyError));
 
             state.expect_no_requests().await?;
+
+            let result = send_task
+                .await
+                .expect("Sending raw transactions should not panic");
+
+            prop_assert!(
+                matches!(
+                    result,
+                    Err(Error {
+                        code: ErrorCode::ServerError(_),
+                        ..
+                    })
+                ),
+                "Result is not a server error: {result:?}"
+            );
+
+            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+
+            let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
+
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Err("any verification error".into()));
+            mempool
+                .expect_request(expected_request)
+                .await?
+                .respond(Ok::<_, BoxError>(mempool::Response::Queued(vec![Ok(rsp_rx)])));
 
             let result = send_task
                 .await

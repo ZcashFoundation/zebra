@@ -685,6 +685,7 @@ where
             tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
 
             queue_result
+                .map_server_error()?
                 .map(|_| SentTransactionHash(transaction_hash))
                 .map_server_error()
         }
