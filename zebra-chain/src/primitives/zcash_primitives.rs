@@ -84,31 +84,40 @@ impl<'a>
 
 struct IdentityMap;
 
-impl zp_tx::components::sapling::MapAuth<sapling::bundle::Authorized, sapling::bundle::Authorized>
-    for IdentityMap
+impl
+    zp_tx::components::sapling::MapAuth<
+        sapling_crypto::bundle::Authorized,
+        sapling_crypto::bundle::Authorized,
+    > for IdentityMap
 {
     fn map_spend_proof(
         &mut self,
-        p: <sapling::bundle::Authorized as sapling::bundle::Authorization>::SpendProof,
-    ) -> <sapling::bundle::Authorized as sapling::bundle::Authorization>::SpendProof {
+        p: <sapling_crypto::bundle::Authorized as sapling_crypto::bundle::Authorization>::SpendProof,
+    ) -> <sapling_crypto::bundle::Authorized as sapling_crypto::bundle::Authorization>::SpendProof
+    {
         p
     }
 
     fn map_output_proof(
         &mut self,
-        p: <sapling::bundle::Authorized as sapling::bundle::Authorization>::OutputProof,
-    ) -> <sapling::bundle::Authorized as sapling::bundle::Authorization>::OutputProof {
+        p: <sapling_crypto::bundle::Authorized as sapling_crypto::bundle::Authorization>::OutputProof,
+    ) -> <sapling_crypto::bundle::Authorized as sapling_crypto::bundle::Authorization>::OutputProof
+    {
         p
     }
 
     fn map_auth_sig(
         &mut self,
-        s: <sapling::bundle::Authorized as sapling::bundle::Authorization>::AuthSig,
-    ) -> <sapling::bundle::Authorized as sapling::bundle::Authorization>::AuthSig {
+        s: <sapling_crypto::bundle::Authorized as sapling_crypto::bundle::Authorization>::AuthSig,
+    ) -> <sapling_crypto::bundle::Authorized as sapling_crypto::bundle::Authorization>::AuthSig
+    {
         s
     }
 
-    fn map_authorization(&mut self, a: sapling::bundle::Authorized) -> sapling::bundle::Authorized {
+    fn map_authorization(
+        &mut self,
+        a: sapling_crypto::bundle::Authorized,
+    ) -> sapling_crypto::bundle::Authorized {
         a
     }
 }
@@ -135,7 +144,7 @@ struct PrecomputedAuth<'a> {
 
 impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
     type TransparentAuth = TransparentAuth<'a>;
-    type SaplingAuth = sapling::bundle::Authorized;
+    type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 }
 

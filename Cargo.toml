@@ -21,6 +21,19 @@ resolver = "2"
 
 # `cargo release` settings
 
+[workspace.dependencies]
+incrementalmerkletree = "0.5.1"
+orchard = "0.8.0"
+sapling-crypto = "0.1.3"
+zcash_address = "0.3.2"
+zcash_client_backend = "0.12.1"
+zcash_encoding = "0.2.0"
+zcash_history = "0.4.0"
+zcash_keys = "0.2.0"
+zcash_primitives = "0.15.0"
+zcash_proofs = "0.15.0"
+zcash_protocol = "0.1.1"
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch

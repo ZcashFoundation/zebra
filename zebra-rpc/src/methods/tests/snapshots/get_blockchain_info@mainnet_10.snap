@@ -7,6 +7,33 @@ expression: info
   "blocks": 10,
   "bestblockhash": "00074c46a4aa8172df8ae2ad1848a2e084e1b6989b7d9e6132adc938bf835b36",
   "estimatedheight": "[Height]",
+  "valuePools": [
+    {
+      "id": "transparent",
+      "chainValue": 0.034375,
+      "chainValueZat": 3437500
+    },
+    {
+      "id": "sprout",
+      "chainValue": 0.0,
+      "chainValueZat": 0
+    },
+    {
+      "id": "sapling",
+      "chainValue": 0.0,
+      "chainValueZat": 0
+    },
+    {
+      "id": "orchard",
+      "chainValue": 0.0,
+      "chainValueZat": 0
+    },
+    {
+      "id": "deferred",
+      "chainValue": 0.0,
+      "chainValueZat": 0
+    }
+  ],
   "upgrades": {
     "5ba81b19": {
       "name": "Overwinter",

@@ -44,7 +44,7 @@ jobs:
 
       - name: Rust files
         id: changed-files-rust
-        uses: tj-actions/changed-files@v44.5.2
+        uses: tj-actions/changed-files@v45.0.0
         with:
           files: |
             **/*.rs
@@ -56,7 +56,7 @@ jobs:
 
       - name: Workflow files
         id: changed-files-workflows
-        uses: tj-actions/changed-files@v44.5.2
+        uses: tj-actions/changed-files@v45.0.0
         with:
           files: |
             .github/workflows/*.yml
@@ -167,7 +167,7 @@ jobs:
     needs: changed-files
     steps:
       - uses: actions/checkout@v4.1.7
-      - uses: codespell-project/actions-codespell@v2.0
+      - uses: codespell-project/actions-codespell@v2.1
         with:
           only_warn: 1
 

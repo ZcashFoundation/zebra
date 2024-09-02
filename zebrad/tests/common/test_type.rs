@@ -330,7 +330,7 @@ impl TestType {
         // Zebra state failures
         if self.needs_zebra_cached_state() {
             // Fail if we need a cached Zebra state, but it's empty
-            lightwalletd_failure_messages.push("No Chain tip available yet".to_string());
+            lightwalletd_failure_messages.push("no chain tip available yet".to_string());
         }
 
         // lightwalletd state failures
