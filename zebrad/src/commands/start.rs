@@ -160,14 +160,14 @@ impl StartCmd {
         // or enable denial of service attacks.
         //
         // See `zebra_network::Connection::drive_peer_request()` for details.
-        let (setup_tx, setup_rx) = oneshot::channel();
+        let (inbound_setup_tx, inbound_setup_rx) = oneshot::channel();
         let inbound = ServiceBuilder::new()
             .load_shed()
             .buffer(inbound::downloads::MAX_INBOUND_CONCURRENCY)
             .timeout(MAX_INBOUND_RESPONSE_TIME)
             .service(Inbound::new(
                 config.sync.full_verify_concurrency_limit,
-                setup_rx,
+                inbound_setup_rx,
             ));
 
         let (peer_set, address_book) = zebra_network::init(
@@ -179,11 +179,13 @@ impl StartCmd {
         .await;
 
         info!("initializing verifiers");
+        let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
         let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::router::init(
                 config.consensus.clone(),
                 &config.network.network,
                 state.clone(),
+                tx_verifier_setup_rx,
             )
             .await;
 
@@ -212,6 +214,10 @@ impl StartCmd {
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
             .service(mempool);
 
+        tx_verifier_setup_tx
+            .send(mempool.clone())
+            .map_err(|_| eyre!("could not send setup data to inbound service"))?;
+
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible
         let setup_data = InboundSetupData {
@@ -222,7 +228,7 @@ impl StartCmd {
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
         };
-        setup_tx
+        inbound_setup_tx
             .send(setup_data)
             .map_err(|_| eyre!("could not send setup data to inbound service"))?;
         // And give it time to clear its queue

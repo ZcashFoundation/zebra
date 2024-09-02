@@ -13,6 +13,7 @@ use std::{
 use hex::FromHex;
 use insta::Settings;
 use jsonrpc_core::Result;
+use tokio::sync::oneshot;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
@@ -86,8 +87,13 @@ pub async fn test_responses<State, ReadState>(
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), network, state.clone())
-        .await;
+    ) = zebra_consensus::router::init(
+        zebra_consensus::Config::default(),
+        network,
+        state.clone(),
+        oneshot::channel().1,
+    )
+    .await;
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);

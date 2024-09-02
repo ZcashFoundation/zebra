@@ -21,7 +21,7 @@ use std::{
 
 use futures::{FutureExt, TryFutureExt};
 use thiserror::Error;
-use tokio::task::JoinHandle;
+use tokio::{sync::oneshot, task::JoinHandle};
 use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -30,6 +30,7 @@ use zebra_chain::{
     parameters::Network,
 };
 
+use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
@@ -230,11 +231,14 @@ where
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
-#[instrument(skip(state_service))]
+#[instrument(skip(state_service, _mempool))]
 pub async fn init<S>(
     config: Config,
     network: &Network,
     mut state_service: S,
+    _mempool: oneshot::Receiver<
+        Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
+    >,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<

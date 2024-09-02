@@ -153,6 +153,7 @@ use color_eyre::{
 use semver::Version;
 use serde_json::Value;
 
+use tokio::sync::oneshot;
 use tower::ServiceExt;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, Height},
@@ -2910,7 +2911,13 @@ async fn validate_regtest_genesis_block() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state).await;
+    ) = zebra_consensus::router::init(
+        zebra_consensus::Config::default(),
+        &network,
+        state,
+        oneshot::channel().1,
+    )
+    .await;
 
     let genesis_hash = block_verifier_router
         .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
@@ -3310,8 +3317,13 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state.clone())
-        .await;
+    ) = zebra_consensus::router::init(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+        oneshot::channel().1,
+    )
+    .await;
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 

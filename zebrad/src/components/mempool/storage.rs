@@ -120,7 +120,7 @@ pub struct Storage {
     // Pending UTXO Request Tracking
     //
     /// The set of outpoints with pending requests for their associated transparent::Output.
-    pending_utxos: PendingUtxos,
+    _pending_utxos: PendingUtxos,
 
     /// The set of transactions rejected due to bad authorizations, or for other
     /// reasons, and their rejection reasons. These rejections only apply to the
@@ -169,7 +169,7 @@ impl Storage {
     pub(crate) fn new(config: &config::Config) -> Self {
         Self {
             tx_cost_limit: config.tx_cost_limit,
-            pending_utxos: PendingUtxos::default(),
+            _pending_utxos: PendingUtxos::default(),
             eviction_memory_time: config.eviction_memory_time,
             verified: Default::default(),
             tip_rejected_exact: Default::default(),

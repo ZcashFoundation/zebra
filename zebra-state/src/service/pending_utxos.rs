@@ -8,6 +8,7 @@ use zebra_chain::transparent;
 
 use crate::{BoxError, Response};
 
+/// Pending UTXO tracker, used in state service and mempool.
 #[derive(Debug, Default)]
 pub struct PendingUtxos(HashMap<transparent::OutPoint, broadcast::Sender<transparent::Utxo>>);
 
@@ -69,5 +70,10 @@ impl PendingUtxos {
     /// Returns the number of utxos that are being waited on.
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    /// Returns true if there are no utxos being waited on.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }
