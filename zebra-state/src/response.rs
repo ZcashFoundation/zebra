@@ -10,6 +10,7 @@ use zebra_chain::{
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
     transparent,
+    value_balance::ValueBalance,
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -127,6 +128,17 @@ impl MinedTx {
 pub enum ReadResponse {
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
+
+    /// Response to [`ReadRequest::TipPoolValues`] with
+    /// the current best chain tip and its [`ValueBalance`].
+    TipPoolValues {
+        /// The current best chain tip height.
+        tip_height: block::Height,
+        /// The current best chain tip hash.
+        tip_hash: block::Hash,
+        /// The value pool balance at the current best chain tip.
+        value_balance: ValueBalance<NonNegative>,
+    },
 
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
@@ -287,7 +299,8 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
-            ReadResponse::TransactionIdsForBlock(_)
+            ReadResponse::TipPoolValues { .. }
+            | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)

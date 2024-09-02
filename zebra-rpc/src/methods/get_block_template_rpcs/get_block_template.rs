@@ -25,9 +25,12 @@ use zebra_consensus::{
 use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
 
-use crate::methods::get_block_template_rpcs::{
-    constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
-    types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
+use crate::methods::{
+    errors::OkOrServerError,
+    get_block_template_rpcs::{
+        constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
+        types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
+    },
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -178,11 +181,7 @@ where
     // but this is ok for an estimate
     let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
         .estimate_distance_to_network_chain_tip(network)
-        .ok_or_else(|| Error {
-            code: ErrorCode::ServerError(0),
-            message: "No Chain tip available yet".to_string(),
-            data: None,
-        })?;
+        .ok_or_server_error("no chain tip available yet")?;
 
     if !sync_status.is_close_to_tip()
         || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP

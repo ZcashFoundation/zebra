@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.38"
+version = "1.0.0-beta.39"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Core Zcash data structures"
 license = "MIT OR Apache-2.0"
@@ -68,7 +68,7 @@ bitflags = "2.5.0"
 bitflags-serde-legacy = "0.1.1"
 blake2b_simd = "1.0.2"
 blake2s_simd = "1.0.2"
-bridgetree = "0.4.0"
+bridgetree = "0.5.0"
 bs58 = { version = "0.5.1", features = ["check"] }
 byteorder = "1.5.0"
 
@@ -78,9 +78,11 @@ byteorder = "1.5.0"
 equihash = "0.2.0"
 
 group = "0.13.0"
-incrementalmerkletree = "0.5.1"
+incrementalmerkletree.workspace = true
 jubjub = "0.10.0"
 lazy_static = "1.4.0"
+tempfile = "3.11.0"
+dirs = "5.0.1"
 num-integer = "0.1.46"
 primitive-types = "0.12.2"
 rand_core = "0.6.4"
@@ -93,17 +95,14 @@ x25519-dalek = { version = "2.0.1", features = ["serde"] }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
-orchard = "0.8.0"
-zcash_encoding = "0.2.0"
-zcash_history = "0.4.0"
+orchard.workspace = true
+zcash_encoding.workspace = true
+zcash_history.workspace = true
 zcash_note_encryption = "0.4.0"
-# TODO: Revert to a release once librustzcash is released (#8749).
-zcash_primitives = { git = "https://github.com/zcash/librustzcash/", branch = "main", features = ["transparent-inputs"] }
-sapling = { package = "sapling-crypto", version = "0.1" }
-# TODO: Revert to a release once librustzcash is released (#8749).
-zcash_protocol = { git = "https://github.com/zcash/librustzcash/", branch = "main"}
-# TODO: Revert to a release once librustzcash is released (#8749).
-zcash_address = { git = "https://github.com/zcash/librustzcash/", branch = "main"}
+zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
+sapling-crypto.workspace = true
+zcash_protocol.workspace = true
+zcash_address.workspace = true
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
@@ -137,7 +136,7 @@ serde_json = { version = "1.0.122", optional = true }
 tokio = { version = "1.39.2", optional = true }
 
 # Experimental feature shielded-scan
-zcash_client_backend = { version = "0.12.1", optional = true }
+zcash_client_backend = { workspace = true, optional = true }
 
 # Optional testing dependencies
 proptest = { version = "1.4.0", optional = true }
@@ -146,7 +145,7 @@ proptest-derive = { version = "0.5.0", optional = true }
 rand = { version = "0.8.5", optional = true }
 rand_chacha = { version = "0.3.1", optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.38", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.39", optional = true }
 
 [dev-dependencies]
 # Benchmarks
@@ -169,7 +168,7 @@ rand_chacha = "0.3.1"
 
 tokio = { version = "1.39.2", features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.38" }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.39" }
 
 [[bench]]
 name = "block"

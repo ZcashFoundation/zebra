@@ -482,6 +482,17 @@ impl Chain {
         )
     }
 
+    /// Returns the non-finalized tip block height, hash, and total pool value balances.
+    pub fn non_finalized_tip_with_value_balance(
+        &self,
+    ) -> (Height, block::Hash, ValueBalance<NonNegative>) {
+        (
+            self.non_finalized_tip_height(),
+            self.non_finalized_tip_hash(),
+            self.chain_value_pools,
+        )
+    }
+
     /// Returns the Sprout note commitment tree of the tip of this [`Chain`],
     /// including all finalized notes, and the non-finalized notes in this chain.
     ///

@@ -294,8 +294,8 @@ impl Storage {
     /// - Removes from the 'verified' set, if present.
     ///   Maintains the order in which the other unmined transactions have been inserted into the mempool.
     ///
-    /// Reject and remove transactions from the mempool that contain any outpoints or nullifiers in
-    /// the `spent_outpoints` or `nullifiers` collections that are passed in.
+    /// Reject and remove transactions from the mempool that contain any spent outpoints or revealed
+    /// nullifiers from the passed in `transactions`.
     ///
     /// Returns the number of transactions that were removed.
     pub fn reject_and_remove_same_effects(

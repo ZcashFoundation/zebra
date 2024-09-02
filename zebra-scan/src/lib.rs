@@ -23,4 +23,4 @@ pub mod tests;
 pub use config::Config;
 pub use init::{init_with_server, spawn_init};
 
-pub use sapling::{zip32::DiversifiableFullViewingKey, SaplingIvk};
+pub use sapling_crypto::{zip32::DiversifiableFullViewingKey, SaplingIvk};
