@@ -664,7 +664,7 @@ where
 
             let response = mempool.oneshot(request).await.map_server_error()?;
 
-            let queue_results = match response {
+            let mut queue_results = match response {
                 mempool::Response::Queued(results) => results,
                 _ => unreachable!("incorrect response variant from mempool service"),
             };
@@ -675,10 +675,17 @@ where
                 "mempool service returned more results than expected"
             );
 
-            tracing::debug!("sent transaction to mempool: {:?}", &queue_results[0]);
+            let queue_result = queue_results
+                .pop()
+                .expect("there should be exactly one item in Vec")
+                .inspect_err(|err| tracing::debug!("sent transaction to mempool: {:?}", &err))
+                .map_server_error()?
+                .await;
 
-            queue_results[0]
-                .as_ref()
+            tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
+
+            queue_result
+                .map_server_error()?
                 .map(|_| SentTransactionHash(transaction_hash))
                 .map_server_error()
         }
