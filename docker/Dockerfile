@@ -5,9 +5,9 @@
 #
 # We are using 4 stages:
 # - deps: install build dependencies and sets the needed variables
-# - tests: builds tests
-# - release: builds release binary
-# - runtime: is our runtime environment
+# - tests: builds tests binaries
+# - release: builds release binaries
+# - runtime: runs the release binaries
 #
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
@@ -29,6 +29,7 @@ ARG RUST_VERSION=1.79.0
 FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
+# Set the default path for the zebrad binary
 ARG APP_HOME
 ENV APP_HOME=${APP_HOME}
 WORKDIR ${APP_HOME}
@@ -65,10 +66,6 @@ ARG SHORT_SHA
 ENV SHORT_SHA=${SHORT_SHA:-}
 
 ENV CARGO_HOME="${APP_HOME}/.cargo/"
-
-# Set the default path for the zebrad binary
-# TODO: users should be able to set this to a different value
-WORKDIR /opt/zebrad/
 
 # Copy the entrypoint script to be used on both images
 COPY ./docker/entrypoint.sh /etc/zebrad/entrypoint.sh
