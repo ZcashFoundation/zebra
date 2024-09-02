@@ -1,6 +1,6 @@
 //! Defines types and implements methods for parsing Sapling viewing keys and converting them to `zebra-chain` types
 
-use sapling::keys::{FullViewingKey as SaplingFvk, SaplingIvk};
+use sapling_crypto::keys::{FullViewingKey as SaplingFvk, SaplingIvk};
 use zcash_client_backend::{
     encoding::decode_extended_full_viewing_key,
     keys::sapling::DiversifiableFullViewingKey as SaplingDfvk,

@@ -7,7 +7,7 @@ use crate::{
     storage::Storage,
 };
 use color_eyre::eyre::Report;
-use sapling::zip32::DiversifiableFullViewingKey;
+use sapling_crypto::zip32::DiversifiableFullViewingKey;
 use tokio::{
     sync::{mpsc::Sender, watch},
     task::JoinHandle,

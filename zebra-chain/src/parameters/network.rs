@@ -41,7 +41,7 @@ impl From<Network> for NetworkKind {
 }
 
 /// An enum describing the possible network choices.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize)]
 #[serde(into = "NetworkKind")]
 pub enum Network {
     /// The production mainnet.
@@ -118,6 +118,22 @@ impl<'a> From<&'a Network> for &'a str {
 impl fmt::Display for Network {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.into())
+    }
+}
+
+impl std::fmt::Debug for Network {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mainnet => write!(f, "{self}"),
+            Self::Testnet(params) if params.is_regtest() => f
+                .debug_struct("Regtest")
+                .field("activation_heights", params.activation_heights())
+                .finish(),
+            Self::Testnet(params) if params.is_default_testnet() => {
+                write!(f, "{self}")
+            }
+            Self::Testnet(params) => f.debug_tuple("ConfiguredTestnet").field(params).finish(),
+        }
     }
 }
 

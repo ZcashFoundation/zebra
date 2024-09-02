@@ -27,7 +27,7 @@ use zcash_client_backend::{
 };
 use zcash_primitives::zip32::{AccountId, Scope};
 
-use sapling::zip32::DiversifiableFullViewingKey;
+use sapling_crypto::zip32::DiversifiableFullViewingKey;
 
 use zebra_chain::{
     block::{Block, Height},
@@ -377,7 +377,7 @@ pub fn scan_block(
     };
 
     zcash_client_backend::scanning::scan_block(
-        network,
+        &zp_network(network),
         block_to_compact(block, chain_metadata),
         scanning_key,
         // Ignore whether notes are change from a viewer's own spends for now.
@@ -554,4 +554,12 @@ pub fn dfvk_to_ufvk(dfvk: &DiversifiableFullViewingKey) -> Result<UnifiedFullVie
         &dfvk.to_bytes()[..],
     ))?])?)
     .map_err(|e| eyre!(e))
+}
+
+/// Returns the [`zcash_primitives::consensus::Network`] for this network.
+pub fn zp_network(network: &Network) -> zcash_primitives::consensus::Network {
+    match network {
+        Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
+        Network::Testnet(_) => zcash_primitives::consensus::Network::TestNetwork,
+    }
 }

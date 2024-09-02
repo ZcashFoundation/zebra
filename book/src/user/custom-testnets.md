@@ -29,7 +29,10 @@ miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
 [network]
 network = "Testnet"
 
-[network.testnet_parameters.activation_heights]
+# No peers
+initial_testnet_peers = []
+
+[network.testnet_parameters]
 network_name = "ConfiguredTestnet_1"
 # The Testnet network magic is not reserved, but it's not recommended
 # for use with incompatible Testnet parameters like those in this config.
@@ -69,7 +72,10 @@ miner_address = 't27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'
 [network]
 network = "Testnet"
 
-[network.testnet_parameters.activation_heights]
+# No peers
+initial_testnet_peers = []
+
+[network.testnet_parameters]
 # The Mainnet, Testnet, and Regtest network names are reserved.
 network_name = "ConfiguredTestnet_2"
 

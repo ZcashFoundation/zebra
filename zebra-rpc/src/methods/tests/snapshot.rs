@@ -2,7 +2,7 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review -p zebra-rpc --lib -- test_rpc_response_data
+//! cargo insta test --review --release -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
 use std::collections::BTreeMap;
@@ -15,7 +15,8 @@ use zebra_chain::{
     chain_tip::mock::MockChainTip,
     orchard,
     parameters::{
-        testnet::{ConfiguredActivationHeights, Parameters},
+        subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
+        testnet::{self, ConfiguredActivationHeights, Parameters},
         Network::Mainnet,
     },
     sapling,
@@ -40,10 +41,19 @@ pub const EXCESSIVE_BLOCK_HEIGHT: u32 = MAX_ON_DISK_HEIGHT.0 + 1;
 async fn test_rpc_response_data() {
     let _init_guard = zebra_test::init();
     let default_testnet = Network::new_default_testnet();
+    let nu6_testnet = testnet::Parameters::build()
+        .with_network_name("NU6Testnet")
+        .with_activation_heights(ConfiguredActivationHeights {
+            blossom: Some(584_000),
+            nu6: Some(POST_NU6_FUNDING_STREAMS_TESTNET.height_range().start.0),
+            ..Default::default()
+        })
+        .to_network();
 
     tokio::join!(
         test_rpc_response_data_for_network(&Mainnet),
         test_rpc_response_data_for_network(&default_testnet),
+        test_rpc_response_data_for_network(&nu6_testnet),
         test_mocked_rpc_response_data_for_network(&Mainnet),
         test_mocked_rpc_response_data_for_network(&default_testnet),
     );
@@ -196,6 +206,17 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         latest_chain_tip,
     );
 
+    // We only want a snapshot of the `getblocksubsidy` and `getblockchaininfo` methods for the non-default Testnet (with an NU6 activation height).
+    if network.is_a_test_network() && !network.is_default_testnet() {
+        let get_blockchain_info = rpc
+            .get_blockchain_info()
+            .await
+            .expect("We should have a GetBlockChainInfo struct");
+        snapshot_rpc_getblockchaininfo("_future_nu6_height", get_blockchain_info, &settings);
+
+        return;
+    }
+
     // `getinfo`
     let get_info = rpc.get_info().expect("We should have a GetInfo struct");
     snapshot_rpc_getinfo(get_info, &settings);
@@ -203,8 +224,9 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // `getblockchaininfo`
     let get_blockchain_info = rpc
         .get_blockchain_info()
+        .await
         .expect("We should have a GetBlockChainInfo struct");
-    snapshot_rpc_getblockchaininfo(get_blockchain_info, &settings);
+    snapshot_rpc_getblockchaininfo("", get_blockchain_info, &settings);
 
     // get the first transaction of the first block which is not the genesis
     let first_block_first_transaction = &blocks[1].transactions[0];
@@ -531,9 +553,13 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
 }
 
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblockchaininfo(info: GetBlockChainInfo, settings: &insta::Settings) {
+fn snapshot_rpc_getblockchaininfo(
+    variant_suffix: &str,
+    info: GetBlockChainInfo,
+    settings: &insta::Settings,
+) {
     settings.bind(|| {
-        insta::assert_json_snapshot!("get_blockchain_info", info, {
+        insta::assert_json_snapshot!(format!("get_blockchain_info{variant_suffix}"), info, {
             ".estimatedheight" => dynamic_redaction(|value, _path| {
                 // assert that the value looks like a valid height here
                 assert!(u32::try_from(value.as_u64().unwrap()).unwrap() < Height::MAX_AS_U32);

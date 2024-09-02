@@ -14,7 +14,7 @@ pub mod mock;
 #[cfg(test)]
 mod tests;
 
-use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
+pub use network_chain_tip_height_estimator::NetworkChainTipHeightEstimator;
 
 /// An interface for querying the chain tip.
 ///

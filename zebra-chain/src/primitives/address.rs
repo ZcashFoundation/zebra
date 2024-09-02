@@ -17,7 +17,7 @@ pub enum Address {
         network: NetworkKind,
 
         /// Sapling address
-        address: sapling::PaymentAddress,
+        address: sapling_crypto::PaymentAddress,
     },
 
     /// Unified address
@@ -32,7 +32,7 @@ pub enum Address {
         orchard: Option<orchard::Address>,
 
         /// Sapling address
-        sapling: Option<sapling::PaymentAddress>,
+        sapling: Option<sapling_crypto::PaymentAddress>,
 
         /// Transparent address
         transparent: Option<transparent::Address>,
@@ -68,7 +68,7 @@ impl zcash_address::TryFromAddress for Address {
         data: [u8; 43],
     ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
         let network = network.into();
-        sapling::PaymentAddress::from_bytes(&data)
+        sapling_crypto::PaymentAddress::from_bytes(&data)
             .map(|address| Self::Sapling { address, network })
             .ok_or_else(|| BoxError::from("not a valid sapling address").into())
     }
@@ -97,7 +97,7 @@ impl zcash_address::TryFromAddress for Address {
                     }
                 }
                 unified::Receiver::Sapling(data) => {
-                    sapling = sapling::PaymentAddress::from_bytes(&data);
+                    sapling = sapling_crypto::PaymentAddress::from_bytes(&data);
                     // ZIP 316: Consumers MUST reject Unified Addresses/Viewing Keys in
                     // which any constituent Item does not meet the validation
                     // requirements of its encoding.

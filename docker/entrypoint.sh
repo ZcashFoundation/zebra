@@ -357,11 +357,11 @@ case "$1" in
         exec cargo test --locked --release --features "zebra-test" --package zebra-scan -- --nocapture --include-ignored scan_task_commands
 
       else
-          exec "$@"
+          exec gosu "$USER" "$@"
       fi
     fi
     ;;
   *)
-    exec "$@"
+    exec gosu "$USER" "$@"
     ;;
 esac

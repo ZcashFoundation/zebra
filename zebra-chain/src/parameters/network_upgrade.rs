@@ -131,8 +131,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(903_800), Heartwood),
     (block::Height(1_028_500), Canopy),
     (block::Height(1_842_420), Nu5),
-    // TODO: Add NU6
-    // (block::Height(2_942_000), Nu6),
+    (block::Height(2_976_000), Nu6),
     // FIXME: TODO: Add NU7 with a correct value
     // (block::Height(2_942_001), Nu7),
 ];
@@ -545,11 +544,8 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
-            #[cfg(zcash_unstable = "nu6")]
-            zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
-            // FIXME: do we need the following cfg check?
-            #[cfg(zcash_unstable = "nu7")]
-            zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
+            // FIXME: uncomment this! zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
+            // FIXME: uncomment this! zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
         }
     }
 }
