@@ -174,9 +174,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let all_methods = Methods { paths: methods };
 
     // Add openapi header and write to file
-    let yaml_string = serde_yaml::to_string(&all_methods)?;
+    let yml_string = serde_yml::to_string(&all_methods)?;
     let mut w = File::create("openapi.yaml")?;
-    w.write_all(format!("{}{}", create_yaml(), yaml_string).as_bytes())?;
+    w.write_all(format!("{}{}", create_yaml(), yml_string).as_bytes())?;
 
     Ok(())
 }
