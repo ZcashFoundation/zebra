@@ -9,14 +9,14 @@ Zebra has the following hardware requirements.
 - 300 GB available disk space 
 - 100 Mbps network connection, with 300 GB of uploads and downloads per month
 
-## Minimal Requirements
+## Minimum Hardware Requirements
 
 - 2 CPU cores
 - 4 GB RAM
 - 300 GB available disk space 
 
-You can run Zebra fine on a computer such as Orange Pi Zero 2W with a 512 GB
-microSD card.
+[Zebra has successfully run on an Orange Pi Zero 2W with a 512 GB microSD card
+without any issues.](https://x.com/Zerodartz/status/1811460885996798159)
 
 ## Disk Requirements
 
