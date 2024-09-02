@@ -21,7 +21,7 @@ use tracing::Instrument;
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
-    chain_tip::ChainTip,
+    chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::ZcashDeserialize,
     subtree::NoteCommitmentSubtreeIndex,
@@ -44,6 +44,8 @@ use errors::{MapServerError, OkOrServerError};
 
 // We don't use a types/ module here, because it is redundant.
 pub mod trees;
+
+pub mod types;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
@@ -85,7 +87,7 @@ pub trait Rpc {
     /// Some fields from the zcashd reference are missing from Zebra's [`GetBlockChainInfo`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
     #[rpc(name = "getblockchaininfo")]
-    fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+    fn get_blockchain_info(&self) -> BoxFuture<Result<GetBlockChainInfo>>;
 
     /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
     ///
@@ -500,98 +502,120 @@ where
         Ok(response)
     }
 
-    // TODO: use a generic error constructor (#5548)
     #[allow(clippy::unwrap_in_result)]
-    fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
-        let network = &self.network;
+    fn get_blockchain_info(&self) -> BoxFuture<Result<GetBlockChainInfo>> {
+        let network = self.network.clone();
+        let debug_force_finished_sync = self.debug_force_finished_sync;
+        let mut state = self.state.clone();
 
-        // `chain` field
-        let chain = self.network.bip70_network_name();
+        async move {
+            // `chain` field
+            let chain = network.bip70_network_name();
 
-        // `blocks` and `best_block_hash` fields
-        let (tip_height, tip_hash) = self
-            .latest_chain_tip
-            .best_tip_height_and_hash()
-            .ok_or_server_error("No Chain tip available yet")?;
+            let request = zebra_state::ReadRequest::TipPoolValues;
+            let response: zebra_state::ReadResponse = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_server_error()?;
 
-        // `estimated_height` field
-        let current_block_time = self
-            .latest_chain_tip
-            .best_tip_block_time()
-            .ok_or_server_error("No Chain tip available yet")?;
+            let zebra_state::ReadResponse::TipPoolValues {
+                tip_height,
+                tip_hash,
+                value_balance,
+            } = response
+            else {
+                unreachable!("unmatched response to a TipPoolValues request")
+            };
 
-        let zebra_estimated_height = self
-            .latest_chain_tip
-            .estimate_network_chain_tip_height(network, Utc::now())
-            .ok_or_server_error("No Chain tip available yet")?;
+            let request = zebra_state::ReadRequest::BlockHeader(tip_hash.into());
+            let response: zebra_state::ReadResponse = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_server_error()?;
 
-        let mut estimated_height =
-            if current_block_time > Utc::now() || zebra_estimated_height < tip_height {
+            let zebra_state::ReadResponse::BlockHeader(block_header) = response else {
+                unreachable!("unmatched response to a BlockHeader request")
+            };
+
+            let tip_block_time = block_header
+                .ok_or_server_error("unexpectedly could not read best chain tip block header")?
+                .time;
+
+            let now = Utc::now();
+            let zebra_estimated_height =
+                NetworkChainTipHeightEstimator::new(tip_block_time, tip_height, &network)
+                    .estimate_height_at(now);
+
+            // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
+            // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
+            // later than the current time on the local clock.
+            let estimated_height = if tip_block_time > now
+                || zebra_estimated_height < tip_height
+                || debug_force_finished_sync
+            {
                 tip_height
             } else {
                 zebra_estimated_height
             };
 
-        // If we're testing the mempool, force the estimated height to be the actual tip height.
-        if self.debug_force_finished_sync {
-            estimated_height = tip_height;
-        }
-
-        // `upgrades` object
-        //
-        // Get the network upgrades in height order, like `zcashd`.
-        let mut upgrades = IndexMap::new();
-        for (activation_height, network_upgrade) in network.full_activation_list() {
-            // Zebra defines network upgrades based on incompatible consensus rule changes,
-            // but zcashd defines them based on ZIPs.
+            // `upgrades` object
             //
-            // All the network upgrades with a consensus branch ID are the same in Zebra and zcashd.
-            if let Some(branch_id) = network_upgrade.branch_id() {
-                // zcashd's RPC seems to ignore Disabled network upgrades, so Zebra does too.
-                let status = if tip_height >= activation_height {
-                    NetworkUpgradeStatus::Active
-                } else {
-                    NetworkUpgradeStatus::Pending
-                };
+            // Get the network upgrades in height order, like `zcashd`.
+            let mut upgrades = IndexMap::new();
+            for (activation_height, network_upgrade) in network.full_activation_list() {
+                // Zebra defines network upgrades based on incompatible consensus rule changes,
+                // but zcashd defines them based on ZIPs.
+                //
+                // All the network upgrades with a consensus branch ID are the same in Zebra and zcashd.
+                if let Some(branch_id) = network_upgrade.branch_id() {
+                    // zcashd's RPC seems to ignore Disabled network upgrades, so Zebra does too.
+                    let status = if tip_height >= activation_height {
+                        NetworkUpgradeStatus::Active
+                    } else {
+                        NetworkUpgradeStatus::Pending
+                    };
 
-                let upgrade = NetworkUpgradeInfo {
-                    name: network_upgrade,
-                    activation_height,
-                    status,
-                };
-                upgrades.insert(ConsensusBranchIdHex(branch_id), upgrade);
+                    let upgrade = NetworkUpgradeInfo {
+                        name: network_upgrade,
+                        activation_height,
+                        status,
+                    };
+                    upgrades.insert(ConsensusBranchIdHex(branch_id), upgrade);
+                }
             }
+
+            // `consensus` object
+            let next_block_height =
+                (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
+            let consensus = TipConsensusBranch {
+                chain_tip: ConsensusBranchIdHex(
+                    NetworkUpgrade::current(&network, tip_height)
+                        .branch_id()
+                        .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
+                ),
+                next_block: ConsensusBranchIdHex(
+                    NetworkUpgrade::current(&network, next_block_height)
+                        .branch_id()
+                        .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
+                ),
+            };
+
+            let response = GetBlockChainInfo {
+                chain,
+                blocks: tip_height,
+                best_block_hash: tip_hash,
+                estimated_height,
+                value_pools: types::ValuePoolBalance::from_value_balance(value_balance),
+                upgrades,
+                consensus,
+            };
+
+            Ok(response)
         }
-
-        // `consensus` object
-        let next_block_height =
-            (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
-        let consensus = TipConsensusBranch {
-            chain_tip: ConsensusBranchIdHex(
-                NetworkUpgrade::current(network, tip_height)
-                    .branch_id()
-                    .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
-            ),
-            next_block: ConsensusBranchIdHex(
-                NetworkUpgrade::current(network, next_block_height)
-                    .branch_id()
-                    .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
-            ),
-        };
-
-        let response = GetBlockChainInfo {
-            chain,
-            blocks: tip_height,
-            best_block_hash: tip_hash,
-            estimated_height,
-            upgrades,
-            consensus,
-        };
-
-        Ok(response)
+        .boxed()
     }
-
-    // TODO: use a generic error constructor (#5548)
     fn get_address_balance(
         &self,
         address_strings: AddressStrings,
@@ -615,7 +639,6 @@ where
     }
 
     // TODO: use HexData or GetRawTransaction::Bytes to handle the transaction data argument
-    //       use a generic error constructor (#5548)
     fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
@@ -963,7 +986,6 @@ where
     }
 
     // TODO: use HexData or SentTransactionHash to handle the transaction ID
-    //       use a generic error constructor (#5548)
     fn get_raw_transaction(
         &self,
         txid_hex: String,
@@ -1197,7 +1219,6 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_address_tx_ids(
         &self,
         request: GetAddressTxIdsRequest,
@@ -1258,7 +1279,6 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_address_utxos(
         &self,
         address_strings: AddressStrings,
@@ -1372,6 +1392,10 @@ pub struct GetBlockChainInfo {
     #[serde(rename = "estimatedheight")]
     estimated_height: Height,
 
+    /// Value pool balances
+    #[serde(rename = "valuePools")]
+    value_pools: [types::ValuePoolBalance; 5],
+
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
 
@@ -1386,6 +1410,7 @@ impl Default for GetBlockChainInfo {
             blocks: Height(1),
             best_block_hash: block::Hash([0; 32]),
             estimated_height: Height(1),
+            value_pools: types::ValuePoolBalance::zero_pools(),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),

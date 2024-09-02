@@ -37,7 +37,7 @@ docker run -d --platform linux/amd64 \
 ### Build it locally
 
 ```shell
-git clone --depth 1 --branch v1.8.0 https://github.com/ZcashFoundation/zebra.git
+git clone --depth 1 --branch v1.9.0 https://github.com/ZcashFoundation/zebra.git
 docker build --file docker/Dockerfile --target runtime --tag zebra:local .
 docker run --detach zebra:local
 ```

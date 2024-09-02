@@ -1,7 +1,8 @@
 //! Generate an openapi.yaml file from the Zebra RPC methods
 
-use std::{collections::HashMap, error::Error, fs::File, io::Write};
+use std::{error::Error, fs::File, io::Write};
 
+use indexmap::IndexMap;
 use quote::ToTokens;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
@@ -15,7 +16,7 @@ const SERVER: &str = "http://localhost:8232";
 // The API methods
 #[derive(Serialize, Debug)]
 struct Methods {
-    paths: HashMap<String, HashMap<String, MethodConfig>>,
+    paths: IndexMap<String, IndexMap<String, MethodConfig>>,
 }
 
 // The configuration for each method
@@ -25,7 +26,7 @@ struct MethodConfig {
     description: String,
     #[serde(rename = "requestBody")]
     request_body: RequestBody,
-    responses: HashMap<String, Response>,
+    responses: IndexMap<String, Response>,
 }
 
 // The request body
@@ -53,7 +54,7 @@ struct Application {
 struct Schema {
     #[serde(rename = "type")]
     type_: String,
-    properties: HashMap<String, Property>,
+    properties: IndexMap<String, Property>,
 }
 
 // The properties of the request body
@@ -95,8 +96,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         ),
     ];
 
-    // Create a hashmap to store the method names and configuration
-    let mut methods = HashMap::new();
+    // Create an indexmap to store the method names and configuration
+    let mut methods = IndexMap::new();
 
     for zebra_rpc_methods_path in paths {
         // Read the source code from the file
@@ -105,8 +106,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         // Parse the source code into a syn AST
         let syn_file = syn::parse_file(&source_code)?;
 
-        // Create a hashmap to store the methods configuration
-        let mut methods_config = HashMap::new();
+        // Create an indexmap to store the methods configuration
+        let mut methods_config = IndexMap::new();
 
         // Iterate over items in the file looking for traits
         for item in &syn_file.items {
@@ -150,7 +151,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         // Create the responses
                         let responses = create_responses(&method_name, have_parameters)?;
 
-                        // Add the method configuration to the hashmap
+                        // Add the method configuration to the indexmap
                         methods_config.insert(
                             request_type,
                             MethodConfig {
@@ -161,7 +162,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             },
                         );
 
-                        // Add the method name and configuration to the hashmap
+                        // Add the method name and configuration to the indexmap
                         methods.insert(format!("/{}", method_name), methods_config.clone());
                     }
                 }
@@ -371,7 +372,7 @@ fn create_request_body(method_name: &str, parameters_example: &str) -> RequestBo
     };
 
     // Create the schema and add the first 2 properties
-    let mut schema = HashMap::new();
+    let mut schema = IndexMap::new();
     schema.insert("method".to_string(), method_name_prop);
     schema.insert("id".to_string(), request_id_prop);
 
@@ -406,8 +407,8 @@ fn create_request_body(method_name: &str, parameters_example: &str) -> RequestBo
 fn create_responses(
     method_name: &str,
     have_parameters: bool,
-) -> Result<HashMap<String, Response>, Box<dyn Error>> {
-    let mut responses = HashMap::new();
+) -> Result<IndexMap<String, Response>, Box<dyn Error>> {
+    let mut responses = IndexMap::new();
 
     let properties = get_default_properties(method_name)?;
 
@@ -424,7 +425,7 @@ fn create_responses(
     };
     responses.insert("200".to_string(), res_ok);
 
-    let mut properties = HashMap::new();
+    let mut properties = IndexMap::new();
     if have_parameters {
         properties.insert(
             "error".to_string(),
@@ -473,10 +474,10 @@ fn default_property<T: serde::Serialize>(
 
 // Get requests examples by using defaults from the Zebra RPC methods
 // TODO: Make this function more concise/readable (https://github.com/ZcashFoundation/zebra/pull/8616#discussion_r1643193949)
-fn get_default_properties(method_name: &str) -> Result<HashMap<String, Property>, Box<dyn Error>> {
+fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property>, Box<dyn Error>> {
     let type_ = "object";
     let items = None;
-    let mut props = HashMap::new();
+    let mut props = IndexMap::new();
 
     // TODO: An entry has to be added here manually for each new RPC method introduced, can we automate?
     let default_result = match method_name {

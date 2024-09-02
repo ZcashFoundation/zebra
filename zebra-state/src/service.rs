@@ -1192,6 +1192,38 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            // Used by `getblockchaininfo` RPC method.
+            ReadRequest::TipPoolValues => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let tip_with_value_balance = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
+                                read::tip_with_value_balance(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                )
+                            });
+
+                        // The work is done in the future.
+                        // TODO: Do this in the Drop impl with the variant name?
+                        timer.finish(module_path!(), line!(), "ReadRequest::TipPoolValues");
+
+                        let (tip_height, tip_hash, value_balance) = tip_with_value_balance?
+                            .ok_or(BoxError::from("no chain tip available yet"))?;
+
+                        Ok(ReadResponse::TipPoolValues {
+                            tip_height,
+                            tip_hash,
+                            value_balance,
+                        })
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the StateService.
             ReadRequest::Depth(hash) => {
                 let state = self.clone();
