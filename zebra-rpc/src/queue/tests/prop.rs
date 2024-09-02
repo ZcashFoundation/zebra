@@ -5,7 +5,7 @@ use std::{collections::HashSet, env, sync::Arc};
 use proptest::prelude::*;
 
 use chrono::Duration;
-use tokio::time;
+use tokio::{sync::oneshot, time};
 use tower::ServiceExt;
 
 use zebra_chain::{
@@ -196,7 +196,9 @@ proptest! {
             let request = Request::Queue(vec![Gossip::Tx(unmined_transaction.clone())]);
             let expected_request = Request::Queue(vec![Gossip::Tx(unmined_transaction.clone())]);
             let send_task = tokio::spawn(mempool.clone().oneshot(request));
-            let response = Response::Queued(vec![Ok(())]);
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Ok(()));
+            let response = Response::Queued(vec![Ok(rsp_rx)]);
 
             mempool
                 .expect_request(expected_request)
@@ -337,7 +339,9 @@ proptest! {
             // retry will queue the transaction to mempool
             let gossip = Gossip::Tx(UnminedTx::from(transaction.clone()));
             let expected_request = Request::Queue(vec![gossip]);
-            let response = Response::Queued(vec![Ok(())]);
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Ok(()));
+            let response = Response::Queued(vec![Ok(rsp_rx)]);
 
             mempool
                 .expect_request(expected_request)
