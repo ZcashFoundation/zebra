@@ -13,7 +13,7 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
-use tower::{timeout::Timeout, Service, ServiceExt};
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -29,6 +29,7 @@ use zebra_chain::{
     transparent::{self, OrderedUtxo},
 };
 
+use zebra_node_services::mempool;
 use zebra_script::CachedFfiTransaction;
 use zebra_state as zs;
 
@@ -59,11 +60,13 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// Transaction verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct Verifier<ZS> {
     network: Network,
     state: Timeout<ZS>,
     script_verifier: script::Verifier,
+    mempool:
+        Option<Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>>,
 }
 
 impl<ZS> Verifier<ZS>
@@ -77,6 +80,24 @@ where
             network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
             script_verifier: script::Verifier,
+            mempool: None,
+        }
+    }
+
+    /// Create a new transaction verifier.
+    pub fn new_with_mempool(
+        network: &Network,
+        state: ZS,
+        mempool: Buffer<
+            BoxService<mempool::Request, mempool::Response, BoxError>,
+            mempool::Request,
+        >,
+    ) -> Self {
+        Self {
+            network: network.clone(),
+            state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
+            script_verifier: script::Verifier,
+            mempool: Some(mempool),
         }
     }
 }

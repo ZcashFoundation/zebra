@@ -231,12 +231,12 @@ where
 /// Block and transaction verification requests should be wrapped in a timeout,
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
-#[instrument(skip(state_service, _mempool))]
+#[instrument(skip(state_service, mempool))]
 pub async fn init<S>(
     config: Config,
     network: &Network,
     mut state_service: S,
-    _mempool: oneshot::Receiver<
+    mempool: oneshot::Receiver<
         Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
     >,
 ) -> (
@@ -336,8 +336,13 @@ where
     );
 
     // transaction verification
+    let transaction = match mempool.await {
+        Ok(mempool) => {
+            transaction::Verifier::new_with_mempool(network, state_service.clone(), mempool)
+        }
+        Err(_) => transaction::Verifier::new(network, state_service.clone()),
+    };
 
-    let transaction = transaction::Verifier::new(network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification
