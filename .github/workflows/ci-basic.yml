@@ -11,12 +11,20 @@ jobs:
       matrix:
         os: [ubuntu-24.04]
 
+    env:
+      # Use system-installed RocksDB library instead of building from scratch
+      ROCKSDB_LIB_DIR: /usr/lib
+      # Use system-installed Snappy library for compression in RocksDB
+      SNAPPY_LIB_DIR: /usr/lib/x86_64-linux-gnu
+      # Enable the `nu6` feature in `zcash_protocol`
+      RUSTFLAGS: '--cfg zcash_unstable="nu6"'
+
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies on Ubuntu
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
       - name: Run tests
-        run: ROCKSDB_LIB_DIR=/usr/lib SNAPPY_LIB_DIR=/usr/lib/x86_64-linux-gnu cargo test --verbose
+        run: cargo test --verbose
       - name: Verify working directory is clean
         run: git diff --exit-code
       - name: Run doc check
