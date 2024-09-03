@@ -1,6 +1,7 @@
 name: Basic checks
 
-on: [push, pull_request]
+#on: [push, pull_request]
+on: [push]
 
 jobs:
   test:
@@ -13,9 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies on Ubuntu
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
       - name: Run tests
-        run: cargo test --verbose
+        run: ROCKSDB_LIB_DIR=/usr/lib SNAPPY_LIB_DIR=/usr/lib/x86_64-linux-gnu cargo test --verbose
       - name: Verify working directory is clean
         run: git diff --exit-code
       - name: Run doc check
