@@ -38,7 +38,7 @@ const POLL_DELAY: Duration = Duration::from_millis(200);
 struct TrustedChainSync {
     /// RPC client for calling Zebra's RPC methods.
     rpc_client: RpcRequestClient,
-    /// The read state service.
+    /// The recorded-state service.
     db: ZebraDb,
     /// The non-finalized state - currently only contains the best chain.
     non_finalized_state: NonFinalizedState,
