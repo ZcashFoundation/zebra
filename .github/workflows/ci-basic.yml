@@ -12,25 +12,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+      - name: Install dependencies on Ubuntu
+        run: sudo apt-get update && sudo apt-get install -y protoc
       - name: Run tests
         run: cargo test --verbose
       - name: Verify working directory is clean
         run: git diff --exit-code
-
-  doc-links:
-    name: Intra-doc links
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo fetch
-      # Requires #![deny(rustdoc::broken_intra_doc_links)] in crates.
-      - name: Check intra-doc links
+      - name: Run doc check
         run: cargo doc --all-features --document-private-items
-
-  fmt:
-    name: Rustfmt
-    timeout-minutes: 30
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: cargo fmt -- --check
+      - name: Run format check
+        run: cargo fmt -- --check
