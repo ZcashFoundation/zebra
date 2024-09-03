@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies on Ubuntu
-        run: sudo apt-get update && sudo apt-get install -y protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Run tests
         run: cargo test --verbose
       - name: Verify working directory is clean
