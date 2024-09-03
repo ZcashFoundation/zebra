@@ -33,7 +33,7 @@ use crate::{
 /// See the [`TrustedChainSync::wait_for_chain_tip_change()`] method documentation for more information.
 const POLL_DELAY: Duration = Duration::from_millis(200);
 
-/// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
+/// Syncs non-finalized blocks in the best chain from a trusted-for-block-validation Zebra node's RPC methods.
 #[derive(Debug)]
 struct TrustedChainSync {
     /// RPC client for calling Zebra's RPC methods.
