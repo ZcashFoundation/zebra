@@ -184,6 +184,8 @@ impl StartCmd {
                 config.consensus.clone(),
                 &config.network.network,
                 state.clone(),
+                // TODO: Pass actual setup channel receiver
+                oneshot::channel().1,
             )
             .await;
 
