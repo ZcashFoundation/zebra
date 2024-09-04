@@ -14,8 +14,10 @@ use std::{
     time::Duration,
 };
 
+use futures::{future::BoxFuture, stream::FuturesUnordered};
 use thiserror::Error;
 
+use tower::BoxError;
 use zebra_chain::{
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent::OutPoint,
@@ -120,11 +122,25 @@ pub struct Storage {
 
     /// The set of partially verified transactions in the mempool that can be added to the set of verified transactions
     /// once a set of UTXOs are available in the mempool if there are no circular dependencies.
-    partially_verified: Vec<(VerifiedUnminedTx, Vec<OutPoint>)>,
+    //
+    // This probably shouldn't be vecs, if the list gets long, it would be pretty inefficient to just keep checking them all until nothing new is verified
+    // Instead, maybe we should keep an index of what UTXOs we're waiting on, but then what if it's a list. Ok, so, "async" again, pending UTXOs, but the UTXOs are checked in the mempool?
+    // For example, imagining a situation where 10 transactions are queued at once to be downloaded and verified where tx10 depends-on (->) tx9 -> tx8 -> tx7 ... tx1,
+    // the transaction verifier would respond to mempool requests with a partially verified response that includes what UTXOs it couldn't find in the state,
+    // the mempool's poll_ready() method would then check if the mempool storage has verified transactions with all of the spent UTXOs of the partially verified transaction and add it to the verified set, or
+    // if some of them have already been spent by another verified unmined tx, it would reject it immediately.
+    // if not all UTXOs spent by the partially verified mempool transaction that could not be found in the state are immediately available in the mempool (but none of them have been spent already),
+    // it would queue them as pending UTXOs and add a boxed future that returns the verified transaction after awaiting a message from the pending UTXO channel.
+    //
+    // Then whenever a transaction is being inserted into the verified set, we check if it has any outputs that are contained in PendingUtxos, and send a message with
+    queued_partially_verified:
+        FuturesUnordered<BoxFuture<'static, Result<VerifiedUnminedTx, BoxError>>>,
 
     // Pending UTXO Request Tracking
     //
     /// The set of outpoints with pending requests for their associated transparent::Output.
+    //
+    // TODO: Create another PendingUtxos struct for the mempool?
     pending_utxos: PendingUtxos,
 
     /// The set of transactions rejected due to bad authorizations, or for other
@@ -174,7 +190,7 @@ impl Storage {
     pub(crate) fn new(config: &config::Config) -> Self {
         Self {
             tx_cost_limit: config.tx_cost_limit,
-            partially_verified: Default::default(),
+            queued_partially_verified: Default::default(),
             pending_utxos: PendingUtxos::default(),
             eviction_memory_time: config.eviction_memory_time,
             verified: Default::default(),
