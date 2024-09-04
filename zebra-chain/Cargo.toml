@@ -176,3 +176,7 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
+
+# FIXME: remove this and all zcash_unstable usage in the code after updating librustzcash
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }
