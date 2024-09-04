@@ -13,7 +13,8 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
-use tower::{timeout::Timeout, Service, ServiceExt};
+use tokio::sync::oneshot;
+use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -29,6 +30,7 @@ use zebra_chain::{
     transparent::{self, OrderedUtxo},
 };
 
+use zebra_node_services::mempool;
 use zebra_script::CachedFfiTransaction;
 use zebra_state as zs;
 
@@ -52,6 +54,10 @@ mod tests;
 ///     chain in the correct order.)
 const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6 * 60);
 
+/// Mempool service type used by the transaction verifier
+pub type MempoolService =
+    Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>;
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -72,12 +78,18 @@ where
     ZS::Future: Send + 'static,
 {
     /// Create a new transaction verifier.
-    pub fn new(network: &Network, state: ZS) -> Self {
+    pub fn new(network: &Network, state: ZS, mempool: oneshot::Receiver<MempoolService>) -> Self {
         Self {
             network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
             script_verifier: script::Verifier,
         }
+    }
+
+    /// Create a new transaction verifier with a closed channel receiver for mempool setup for tests.
+    #[cfg(test)]
+    pub fn new_for_tests(network: &Network, state: ZS) -> Self {
+        Self::new(network, state, oneshot::channel().1)
     }
 }
 

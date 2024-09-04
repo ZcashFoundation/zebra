@@ -30,7 +30,6 @@ use zebra_chain::{
     parameters::Network,
 };
 
-use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
@@ -236,9 +235,7 @@ pub async fn init<S>(
     config: Config,
     network: &Network,
     mut state_service: S,
-    mempool: oneshot::Receiver<
-        Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
-    >,
+    mempool: oneshot::Receiver<crate::transaction::MempoolService>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -337,7 +334,7 @@ where
 
     // transaction verification
 
-    let transaction = transaction::Verifier::new(network, state_service.clone());
+    let transaction = transaction::Verifier::new(network, state_service.clone(), mempool);
     let transaction = Buffer::new(BoxService::new(transaction), VERIFIER_BUFFER_BOUND);
 
     // block verification
