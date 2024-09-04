@@ -146,6 +146,7 @@ pub enum Transaction {
     },
     /// A future version of transaction
     #[cfg(feature = "zsf")]
+    #[allow(non_snake_case)]
     ZFuture {
         /// The Network Upgrade for this transaction.
         ///

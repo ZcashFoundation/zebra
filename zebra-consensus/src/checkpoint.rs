@@ -37,7 +37,6 @@ use zebra_state::{self as zs, CheckpointVerifiedBlock};
 
 use crate::{
     block::{subsidy::general::block_subsidy_pre_zsf, VerifyBlockError},
-    block_subsidy,
     checkpoint::types::{
         Progress::{self, *},
         TargetHeight::{self, *},
