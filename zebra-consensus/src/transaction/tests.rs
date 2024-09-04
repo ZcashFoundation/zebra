@@ -7,7 +7,7 @@ use std::{collections::HashMap, sync::Arc};
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
 use halo2::pasta::{group::ff::PrimeField, pallas};
-use tower::{service_fn, ServiceExt};
+use tower::{buffer::Buffer, service_fn, ServiceExt};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -1652,6 +1652,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called") });
     let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = Buffer::new(verifier, 10);
 
     let block_height = NetworkUpgrade::Nu5
         .activation_height(&network)
@@ -1701,7 +1702,11 @@ async fn v5_coinbase_transaction_expiry_height() {
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
-        .await;
+        .await
+        .map_err(|err| {
+            *err.downcast()
+                .expect("error type should be TransactionError")
+        });
 
     assert_eq!(
         result,
@@ -1726,7 +1731,11 @@ async fn v5_coinbase_transaction_expiry_height() {
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
-        .await;
+        .await
+        .map_err(|err| {
+            *err.downcast()
+                .expect("error type should be TransactionError")
+        });
 
     assert_eq!(
         result,
@@ -2059,7 +2068,6 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
 
         // Test the transaction verifier
         let result = verifier
-            .clone()
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2136,6 +2144,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
     let state_service =
         service_fn(|_| async { unreachable!("State service should not be called.") });
     let verifier = Verifier::new_for_tests(&network, state_service);
+    let verifier = Buffer::new(verifier, 10);
 
     // Test the transaction verifier.
     //
@@ -2154,7 +2163,11 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
-            .await;
+            .await
+            .map_err(|err| {
+                *err.downcast()
+                    .expect("error type should be TransactionError")
+            });
 
         if result == expected_error || i >= 100 {
             break result;
@@ -2190,7 +2203,6 @@ fn v4_with_sapling_spends() {
 
         // Test the transaction verifier
         let result = verifier
-            .clone()
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2233,7 +2245,6 @@ fn v4_with_duplicate_sapling_spends() {
 
         // Test the transaction verifier
         let result = verifier
-            .clone()
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2278,7 +2289,6 @@ fn v4_with_sapling_outputs_and_no_spends() {
 
         // Test the transaction verifier
         let result = verifier
-            .clone()
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
@@ -2327,7 +2337,6 @@ fn v5_with_sapling_spends() {
 
         // Test the transaction verifier
         let result = verifier
-            .clone()
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
@@ -2371,7 +2380,6 @@ fn v5_with_duplicate_sapling_spends() {
 
         // Test the transaction verifier
         let result = verifier
-            .clone()
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
@@ -2434,7 +2442,6 @@ fn v5_with_duplicate_orchard_action() {
 
         // Test the transaction verifier
         let result = verifier
-            .clone()
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),

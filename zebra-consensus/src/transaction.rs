@@ -65,11 +65,12 @@ pub type MempoolService =
 /// Transaction verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
-#[derive(Debug, Clone)]
 pub struct Verifier<ZS> {
     network: Network,
     state: Timeout<ZS>,
+    mempool: Option<MempoolService>,
     script_verifier: script::Verifier,
+    mempool_setup_rx: oneshot::Receiver<MempoolService>,
 }
 
 impl<ZS> Verifier<ZS>
@@ -78,11 +79,17 @@ where
     ZS::Future: Send + 'static,
 {
     /// Create a new transaction verifier.
-    pub fn new(network: &Network, state: ZS, mempool: oneshot::Receiver<MempoolService>) -> Self {
+    pub fn new(
+        network: &Network,
+        state: ZS,
+        mempool_setup_rx: oneshot::Receiver<MempoolService>,
+    ) -> Self {
         Self {
             network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
+            mempool: None,
             script_verifier: script::Verifier,
+            mempool_setup_rx,
         }
     }
 
