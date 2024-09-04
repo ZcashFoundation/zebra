@@ -209,7 +209,7 @@ ARG FEATURES
 ENV FEATURES=${FEATURES}
 
 # Path and name of the config file
-# This are set here to always this variable set, even if the user does not set it
+# These are set to a default value when not defined in the environment
 ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR:-/etc/zebrad}
 ENV ZEBRA_CONF_FILE=${ZEBRA_CONF_FILE:-zebrad.toml}
 
