@@ -18,11 +18,13 @@ jobs:
       SNAPPY_LIB_DIR: /usr/lib/x86_64-linux-gnu
       # Enable the `nu6` feature in `zcash_protocol`
       RUSTFLAGS: '--cfg zcash_unstable="nu6"'
+      RUSTDOCFLAGS: '--cfg zcash_unstable="nu6"'
 
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies on Ubuntu
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
+        #run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
       - name: Run tests
         run: cargo test --verbose
       - name: Verify working directory is clean
