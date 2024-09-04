@@ -68,6 +68,7 @@ pub type MempoolService =
 pub struct Verifier<ZS> {
     network: Network,
     state: Timeout<ZS>,
+    // TODO: Use an enum so that this can either be Pending(oneshot::Receiver) or Initialized(MempoolService)
     mempool: Option<MempoolService>,
     script_verifier: script::Verifier,
     mempool_setup_rx: oneshot::Receiver<MempoolService>,
@@ -485,6 +486,9 @@ where
                     legacy_sigop_count,
                 },
                 Request::Mempool { transaction, .. } => {
+                    // TODO: Poll the mempool so it sees the new verified result promptly / nearly-immediately 
+                    //       (to solve concurrency issue with dependency chains of orphaned transactions)
+
                     let transaction = VerifiedUnminedTx::new(
                         transaction,
                         miner_fee.expect(
