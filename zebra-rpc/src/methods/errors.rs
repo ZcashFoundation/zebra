@@ -2,7 +2,7 @@
 
 use jsonrpc_core::ErrorCode;
 
-pub(crate) trait MapServerError<T, E> {
+pub(crate) trait MapServerError<T> {
     fn map_server_error(self) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
@@ -13,7 +13,7 @@ pub(crate) trait OkOrServerError<T> {
     ) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
-impl<T, E> MapServerError<T, E> for Result<T, E>
+impl<T, E> MapServerError<T> for Result<T, E>
 where
     E: ToString,
 {
