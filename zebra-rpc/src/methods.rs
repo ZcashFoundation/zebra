@@ -1359,6 +1359,7 @@ where
 
     fn stop(&self) -> Result<()> {
         if self.network.is_regtest() {
+            // TODO: Use a controlled shutdown.
             std::process::exit(0);
         } else {
             Err(Error {
