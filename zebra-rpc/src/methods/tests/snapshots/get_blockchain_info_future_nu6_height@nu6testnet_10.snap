@@ -52,22 +52,22 @@ expression: info
     },
     "f5b9230b": {
       "name": "Heartwood",
-      "activationheight": 2942000,
+      "activationheight": 2976000,
       "status": "pending"
     },
     "e9ff75a6": {
       "name": "Canopy",
-      "activationheight": 2942000,
+      "activationheight": 2976000,
       "status": "pending"
     },
     "c2d6d0b4": {
       "name": "NU5",
-      "activationheight": 2942000,
+      "activationheight": 2976000,
       "status": "pending"
     },
     "c8e71055": {
       "name": "Nu6",
-      "activationheight": 2942000,
+      "activationheight": 2976000,
       "status": "pending"
     }
   },

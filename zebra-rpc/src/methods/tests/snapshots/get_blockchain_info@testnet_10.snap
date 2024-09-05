@@ -64,6 +64,11 @@ expression: info
       "name": "NU5",
       "activationheight": 1842420,
       "status": "pending"
+    },
+    "c8e71055": {
+      "name": "Nu6",
+      "activationheight": 2976000,
+      "status": "pending"
     }
   },
   "consensus": {

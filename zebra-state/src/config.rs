@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tokio::task::{spawn_blocking, JoinHandle};
 use tracing::Span;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
     constants::{DATABASE_FORMAT_VERSION_FILE_NAME, RESTORABLE_DB_VERSIONS, STATE_DATABASE_KIND},
@@ -173,12 +173,8 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let cache_dir = dirs::cache_dir()
-            .unwrap_or_else(|| std::env::current_dir().unwrap().join("cache"))
-            .join("zebra");
-
         Self {
-            cache_dir,
+            cache_dir: default_cache_dir(),
             ephemeral: false,
             delete_old_database: true,
             debug_stop_at_height: None,
@@ -471,6 +467,8 @@ pub(crate) use hidden::{
 pub(crate) mod hidden {
     #![allow(dead_code)]
 
+    use zebra_chain::common::atomic_write;
+
     use super::*;
 
     /// Writes `changed_version` to the on-disk state database after the format is changed.
@@ -512,10 +510,9 @@ pub(crate) mod hidden {
 
         let version = format!("{}.{}", changed_version.minor, changed_version.patch);
 
-        // # Concurrency
-        //
-        // The caller handles locking for this file write.
-        fs::write(version_path, version.as_bytes())?;
+        // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
+        // crashes.
+        atomic_write(version_path, version.as_bytes())??;
 
         Ok(())
     }

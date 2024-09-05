@@ -28,7 +28,7 @@ paths:
                   default: getinfo
                 id:
                   type: string
-                  default: x2r3lRddGL
+                  default: VuJXrxLSw8
                 params:
                   type: array
                   items: {}
@@ -61,7 +61,7 @@ paths:
                   default: getblockchaininfo
                 id:
                   type: string
-                  default: w8Lb0nAvLd
+                  default: HDVqYXM9m6
                 params:
                   type: array
                   items: {}
@@ -99,7 +99,7 @@ paths:
                   default: getaddressbalance
                 id:
                   type: string
-                  default: QbTztoTvRo
+                  default: Xw5TDBKXGl
                 params:
                   type: array
                   items: {}
@@ -147,7 +147,7 @@ paths:
                   default: sendrawtransaction
                 id:
                   type: string
-                  default: aDK5RQWj16
+                  default: QaJv2bXyZu
                 params:
                   type: array
                   items: {}
@@ -196,7 +196,7 @@ paths:
                   default: getblock
                 id:
                   type: string
-                  default: xxCP1d61X0
+                  default: k0DACJrgZs
                 params:
                   type: array
                   items: {}
@@ -239,7 +239,7 @@ paths:
                   default: getbestblockhash
                 id:
                   type: string
-                  default: DoZgd1j7xW
+                  default: rIFaLhZwHF
                 params:
                   type: array
                   items: {}
@@ -272,7 +272,7 @@ paths:
                   default: getbestblockheightandhash
                 id:
                   type: string
-                  default: 0iUFHsOjk3
+                  default: oxrhh1swvh
                 params:
                   type: array
                   items: {}
@@ -305,7 +305,7 @@ paths:
                   default: getrawmempool
                 id:
                   type: string
-                  default: WXG2c6FcCK
+                  default: E7oUD34jk2
                 params:
                   type: array
                   items: {}
@@ -343,7 +343,7 @@ paths:
                   default: z_gettreestate
                 id:
                   type: string
-                  default: 38P0xXV0do
+                  default: Hp22XK728i
                 params:
                   type: array
                   items: {}
@@ -393,7 +393,7 @@ paths:
                   default: z_getsubtreesbyindex
                 id:
                   type: string
-                  default: 662iR8VZGT
+                  default: Cs69hg68pl
                 params:
                   type: array
                   items: {}
@@ -432,7 +432,7 @@ paths:
                   default: getrawtransaction
                 id:
                   type: string
-                  default: UuvVrzSzqC
+                  default: iu395PEErc
                 params:
                   type: array
                   items: {}
@@ -480,7 +480,7 @@ paths:
                   default: getaddresstxids
                 id:
                   type: string
-                  default: KMss2wDMwH
+                  default: z3lOKfsQdp
                 params:
                   type: array
                   items: {}
@@ -528,7 +528,7 @@ paths:
                   default: getaddressutxos
                 id:
                   type: string
-                  default: 4Y6BAhe6Lf
+                  default: '7U4Q4dSxej'
                 params:
                   type: array
                   items: {}
@@ -571,7 +571,7 @@ paths:
                   default: getblockcount
                 id:
                   type: string
-                  default: nzPm5W3X1G
+                  default: '8yw3EX7Cwi'
                 params:
                   type: array
                   items: {}
@@ -609,7 +609,7 @@ paths:
                   default: getblockhash
                 id:
                   type: string
-                  default: KLKosq2Z8E
+                  default: ndDYksCl9E
                 params:
                   type: array
                   items: {}
@@ -657,7 +657,7 @@ paths:
                   default: getblocktemplate
                 id:
                   type: string
-                  default: spj7gKe2AA
+                  default: lJi2hfxty1
                 params:
                   type: array
                   items: {}
@@ -695,7 +695,7 @@ paths:
                   default: submitblock
                 id:
                   type: string
-                  default: QOQsC3nA7z
+                  default: '9fEFOdTQle'
                 params:
                   type: array
                   items: {}
@@ -728,7 +728,7 @@ paths:
                   default: getmininginfo
                 id:
                   type: string
-                  default: Si3Sdb9ICT
+                  default: Dytpq4f3lF
                 params:
                   type: array
                   items: {}
@@ -761,7 +761,7 @@ paths:
                   default: getnetworksolps
                 id:
                   type: string
-                  default: jWvKPdOxDa
+                  default: yX3woRnOaN
                 params:
                   type: array
                   items: {}
@@ -794,7 +794,7 @@ paths:
                   default: getnetworkhashps
                 id:
                   type: string
-                  default: wnFwBVFrN0
+                  default: AyAZMtbezv
                 params:
                   type: array
                   items: {}
@@ -827,7 +827,7 @@ paths:
                   default: getpeerinfo
                 id:
                   type: string
-                  default: NpKiq59CE8
+                  default: nNcrsu3ZAR
                 params:
                   type: array
                   items: {}
@@ -865,7 +865,7 @@ paths:
                   default: validateaddress
                 id:
                   type: string
-                  default: PDjTChWgFW
+                  default: LGyfO7zTjW
                 params:
                   type: array
                   items: {}
@@ -903,7 +903,7 @@ paths:
                   default: z_validateaddress
                 id:
                   type: string
-                  default: aCeb6xbIuo
+                  default: '2Q09a2Nh4N'
                 params:
                   type: array
                   items: {}
@@ -941,7 +941,7 @@ paths:
                   default: getblocksubsidy
                 id:
                   type: string
-                  default: EeBvVXCJon
+                  default: nv6lOWCRso
                 params:
                   type: array
                   items: {}
@@ -984,7 +984,7 @@ paths:
                   default: getdifficulty
                 id:
                   type: string
-                  default: jg2K8N0ZG4
+                  default: '2O3A0PF1SS'
                 params:
                   type: array
                   items: {}
@@ -1022,7 +1022,7 @@ paths:
                   default: z_listunifiedreceivers
                 id:
                   type: string
-                  default: Y3gscsg8yT
+                  default: XYgGcDIx2X
                 params:
                   type: array
                   items: {}
