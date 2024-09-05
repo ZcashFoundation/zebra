@@ -264,6 +264,10 @@ where
     while !template_sender.is_closed() && !is_shutting_down() {
         let template: Result<_, _> = rpc.get_block_template(Some(parameters.clone())).await;
 
+        if template.is_err() {
+            info!(?template, "error getting block template")
+        }
+
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
             info!(
