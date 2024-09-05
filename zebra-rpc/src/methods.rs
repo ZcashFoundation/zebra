@@ -1359,7 +1359,7 @@ where
 
     fn stop(&self) -> Result<()> {
         if self.network.is_regtest() {
-            // TODO: Use a controlled shutdown.
+            // TODO: Use graceful termination in `stop` RPC (#8850)
             std::process::exit(0);
         } else {
             Err(Error {
