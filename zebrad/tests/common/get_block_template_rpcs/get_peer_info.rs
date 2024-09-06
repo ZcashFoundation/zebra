@@ -34,7 +34,7 @@ pub(crate) async fn run() -> Result<()> {
     let rpc_address = zebra_rpc_address.expect("getpeerinfo test must have RPC port");
 
     // Wait until port is open.
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
+    zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {rpc_address}"))?;
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
