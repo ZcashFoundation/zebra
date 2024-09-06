@@ -240,6 +240,7 @@ where
     ///
     /// Returns the action taken in response to the queue request.
     #[instrument(skip(self, gossiped_tx), fields(txid = %gossiped_tx.id()))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn download_if_needed_and_verify(
         &mut self,
         gossiped_tx: Gossip,
