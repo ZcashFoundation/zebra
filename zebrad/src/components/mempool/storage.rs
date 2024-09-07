@@ -327,23 +327,21 @@ impl Storage {
         let duplicate_spend_ids: HashSet<_> = self
             .verified
             .transactions()
-            .filter_map(|tx| {
-                (tx.transaction
-                    .spent_outpoints()
+            .values()
+            .map(|tx| (tx.transaction.id, &tx.transaction.transaction))
+            .filter_map(|(tx_id, tx)| {
+                (tx.spent_outpoints()
                     .any(|outpoint| spent_outpoints.contains(&outpoint))
                     || tx
-                        .transaction
                         .sprout_nullifiers()
                         .any(|nullifier| sprout_nullifiers.contains(nullifier))
                     || tx
-                        .transaction
                         .sapling_nullifiers()
                         .any(|nullifier| sapling_nullifiers.contains(nullifier))
                     || tx
-                        .transaction
                         .orchard_nullifiers()
                         .any(|nullifier| orchard_nullifiers.contains(nullifier)))
-                .then_some(tx.id)
+                .then_some(tx_id)
             })
             .collect();
 
@@ -407,24 +405,15 @@ impl Storage {
 
     /// Returns the set of [`UnminedTxId`]s in the mempool.
     pub fn tx_ids(&self) -> impl Iterator<Item = UnminedTxId> + '_ {
-        self.verified.transactions().map(|tx| tx.id)
+        self.transactions().values().map(|tx| tx.transaction.id)
     }
 
-    /// Returns an iterator over the [`UnminedTx`]s in the mempool.
-    //
-    // TODO: make the transactions() method return VerifiedUnminedTx,
-    //       and remove the full_transactions() method
-    pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> {
-        self.verified.transactions()
-    }
-
-    /// Returns an iterator over the [`VerifiedUnminedTx`] in the set.
+    /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the verified set.
     ///
     /// Each [`VerifiedUnminedTx`] contains an [`UnminedTx`],
     /// and adds extra fields from the transaction verifier result.
-    #[allow(dead_code)]
-    pub fn full_transactions(&self) -> impl Iterator<Item = &VerifiedUnminedTx> + '_ {
-        self.verified.full_transactions()
+    pub fn transactions(&self) -> &HashMap<UnminedTxId, VerifiedUnminedTx> {
+        self.verified.transactions()
     }
 
     /// Returns the number of transactions in the mempool.
@@ -455,9 +444,9 @@ impl Storage {
         &self,
         tx_ids: HashSet<UnminedTxId>,
     ) -> impl Iterator<Item = &UnminedTx> {
-        self.verified
-            .transactions()
-            .filter(move |tx| tx_ids.contains(&tx.id))
+        tx_ids
+            .into_iter()
+            .filter_map(|tx_id| self.transactions().get(&tx_id).map(|tx| &tx.transaction))
     }
 
     /// Returns the set of [`UnminedTx`]es with matching [`transaction::Hash`]es
@@ -471,7 +460,9 @@ impl Storage {
     ) -> impl Iterator<Item = &UnminedTx> {
         self.verified
             .transactions()
-            .filter(move |tx| tx_ids.contains(&tx.id.mined_id()))
+            .iter()
+            .filter(move |(tx_id, _)| tx_ids.contains(&tx_id.mined_id()))
+            .map(|(_, tx)| &tx.transaction)
     }
 
     /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
@@ -480,7 +471,7 @@ impl Storage {
     /// This matches the exact transaction, with identical blockchain effects,
     /// signatures, and proofs.
     pub fn contains_transaction_exact(&self, txid: &UnminedTxId) -> bool {
-        self.verified.transactions().any(|tx| &tx.id == txid)
+        self.verified.contains(txid)
     }
 
     /// Returns the number of rejected [`UnminedTxId`]s or [`transaction::Hash`]es.
@@ -611,11 +602,11 @@ impl Storage {
         // then extracts the mined ID out of it
         let mut unmined_id_set = HashSet::new();
 
-        for t in self.transactions() {
-            if let Some(expiry_height) = t.transaction.expiry_height() {
+        for (&tx_id, tx) in self.transactions() {
+            if let Some(expiry_height) = tx.transaction.transaction.expiry_height() {
                 if tip_height >= expiry_height {
-                    txid_set.insert(t.id.mined_id());
-                    unmined_id_set.insert(t.id);
+                    txid_set.insert(tx_id.mined_id());
+                    unmined_id_set.insert(tx_id);
                 }
             }
         }
@@ -625,8 +616,8 @@ impl Storage {
             .remove_all_that(|tx| txid_set.contains(&tx.transaction.id.mined_id()));
 
         // also reject it
-        for id in unmined_id_set.iter() {
-            self.reject(*id, SameEffectsChainRejectionError::Expired.into());
+        for &id in &unmined_id_set {
+            self.reject(id, SameEffectsChainRejectionError::Expired.into());
         }
 
         unmined_id_set

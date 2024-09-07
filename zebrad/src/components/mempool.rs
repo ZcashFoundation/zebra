@@ -132,7 +132,10 @@ impl ActiveState {
             } => {
                 let mut transactions = Vec::new();
 
-                let storage = storage.transactions().map(|tx| tx.clone().into());
+                let storage = storage
+                    .transactions()
+                    .values()
+                    .map(|tx| tx.transaction.clone().into());
                 transactions.extend(storage);
 
                 let pending = tx_downloads.transaction_requests().cloned();
@@ -732,7 +735,7 @@ impl Service<Request> for Mempool {
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
 
-                    let transactions: Vec<_> = storage.full_transactions().cloned().collect();
+                    let transactions: Vec<_> = storage.transactions().values().cloned().collect();
 
                     trace!(?req, transactions_count = ?transactions.len(), "answered mempool request");
 
