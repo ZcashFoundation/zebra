@@ -45,7 +45,8 @@ pub struct VerifiedSet {
     /// The set of verified transactions in the mempool.
     transactions: HashMap<UnminedTxId, VerifiedUnminedTx>,
 
-    /// A map of mempool transaction dependencies.
+    /// A map of dependencies between transactions in the mempool that
+    /// spend or create outputs of other transactions in the mempool.
     transaction_dependencies: TransactionDependencies,
 
     /// The [`transparent::Utxo`]s created by verified transactions in the mempool

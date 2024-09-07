@@ -552,6 +552,8 @@ where
     ///
     /// Returns a tuple with a OutPoint -> Utxo map, and a vector of Outputs
     /// in the same order as the matching inputs in the transaction.
+    // TODO: Add `required_mempool_outputs` return value here so that the mempool can drop transactions that
+    //       have been verified spending outputs that aren't in the `created_outputs` collection.
     async fn spent_utxos(
         tx: Arc<Transaction>,
         known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
