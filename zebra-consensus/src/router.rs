@@ -30,6 +30,7 @@ use zebra_chain::{
     parameters::Network,
 };
 
+use zebra_node_services::mempool;
 use zebra_state as zs;
 
 use crate::{
@@ -231,11 +232,11 @@ where
 /// so that out-of-order and invalid requests do not hang indefinitely.
 /// See the [`router`](`crate::router`) module documentation for details.
 #[instrument(skip(state_service, mempool))]
-pub async fn init<S>(
+pub async fn init<S, Mempool>(
     config: Config,
     network: &Network,
     mut state_service: S,
-    mempool: oneshot::Receiver<crate::transaction::MempoolService>,
+    mempool: oneshot::Receiver<Mempool>,
 ) -> (
     Buffer<BoxService<Request, block::Hash, RouterError>, Request>,
     Buffer<
@@ -248,6 +249,11 @@ pub async fn init<S>(
 where
     S: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     S::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
 {
     // Give other tasks priority before spawning the checkpoint task.
     tokio::task::yield_now().await;
@@ -424,7 +430,10 @@ where
         config.clone(),
         network,
         state_service.clone(),
-        oneshot::channel().1,
+        oneshot::channel::<
+            Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
+        >()
+        .1,
     )
     .await
 }

@@ -185,7 +185,17 @@ impl StartCmd {
                 &config.network.network,
                 state.clone(),
                 // TODO: Pass actual setup channel receiver
-                oneshot::channel().1,
+                oneshot::channel::<
+                    tower::buffer::Buffer<
+                        BoxService<
+                            zebra_node_services::mempool::Request,
+                            zebra_node_services::mempool::Response,
+                            tower::BoxError,
+                        >,
+                        zebra_node_services::mempool::Request,
+                    >,
+                >()
+                .1,
             )
             .await;
 

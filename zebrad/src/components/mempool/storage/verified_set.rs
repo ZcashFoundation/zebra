@@ -88,6 +88,12 @@ impl VerifiedSet {
         &self.transactions
     }
 
+    /// Returns a [`transparent::Output`] created by a mempool transaction for the provided
+    /// [`transparent::OutPoint`] if one exists, or None otherwise.
+    pub fn created_output(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+        self.created_outputs.get(outpoint).cloned()
+    }
+
     /// Returns the number of verified transactions in the set.
     pub fn transaction_count(&self) -> usize {
         self.transactions.len()

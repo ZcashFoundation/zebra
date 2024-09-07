@@ -5,7 +5,10 @@
 use std::collections::HashSet;
 
 use tokio::sync::oneshot;
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
+use zebra_chain::{
+    transaction::{self, UnminedTx, UnminedTxId},
+    transparent,
+};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::transaction::VerifiedUnminedTx;
@@ -38,6 +41,10 @@ pub enum Request {
     /// directly; V5 transaction are matched just by the Hash, disregarding
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<transaction::Hash>),
+
+    /// Looks up a UTXO in the mempool transparent identified by the given [`OutPoint`](transparent::OutPoint),
+    /// returning `None` immediately if it is unknown.
+    UnspentOutput(transparent::OutPoint),
 
     /// Get all the [`VerifiedUnminedTx`] in the mempool.
     ///
@@ -98,6 +105,9 @@ pub enum Response {
     /// [`Request::TransactionsByMinedId`] requests, since the mempool does not allow
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
+
+    /// Response to [`Request::UnspentOutput`] with the transparent output
+    UnspentOutput(Option<transparent::Output>),
 
     /// Returns all [`VerifiedUnminedTx`] in the mempool.
     //

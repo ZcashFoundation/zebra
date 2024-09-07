@@ -16,8 +16,9 @@ use std::{
 
 use thiserror::Error;
 
-use zebra_chain::transaction::{
-    self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
+use zebra_chain::{
+    transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transparent,
 };
 
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
@@ -414,6 +415,12 @@ impl Storage {
     /// and adds extra fields from the transaction verifier result.
     pub fn transactions(&self) -> &HashMap<UnminedTxId, VerifiedUnminedTx> {
         self.verified.transactions()
+    }
+
+    /// Returns a [`transparent::Output`] created by a mempool transaction for the provided
+    /// [`transparent::OutPoint`] if one exists, or None otherwise.
+    pub fn created_output(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {
+        self.verified.created_output(outpoint)
     }
 
     /// Returns the number of transactions in the mempool.
