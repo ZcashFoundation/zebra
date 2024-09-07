@@ -189,12 +189,24 @@ pub enum Response {
         /// [`Response::Mempool`] responses are uniquely identified by the
         /// [`UnminedTxId`] variant for their transaction version.
         transaction: VerifiedUnminedTx,
+
+        /// A list of spent [`transparent::OutPoint`]s that were found in
+        /// the mempool's list of `created_outputs`.
+        ///
+        /// Used by the mempool to determine dependencies between transactions
+        /// in the mempool and to avoid adding transactions with missing spends
+        /// to its verified set.
+        spent_mempool_outpoints: Vec<transparent::OutPoint>,
     },
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl From<VerifiedUnminedTx> for Response {
     fn from(transaction: VerifiedUnminedTx) -> Self {
-        Response::Mempool { transaction }
+        Response::Mempool {
+            transaction,
+            spent_mempool_outpoints: Vec::new(),
+        }
     }
 }
 
@@ -523,7 +535,7 @@ where
                         ),
                         legacy_sigop_count,
                     )?;
-                    Response::Mempool { transaction }
+                    Response::Mempool { transaction, spent_mempool_outpoints }
                 },
             };
 

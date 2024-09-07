@@ -346,6 +346,7 @@ where
                     height: next_height,
                 })
                 .map_ok(|rsp| {
+                    // TODO: Return the spent mempool outpoints as well
                     (rsp.into_mempool_transaction()
                         .expect("unexpected non-mempool response to mempool request"), tip_height)
                 })
