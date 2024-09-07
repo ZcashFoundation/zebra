@@ -588,7 +588,7 @@ impl Service<Request> for Mempool {
                 pin!(tx_downloads.timeout(RATE_LIMIT_DELAY)).poll_next(cx)
             {
                 match r {
-                    Ok(Ok((tx, _spent_mempool_outpoints, expected_tip_height))) => {
+                    Ok(Ok((tx, spent_mempool_outpoints, expected_tip_height))) => {
                         // # Correctness:
                         //
                         // It's okay to use tip height here instead of the tip hash since
@@ -596,7 +596,7 @@ impl Service<Request> for Mempool {
                         // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
-                            let insert_result = storage.insert(tx.clone());
+                            let insert_result = storage.insert(tx.clone(), spent_mempool_outpoints);
 
                             tracing::trace!(
                                 ?insert_result,

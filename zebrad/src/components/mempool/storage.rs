@@ -184,7 +184,7 @@ impl Storage {
     pub fn insert(
         &mut self,
         tx: VerifiedUnminedTx,
-        // _spent_mempool_outpoints: Vec<transparent::OutPoint>,
+        _spent_mempool_outpoints: Vec<transparent::OutPoint>,
     ) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
