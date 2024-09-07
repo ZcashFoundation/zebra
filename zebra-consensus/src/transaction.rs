@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
@@ -421,7 +422,7 @@ where
             // Load spent UTXOs from state.
             // The UTXOs are required for almost all the async checks.
             let load_spent_utxos_fut =
-                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone(), mempool);
+                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone(), mempool.clone());
             let (spent_utxos, spent_outputs, spent_mempool_outpoints) = load_spent_utxos_fut.await?;
 
             // WONTFIX: Return an error for Request::Block as well to replace this check in
@@ -517,10 +518,6 @@ where
                     legacy_sigop_count,
                 },
                 Request::Mempool { transaction, .. } => {
-                    // TODO: If the mempool transaction has any transparent outputs, poll the mempool so
-                    //       it sees the new verified result promptly / nearly-immediately 
-                    //       (to solve concurrency issue with dependency chains of orphaned transactions) 
-
                     let transaction = VerifiedUnminedTx::new(
                         transaction,
                         miner_fee.expect(
@@ -528,6 +525,16 @@ where
                         ),
                         legacy_sigop_count,
                     )?;
+
+                    if let Some(mut mempool) = mempool {
+                        if !transaction.transaction.transaction.outputs().is_empty() {
+                            tokio::spawn(async move {
+                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                mempool.ready().await.expect("mempool poll_ready() method should not return an error");
+                            });
+                        }
+                    }
+
                     Response::Mempool { transaction, spent_mempool_outpoints }
                 },
             };

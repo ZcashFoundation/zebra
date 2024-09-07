@@ -119,6 +119,9 @@ pub enum RejectionError {
 }
 
 /// Hold mempool verified and rejected mempool transactions.
+//
+// Add a `pending_outputs` field similar to the `pending_utxos` field in the state service
+// for queuing outpoint queries.
 pub struct Storage {
     /// The set of verified transactions in the mempool.
     verified: VerifiedSet,
