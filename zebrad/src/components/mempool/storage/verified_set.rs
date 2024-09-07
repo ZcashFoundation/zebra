@@ -48,15 +48,11 @@ pub struct VerifiedSet {
     /// A map of mempool transaction dependencies.
     transaction_dependencies: TransactionDependencies,
 
-    /// A map of mempool transaction dependants.
-    // TODO: Unify this field with `transaction_dependencies`
-    transaction_dependants: HashMap<UnminedTxId, Vec<UnminedTxId>>,
-
     /// The [`transparent::Utxo`]s created by verified transactions in the mempool
     ///
     /// Note that these UTXOs may not be unspent.
     /// Outputs can be spent by later transactions or blocks in the chain.
-    created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
+    created_outputs: HashMap<transparent::OutPoint, transparent::Output>,
 
     /// The total size of the transactions in the mempool if they were
     /// serialized.
@@ -146,13 +142,12 @@ impl VerifiedSet {
             return Err(SameEffectsTipRejectionError::SpendConflict);
         }
 
-        // TODO: Update `created_utxos` and `transaction_dependencies`
-
-        self.cache_outputs_from(&transaction.transaction.transaction);
+        // TODO: Update `transaction_dependencies`
+        let tx_id = transaction.transaction.id;
+        self.cache_outputs_from(tx_id, &transaction.transaction.transaction);
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
-        self.transactions
-            .insert(transaction.transaction.id, transaction);
+        self.transactions.insert(tx_id, transaction);
 
         self.update_metrics();
 
@@ -226,9 +221,7 @@ impl VerifiedSet {
     ///
     /// Also removes its outputs from the internal caches.
     fn remove(&mut self, key_to_remove: &UnminedTxId) -> VerifiedUnminedTx {
-        // TODO:
-        // - Remove any dependant transactions as well
-        // - Update the `created_utxos`
+        // TODO: Remove any dependant transactions as well
 
         let removed_tx = self
             .transactions
@@ -259,7 +252,14 @@ impl VerifiedSet {
     }
 
     /// Inserts the transaction's outputs into the internal caches.
-    fn cache_outputs_from(&mut self, tx: &Transaction) {
+    fn cache_outputs_from(&mut self, tx_id: UnminedTxId, tx: &Transaction) {
+        for (index, output) in tx.outputs().iter().cloned().enumerate() {
+            self.created_outputs.insert(
+                transparent::OutPoint::from_usize(tx_id.mined_id(), index),
+                output,
+            );
+        }
+
         self.spent_outpoints.extend(tx.spent_outpoints());
         self.sprout_nullifiers.extend(tx.sprout_nullifiers());
         self.sapling_nullifiers.extend(tx.sapling_nullifiers());
@@ -269,6 +269,14 @@ impl VerifiedSet {
     /// Removes the tracked transaction outputs from the mempool.
     fn remove_outputs(&mut self, unmined_tx: &UnminedTx) {
         let tx = &unmined_tx.transaction;
+
+        for index in 0..tx.outputs().len() {
+            self.created_outputs
+                .remove(&transparent::OutPoint::from_usize(
+                    unmined_tx.id.mined_id(),
+                    index,
+                ));
+        }
 
         let spent_outpoints = tx.spent_outpoints().map(Cow::Owned);
         let sprout_nullifiers = tx.sprout_nullifiers().map(Cow::Borrowed);
