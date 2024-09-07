@@ -22,7 +22,10 @@ use zebra_chain::{
 };
 
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
-use super::{config, downloads::TransactionDownloadVerifyError, MempoolError};
+use super::{
+    config, downloads::TransactionDownloadVerifyError, pending_outputs::PendingOutputs,
+    MempoolError,
+};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -119,12 +122,12 @@ pub enum RejectionError {
 }
 
 /// Hold mempool verified and rejected mempool transactions.
-//
-// Add a `pending_outputs` field similar to the `pending_utxos` field in the state service
-// for queuing outpoint queries.
 pub struct Storage {
     /// The set of verified transactions in the mempool.
     verified: VerifiedSet,
+
+    /// The set of outpoints with pending requests for their associated transparent::Output.
+    pub(super) pending_outputs: PendingOutputs,
 
     /// The set of transactions rejected due to bad authorizations, or for other
     /// reasons, and their rejection reasons. These rejections only apply to the
@@ -175,6 +178,7 @@ impl Storage {
             tx_cost_limit: config.tx_cost_limit,
             eviction_memory_time: config.eviction_memory_time,
             verified: Default::default(),
+            pending_outputs: Default::default(),
             tip_rejected_exact: Default::default(),
             tip_rejected_same_effects: Default::default(),
             chain_rejected_same_effects: Default::default(),
@@ -228,7 +232,10 @@ impl Storage {
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
         let mut result = Ok(tx_id);
-        if let Err(rejection_error) = self.verified.insert(tx, spent_mempool_outpoints) {
+        if let Err(rejection_error) =
+            self.verified
+                .insert(tx, spent_mempool_outpoints, &mut self.pending_outputs)
+        {
             tracing::debug!(
                 ?tx_id,
                 ?rejection_error,

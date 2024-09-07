@@ -655,17 +655,20 @@ where
                     .oneshot(mempool::Request::UnspentOutput(spent_mempool_outpoint));
 
                 let mempool::Response::UnspentOutput(output) = query.await? else {
-                    unreachable!("UnspentOutput always responds with Option<Output>")
+                    unreachable!("UnspentOutput always responds with UnspentOutput")
                 };
 
-                let Some(output) = output else {
-                    // TODO: Add an `AwaitOutput` mempool Request to wait for another transaction
-                    //       to be added to the mempool that creates the required output and call
-                    //       here with a short timeout (everything will be invalidated by a chain
-                    //       tip change anyway, and the tx verifier should poll the mempool so it
-                    //       checks for new created outputs at the queued pending output outpoint
-                    //       almost immediately after a tx is verified).
-                    return Err(TransactionError::TransparentInputNotFound);
+                let output = if let Some(output) = output {
+                    output
+                } else {
+                    let query = mempool
+                        .clone()
+                        .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
+                    if let mempool::Response::UnspentOutput(output) = query.await? {
+                        output.ok_or(TransactionError::TransparentInputNotFound)?
+                    } else {
+                        unreachable!("AwaitOutput always responds with UnspentOutput")
+                    }
                 };
 
                 spent_outputs.push(output.clone());

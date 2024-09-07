@@ -42,9 +42,26 @@ pub enum Request {
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<transaction::Hash>),
 
-    /// Looks up a UTXO in the mempool transparent identified by the given [`OutPoint`](transparent::OutPoint),
+    /// Looks up a [`transparent::Output`] in the mempool identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
+    ///
+    /// Does not gaurantee that the output will remain in the mempool or that it is unspent.
     UnspentOutput(transparent::OutPoint),
+
+    /// Request a [`transparent::Output`] identified by the given [`OutPoint`](transparent::OutPoint),
+    /// waiting until it becomes available if it is unknown.
+    ///
+    /// This request is purely informational, and there are no guarantees about
+    /// whether the UTXO remains unspent or is on the best chain, or any chain.
+    /// Its purpose is to allow orphaned mempool transaction verification.
+    ///
+    /// # Correctness
+    ///
+    /// Output requests should be wrapped in a timeout, so that
+    /// out-of-order and invalid requests do not hang indefinitely.
+    ///
+    /// Outdated requests are pruned on a regular basis.
+    AwaitOutput(transparent::OutPoint),
 
     /// Get all the [`VerifiedUnminedTx`] in the mempool.
     ///

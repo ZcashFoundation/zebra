@@ -50,6 +50,7 @@ mod crawler;
 pub mod downloads;
 mod error;
 pub mod gossip;
+mod pending_outputs;
 mod queue_checker;
 mod storage;
 
@@ -741,6 +742,16 @@ impl Service<Request> for Mempool {
                     async move { Ok(Response::UnspentOutput(res)) }.boxed()
                 }
 
+                Request::AwaitOutput(outpoint) => {
+                    trace!(?req, "got mempool request");
+
+                    let response_fut = storage.pending_outputs.queue(outpoint);
+
+                    trace!("answered mempool request");
+
+                    response_fut.boxed()
+                }
+
                 #[cfg(feature = "getblocktemplate-rpcs")]
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
@@ -820,6 +831,7 @@ impl Service<Request> for Mempool {
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
                     Request::UnspentOutput(_) => Response::UnspentOutput(None),
+                    Request::AwaitOutput(_) => Response::UnspentOutput(None),
 
                     #[cfg(feature = "getblocktemplate-rpcs")]
                     Request::FullTransactions => {

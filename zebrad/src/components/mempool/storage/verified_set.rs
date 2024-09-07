@@ -12,6 +12,8 @@ use zebra_chain::{
     transparent,
 };
 
+use crate::components::mempool::pending_outputs::PendingOutputs;
+
 use super::super::SameEffectsTipRejectionError;
 
 // Imports for doc links
@@ -184,6 +186,7 @@ impl VerifiedSet {
         &mut self,
         transaction: VerifiedUnminedTx,
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
+        pending_outputs: &mut PendingOutputs,
     ) -> Result<(), SameEffectsTipRejectionError> {
         if self.has_spend_conflicts(&transaction.transaction) {
             return Err(SameEffectsTipRejectionError::SpendConflict);
@@ -199,12 +202,15 @@ impl VerifiedSet {
         }
 
         let tx_id = transaction.transaction.id;
-
-        // TODO: Update `transaction_dependencies`
         self.transaction_dependencies
             .add(tx_id.mined_id(), spent_mempool_outpoints);
 
-        self.cache_outputs_from(tx_id.mined_id(), &transaction.transaction.transaction);
+        self.cache_outputs_and_respond_to_pending_output_requests_from(
+            tx_id.mined_id(),
+            &transaction.transaction.transaction,
+            pending_outputs,
+        );
+
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
         self.transactions.insert(tx_id, transaction);
@@ -313,11 +319,17 @@ impl VerifiedSet {
             || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers().copied())
     }
 
-    /// Inserts the transaction's outputs into the internal caches.
-    fn cache_outputs_from(&mut self, tx_hash: transaction::Hash, tx: &Transaction) {
+    /// Inserts the transaction's outputs into the internal caches and responds to pending output requests.
+    fn cache_outputs_and_respond_to_pending_output_requests_from(
+        &mut self,
+        tx_hash: transaction::Hash,
+        tx: &Transaction,
+        pending_outputs: &mut PendingOutputs,
+    ) {
         for (index, output) in tx.outputs().iter().cloned().enumerate() {
-            self.created_outputs
-                .insert(transparent::OutPoint::from_usize(tx_hash, index), output);
+            let outpoint = transparent::OutPoint::from_usize(tx_hash, index);
+            self.created_outputs.insert(outpoint, output.clone());
+            pending_outputs.respond(&outpoint, output)
         }
 
         self.spent_outpoints.extend(tx.spent_outpoints());
