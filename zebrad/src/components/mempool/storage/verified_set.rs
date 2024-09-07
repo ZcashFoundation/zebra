@@ -2,7 +2,7 @@
 
 use std::{
     borrow::Cow,
-    collections::{HashSet, VecDeque},
+    collections::{HashMap, HashSet},
     hash::Hash,
 };
 
@@ -18,11 +18,24 @@ use super::super::SameEffectsTipRejectionError;
 #[allow(unused_imports)]
 use zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 
+#[derive(Default)]
+struct TransactionDependencies {
+    /// Lists of mempool transactions that create UTXOs spent
+    /// by a mempool transaction.
+    dependencies: HashMap<UnminedTxId, Vec<UnminedTxId>>,
+
+    /// Lists of mempool transactions that spend UTXOs created
+    /// by a mempool transaction.
+    dependants: HashMap<UnminedTxId, Vec<UnminedTxId>>,
+}
+
 /// The set of verified transactions stored in the mempool.
 ///
 /// This also caches the all the spent outputs from the transactions in the mempool. The spent
 /// outputs include:
 ///
+/// - the dependencies of transactions that spent the outputs of other transactions in the mempool
+/// - the UTXOs of transactions in the mempool
 /// - the transparent outpoints spent by transactions in the mempool
 /// - the Sprout nullifiers revealed by transactions in the mempool
 /// - the Sapling nullifiers revealed by transactions in the mempool
@@ -30,7 +43,20 @@ use zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 #[derive(Default)]
 pub struct VerifiedSet {
     /// The set of verified transactions in the mempool.
-    transactions: VecDeque<VerifiedUnminedTx>,
+    transactions: HashMap<UnminedTxId, VerifiedUnminedTx>,
+
+    /// A map of mempool transaction dependencies.
+    transaction_dependencies: TransactionDependencies,
+
+    /// A map of mempool transaction dependants.
+    // TODO: Unify this field with `transaction_dependencies`
+    transaction_dependants: HashMap<UnminedTxId, Vec<UnminedTxId>>,
+
+    /// The [`transparent::Utxo`]s created by verified transactions in the mempool
+    ///
+    /// Note that these UTXOs may not be unspent.
+    /// Outputs can be spent by later transactions or blocks in the chain.
+    created_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
 
     /// The total size of the transactions in the mempool if they were
     /// serialized.
@@ -60,20 +86,9 @@ impl Drop for VerifiedSet {
 }
 
 impl VerifiedSet {
-    /// Returns an iterator over the [`UnminedTx`] in the set.
-    //
-    // TODO: make the transactions() method return VerifiedUnminedTx,
-    //       and remove the full_transactions() method
-    pub fn transactions(&self) -> impl Iterator<Item = &UnminedTx> + '_ {
-        self.transactions.iter().map(|tx| &tx.transaction)
-    }
-
-    /// Returns an iterator over the [`VerifiedUnminedTx`] in the set.
-    ///
-    /// Each [`VerifiedUnminedTx`] contains an [`UnminedTx`],
-    /// and adds extra fields from the transaction verifier result.
-    pub fn full_transactions(&self) -> impl Iterator<Item = &VerifiedUnminedTx> + '_ {
-        self.transactions.iter()
+    /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the set.
+    pub fn transactions(&self) -> &HashMap<UnminedTxId, VerifiedUnminedTx> {
+        &self.transactions
     }
 
     /// Returns the number of verified transactions in the set.
@@ -99,7 +114,7 @@ impl VerifiedSet {
     /// Returns `true` if the set of verified transactions contains the transaction with the
     /// specified [`UnminedTxId`].
     pub fn contains(&self, id: &UnminedTxId) -> bool {
-        self.transactions.iter().any(|tx| &tx.transaction.id == id)
+        self.transactions.contains_key(id)
     }
 
     /// Clear the set of verified transactions.
@@ -131,10 +146,13 @@ impl VerifiedSet {
             return Err(SameEffectsTipRejectionError::SpendConflict);
         }
 
+        // TODO: Update `created_utxos` and `transaction_dependencies`
+
         self.cache_outputs_from(&transaction.transaction.transaction);
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
-        self.transactions.push_front(transaction);
+        self.transactions
+            .insert(transaction.transaction.id, transaction);
 
         self.update_metrics();
 
@@ -168,16 +186,20 @@ impl VerifiedSet {
             use rand::distributions::{Distribution, WeightedIndex};
             use rand::prelude::thread_rng;
 
-            let weights: Vec<u64> = self
+            let (keys, weights): (Vec<UnminedTxId>, Vec<u64>) = self
                 .transactions
                 .iter()
-                .map(|tx| tx.clone().eviction_weight())
-                .collect();
+                .map(|(&tx_id, tx)| (tx_id, tx.eviction_weight()))
+                .unzip();
 
             let dist = WeightedIndex::new(weights)
                 .expect("there is at least one weight, all weights are non-negative, and the total is positive");
 
-            Some(self.remove(dist.sample(&mut thread_rng())))
+            let key_to_remove = keys
+                .get(dist.sample(&mut thread_rng()))
+                .expect("should have a key at every index in the distribution");
+
+            Some(self.remove(key_to_remove))
         }
     }
 
@@ -185,25 +207,16 @@ impl VerifiedSet {
     ///
     /// Returns the amount of transactions removed.
     pub fn remove_all_that(&mut self, predicate: impl Fn(&VerifiedUnminedTx) -> bool) -> usize {
-        // Clippy suggests to remove the `collect` and the `into_iter` further down. However, it is
-        // unable to detect that when that is done, there is a borrow conflict. What happens is the
-        // iterator borrows `self.transactions` immutably, but it also need to be borrowed mutably
-        // in order to remove the transactions while traversing the iterator.
-        #[allow(clippy::needless_collect)]
-        let indices_to_remove: Vec<_> = self
+        let keys_to_remove: Vec<_> = self
             .transactions
             .iter()
-            .enumerate()
-            .filter(|(_, tx)| predicate(tx))
-            .map(|(index, _)| index)
+            .filter_map(|(&tx_id, tx)| predicate(tx).then_some(tx_id))
             .collect();
 
-        let removed_count = indices_to_remove.len();
+        let removed_count = keys_to_remove.len();
 
-        // Correctness: remove indexes in reverse order,
-        // so earlier indexes still correspond to the same transactions
-        for index_to_remove in indices_to_remove.into_iter().rev() {
-            self.remove(index_to_remove);
+        for key_to_remove in keys_to_remove {
+            self.remove(&key_to_remove);
         }
 
         removed_count
@@ -212,11 +225,15 @@ impl VerifiedSet {
     /// Removes a transaction from the set.
     ///
     /// Also removes its outputs from the internal caches.
-    fn remove(&mut self, transaction_index: usize) -> VerifiedUnminedTx {
+    fn remove(&mut self, key_to_remove: &UnminedTxId) -> VerifiedUnminedTx {
+        // TODO:
+        // - Remove any dependant transactions as well
+        // - Update the `created_utxos`
+
         let removed_tx = self
             .transactions
-            .remove(transaction_index)
-            .expect("invalid transaction index");
+            .remove(key_to_remove)
+            .expect("invalid transaction key");
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
         self.total_cost -= removed_tx.cost();
@@ -308,7 +325,7 @@ impl VerifiedSet {
         let mut size_with_weight_gt2 = 0;
         let mut size_with_weight_gt3 = 0;
 
-        for entry in self.full_transactions() {
+        for entry in self.transactions().values() {
             paid_actions += entry.conventional_actions - entry.unpaid_actions;
 
             if entry.fee_weight_ratio > 3.0 {
