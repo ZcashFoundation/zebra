@@ -307,6 +307,14 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Note: The block verifier expects the transaction verifier to always be ready.
+
+        if self.mempool.is_none() {
+            if let Ok(mempool) = self.mempool_setup_rx.try_recv() {
+                self.mempool = Some(mempool);
+            }
+        }
+
         Poll::Ready(Ok(()))
     }
 
