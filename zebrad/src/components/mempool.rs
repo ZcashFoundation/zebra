@@ -588,7 +588,7 @@ impl Service<Request> for Mempool {
                 pin!(tx_downloads.timeout(RATE_LIMIT_DELAY)).poll_next(cx)
             {
                 match r {
-                    Ok(Ok((tx, expected_tip_height))) => {
+                    Ok(Ok((tx, _spent_mempool_outpoints, expected_tip_height))) => {
                         // # Correctness:
                         //
                         // It's okay to use tip height here instead of the tip hash since

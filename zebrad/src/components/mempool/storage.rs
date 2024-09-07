@@ -181,7 +181,11 @@ impl Storage {
     /// If inserting this transaction evicts other transactions, they will be tracked
     /// as [`SameEffectsChainRejectionError::RandomlyEvicted`].
     #[allow(clippy::unwrap_in_result)]
-    pub fn insert(&mut self, tx: VerifiedUnminedTx) -> Result<UnminedTxId, MempoolError> {
+    pub fn insert(
+        &mut self,
+        tx: VerifiedUnminedTx,
+        // _spent_mempool_outpoints: Vec<transparent::OutPoint>,
+    ) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
         // This method must call `reject`, rather than modifying the rejection lists directly.

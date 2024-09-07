@@ -273,14 +273,6 @@ impl Request {
 }
 
 impl Response {
-    /// The verified mempool transaction, if this is a mempool response.
-    pub fn into_mempool_transaction(self) -> Option<VerifiedUnminedTx> {
-        match self {
-            Response::Block { .. } => None,
-            Response::Mempool { transaction, .. } => Some(transaction),
-        }
-    }
-
     /// The unmined transaction ID for the transaction in this response.
     pub fn tx_id(&self) -> UnminedTxId {
         match self {
