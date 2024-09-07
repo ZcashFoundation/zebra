@@ -8,7 +8,7 @@ use std::{
 
 use zebra_chain::{
     orchard, sapling, sprout,
-    transaction::{Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transaction::{self, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
 
@@ -22,11 +22,50 @@ use zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 struct TransactionDependencies {
     /// Lists of mempool transactions that create UTXOs spent
     /// by a mempool transaction.
-    dependencies: HashMap<UnminedTxId, Vec<UnminedTxId>>,
+    dependencies: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 
     /// Lists of mempool transactions that spend UTXOs created
     /// by a mempool transaction.
-    dependants: HashMap<UnminedTxId, Vec<UnminedTxId>>,
+    dependants: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
+}
+
+impl TransactionDependencies {
+    /// Adds a transaction that spends outputs created by other transactions in the mempool
+    /// as a dependant of those transactions, and adds the transactions that created the outputs
+    /// spent by the dependant transaction as dependencies of the dependant transaction.
+    //
+    // TODO: Order transactions in block templates based on their dependencies
+    fn add(
+        &mut self,
+        dependant: transaction::Hash,
+        spent_mempool_outpoints: Vec<transparent::OutPoint>,
+    ) {
+        for &spent_mempool_outpoint in &spent_mempool_outpoints {
+            self.dependants
+                .entry(spent_mempool_outpoint.hash)
+                .or_default()
+                .insert(dependant);
+        }
+
+        self.dependencies.entry(dependant).or_default().extend(
+            spent_mempool_outpoints
+                .into_iter()
+                .map(|outpoint| outpoint.hash),
+        );
+    }
+
+    /// Removes the hash of a transaction in the mempool and the hashes of any transactions
+    /// that are tracked as being directly dependant on that transaction from
+    /// this [`TransactionDependencies`].
+    ///
+    /// Returns a list of transaction hashes that have been removed.
+    fn _remove(&mut self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+        for dependencies in self.dependencies.values_mut() {
+            dependencies.remove(tx_hash);
+        }
+
+        self.dependants.remove(tx_hash).unwrap_or_default()
+    }
 }
 
 /// The set of verified transactions stored in the mempool.
@@ -144,14 +183,28 @@ impl VerifiedSet {
     pub fn insert(
         &mut self,
         transaction: VerifiedUnminedTx,
+        spent_mempool_outpoints: Vec<transparent::OutPoint>,
     ) -> Result<(), SameEffectsTipRejectionError> {
         if self.has_spend_conflicts(&transaction.transaction) {
             return Err(SameEffectsTipRejectionError::SpendConflict);
         }
 
-        // TODO: Update `transaction_dependencies`
+        // This likely only needs to check that the transaction hash of the outpoint is still in the mempool,
+        // bu it's likely rare that a transaction spends multiple transparent outputs of
+        // a single transaction in practice.
+        for outpoint in &spent_mempool_outpoints {
+            if !self.created_outputs.contains_key(outpoint) {
+                return Err(SameEffectsTipRejectionError::MissingOutput);
+            }
+        }
+
         let tx_id = transaction.transaction.id;
-        self.cache_outputs_from(tx_id, &transaction.transaction.transaction);
+
+        // TODO: Update `transaction_dependencies`
+        self.transaction_dependencies
+            .add(tx_id.mined_id(), spent_mempool_outpoints);
+
+        self.cache_outputs_from(tx_id.mined_id(), &transaction.transaction.transaction);
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
         self.transactions.insert(tx_id, transaction);
@@ -228,7 +281,9 @@ impl VerifiedSet {
     ///
     /// Also removes its outputs from the internal caches.
     fn remove(&mut self, key_to_remove: &UnminedTxId) -> VerifiedUnminedTx {
-        // TODO: Remove any dependant transactions as well
+        // TODO:
+        // - Remove any dependant transactions as well
+        // - Update `transaction_dependencies`
 
         let removed_tx = self
             .transactions
@@ -259,12 +314,10 @@ impl VerifiedSet {
     }
 
     /// Inserts the transaction's outputs into the internal caches.
-    fn cache_outputs_from(&mut self, tx_id: UnminedTxId, tx: &Transaction) {
+    fn cache_outputs_from(&mut self, tx_hash: transaction::Hash, tx: &Transaction) {
         for (index, output) in tx.outputs().iter().cloned().enumerate() {
-            self.created_outputs.insert(
-                transparent::OutPoint::from_usize(tx_id.mined_id(), index),
-                output,
-            );
+            self.created_outputs
+                .insert(transparent::OutPoint::from_usize(tx_hash, index), output);
         }
 
         self.spent_outpoints.extend(tx.spent_outpoints());

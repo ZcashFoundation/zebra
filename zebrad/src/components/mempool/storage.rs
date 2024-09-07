@@ -68,6 +68,12 @@ pub enum SameEffectsTipRejectionError {
         its inputs"
     )]
     SpendConflict,
+
+    #[error(
+        "transaction rejected because it spends missing outputs from \
+        another transaction in the mempool"
+    )]
+    MissingOutput,
 }
 
 /// Transactions rejected based only on their effects (spends, outputs, transaction header).
@@ -184,7 +190,7 @@ impl Storage {
     pub fn insert(
         &mut self,
         tx: VerifiedUnminedTx,
-        _spent_mempool_outpoints: Vec<transparent::OutPoint>,
+        spent_mempool_outpoints: Vec<transparent::OutPoint>,
     ) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -219,7 +225,7 @@ impl Storage {
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
         let mut result = Ok(tx_id);
-        if let Err(rejection_error) = self.verified.insert(tx) {
+        if let Err(rejection_error) = self.verified.insert(tx, spent_mempool_outpoints) {
             tracing::debug!(
                 ?tx_id,
                 ?rejection_error,

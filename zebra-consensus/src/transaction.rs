@@ -517,8 +517,9 @@ where
                     legacy_sigop_count,
                 },
                 Request::Mempool { transaction, .. } => {
-                    // TODO: Poll the mempool so it sees the new verified result promptly / nearly-immediately 
-                    //       (to solve concurrency issue with dependency chains of orphaned transactions)
+                    // TODO: If the mempool transaction has any transparent outputs, poll the mempool so
+                    //       it sees the new verified result promptly / nearly-immediately 
+                    //       (to solve concurrency issue with dependency chains of orphaned transactions) 
 
                     let transaction = VerifiedUnminedTx::new(
                         transaction,
