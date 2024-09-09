@@ -301,6 +301,18 @@ pub trait Rpc {
         &self,
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
+
+    #[rpc(name = "stop")]
+    /// Stop the running zebrad process.
+    ///
+    /// # Notes
+    ///
+    /// Only works if the network of the running zebrad process is `Regtest`.
+    ///
+    /// zcashd reference: [`stop`](https://zcash.github.io/rpc/stop.html)
+    /// method: post
+    /// tags: control
+    fn stop(&self) -> Result<()>;
 }
 
 /// RPC method implementations.
@@ -1343,6 +1355,19 @@ where
             Ok(response_utxos)
         }
         .boxed()
+    }
+
+    fn stop(&self) -> Result<()> {
+        if self.network.is_regtest() {
+            // TODO: Use graceful termination in `stop` RPC (#8850)
+            std::process::exit(0);
+        } else {
+            Err(Error {
+                code: ErrorCode::MethodNotFound,
+                message: "stop is only available on regtest networks".to_string(),
+                data: None,
+            })
+        }
     }
 }
 
