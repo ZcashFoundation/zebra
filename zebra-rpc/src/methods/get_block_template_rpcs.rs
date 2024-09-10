@@ -994,9 +994,32 @@ where
 
     fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>> {
         let network = self.network.clone();
+        let mut state = self.state.clone();
+
+        let chain_tip = self.latest_chain_tip.clone();
+        let tip_height = chain_tip.best_tip_height().unwrap_or(Height(0)).0;
+
+        let mined_tx_ids = chain_tip.best_tip_mined_transaction_ids();
+        let current_block_tx = (!mined_tx_ids.is_empty()).then(|| mined_tx_ids.len());
+
         let solution_rate_fut = self.get_network_sol_ps(None, None);
         async move {
+            // Get the current block size.
+            let request = zebra_state::ReadRequest::TipBlockSize;
+            let response: zebra_state::ReadResponse = state
+                .ready()
+                .and_then(|service| service.call(request))
+                .await
+                .map_server_error()?;
+            let current_block_size = match response {
+                zebra_state::ReadResponse::TipBlockSize(Some(block_size)) => Some(block_size),
+                _ => None,
+            };
+
             Ok(get_mining_info::Response::new(
+                tip_height,
+                current_block_size,
+                current_block_tx,
                 network,
                 solution_rate_fut.await?,
             ))
