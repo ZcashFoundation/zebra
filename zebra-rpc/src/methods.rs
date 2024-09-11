@@ -308,7 +308,8 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Only works if the network of the running zebrad process is `Regtest`.
+    /// - Available for non windows targets only.
+    /// - Only works if the network of the running zebrad process is `Regtest`.
     ///
     /// zcashd reference: [`stop`](https://zcash.github.io/rpc/stop.html)
     /// method: post
