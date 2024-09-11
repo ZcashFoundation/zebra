@@ -302,6 +302,7 @@ pub trait Rpc {
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
 
+    #[cfg(not(target_os = "windows"))]
     #[rpc(name = "stop")]
     /// Stop the running zebrad process.
     ///
@@ -1357,8 +1358,9 @@ where
         .boxed()
     }
 
+    #[cfg(not(target_os = "windows"))]
     fn stop(&self) -> Result<String> {
-        if self.network.is_regtest() && cfg!(not(target_os = "windows")) {
+        if self.network.is_regtest() {
             match nix::sys::signal::raise(nix::sys::signal::SIGINT) {
                 Ok(_) => Ok("Zebra server stopping".to_string()),
                 Err(error) => Err(Error {
@@ -1370,8 +1372,7 @@ where
         } else {
             Err(Error {
                 code: ErrorCode::MethodNotFound,
-                message: "stop is only available on *nix platforms and regtest networks"
-                    .to_string(),
+                message: "stop is only available on regtest networks".to_string(),
                 data: None,
             })
         }
