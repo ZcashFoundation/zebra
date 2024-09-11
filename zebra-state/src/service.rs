@@ -33,12 +33,14 @@ use tracing::{instrument, Instrument, Span};
 use tower::buffer::Buffer;
 
 use zebra_chain::{
-    block::{self, CountedHeader, Height, HeightDiff},
+    block::{self, CountedHeader, HeightDiff},
     diagnostic::{task::WaitForPanics, CodeTimer},
     parameters::{Network, NetworkUpgrade},
-    serialization::ZcashSerialize,
     subtree::NoteCommitmentSubtreeIndex,
 };
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_chain::{block::Height, serialization::ZcashSerialize};
 
 use crate::{
     constants::{
@@ -1907,6 +1909,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => {
                 let state = self.clone();
 
