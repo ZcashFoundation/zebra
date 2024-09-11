@@ -312,7 +312,7 @@ pub trait Rpc {
     /// zcashd reference: [`stop`](https://zcash.github.io/rpc/stop.html)
     /// method: post
     /// tags: control
-    fn stop(&self) -> Result<()>;
+    fn stop(&self) -> Result<String>;
 }
 
 /// RPC method implementations.
@@ -1357,14 +1357,21 @@ where
         .boxed()
     }
 
-    fn stop(&self) -> Result<()> {
-        if self.network.is_regtest() {
-            // TODO: Use graceful termination in `stop` RPC (#8850)
-            std::process::exit(0);
+    fn stop(&self) -> Result<String> {
+        if self.network.is_regtest() && cfg!(not(target_os = "windows")) {
+            match nix::sys::signal::raise(nix::sys::signal::SIGINT) {
+                Ok(_) => Ok("Zebra server stopping".to_string()),
+                Err(error) => Err(Error {
+                    code: ErrorCode::InternalError,
+                    message: format!("Failed to shut down: {}", error),
+                    data: None,
+                }),
+            }
         } else {
             Err(Error {
                 code: ErrorCode::MethodNotFound,
-                message: "stop is only available on regtest networks".to_string(),
+                message: "stop is only available on *nix platforms and regtest networks"
+                    .to_string(),
                 data: None,
             })
         }
