@@ -302,18 +302,17 @@ pub trait Rpc {
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
 
-    #[cfg(not(target_os = "windows"))]
-    #[rpc(name = "stop")]
     /// Stop the running zebrad process.
     ///
     /// # Notes
     ///
-    /// - Available for non windows targets only.
-    /// - Only works if the network of the running zebrad process is `Regtest`.
+    /// - Works for non windows targets only.
+    /// - Works only if the network of the running zebrad process is `Regtest`.
     ///
     /// zcashd reference: [`stop`](https://zcash.github.io/rpc/stop.html)
     /// method: post
     /// tags: control
+    #[rpc(name = "stop")]
     fn stop(&self) -> Result<String>;
 }
 
@@ -1359,8 +1358,8 @@ where
         .boxed()
     }
 
-    #[cfg(not(target_os = "windows"))]
     fn stop(&self) -> Result<String> {
+        #[cfg(not(target_os = "windows"))]
         if self.network.is_regtest() {
             match nix::sys::signal::raise(nix::sys::signal::SIGINT) {
                 Ok(_) => Ok("Zebra server stopping".to_string()),
@@ -1377,6 +1376,12 @@ where
                 data: None,
             })
         }
+        #[cfg(target_os = "windows")]
+        Err(Error {
+            code: ErrorCode::MethodNotFound,
+            message: "stop is not available in windows targets".to_string(),
+            data: None,
+        })
     }
 }
 
