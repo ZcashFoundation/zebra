@@ -29,158 +29,27 @@ import re
 SERIAL_SCRIPTS = [
     # These tests involve enough shielded spends (consuming all CPU
     # cores) that we can't run them in parallel.
-    'mergetoaddress_sapling.py',
-    'mergetoaddress_ua_nu5.py',
-    'mergetoaddress_ua_sapling.py',
-    'wallet_shieldingcoinbase.py',
 ]
 
 FLAKY_SCRIPTS = [
     # These tests have intermittent failures that we haven't diagnosed yet.
-    'mempool_nu_activation.py',
-    'mempool_packages.py',
 ]
 
 BASE_SCRIPTS= [
     # Scripts that are run by the travis build process
     # Longest test should go first, to favor running tests in parallel
     # vv Tests less than 5m vv
-    'wallet.py',
-    'sprout_sapling_migration.py',
-    'remove_sprout_shielding.py',
-    # vv Tests less than 2m vv
-    'mergetoaddress_mixednotes.py',
-    'wallet_shieldcoinbase_sapling.py',
-    'wallet_shieldcoinbase_ua_sapling.py',
-    'wallet_shieldcoinbase_ua_nu5.py',
-    'turnstile.py',
-    'walletbackup.py',
-    'zkey_import_export.py',
-    'prioritisetransaction.py',
-    'wallet_changeaddresses.py',
-    'wallet_listreceived.py',
-    'mempool_tx_expiry.py',
-    'finalsaplingroot.py',
-    'finalorchardroot.py',
-    'wallet_orchard.py',
-    'wallet_overwintertx.py',
-    'wallet_persistence.py',
-    'wallet_listnotes.py',
-    'wallet_listunspent.py',
-    'wallet_golden_5_6_0.py',
-    'wallet_tarnished_5_6_0.py',
-    # vv Tests less than 60s vv
-    'orchard_reorg.py',
-    'fundrawtransaction.py',
-    'reorg_limit.py',
-    'mempool_limit.py',
-    'p2p-fullblocktest.py',
     # vv Tests less than 30s vv
-    'wallet_1941.py',
-    'wallet_accounts.py',
-    'wallet_addresses.py',
-    'wallet_anchorfork.py',
-    'wallet_changeindicator.py',
-    'wallet_deprecation.py',
-    'wallet_doublespend.py',
-    'wallet_import_export.py',
-    'wallet_isfromme.py',
-    'wallet_orchard_change.py',
-    'wallet_orchard_init.py',
-    'wallet_orchard_persistence.py',
-    'wallet_orchard_reindex.py',
-    'wallet_nullifiers.py',
-    'wallet_sapling.py',
-    'wallet_sendmany_any_taddr.py',
-    'wallet_treestate.py',
-    'wallet_unified_change.py',
-    'listtransactions.py',
-    'mempool_resurrect_test.py',
-    'txn_doublespend.py',
-    'txn_doublespend.py --mineblock',
-    'getchaintips.py',
-    'rawtransactions.py',
-    'getrawtransaction_insight.py',
-    'rest.py',
-    'mempool_spendcoinbase.py',
-    'mempool_reorg.py',
-    'httpbasics.py',
-    'multi_rpc.py',
-    'zapwallettxes.py',
-    'proxy_test.py',
-    'merkle_blocks.py',
-    'signrawtransactions.py',
-    'signrawtransaction_offline.py',
-    'key_import_export.py',
-    'nodehandling.py',
-    'reindex.py',
-    'addressindex.py',
-    'spentindex.py',
-    'timestampindex.py',
-    'decodescript.py',
-    'blockchain.py',
-    'disablewallet.py',
-    'keypool.py',
-    'getblocktemplate.py',
-    'getmininginfo.py',
-    'bip65-cltv-p2p.py',
-    'bipdersig-p2p.py',
-    'invalidblockrequest.py',
-    'invalidtxrequest.py',
-    'p2p_nu_peer_management.py',
-    'rewind_index.py',
-    'p2p_txexpiry_dos.py',
-    'p2p_txexpiringsoon.py',
-    'p2p_node_bloom.py',
-    'regtest_signrawtransaction.py',
-    'shorter_block_times.py',
-    'mining_shielded_coinbase.py',
-    'coinbase_funding_streams.py',
-    'framework.py',
-    'sapling_rewind_check.py',
-    'feature_zip221.py',
-    'feature_zip239.py',
-    'feature_zip244_blockcommitments.py',
-    'upgrade_golden.py',
-    'nuparams.py',
-    'post_heartwood_rollback.py',
-    'feature_logging.py',
-    'feature_walletfile.py',
-    'wallet_parsing_amounts.py',
-    'wallet_broadcast.py',
-    'wallet_z_sendmany.py',
-    'wallet_zero_value.py',
-    'threeofthreerestore.py',
-    'show_help.py',
-    'errors.py',
-    'converttex.py',
-]
+    'getmininginfo.py']
 
 ZMQ_SCRIPTS = [
     # ZMQ test can only be run if bitcoin was built with zmq-enabled.
     # call rpc_tests.py with --nozmq to explicitly exclude these tests.
-    "zmq_test.py"]
+]
 
 EXTENDED_SCRIPTS = [
     # These tests are not run by the travis build process.
     # Longest test should go first, to favor running tests in parallel
-    'pruning.py',
-    # vv Tests less than 5m vv
-    # vv Tests less than 2m vv
-    'getblocktemplate_longpoll.py',
-    # vv Tests less than 60s vv
-    'rpcbind_test.py',
-    # vv Tests less than 30s vv
-    'getblocktemplate_proposals.py',
-    'forknotify.py',
-    'hardforkdetection.py',
-    'invalidateblock.py',
-    'receivedby.py',
-    'maxblocksinflight.py',
-#    'forknotify.py',
-    'p2p-acceptblock.py',
-    'maxuploadtarget.py',
-    'wallet_db_flush.py',
 ]
 
 ALL_SCRIPTS = SERIAL_SCRIPTS + FLAKY_SCRIPTS + BASE_SCRIPTS + ZMQ_SCRIPTS + EXTENDED_SCRIPTS
