@@ -158,3 +158,6 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Python pycache
+__pycache__/
