@@ -498,7 +498,7 @@ impl Storage {
         self.verified
             .transactions()
             .iter()
-            .filter(move |(tx_id, _)| tx_ids.contains(&tx_id))
+            .filter(move |(tx_id, _)| tx_ids.contains(tx_id))
             .map(|(_, tx)| &tx.transaction)
     }
 
@@ -558,12 +558,12 @@ impl Storage {
             return Some(error.clone().into());
         }
 
-        if let Some(error) = self.tip_rejected_same_effects.get(&txid) {
+        if let Some(error) = self.tip_rejected_same_effects.get(txid) {
             return Some(error.clone().into());
         }
 
         for (error, set) in self.chain_rejected_same_effects.iter() {
-            if set.contains_key(&txid) {
+            if set.contains_key(txid) {
                 return Some(error.clone().into());
             }
         }
