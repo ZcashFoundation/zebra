@@ -1,4 +1,4 @@
-//! Pending [`transparent::Output`] tracker for [`AwaitOutput` requests](zebra_node_services::Mempool::Request::AwaitOutput).
+//! Pending [`transparent::Output`] tracker for [`AwaitOutput` requests](zebra_node_services::mempool::Request::AwaitOutput).
 
 use std::{collections::HashMap, future::Future};
 

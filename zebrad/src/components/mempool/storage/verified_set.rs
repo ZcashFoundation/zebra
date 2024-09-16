@@ -156,7 +156,7 @@ impl VerifiedSet {
     }
 
     /// Returns `true` if the set of verified transactions contains the transaction with the
-    /// specified [`UnminedTxId`].
+    /// specified [`transaction::Hash`].
     pub fn contains(&self, id: &transaction::Hash) -> bool {
         self.transactions.contains_key(id)
     }
