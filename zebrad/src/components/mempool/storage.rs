@@ -315,6 +315,7 @@ impl Storage {
     /// - Returns the number of transactions which were removed.
     /// - Removes from the 'verified' set, if present.
     ///   Maintains the order in which the other unmined transactions have been inserted into the mempool.
+    /// - Prunes `pending_outputs` of any closed channels.
     ///
     /// Reject and remove transactions from the mempool that contain any spent outpoints or revealed
     /// nullifiers from the passed in `transactions`.
@@ -386,6 +387,8 @@ impl Storage {
                 SameEffectsChainRejectionError::DuplicateSpend.into(),
             );
         }
+
+        self.pending_outputs.prune();
 
         num_removed_mined + num_removed_duplicate_spend
     }
