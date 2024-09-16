@@ -240,9 +240,9 @@ impl VerifiedSet {
     ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     #[allow(clippy::unwrap_in_result)]
-    pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
+    pub fn evict_one(&mut self) -> Vec<VerifiedUnminedTx> {
         if self.transactions.is_empty() {
-            None
+            Vec::new()
         } else {
             use rand::distributions::{Distribution, WeightedIndex};
             use rand::prelude::thread_rng;
@@ -260,7 +260,7 @@ impl VerifiedSet {
                 .get(dist.sample(&mut thread_rng()))
                 .expect("should have a key at every index in the distribution");
 
-            Some(self.remove(key_to_remove))
+            self.remove(key_to_remove)
         }
     }
 
@@ -274,10 +274,10 @@ impl VerifiedSet {
             .filter_map(|(&tx_id, tx)| predicate(tx).then_some(tx_id))
             .collect();
 
-        let removed_count = keys_to_remove.len();
+        let mut removed_count = 0;
 
         for key_to_remove in keys_to_remove {
-            self.remove(&key_to_remove);
+            removed_count += self.remove(&key_to_remove).len();
         }
 
         removed_count
@@ -286,17 +286,12 @@ impl VerifiedSet {
     /// Removes a transaction from the set.
     ///
     /// Also removes its outputs from the internal caches.
-    fn remove(&mut self, key_to_remove: &transaction::Hash) -> VerifiedUnminedTx {
-        // TODO:
-        // - Remove any dependant transactions as well
-        // - Update `transaction_dependencies`
-
-        let removed_tx = self
-            .transactions
-            .remove(key_to_remove)
-            .expect("invalid transaction key");
-
-        self.transaction_dependencies.remove(key_to_remove);
+    fn remove(&mut self, key_to_remove: &transaction::Hash) -> Vec<VerifiedUnminedTx> {
+        let Some(removed_tx) = self.transactions.remove(key_to_remove) else {
+            // Transaction key not found, it may have been removed as a dependent
+            // of another transaction that was removed.
+            return Vec::new();
+        };
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
         self.total_cost -= removed_tx.cost();
@@ -304,7 +299,14 @@ impl VerifiedSet {
 
         self.update_metrics();
 
-        removed_tx
+        let mut removed_txs = vec![removed_tx];
+        let dependent_transactions = self.transaction_dependencies.remove(key_to_remove);
+
+        for dependent_tx in dependent_transactions {
+            removed_txs.extend(self.remove(&dependent_tx));
+        }
+
+        removed_txs
     }
 
     /// Returns `true` if the given `transaction` has any spend conflicts with transactions in the
