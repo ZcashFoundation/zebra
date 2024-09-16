@@ -53,6 +53,56 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
+// FIXME: doc this
+macro_rules! shielded_data_iter {
+    ($self:expr, $mapper:expr) => {
+        match $self {
+            // Maybe Orchard shielded data
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(orchard_shielded_data.into_iter().flat_map($mapper)),
+
+            // FIXME: process V6 properly?
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(orchard_shielded_data.into_iter().flat_map($mapper)),
+
+            // No Orchard shielded data
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => Box::new(std::iter::empty()),
+        }
+    };
+}
+
+// FIXME: doc this
+macro_rules! shielded_data_field {
+    ($self:expr, $field:ident) => {
+        match $self {
+            // Maybe Orchard shielded data
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+
+            // FIXME: process V6 properly?
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+
+            // No Orchard shielded data
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+        }
+    };
+}
+
 /// A Zcash transaction.
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
@@ -140,7 +190,7 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The orchard data for this transaction, if any.
-        orchard_shielded_data: Option<orchard::ShieldedData>,
+        orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     },
     // FIXME: implement V6 properly (now it's just a coipy of V5)
     /// A `version = 6` transaction , which supports Orchard ZSA, Orchard Vanille, Sapling and
@@ -161,8 +211,10 @@ pub enum Transaction {
         outputs: Vec<transparent::Output>,
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        /// The orchard data for this transaction, if any.
-        orchard_shielded_data: Option<orchard::ShieldedData>,
+        /// The ZSA orchard shielded data for this transaction, if any.
+        orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardZSA>>,
+        /// The ZSA issuance data for this transaction, if any.
+        orchard_zsa_issue_data: Option<orchard::IssueData>,
     },
 }
 
@@ -1017,96 +1069,52 @@ impl Transaction {
 
     // orchard
 
-    /// Access the [`orchard::ShieldedData`] in this transaction,
-    /// regardless of version.
-    pub fn orchard_shielded_data(&self) -> Option<&orchard::ShieldedData> {
-        match self {
-            // Maybe Orchard shielded data
-            Transaction::V5 {
-                orchard_shielded_data,
-                ..
-            } => orchard_shielded_data.as_ref(),
-
-            // FIXME: Support V6/OrchardZSA propetly.
-            Transaction::V6 {
-                orchard_shielded_data,
-                ..
-            } => orchard_shielded_data.as_ref(),
-
-            // No Orchard shielded data
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => None,
-        }
-    }
-
-    /// Modify the [`orchard::ShieldedData`] in this transaction,
-    /// regardless of version.
-    #[cfg(any(test, feature = "proptest-impl"))]
-    pub fn orchard_shielded_data_mut(&mut self) -> Option<&mut orchard::ShieldedData> {
-        match self {
-            Transaction::V5 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(orchard_shielded_data),
-
-            // FIXME: Support V6/OrchardZSA propetly.
-            Transaction::V6 {
-                orchard_shielded_data: Some(orchard_shielded_data),
-                ..
-            } => Some(orchard_shielded_data),
-
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 {
-                orchard_shielded_data: None,
-                ..
-            }
-            | Transaction::V6 {
-                orchard_shielded_data: None,
-                ..
-            } => None,
-        }
-    }
-
     /// Iterate over the [`orchard::Action`]s in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_actions(&self) -> impl Iterator<Item = &orchard::Action> {
-        self.orchard_shielded_data()
-            .into_iter()
-            .flat_map(orchard::ShieldedData::actions)
+    pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = orchard::ActionCommon> + '_> {
+        shielded_data_iter!(self, orchard::ShieldedData::action_commons)
     }
 
     /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_nullifiers(&self) -> impl Iterator<Item = &orchard::Nullifier> {
-        self.orchard_shielded_data()
-            .into_iter()
-            .flat_map(orchard::ShieldedData::nullifiers)
+    pub fn orchard_nullifiers(&self) -> Box<dyn Iterator<Item = &orchard::Nullifier> + '_> {
+        shielded_data_iter!(self, orchard::ShieldedData::nullifiers)
     }
 
     /// Access the note commitments in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
-        self.orchard_shielded_data()
-            .into_iter()
-            .flat_map(orchard::ShieldedData::note_commitments)
+    pub fn orchard_note_commitments(&self) -> Box<dyn Iterator<Item = &pallas::Base> + '_> {
+        shielded_data_iter!(self, orchard::ShieldedData::note_commitments)
     }
 
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
     /// regardless of version.
     pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {
-        self.orchard_shielded_data()
-            .map(|orchard_shielded_data| orchard_shielded_data.flags)
+        shielded_data_field!(self, flags)
     }
 
     /// Return if the transaction has any Orchard shielded data,
     /// regardless of version.
     pub fn has_orchard_shielded_data(&self) -> bool {
-        self.orchard_shielded_data().is_some()
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => false,
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.is_some(),
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.is_some(),
+        }
+    }
+
+    // FIXME: add doc
+    pub fn orchard_shared_anchor(&self) -> Option<orchard::tree::Root> {
+        shielded_data_field!(self, shared_anchor)
     }
 
     // value balances
@@ -1501,10 +1509,8 @@ impl Transaction {
     ///
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
-        let orchard_value_balance = self
-            .orchard_shielded_data()
-            .map(|shielded_data| shielded_data.value_balance)
-            .unwrap_or_else(Amount::zero);
+        let orchard_value_balance =
+            shielded_data_field!(self, value_balance).unwrap_or_else(Amount::zero);
 
         ValueBalance::from_orchard_amount(orchard_value_balance)
     }
@@ -1515,8 +1521,30 @@ impl Transaction {
     /// See `orchard_value_balance` for details.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn orchard_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
-        self.orchard_shielded_data_mut()
-            .map(|shielded_data| &mut shielded_data.value_balance)
+        match self {
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.value_balance),
+
+            Transaction::V6 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.value_balance),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 {
+                orchard_shielded_data: None,
+                ..
+            }
+            | Transaction::V6 {
+                orchard_shielded_data: None,
+                ..
+            } => None,
+        }
     }
 
     /// Returns the value balances for this transaction using the provided transparent outputs.

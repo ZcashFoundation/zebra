@@ -6000,6 +6000,7 @@ dependencies = [
  "itertools 0.13.0",
  "jubjub",
  "lazy_static",
+ "nonempty",
  "num-integer",
  "orchard",
  "primitive-types",

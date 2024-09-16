@@ -15,7 +15,8 @@ keywords = ["zebra", "zcash"]
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
 [features]
-default = []
+#default = []
+default = ["tx-v6"]
 
 # Production features that activate extra functionality
 
@@ -60,6 +61,11 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
+# Support for transaction version 6
+tx-v6 = [
+  "nonempty"
+]
+
 [dependencies]
 
 # Cryptography
@@ -101,6 +107,9 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
+
+# Used for orchard serialization
+nonempty = { version = "0.7", optional = true }
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }

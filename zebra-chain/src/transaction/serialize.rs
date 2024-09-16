@@ -11,6 +11,7 @@ use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
+    orchard::OrchardFlavorExt,
     parameters::{
         OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID,
         TX_V6_VERSION_GROUP_ID,
@@ -326,7 +327,7 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     }
 }
 
-impl ZcashSerialize for Option<orchard::ShieldedData> {
+impl<V: OrchardFlavorExt> ZcashSerialize for Option<orchard::ShieldedData<V>> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
             None => {
@@ -342,14 +343,15 @@ impl ZcashSerialize for Option<orchard::ShieldedData> {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
         }
+
         Ok(())
     }
 }
 
-impl ZcashSerialize for orchard::ShieldedData {
+impl<V: OrchardFlavorExt> ZcashSerialize for orchard::ShieldedData<V> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Split the AuthorizedAction
-        let (actions, sigs): (Vec<orchard::Action>, Vec<Signature<SpendAuth>>) = self
+        let (actions, sigs): (Vec<orchard::Action<V>>, Vec<Signature<SpendAuth>>) = self
             .actions
             .iter()
             .cloned()
@@ -377,16 +379,20 @@ impl ZcashSerialize for orchard::ShieldedData {
         // Denoted as `bindingSigOrchard` in the spec.
         self.binding_sig.zcash_serialize(&mut writer)?;
 
+        #[cfg(feature = "tx-v6")]
+        // Denoted as `vAssetBurn` in the spec (ZIP 230).
+        self.burn.zcash_serialize(&mut writer)?;
+
         Ok(())
     }
 }
 
 // we can't split ShieldedData out of Option<ShieldedData> deserialization,
 // because the counts are read along with the arrays.
-impl ZcashDeserialize for Option<orchard::ShieldedData> {
+impl<V: OrchardFlavorExt> ZcashDeserialize for Option<orchard::ShieldedData<V>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
-        let actions: Vec<orchard::Action> = (&mut reader).zcash_deserialize_into()?;
+        let actions: Vec<orchard::Action<V>> = (&mut reader).zcash_deserialize_into()?;
 
         // "The fields flagsOrchard, valueBalanceOrchard, anchorOrchard, sizeProofsOrchard,
         // proofsOrchard , and bindingSigOrchard are present if and only if nActionsOrchard > 0."
@@ -432,7 +438,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
         let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
 
         // Create the AuthorizedAction from deserialized parts
-        let authorized_actions: Vec<orchard::AuthorizedAction> = actions
+        let authorized_actions: Vec<orchard::AuthorizedAction<V>> = actions
             .into_iter()
             .zip(sigs)
             .map(|(action, spend_auth_sig)| {
@@ -440,11 +446,17 @@ impl ZcashDeserialize for Option<orchard::ShieldedData> {
             })
             .collect();
 
-        let actions: AtLeastOne<orchard::AuthorizedAction> = authorized_actions.try_into()?;
+        let actions: AtLeastOne<orchard::AuthorizedAction<V>> = authorized_actions.try_into()?;
 
-        Ok(Some(orchard::ShieldedData {
+        // TODO: FIXME: add a proper comment
+        #[cfg(feature = "tx-v6")]
+        let burn = (&mut reader).zcash_deserialize_into()?;
+
+        Ok(Some(orchard::ShieldedData::<V> {
             flags,
             value_balance,
+            #[cfg(feature = "tx-v6")]
+            burn,
             shared_anchor,
             proof,
             actions,
@@ -677,7 +689,6 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
 
-            // FIXME: implement a proper serialization for V6
             Transaction::V6 {
                 network_upgrade,
                 lock_time,
@@ -686,9 +697,11 @@ impl ZcashSerialize for Transaction {
                 outputs,
                 sapling_shielded_data,
                 orchard_shielded_data,
+                orchard_zsa_issue_data,
             } => {
+                // FIXME: fix spec or use another link as the current version of the PDF
+                // doesn't contain V6 description.
                 // Transaction V6 spec:
-                // FIXME: specify a proper ref
                 // https://zips.z.cash/protocol/protocol.pdf#txnencoding
 
                 // Denoted as `nVersionGroupId` in the spec.
@@ -723,6 +736,9 @@ impl ZcashSerialize for Transaction {
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
+
+                // TODO: FIXME: add ref to spec
+                orchard_zsa_issue_data.zcash_serialize(&mut writer)?;
             }
         }
         Ok(())
@@ -982,8 +998,9 @@ impl ZcashDeserialize for Transaction {
             }
             // FIXME: implement a proper deserialization for V6
             (6, true) => {
+                // FIXME: fix spec or use another link as the current version of the PDF
+                // doesn't contain V6 description.
                 // Transaction V6 spec:
-                // FIXME: specify a proper ref
                 // https://zips.z.cash/protocol/protocol.pdf#txnencoding
 
                 // Denoted as `nVersionGroupId` in the spec.
@@ -1024,6 +1041,9 @@ impl ZcashDeserialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 let orchard_shielded_data = (&mut limited_reader).zcash_deserialize_into()?;
 
+                // TODO: FIXME: add ref to spec
+                let orchard_zsa_issue_data = (&mut limited_reader).zcash_deserialize_into()?;
+
                 Ok(Transaction::V6 {
                     network_upgrade,
                     lock_time,
@@ -1032,6 +1052,7 @@ impl ZcashDeserialize for Transaction {
                     outputs,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    orchard_zsa_issue_data,
                 })
             }
             (_, _) => Err(SerializationError::Parse("bad tx header")),
@@ -1080,6 +1101,11 @@ pub const MIN_TRANSPARENT_TX_V4_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4;
 ///
 /// v5 transactions also have an expiry height and a consensus branch ID.
 pub const MIN_TRANSPARENT_TX_V5_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4 + 4;
+
+/// The minimum transaction size for v6 transactions.
+///
+/// FIXME: specify a proper value and description.
+pub const MIN_TRANSPARENT_TX_V6_SIZE: u64 = MIN_TRANSPARENT_TX_V5_SIZE;
 
 /// No valid Zcash message contains more transactions than can fit in a single block
 ///
