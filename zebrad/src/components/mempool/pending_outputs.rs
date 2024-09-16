@@ -56,9 +56,4 @@ impl PendingOutputs {
     pub fn prune(&mut self) {
         self.0.retain(|_, chan| chan.receiver_count() > 0);
     }
-
-    /// Returns the number of Outputs that are being waited on.
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
 }
