@@ -2,7 +2,7 @@
 //!
 //! A service that manages known unmined Zcash transactions.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use tokio::sync::oneshot;
 use zebra_chain::{
@@ -134,6 +134,9 @@ pub enum Response {
     FullTransactions {
         /// All [`VerifiedUnminedTx`]s in the mempool
         transactions: Vec<VerifiedUnminedTx>,
+
+        /// All transaction dependencies in the mempool
+        transaction_dependencies: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 
         /// Last seen chain tip hash by mempool service
         last_seen_tip_hash: zebra_chain::block::Hash,

@@ -758,11 +758,13 @@ impl Service<Request> for Mempool {
                     trace!(?req, "got mempool request");
 
                     let transactions: Vec<_> = storage.transactions().values().cloned().collect();
+                    let transaction_dependencies = storage.transaction_dependencies().clone();
 
                     trace!(?req, transactions_count = ?transactions.len(), "answered mempool request");
 
                     let response = Response::FullTransactions {
                         transactions,
+                        transaction_dependencies,
                         last_seen_tip_hash: *last_seen_tip_hash,
                     };
 

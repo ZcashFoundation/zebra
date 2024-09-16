@@ -26,17 +26,23 @@ struct TransactionDependencies {
     /// by a mempool transaction.
     dependencies: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 
-    /// Lists of mempool transactions that spend UTXOs created
-    /// by a mempool transaction.
+    /// Lists of transaction ids in the mempool that spend UTXOs created
+    /// by a transaction in the mempool, e.g. tx1 -> set(tx2, tx3, tx4) where
+    /// tx2, tx3, and tx4 spend outputs created by tx1.
     dependents: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 }
 
 impl TransactionDependencies {
     /// Adds a transaction that spends outputs created by other transactions in the mempool
-    /// as a dependant of those transactions, and adds the transactions that created the outputs
-    /// spent by the dependant transaction as dependencies of the dependant transaction.
-    //
-    // TODO: Order transactions in block templates based on their dependencies
+    /// as a dependent of those transactions, and adds the transactions that created the outputs
+    /// spent by the dependent transaction as dependencies of the dependent transaction.
+    ///
+    /// # Correctness
+    ///
+    /// It's the caller's responsibility to ensure that there are no cyclical dependencies.
+    ///
+    /// The transaction verifier will wait until the spent output of a transaction has been added to the verified set,
+    /// so its `AwaitOutput` requests will timeout if there is a cyclical dependency.
     fn add(
         &mut self,
         dependent: transaction::Hash,
@@ -49,23 +55,22 @@ impl TransactionDependencies {
                 .insert(dependent);
         }
 
-        self.dependencies.entry(dependent).or_default().extend(
-            spent_mempool_outpoints
-                .into_iter()
-                .map(|outpoint| outpoint.hash),
-        );
+        if !spent_mempool_outpoints.is_empty() {
+            self.dependencies.entry(dependent).or_default().extend(
+                spent_mempool_outpoints
+                    .into_iter()
+                    .map(|outpoint| outpoint.hash),
+            );
+        }
     }
 
     /// Removes the hash of a transaction in the mempool and the hashes of any transactions
     /// that are tracked as being directly dependant on that transaction from
     /// this [`TransactionDependencies`].
     ///
-    /// Returns a list of transaction hashes that have been removed.
+    /// Returns a list of transaction hashes that depend on the transaction being removed.
     fn remove(&mut self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
-        for dependencies in self.dependencies.values_mut() {
-            dependencies.remove(tx_hash);
-        }
-
+        self.dependencies.remove(tx_hash);
         self.dependents.remove(tx_hash).unwrap_or_default()
     }
 }
@@ -127,6 +132,13 @@ impl VerifiedSet {
     /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the set.
     pub fn transactions(&self) -> &HashMap<transaction::Hash, VerifiedUnminedTx> {
         &self.transactions
+    }
+
+    /// Returns a reference to the [`HashMap`] of transaction dependencies in the verified set.
+    pub fn transaction_dependencies(
+        &self,
+    ) -> &HashMap<transaction::Hash, HashSet<transaction::Hash>> {
+        &self.transaction_dependencies.dependencies
     }
 
     /// Returns a [`transparent::Output`] created by a mempool transaction for the provided
