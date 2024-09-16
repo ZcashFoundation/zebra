@@ -134,7 +134,7 @@ pub struct Storage {
     /// current tip.
     ///
     /// Only transactions with the exact [`UnminedTxId`] are invalid.
-    tip_rejected_exact: HashMap<UnminedTxId, ExactTipRejectionError>,
+    tip_rejected_exact: HashMap<transaction::Hash, ExactTipRejectionError>,
 
     /// A set of transactions rejected for their effects, and their rejection
     /// reasons. These rejections only apply to the current tip.
@@ -202,7 +202,8 @@ impl Storage {
         // # Security
         //
         // This method must call `reject`, rather than modifying the rejection lists directly.
-        let tx_id = tx.transaction.id;
+        let unmined_tx_id = tx.transaction.id;
+        let tx_id = unmined_tx_id.mined_id();
 
         // First, check if we have a cached rejection for this transaction.
         if let Some(error) = self.rejection_error(&tx_id) {
@@ -231,7 +232,7 @@ impl Storage {
         }
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
-        let mut result = Ok(tx_id);
+        let mut result = Ok(unmined_tx_id);
         if let Err(rejection_error) =
             self.verified
                 .insert(tx, spent_mempool_outpoints, &mut self.pending_outputs)
@@ -272,13 +273,13 @@ impl Storage {
             // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
             // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
             self.reject(
-                victim_tx.transaction.id,
+                victim_tx.transaction.id.mined_id(),
                 SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
             // If this transaction gets evicted, set its result to the same error
             // (we could return here, but we still want to check the mempool size)
-            if victim_tx.transaction.id == tx_id {
+            if victim_tx.transaction.id == unmined_tx_id {
                 result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
@@ -374,14 +375,14 @@ impl Storage {
             self.reject(
                 // the reject and rejection_error fns that store and check `SameEffectsChainRejectionError`s
                 // only use the mined id, so using `Legacy` ids will apply to v5 transactions as well.
-                UnminedTxId::Legacy(mined_id),
+                mined_id,
                 SameEffectsChainRejectionError::Mined.into(),
             );
         }
 
         for duplicate_spend_id in duplicate_spend_ids {
             self.reject(
-                duplicate_spend_id,
+                duplicate_spend_id.mined_id(),
                 SameEffectsChainRejectionError::DuplicateSpend.into(),
             );
         }
@@ -433,7 +434,7 @@ impl Storage {
     ///
     /// Each [`VerifiedUnminedTx`] contains an [`UnminedTx`],
     /// and adds extra fields from the transaction verifier result.
-    pub fn transactions(&self) -> &HashMap<UnminedTxId, VerifiedUnminedTx> {
+    pub fn transactions(&self) -> &HashMap<transaction::Hash, VerifiedUnminedTx> {
         self.verified.transactions()
     }
 
@@ -471,9 +472,11 @@ impl Storage {
         &self,
         tx_ids: HashSet<UnminedTxId>,
     ) -> impl Iterator<Item = &UnminedTx> {
-        tx_ids
-            .into_iter()
-            .filter_map(|tx_id| self.transactions().get(&tx_id).map(|tx| &tx.transaction))
+        tx_ids.into_iter().filter_map(|tx_id| {
+            self.transactions()
+                .get(&tx_id.mined_id())
+                .map(|tx| &tx.transaction)
+        })
     }
 
     /// Returns the set of [`UnminedTx`]es with matching [`transaction::Hash`]es
@@ -488,7 +491,7 @@ impl Storage {
         self.verified
             .transactions()
             .iter()
-            .filter(move |(tx_id, _)| tx_ids.contains(&tx_id.mined_id()))
+            .filter(move |(tx_id, _)| tx_ids.contains(&tx_id))
             .map(|(_, tx)| &tx.transaction)
     }
 
@@ -497,8 +500,8 @@ impl Storage {
     ///
     /// This matches the exact transaction, with identical blockchain effects,
     /// signatures, and proofs.
-    pub fn contains_transaction_exact(&self, txid: &UnminedTxId) -> bool {
-        self.verified.contains(txid)
+    pub fn contains_transaction_exact(&self, tx_id: &transaction::Hash) -> bool {
+        self.verified.contains(tx_id)
     }
 
     /// Returns the number of rejected [`UnminedTxId`]s or [`transaction::Hash`]es.
@@ -516,13 +519,13 @@ impl Storage {
     }
 
     /// Add a transaction to the rejected list for the given reason.
-    pub fn reject(&mut self, txid: UnminedTxId, reason: RejectionError) {
+    pub fn reject(&mut self, tx_id: transaction::Hash, reason: RejectionError) {
         match reason {
             RejectionError::ExactTip(e) => {
-                self.tip_rejected_exact.insert(txid, e);
+                self.tip_rejected_exact.insert(tx_id, e);
             }
             RejectionError::SameEffectsTip(e) => {
-                self.tip_rejected_same_effects.insert(txid.mined_id(), e);
+                self.tip_rejected_same_effects.insert(tx_id, e);
             }
             RejectionError::SameEffectsChain(e) => {
                 let eviction_memory_time = self.eviction_memory_time;
@@ -531,7 +534,7 @@ impl Storage {
                     .or_insert_with(|| {
                         EvictionList::new(MAX_EVICTION_MEMORY_ENTRIES, eviction_memory_time)
                     })
-                    .insert(txid.mined_id());
+                    .insert(tx_id);
             }
         }
         self.limit_rejection_list_memory();
@@ -543,17 +546,17 @@ impl Storage {
     /// This matches transactions based on each rejection list's matching rule.
     ///
     /// Returns an arbitrary error if the transaction is in multiple lists.
-    pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
+    pub fn rejection_error(&self, txid: &transaction::Hash) -> Option<MempoolError> {
         if let Some(error) = self.tip_rejected_exact.get(txid) {
             return Some(error.clone().into());
         }
 
-        if let Some(error) = self.tip_rejected_same_effects.get(&txid.mined_id()) {
+        if let Some(error) = self.tip_rejected_same_effects.get(&txid) {
             return Some(error.clone().into());
         }
 
         for (error, set) in self.chain_rejected_same_effects.iter() {
-            if set.contains_key(&txid.mined_id()) {
+            if set.contains_key(&txid) {
                 return Some(error.clone().into());
             }
         }
@@ -570,20 +573,20 @@ impl Storage {
     ) -> impl Iterator<Item = UnminedTxId> + '_ {
         tx_ids
             .into_iter()
-            .filter(move |txid| self.contains_rejected(txid))
+            .filter(move |txid| self.contains_rejected(&txid.mined_id()))
     }
 
     /// Returns `true` if a transaction matching the supplied [`UnminedTxId`] is in
     /// the mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
-    pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
+    pub fn contains_rejected(&self, txid: &transaction::Hash) -> bool {
         self.rejection_error(txid).is_some()
     }
 
     /// Add a transaction that failed download and verification to the rejected list
     /// if needed, depending on the reason for the failure.
-    pub fn reject_if_needed(&mut self, txid: UnminedTxId, e: TransactionDownloadVerifyError) {
+    pub fn reject_if_needed(&mut self, txid: transaction::Hash, e: TransactionDownloadVerifyError) {
         match e {
             // Rejecting a transaction already in state would speed up further
             // download attempts without checking the state. However it would
@@ -623,7 +626,7 @@ impl Storage {
     pub fn remove_expired_transactions(
         &mut self,
         tip_height: zebra_chain::block::Height,
-    ) -> HashSet<UnminedTxId> {
+    ) -> HashSet<transaction::Hash> {
         let mut txid_set = HashSet::new();
         // we need a separate set, since reject() takes the original unmined ID,
         // then extracts the mined ID out of it
@@ -632,7 +635,7 @@ impl Storage {
         for (&tx_id, tx) in self.transactions() {
             if let Some(expiry_height) = tx.transaction.transaction.expiry_height() {
                 if tip_height >= expiry_height {
-                    txid_set.insert(tx_id.mined_id());
+                    txid_set.insert(tx_id);
                     unmined_id_set.insert(tx_id);
                 }
             }
@@ -654,7 +657,10 @@ impl Storage {
     ///
     /// If it is already in the mempool (or in its rejected list)
     /// then it shouldn't be downloaded/verified.
-    pub fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), MempoolError> {
+    pub fn should_download_or_verify(
+        &mut self,
+        txid: transaction::Hash,
+    ) -> Result<(), MempoolError> {
         // Check if the transaction is already in the mempool.
         if self.contains_transaction_exact(&txid) {
             return Err(MempoolError::InMempool);

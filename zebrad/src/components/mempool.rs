@@ -391,10 +391,11 @@ impl Mempool {
     /// Remove expired transaction ids from a given list of inserted ones.
     fn remove_expired_from_peer_list(
         send_to_peers_ids: &HashSet<UnminedTxId>,
-        expired_transactions: &HashSet<UnminedTxId>,
+        expired_transactions: &HashSet<zebra_chain::transaction::Hash>,
     ) -> HashSet<UnminedTxId> {
         send_to_peers_ids
-            .difference(expired_transactions)
+            .iter()
+            .filter(|id| !expired_transactions.contains(&id.mined_id()))
             .copied()
             .collect()
     }
@@ -620,7 +621,7 @@ impl Service<Request> for Mempool {
                         tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
-                        storage.reject_if_needed(txid, error);
+                        storage.reject_if_needed(txid.mined_id(), error);
                     }
                     Err(_elapsed) => {
                         // A timeout happens when the stream hangs waiting for another service,
@@ -791,7 +792,8 @@ impl Service<Request> for Mempool {
                                     MempoolError,
                                 > {
                                     let (rsp_tx, rsp_rx) = oneshot::channel();
-                                    storage.should_download_or_verify(gossiped_tx.id())?;
+                                    storage
+                                        .should_download_or_verify(gossiped_tx.id().mined_id())?;
                                     tx_downloads
                                         .download_if_needed_and_verify(gossiped_tx, Some(rsp_tx))?;
 

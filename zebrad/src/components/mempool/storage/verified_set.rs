@@ -8,7 +8,7 @@ use std::{
 
 use zebra_chain::{
     orchard, sapling, sprout,
-    transaction::{self, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
 
@@ -28,7 +28,7 @@ struct TransactionDependencies {
 
     /// Lists of mempool transactions that spend UTXOs created
     /// by a mempool transaction.
-    dependants: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
+    dependents: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 }
 
 impl TransactionDependencies {
@@ -39,17 +39,17 @@ impl TransactionDependencies {
     // TODO: Order transactions in block templates based on their dependencies
     fn add(
         &mut self,
-        dependant: transaction::Hash,
+        dependent: transaction::Hash,
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
     ) {
         for &spent_mempool_outpoint in &spent_mempool_outpoints {
-            self.dependants
+            self.dependents
                 .entry(spent_mempool_outpoint.hash)
                 .or_default()
-                .insert(dependant);
+                .insert(dependent);
         }
 
-        self.dependencies.entry(dependant).or_default().extend(
+        self.dependencies.entry(dependent).or_default().extend(
             spent_mempool_outpoints
                 .into_iter()
                 .map(|outpoint| outpoint.hash),
@@ -61,12 +61,12 @@ impl TransactionDependencies {
     /// this [`TransactionDependencies`].
     ///
     /// Returns a list of transaction hashes that have been removed.
-    fn _remove(&mut self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+    fn remove(&mut self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
         for dependencies in self.dependencies.values_mut() {
             dependencies.remove(tx_hash);
         }
 
-        self.dependants.remove(tx_hash).unwrap_or_default()
+        self.dependents.remove(tx_hash).unwrap_or_default()
     }
 }
 
@@ -84,7 +84,7 @@ impl TransactionDependencies {
 #[derive(Default)]
 pub struct VerifiedSet {
     /// The set of verified transactions in the mempool.
-    transactions: HashMap<UnminedTxId, VerifiedUnminedTx>,
+    transactions: HashMap<transaction::Hash, VerifiedUnminedTx>,
 
     /// A map of dependencies between transactions in the mempool that
     /// spend or create outputs of other transactions in the mempool.
@@ -125,7 +125,7 @@ impl Drop for VerifiedSet {
 
 impl VerifiedSet {
     /// Returns a reference to the [`HashMap`] of [`VerifiedUnminedTx`]s in the set.
-    pub fn transactions(&self) -> &HashMap<UnminedTxId, VerifiedUnminedTx> {
+    pub fn transactions(&self) -> &HashMap<transaction::Hash, VerifiedUnminedTx> {
         &self.transactions
     }
 
@@ -157,7 +157,7 @@ impl VerifiedSet {
 
     /// Returns `true` if the set of verified transactions contains the transaction with the
     /// specified [`UnminedTxId`].
-    pub fn contains(&self, id: &UnminedTxId) -> bool {
+    pub fn contains(&self, id: &transaction::Hash) -> bool {
         self.transactions.contains_key(id)
     }
 
@@ -201,12 +201,12 @@ impl VerifiedSet {
             }
         }
 
-        let tx_id = transaction.transaction.id;
+        let tx_id = transaction.transaction.id.mined_id();
         self.transaction_dependencies
-            .add(tx_id.mined_id(), spent_mempool_outpoints);
+            .add(tx_id, spent_mempool_outpoints);
 
         self.cache_outputs_and_respond_to_pending_output_requests_from(
-            tx_id.mined_id(),
+            tx_id,
             &transaction.transaction.transaction,
             pending_outputs,
         );
@@ -247,7 +247,7 @@ impl VerifiedSet {
             use rand::distributions::{Distribution, WeightedIndex};
             use rand::prelude::thread_rng;
 
-            let (keys, weights): (Vec<UnminedTxId>, Vec<u64>) = self
+            let (keys, weights): (Vec<transaction::Hash>, Vec<u64>) = self
                 .transactions
                 .iter()
                 .map(|(&tx_id, tx)| (tx_id, tx.eviction_weight()))
@@ -286,7 +286,7 @@ impl VerifiedSet {
     /// Removes a transaction from the set.
     ///
     /// Also removes its outputs from the internal caches.
-    fn remove(&mut self, key_to_remove: &UnminedTxId) -> VerifiedUnminedTx {
+    fn remove(&mut self, key_to_remove: &transaction::Hash) -> VerifiedUnminedTx {
         // TODO:
         // - Remove any dependant transactions as well
         // - Update `transaction_dependencies`
@@ -295,6 +295,8 @@ impl VerifiedSet {
             .transactions
             .remove(key_to_remove)
             .expect("invalid transaction key");
+
+        self.transaction_dependencies.remove(key_to_remove);
 
         self.transactions_serialized_size -= removed_tx.transaction.size;
         self.total_cost -= removed_tx.cost();
