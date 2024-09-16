@@ -43,14 +43,14 @@ fn mempool_storage_crud_exact_mainnet() {
     let _ = storage.insert(unmined_tx.clone(), Vec::new());
 
     // Check that it is in the mempool, and not rejected.
-    assert!(storage.contains_transaction_exact(&unmined_tx.transaction.id));
+    assert!(storage.contains_transaction_exact(&unmined_tx.transaction.id.mined_id()));
 
     // Remove tx
     let removal_count = storage.remove_exact(&iter::once(unmined_tx.transaction.id).collect());
 
     // Check that it is /not/ in the mempool.
     assert_eq!(removal_count, 1);
-    assert!(!storage.contains_transaction_exact(&unmined_tx.transaction.id));
+    assert!(!storage.contains_transaction_exact(&unmined_tx.transaction.id.mined_id()));
 }
 
 #[test]
@@ -124,7 +124,7 @@ fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
 
     // Test if rejected transactions were actually rejected.
     for tx in some_rejected_transactions.iter() {
-        assert!(!storage.contains_transaction_exact(&tx.transaction.id));
+        assert!(!storage.contains_transaction_exact(&tx.transaction.id.mined_id()));
     }
 
     // Query all the ids we have for rejected, get back `total - MEMPOOL_SIZE`
@@ -170,7 +170,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     let _ = storage.insert(unmined_tx_1.clone(), Vec::new());
 
     // Check that it is in the mempool, and not rejected.
-    assert!(storage.contains_transaction_exact(&unmined_tx_1.transaction.id));
+    assert!(storage.contains_transaction_exact(&unmined_tx_1.transaction.id.mined_id()));
 
     // Reject and remove mined tx
     let removal_count = storage.reject_and_remove_same_effects(
@@ -180,11 +180,11 @@ fn mempool_storage_crud_same_effects_mainnet() {
 
     // Check that it is /not/ in the mempool as a verified transaction.
     assert_eq!(removal_count, 1);
-    assert!(!storage.contains_transaction_exact(&unmined_tx_1.transaction.id));
+    assert!(!storage.contains_transaction_exact(&unmined_tx_1.transaction.id.mined_id()));
 
     // Check that it's rejection is cached in the chain_rejected_same_effects' `Mined` eviction list.
     assert_eq!(
-        storage.rejection_error(&unmined_tx_1.transaction.id),
+        storage.rejection_error(&unmined_tx_1.transaction.id.mined_id()),
         Some(SameEffectsChainRejectionError::Mined.into())
     );
     assert_eq!(
@@ -210,7 +210,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
     );
 
     // Check that it is in the mempool, and not rejected.
-    assert!(storage.contains_transaction_exact(&unmined_tx_2.transaction.id));
+    assert!(storage.contains_transaction_exact(&unmined_tx_2.transaction.id.mined_id()));
 
     // Reject and remove duplicate spend tx
     let removal_count = storage.reject_and_remove_same_effects(
@@ -220,11 +220,11 @@ fn mempool_storage_crud_same_effects_mainnet() {
 
     // Check that it is /not/ in the mempool as a verified transaction.
     assert_eq!(removal_count, 1);
-    assert!(!storage.contains_transaction_exact(&unmined_tx_2.transaction.id));
+    assert!(!storage.contains_transaction_exact(&unmined_tx_2.transaction.id.mined_id()));
 
     // Check that it's rejection is cached in the chain_rejected_same_effects' `SpendConflict` eviction list.
     assert_eq!(
-        storage.rejection_error(&unmined_tx_2.transaction.id),
+        storage.rejection_error(&unmined_tx_2.transaction.id.mined_id()),
         Some(SameEffectsChainRejectionError::DuplicateSpend.into())
     );
     assert_eq!(
@@ -281,7 +281,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
 
     // remove_expired_transactions() will return what was removed
     let expired = storage.remove_expired_transactions(Height(1));
-    assert!(expired.contains(&tx_id));
+    assert!(expired.contains(&tx_id.mined_id()));
     let everything_in_mempool: HashSet<UnminedTxId> = storage.tx_ids().collect();
     assert_eq!(everything_in_mempool.len(), 0);
 
