@@ -265,6 +265,7 @@ pub async fn test_responses<State, ReadState>(
                 .await
                 .respond(mempool::Response::FullTransactions {
                     transactions: vec![],
+                    transaction_dependencies: Default::default(),
                     // tip hash needs to match chain info for long poll requests
                     last_seen_tip_hash: fake_tip_hash,
                 });

@@ -1364,6 +1364,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                 .await
                 .respond(mempool::Response::FullTransactions {
                     transactions,
+                    transaction_dependencies: Default::default(),
                     last_seen_tip_hash,
                 });
         }
