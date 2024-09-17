@@ -161,3 +161,6 @@ $RECYCLE.BIN/
 
 # Python pycache
 __pycache__/
+
+# RPC tests cache 
+zebra-rpc/qa/cache/

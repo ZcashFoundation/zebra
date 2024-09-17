@@ -294,14 +294,12 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         block_time = int(time.time()) - (200 * PRE_BLOSSOM_BLOCK_TARGET_SPACING)
         for i in range(MAX_NODES):
             datadir = initialize_datadir(cachedir, i)
-            args = [ zcashd_binary(), "-keypool=1", "-datadir="+datadir, "-discover=0" ]
-            args.extend([
-                '-nuparams=5ba81b19:1', # Overwinter
-                '-nuparams=76b809bb:1', # Sapling
-                '-mocktime=%d' % block_time
-            ])
-            if i > 0:
-                args.append("-connect=127.0.0.1:"+str(p2p_port(0)))
+
+            update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
+            binary = zcashd_binary()
+            config = zebrad_config()
+            args = [ binary, "-c="+config, "start" ]
+
             bitcoind_processes[i] = subprocess.Popen(args)
             if os.getenv("PYTHON_DEBUG", ""):
                 print("initialize_chain: %s started, waiting for RPC to come up" % (zcashd_binary(),))
@@ -328,7 +326,8 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         for i in range(2):
             for peer in range(4):
                 for j in range(25):
-                    set_node_times(rpcs, block_time)
+                    # Removed because zebrad does not has this RPC method:
+                    #set_node_times(rpcs, block_time)
                     rpcs[peer].generate(1)
                     block_time += PRE_BLOSSOM_BLOCK_TARGET_SPACING
                 # Must sync before next peer starts generating blocks
@@ -339,6 +338,7 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         # Shut them down, and clean up cache directories:
         stop_nodes(rpcs)
         wait_bitcoinds()
+
         for i in range(MAX_NODES):
             # record the system time at which the cache was regenerated
             with open(node_file(cachedir, i, 'cache_config.json'), "w", encoding="utf8") as cache_conf_file:
@@ -346,16 +346,18 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
                 cache_conf_json = json.dumps(cache_config, indent=4)
                 cache_conf_file.write(cache_conf_json)
 
-            os.remove(node_file(cachedir, i, "debug.log"))
-            os.remove(node_file(cachedir, i, "db.log"))
-            os.remove(node_file(cachedir, i, "peers.dat"))
+            # Removed as zebrad do not created these files:
+            #os.remove(node_file(cachedir, i, "debug.log"))
+            #os.remove(node_file(cachedir, i, "db.log"))
+            #os.remove(node_file(cachedir, i, "peers.dat"))
+
 
     def init_from_cache():
         for i in range(num_nodes):
             from_dir = os.path.join(cachedir, "node"+str(i))
             to_dir = os.path.join(test_dir,  "node"+str(i))
             shutil.copytree(from_dir, to_dir)
-            with open(os.path.join(to_dir, 'regtest', 'cache_config.json'), "r", encoding="utf8") as cache_conf_file:
+            with open(os.path.join(to_dir, 'cache_config.json'), "r", encoding="utf8") as cache_conf_file:
                 cache_conf = json.load(cache_conf_file)
                 # obtain the clock offset as a negative number of seconds
                 offset = round(cache_conf['cache_time']) - round(time.time())
@@ -449,7 +451,7 @@ def persist_node_caches(tmpdir, cache_behavior, num_nodes):
     os.mkdir(cache_path)
 
     for i in range(num_nodes):
-        node_path = os.path.join(tmpdir, 'node' + str(i), 'regtest')
+        node_path = os.path.join(tmpdir, 'node' + str(i))
 
         # Clean up the files that we don't want to persist
         os.remove(os.path.join(node_path, 'debug.log'))
@@ -570,7 +572,7 @@ def start_nodes(num_nodes, dirname, extra_args=None, rpchost=None, binary=None):
     return rpcs
 
 def node_file(dirname, n_node, filename):
-    return os.path.join(dirname, "node"+str(n_node), "regtest", filename)
+    return os.path.join(dirname, "node"+str(n_node), filename)
 
 def check_node(i):
     bitcoind_processes[i].poll()
