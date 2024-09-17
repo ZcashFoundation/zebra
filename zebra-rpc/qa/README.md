@@ -35,7 +35,7 @@ Unix
 ----
 
 ```
-export ZCASHD=/path/to/zebrad/binary
+export ZEBRAD=/path/to/zebrad/binary
 export CONFIG=/path/to/zebra/config.toml
 ```
 

@@ -29,8 +29,8 @@ import errno
 from . import coverage
 from .proxy import ServiceProxy, JSONRPCException
 
-ZCASHD_BINARY = os.path.join('src', 'zcashd')
-ZEBRAD_CONFIG = os.path.join('zebrad', 'zebrad.toml')
+ZEBRAD_BINARY = os.path.join('target', 'debug', 'zebrad')
+ZEBRAD_CONFIG = os.path.join('config.toml')
 
 LEGACY_DEFAULT_FEE = Decimal('0.00001')
 
@@ -56,7 +56,7 @@ PORT_RANGE = 5000
 
 
 def zcashd_binary():
-    return os.getenv("ZCASHD", ZCASHD_BINARY)
+    return os.getenv("ZEBRAD", ZEBRAD_BINARY)
 
 def zebrad_config():
     return os.getenv("CONFIG", ZEBRAD_CONFIG)
