@@ -66,7 +66,7 @@ pub struct Verifier<ZS, Mempool> {
     network: Network,
     state: Timeout<ZS>,
     // TODO: Use an enum so that this can either be Pending(oneshot::Receiver) or Initialized(MempoolService)
-    mempool: Option<Mempool>,
+    mempool: Option<Timeout<Mempool>>,
     script_verifier: script::Verifier,
     mempool_setup_rx: oneshot::Receiver<Mempool>,
 }
@@ -334,7 +334,7 @@ where
 
         if self.mempool.is_none() {
             if let Ok(mempool) = self.mempool_setup_rx.try_recv() {
-                self.mempool = Some(mempool);
+                self.mempool = Some(Timeout::new(mempool, UTXO_LOOKUP_TIMEOUT));
             }
         }
 
@@ -593,7 +593,7 @@ where
         known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
         is_mempool: bool,
         state: Timeout<ZS>,
-        mempool: Option<Mempool>,
+        mempool: Option<Timeout<Mempool>>,
     ) -> Result<
         (
             HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -650,6 +650,8 @@ where
 
         if let Some(mempool) = mempool {
             for &spent_mempool_outpoint in &spent_mempool_outpoints {
+                // TODO: Respond to AwaitOutput requests immediately if the output is already available in the mempool
+                //       instead of calling the mempool service twice (using 2 queries introduces a concurrency bug).
                 let query = mempool
                     .clone()
                     .oneshot(mempool::Request::UnspentOutput(spent_mempool_outpoint));
