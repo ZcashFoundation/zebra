@@ -1,7 +1,7 @@
-The [pull-tester](/qa/pull-tester/) folder contains a script to call
-multiple tests from the [rpc-tests](/qa/rpc-tests/) folder.
+The [pull-tester](/pull-tester/) folder contains a script to call
+multiple tests from the [rpc-tests](/rpc-tests/) folder.
 
-Every pull request to the zcash repository is built and run through
+Every pull request to the zebra repository is built and run through
 the regression test suite. You can also run all or only individual
 tests locally.
 
@@ -13,7 +13,7 @@ Before running the tests, the following must be installed.
 Unix
 ----
 
-The `zmq` and `base58` Python libraries are required. On Ubuntu or Debian-based
+The `zmq`, `toml` and `base58` Python libraries are required. On Ubuntu or Debian-based
 distributions they can be installed via:
 ```
 sudo apt-get install python3-zmq python3-base58
@@ -23,30 +23,29 @@ OS X
 ------
 
 ```
-pip3 install pyzmq base58
+pip3 install pyzmq base58 toml
 ```
 
-Running tests
-=============
+Running tests locally
+=====================
+
+Please add the following environment variables before running:
+
+Unix
+----
+
+```
+export ZCASHD=/path/to/zebrad/binary
+export CONFIG=/path/to/zebra/config.toml
+```
 
 You can run any single test by calling
 
-    RPC_TEST=<testname> make rpc-tests
-
-Or you can run any combination of tests by calling
-
-    RPC_TEST="<testname1> <testname2> <testname3> ..." make rpc-tests
+    ./qa/pull-tester/rpc-tests.py getmininginfo
 
 Run the regression test suite with
 
-    make rpc-tests
-
-Run all possible tests with
-
-    RPC_TEST="--extended" make rpc-tests
-
-You can also run the tests directly using `qa/pull-tester/rpc-tests.py` instead
-of `make`, but that won't ensure that zcashd is up-to-date with any changes.
+    ./qa/pull-tester/rpc-tests.py
 
 By default, tests will be run in parallel. To specify how many jobs to run,
 append `--jobs=n` (default n=4).
@@ -91,4 +90,4 @@ Writing tests
 =============
 You are encouraged to write tests for new or existing features.
 Further information about the test framework and individual RPC
-tests is found in [qa/rpc-tests](/qa/rpc-tests).
+tests is found in [rpc-tests](rpc-tests).
