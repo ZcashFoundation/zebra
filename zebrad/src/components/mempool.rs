@@ -733,20 +733,14 @@ impl Service<Request> for Mempool {
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
 
-                Request::UnspentOutput(outpoint) => {
-                    trace!(?req, "got mempool request");
-
-                    let res = storage.created_output(&outpoint);
-
-                    trace!(?res, "answered mempool request");
-
-                    async move { Ok(Response::UnspentOutput(res)) }.boxed()
-                }
-
                 Request::AwaitOutput(outpoint) => {
                     trace!(?req, "got mempool request");
 
                     let response_fut = storage.pending_outputs.queue(outpoint);
+
+                    if let Some(output) = storage.created_output(&outpoint) {
+                        storage.pending_outputs.respond(&outpoint, output)
+                    }
 
                     trace!("answered mempool request");
 
@@ -834,7 +828,6 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
-                    Request::UnspentOutput(_) => Response::UnspentOutput(None),
                     Request::AwaitOutput(_) => Response::UnspentOutput(None),
 
                     #[cfg(feature = "getblocktemplate-rpcs")]

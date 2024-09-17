@@ -42,12 +42,6 @@ pub enum Request {
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<transaction::Hash>),
 
-    /// Looks up a [`transparent::Output`] in the mempool identified by the given [`OutPoint`](transparent::OutPoint),
-    /// returning `None` immediately if it is unknown.
-    ///
-    /// Does not gaurantee that the output will remain in the mempool or that it is unspent.
-    UnspentOutput(transparent::OutPoint),
-
     /// Request a [`transparent::Output`] identified by the given [`OutPoint`](transparent::OutPoint),
     /// waiting until it becomes available if it is unknown.
     ///

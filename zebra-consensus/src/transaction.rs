@@ -654,24 +654,13 @@ where
                 //       instead of calling the mempool service twice (using 2 queries introduces a concurrency bug).
                 let query = mempool
                     .clone()
-                    .oneshot(mempool::Request::UnspentOutput(spent_mempool_outpoint));
+                    .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
 
                 let mempool::Response::UnspentOutput(output) = query.await? else {
                     unreachable!("UnspentOutput always responds with UnspentOutput")
                 };
 
-                let output = if let Some(output) = output {
-                    output
-                } else {
-                    let query = mempool
-                        .clone()
-                        .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
-                    if let mempool::Response::UnspentOutput(output) = query.await? {
-                        output.ok_or(TransactionError::TransparentInputNotFound)?
-                    } else {
-                        unreachable!("AwaitOutput always responds with UnspentOutput")
-                    }
-                };
+                let output = output.ok_or(TransactionError::TransparentInputNotFound)?;
 
                 spent_outputs.push(output.clone());
             }
