@@ -1,6 +1,10 @@
 //! Support functions for the `get_block_template()` RPC.
 
-use std::{collections::HashMap, iter, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    iter,
+    sync::Arc,
+};
 
 use jsonrpc_core::{Error, ErrorCode, Result};
 use tower::{Service, ServiceExt};
@@ -16,7 +20,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{subsidy::FundingStreamReceiver, Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
-    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
+    transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
 use zebra_consensus::{
@@ -253,7 +257,12 @@ where
 pub async fn fetch_mempool_transactions<Mempool>(
     mempool: Mempool,
     chain_tip_hash: block::Hash,
-) -> Result<Option<Vec<VerifiedUnminedTx>>>
+) -> Result<
+    Option<(
+        Vec<VerifiedUnminedTx>,
+        HashMap<transaction::Hash, HashSet<transaction::Hash>>,
+    )>,
+>
 where
     Mempool: Service<
             mempool::Request,
@@ -271,8 +280,11 @@ where
             data: None,
         })?;
 
+    // TODO: Order transactions in block templates based on their dependencies
+
     let mempool::Response::FullTransactions {
         transactions,
+        transaction_dependencies,
         last_seen_tip_hash,
     } = response
     else {
@@ -280,7 +292,7 @@ where
     };
 
     // Check that the mempool and state were in sync when we made the requests
-    Ok((last_seen_tip_hash == chain_tip_hash).then_some(transactions))
+    Ok((last_seen_tip_hash == chain_tip_hash).then_some((transactions, transaction_dependencies)))
 }
 
 // - Response processing

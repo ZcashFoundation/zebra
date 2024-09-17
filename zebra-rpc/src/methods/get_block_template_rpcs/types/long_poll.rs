@@ -71,14 +71,18 @@ impl LongPollInput {
         max_time: DateTime32,
         mempool_tx_ids: impl IntoIterator<Item = UnminedTxId>,
     ) -> Self {
-        let mempool_transaction_mined_ids =
+        let mut tx_mined_ids: Vec<transaction::Hash> =
             mempool_tx_ids.into_iter().map(|id| id.mined_id()).collect();
+
+        // The mempool returns unordered transactions, we need to sort them here so
+        // that the longpollid doesn't change unexpectedly.
+        tx_mined_ids.sort();
 
         LongPollInput {
             tip_height,
             tip_hash,
             max_time,
-            mempool_transaction_mined_ids,
+            mempool_transaction_mined_ids: tx_mined_ids.into(),
         }
     }
 

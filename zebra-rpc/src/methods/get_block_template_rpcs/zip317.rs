@@ -6,6 +6,8 @@
 //! > when computing `size_target`, since there is no consensus requirement for this to be
 //! > exactly the same between implementations.
 
+use std::collections::{HashMap, HashSet};
+
 use rand::{
     distributions::{Distribution, WeightedIndex},
     prelude::thread_rng,
@@ -15,7 +17,7 @@ use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
+    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
     transparent,
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -36,11 +38,12 @@ use crate::methods::get_block_template_rpcs::{
 /// Returns selected transactions from `mempool_txs`.
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
-pub async fn select_mempool_transactions(
+pub fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
     miner_address: &transparent::Address,
     mempool_txs: Vec<VerifiedUnminedTx>,
+    mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> Vec<VerifiedUnminedTx> {
@@ -79,6 +82,7 @@ pub async fn select_mempool_transactions(
             &mut conventional_fee_txs,
             tx_weights,
             &mut selected_txs,
+            mempool_tx_deps,
             &mut remaining_block_bytes,
             &mut remaining_block_sigops,
             // The number of unpaid actions is always zero for transactions that pay the
@@ -95,6 +99,7 @@ pub async fn select_mempool_transactions(
             &mut low_fee_txs,
             tx_weights,
             &mut selected_txs,
+            mempool_tx_deps,
             &mut remaining_block_bytes,
             &mut remaining_block_sigops,
             &mut remaining_block_unpaid_actions,
@@ -158,6 +163,22 @@ fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<Weight
     WeightedIndex::new(tx_weights).ok()
 }
 
+fn has_dependencies(
+    selected_txs: &Vec<VerifiedUnminedTx>,
+    deps: Option<&HashSet<transaction::Hash>>,
+) -> bool {
+    let Some(deps) = deps else { return true };
+
+    let mut num_available_deps = 0;
+    for tx in selected_txs {
+        if deps.contains(&tx.transaction.id.mined_id()) {
+            num_available_deps += 1;
+        }
+    }
+
+    num_available_deps == deps.len()
+}
+
 /// Chooses a random transaction from `txs` using the weighted index `tx_weights`,
 /// and tries to add it to `selected_txs`.
 ///
@@ -172,6 +193,7 @@ fn checked_add_transaction_weighted_random(
     candidate_txs: &mut Vec<VerifiedUnminedTx>,
     tx_weights: WeightedIndex<f32>,
     selected_txs: &mut Vec<VerifiedUnminedTx>,
+    mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
     remaining_block_bytes: &mut usize,
     remaining_block_sigops: &mut u64,
     remaining_block_unpaid_actions: &mut u32,
@@ -191,6 +213,17 @@ fn checked_add_transaction_weighted_random(
     if candidate_tx.transaction.size <= *remaining_block_bytes
         && candidate_tx.legacy_sigop_count <= *remaining_block_sigops
         && candidate_tx.unpaid_actions <= *remaining_block_unpaid_actions
+        // # Correctness
+        //
+        // Transactions that spend outputs created in the same block
+        // must appear after the transaction that created those outputs
+        // 
+        // TODO: If it gets here but the dependencies aren't selected, add it to a list of transactions
+        //       to be added immediately if there's room once their dependencies have been selected?
+        && has_dependencies(
+            selected_txs,
+            mempool_tx_deps.get(&candidate_tx.transaction.id.mined_id()),
+        )
     {
         selected_txs.push(candidate_tx.clone());
 
