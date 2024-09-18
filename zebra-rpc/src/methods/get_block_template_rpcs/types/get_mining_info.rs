@@ -5,6 +5,18 @@ use zebra_chain::parameters::Network;
 /// Response to a `getmininginfo` RPC request.
 #[derive(Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct Response {
+    /// The current tip height.
+    #[serde(rename = "blocks")]
+    tip_height: u32,
+
+    /// The size of the last mined block if any.
+    #[serde(rename = "currentblocksize", skip_serializing_if = "Option::is_none")]
+    current_block_size: Option<usize>,
+
+    /// The number of transactions in the last mined block if any.
+    #[serde(rename = "currentblocktx", skip_serializing_if = "Option::is_none")]
+    current_block_tx: Option<usize>,
+
     /// The estimated network solution rate in Sol/s.
     networksolps: u64,
 
@@ -20,8 +32,17 @@ pub struct Response {
 
 impl Response {
     /// Creates a new `getmininginfo` response
-    pub fn new(network: Network, networksolps: u64) -> Self {
+    pub fn new(
+        tip_height: u32,
+        current_block_size: Option<usize>,
+        current_block_tx: Option<usize>,
+        network: Network,
+        networksolps: u64,
+    ) -> Self {
         Self {
+            tip_height,
+            current_block_size,
+            current_block_tx,
             networksolps,
             networkhashps: networksolps,
             chain: network.bip70_network_name(),
