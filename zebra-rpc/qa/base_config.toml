@@ -16,7 +16,7 @@ cache_dir = true
 crawl_new_peer_interval = "1m 1s"
 initial_mainnet_peers = [ "dnsseed.z.cash:8233", "dnsseed.str4d.xyz:8233", "mainnet.seeder.zfnd.org:8233", "mainnet.is.yolo.money:8233",]
 initial_testnet_peers = [ "dnsseed.testnet.z.cash:18233", "testnet.seeder.zfnd.org:18233", "testnet.is.yolo.money:18233",]
-listen_addr = "127.0.0.1:11264"
+listen_addr = "127.0.0.1:0"
 max_connections_per_ip = 1
 network = "Regtest"
 peerset_initial_target_size = 25
@@ -27,7 +27,7 @@ parallel_cpu_threads = 0
 listen_addr = "127.0.0.1:16264"
 
 [state]
-cache_dir = "/tmp/testnowand1s/33/node0/kvxfudbjch"
+cache_dir = ""
 delete_old_database = true
 ephemeral = false
 

@@ -38,8 +38,8 @@ FLAKY_SCRIPTS = [
 BASE_SCRIPTS= [
     # Scripts that are run by the travis build process
     # Longest test should go first, to favor running tests in parallel
-    'getmininginfo.py',
-    'reindex.py']
+    'reindex.py',
+    'getmininginfo.py']
 
 ZMQ_SCRIPTS = [
     # ZMQ test can only be run if bitcoin was built with zmq-enabled.
