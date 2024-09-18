@@ -1063,6 +1063,11 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::ValidBlockProposal`] when successful, or an error if
     /// the block fails contextual validation.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
+
+    #[cfg(feature = "getblocktemplate-rpcs")]
+    /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
+    /// with the current best chain tip block size in bytes.
+    TipBlockSize,
 }
 
 impl ReadRequest {
@@ -1098,6 +1103,8 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::TipBlockSize => "tip_block_size",
         }
     }
 
