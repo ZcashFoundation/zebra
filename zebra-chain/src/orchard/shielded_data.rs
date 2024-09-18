@@ -79,7 +79,7 @@ impl<V: OrchardFlavorExt> ShieldedData<V> {
         self.actions.actions()
     }
 
-    // FIXME: add a doc comment
+    /// FIXME: add a doc comment
     pub fn action_commons(&self) -> impl Iterator<Item = ActionCommon> + '_ {
         self.actions.actions().map(|action| action.into())
     }

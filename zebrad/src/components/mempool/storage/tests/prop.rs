@@ -712,11 +712,13 @@ impl SpendConflictTestInput {
                 Transaction::V5 {
                     orchard_shielded_data,
                     ..
-                }
-                | Transaction::V6 {
-                    orchard_shielded_data,
-                    ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
+
+                // FIXME: implement for V6
+                Transaction::V6 {
+                    orchard_shielded_data: _,
+                    ..
+                } => {}
 
                 // No Spends
                 Transaction::V1 { .. }
@@ -732,7 +734,7 @@ impl SpendConflictTestInput {
     ///
     /// This may clear the entire shielded data.
     fn remove_orchard_actions_with_conflicts(
-        maybe_shielded_data: &mut Option<orchard::ShieldedData>,
+        maybe_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
         if let Some(shielded_data) = maybe_shielded_data.take() {
@@ -789,10 +791,11 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
     fallback_shielded_data: DisplayToDebug<sapling::ShieldedData<A>>,
 }
 
+// FIXME: make it a generic to support V6
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
 struct OrchardSpendConflict {
-    new_shielded_data: DisplayToDebug<orchard::ShieldedData>,
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData<orchard::OrchardVanilla>>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -938,7 +941,10 @@ impl OrchardSpendConflict {
     /// the new action is inserted in the transaction.
     ///
     /// The transaction will then conflict with any other transaction with the same new nullifier.
-    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData>) {
+    pub fn apply_to(
+        self,
+        orchard_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
+    ) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
             shielded_data.actions.first_mut().action.nullifier =
                 self.new_shielded_data.actions.first().action.nullifier;

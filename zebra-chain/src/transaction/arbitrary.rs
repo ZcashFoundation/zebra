@@ -141,7 +141,7 @@ impl Transaction {
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedData>()),
+            option::of(any::<orchard::ShieldedData<orchard::OrchardVanilla>>()),
         )
             .prop_map(
                 move |(
@@ -697,7 +697,7 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for orchard::ShieldedData {
+impl Arbitrary for orchard::ShieldedData<orchard::OrchardVanilla> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -707,7 +707,7 @@ impl Arbitrary for orchard::ShieldedData {
             any::<orchard::tree::Root>(),
             any::<Halo2Proof>(),
             vec(
-                any::<orchard::shielded_data::AuthorizedAction>(),
+                any::<orchard::shielded_data::AuthorizedAction<orchard::OrchardVanilla>>(),
                 1..MAX_ARBITRARY_ITEMS,
             ),
             any::<BindingSignature>(),
@@ -722,6 +722,7 @@ impl Arbitrary for orchard::ShieldedData {
                         .try_into()
                         .expect("arbitrary vector size range produces at least one action"),
                     binding_sig: binding_sig.0,
+                    burn: Default::default(),
                 },
             )
             .boxed()
@@ -923,7 +924,7 @@ pub fn transaction_to_fake_v5(
             outputs,
             lock_time,
             sapling_shielded_data,
-            orchard_shielded_data,
+            orchard_shielded_data: _,
             ..
         } => V5 {
             network_upgrade: block_nu,
@@ -932,7 +933,10 @@ pub fn transaction_to_fake_v5(
             lock_time: *lock_time,
             expiry_height: height,
             sapling_shielded_data: sapling_shielded_data.clone(),
-            orchard_shielded_data: orchard_shielded_data.clone(),
+            // FIXME: is it possible to convert V6 shielded data to V5?
+            // FIXME: add another function for V6, like transaction_to_fake_v6?
+            //orchard_shielded_data: orchard_shielded_data.clone(),
+            orchard_shielded_data: None,
         },
     }
 }
@@ -1036,6 +1040,7 @@ pub fn transactions_from_blocks<'a>(
     })
 }
 
+// FIXME: make it a generic to support V6?
 /// Modify a V5 transaction to insert fake Orchard shielded data.
 ///
 /// Creates a fake instance of [`orchard::ShieldedData`] with one fake action. Note that both the
@@ -1050,7 +1055,7 @@ pub fn transactions_from_blocks<'a>(
 /// Panics if the transaction to be modified is not V5.
 pub fn insert_fake_orchard_shielded_data(
     transaction: &mut Transaction,
-) -> &mut orchard::ShieldedData {
+) -> &mut orchard::ShieldedData<orchard::OrchardVanilla> {
     // Create a dummy action
     let mut runner = TestRunner::default();
     let dummy_action = orchard::Action::arbitrary()
@@ -1065,13 +1070,14 @@ pub fn insert_fake_orchard_shielded_data(
     };
 
     // Place the dummy action inside the Orchard shielded data
-    let dummy_shielded_data = orchard::ShieldedData {
+    let dummy_shielded_data = orchard::ShieldedData::<orchard::OrchardVanilla> {
         flags: orchard::Flags::empty(),
         value_balance: Amount::try_from(0).expect("invalid transaction amount"),
         shared_anchor: orchard::tree::Root::default(),
         proof: Halo2Proof(vec![]),
         actions: at_least_one![dummy_authorized_action],
         binding_sig: Signature::from([0u8; 64]),
+        burn: Default::default(),
     };
 
     // Replace the shielded data in the transaction

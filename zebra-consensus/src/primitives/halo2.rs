@@ -10,7 +10,7 @@ use std::{
 
 use futures::{future::BoxFuture, FutureExt};
 use once_cell::sync::Lazy;
-use orchard::{circuit::VerifyingKey, orchard_flavor::OrchardVanilla};
+use orchard::circuit::VerifyingKey;
 use rand::{thread_rng, CryptoRng, RngCore};
 
 use thiserror::Error;
@@ -18,6 +18,8 @@ use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
+
+use zebra_chain::orchard::{OrchardFlavorExt, OrchardVanilla};
 
 use crate::BoxError;
 
@@ -76,7 +78,7 @@ pub type ItemVerifyingKey = VerifyingKey;
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key.
     // FIXME: support OrchardZSA?
-    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
+    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();
 }
 
 // === TEMPORARY BATCH HALO2 SUBSTITUTE ===
@@ -131,8 +133,8 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl From<&zebra_chain::orchard::ShieldedData> for Item {
-    fn from(shielded_data: &zebra_chain::orchard::ShieldedData) -> Item {
+impl From<&zebra_chain::orchard::ShieldedData<OrchardVanilla>> for Item {
+    fn from(shielded_data: &zebra_chain::orchard::ShieldedData<OrchardVanilla>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();

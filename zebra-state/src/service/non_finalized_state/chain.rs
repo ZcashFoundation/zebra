@@ -1525,7 +1525,7 @@ impl Chain {
                     inputs,
                     outputs,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    orchard_shielded_data: _,
                     ..
                 } => (
                     inputs,
@@ -1533,7 +1533,8 @@ impl Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    // FIXME: support V6 shielded data?
+                    &None, //orchard_shielded_data,
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
@@ -1700,7 +1701,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     inputs,
                     outputs,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    orchard_shielded_data: _,
                     ..
                 } => (
                     inputs,
@@ -1708,7 +1709,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    orchard_shielded_data,
+                    // FIXME: support V6 shielded data?
+                    &None, //orchard_shielded_data,
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
@@ -2045,11 +2047,11 @@ where
     }
 }
 
-impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
+impl UpdateWith<Option<orchard::ShieldedData<orchard::OrchardVanilla>>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2070,7 +2072,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
