@@ -58,8 +58,11 @@ PORT_RANGE = 5000
 def zcashd_binary():
     return os.getenv("ZEBRAD", ZEBRAD_BINARY)
 
-def zebrad_config():
-    return os.getenv("CONFIG", ZEBRAD_CONFIG)
+def zebrad_config(datadir):
+    base_location = os.getenv("CONFIG", ZEBRAD_CONFIG)
+    new_location = os.path.join(datadir, "config.toml")
+    shutil.copyfile(base_location, new_location)
+    return new_location
 
 class PortSeed:
     # Must be initialized with a unique integer for each process
@@ -210,7 +213,9 @@ def initialize_datadir(dirname, n, clock_offset=0):
 def update_zebrad_conf(datadir, rpc_port, p2p_port):
     import toml
 
-    with open(zebrad_config(), 'r') as f:
+    config_path = zebrad_config(datadir)
+
+    with open(config_path, 'r') as f:
         config_file = toml.load(f)
 
     config_file['rpc']['listen_addr'] = '127.0.0.1:'+str(rpc_port)
@@ -219,8 +224,10 @@ def update_zebrad_conf(datadir, rpc_port, p2p_port):
     config_file['state']['ephemeral'] = False
     config_file['network']['network'] = 'Regtest'
 
-    with open(zebrad_config(), 'w') as f:
+    with open(config_path, 'w') as f:
         toml.dump(config_file, f)
+
+    return config_path
 
 def rpc_auth_pair(n):
     return 'rpcuser💻' + str(n), 'rpcpass🔑' + str(n)
@@ -295,9 +302,8 @@ def initialize_chain(test_dir, num_nodes, cachedir, cache_behavior='current'):
         for i in range(MAX_NODES):
             datadir = initialize_datadir(cachedir, i)
 
-            update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
+            config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
             binary = zcashd_binary()
-            config = zebrad_config()
             args = [ binary, "-c="+config, "start" ]
 
             bitcoind_processes[i] = subprocess.Popen(args)
@@ -515,11 +521,12 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
     """
     Start a bitcoind and return RPC connection to it
     """
+
     datadir = os.path.join(dirname, "node"+str(i))
     if binary is None:
         binary = zcashd_binary()
 
-    config = zebrad_config()
+    config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
     args = [ binary, "-c="+config, "start" ]
 
     if extra_args is not None: args.extend(extra_args)

@@ -47,13 +47,6 @@ Run the regression test suite with
 
     ./qa/pull-tester/rpc-tests.py
 
-Note: Running the suite will make tests to run in paralell.
-TODO: Running the full suite is currently not working (lock issue with the zebra database).
-
-Test can also run directly and individually, for example:
-
-    ./qa/rpc-tests/reindex.py
-
 By default, tests will be run in parallel. To specify how many jobs to run,
 append `--jobs=n` (default n=4).
 
