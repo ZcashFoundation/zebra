@@ -29,8 +29,11 @@ pip3 install pyzmq base58 toml
 Running tests locally
 =====================
 
-Make sure you have a `zebrad` binary in the `target/debug/` directory, or
-you can use a custom location by setting the `ZEBRAD` environment variable.
+If it is not already there please set the zebrad binary environment variable:
+
+```
+export CARGO_BIN_EXE_zebrad=/path/to/zebrad
+```
 
 You can run any single test by calling
 
