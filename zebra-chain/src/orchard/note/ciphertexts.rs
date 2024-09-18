@@ -126,6 +126,9 @@ impl ZcashDeserialize for WrappedNoteKey {
 }
 
 #[cfg(test)]
+use crate::orchard::OrchardFlavorExt;
+
+#[cfg(test)]
 use proptest::prelude::*;
 #[cfg(test)]
 proptest! {
