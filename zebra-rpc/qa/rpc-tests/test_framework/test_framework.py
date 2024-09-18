@@ -16,7 +16,7 @@ import traceback
 
 from .proxy import JSONRPCException
 from .util import (
-    ZEBRAD_BINARY,
+    zcashd_binary,
     initialize_chain,
     start_nodes,
     connect_nodes_bi,
@@ -194,10 +194,10 @@ class ComparisonTestFramework(BitcoinTestFramework):
 
     def add_options(self, parser):
         parser.add_option("--testbinary", dest="testbinary",
-                          default=os.getenv("ZEBRAD", ZEBRAD_BINARY),
+                          default=os.getenv("ZEBRAD", zcashd_binary()),
                           help="zebrad binary to test")
         parser.add_option("--refbinary", dest="refbinary",
-                          default=os.getenv("ZEBRAD", ZEBRAD_BINARY),
+                          default=os.getenv("ZEBRAD", zcashd_binary()),
                           help="zebrad binary to use for reference nodes (if any)")
 
     def setup_network(self):

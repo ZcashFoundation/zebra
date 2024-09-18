@@ -184,8 +184,8 @@ def run_tests(test_handler, test_list, src_dir, build_dir, exeext, jobs=1, enabl
         BOLD = ('\033[0m', '\033[1m')
 
     #Set env vars
-    if "ZEBRAD" not in os.environ:
-        os.environ["ZEBRAD"] = build_dir + '/src/zcashd' + exeext
+    #if "ZEBRAD" not in os.environ:
+    #    os.environ["ZEBRAD"] = build_dir + '/target/debug/zebrad' + exeext
 
     tests_dir = src_dir + '/qa/rpc-tests/'
 

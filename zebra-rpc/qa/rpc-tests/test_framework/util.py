@@ -29,9 +29,6 @@ import errno
 from . import coverage
 from .proxy import ServiceProxy, JSONRPCException
 
-ZEBRAD_BINARY = os.path.join('target', 'debug', 'zebrad')
-ZEBRAD_CONFIG = os.path.join('config.toml')
-
 LEGACY_DEFAULT_FEE = Decimal('0.00001')
 
 COVERAGE_DIR = None
@@ -54,12 +51,14 @@ PORT_MIN = 11000
 # The number of ports to "reserve" for p2p and rpc, each
 PORT_RANGE = 5000
 
+def default_binary():
+    return os.getenv("CARGO_BIN_EXE_zebrad", "zebrad")
 
 def zcashd_binary():
-    return os.getenv("ZEBRAD", ZEBRAD_BINARY)
+    return os.getenv("ZEBRAD", default_binary())
 
 def zebrad_config(datadir):
-    base_location = os.getenv("CONFIG", ZEBRAD_CONFIG)
+    base_location = os.path.join('qa', 'base_config.toml')
     new_location = os.path.join(datadir, "config.toml")
     shutil.copyfile(base_location, new_location)
     return new_location

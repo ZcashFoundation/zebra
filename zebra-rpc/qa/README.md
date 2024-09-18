@@ -29,15 +29,8 @@ pip3 install pyzmq base58 toml
 Running tests locally
 =====================
 
-Please add the following environment variables before running:
-
-Unix
-----
-
-```
-export ZEBRAD=/path/to/zebrad/binary
-export CONFIG=/path/to/zebra/config.toml
-```
+Make sure you have a `zebrad` binary in the `target/debug/` directory, or
+you can use a custom location by setting the `ZEBRAD` environment variable.
 
 You can run any single test by calling
 
