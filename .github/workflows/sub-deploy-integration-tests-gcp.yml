@@ -35,23 +35,15 @@ on:
 
       # Cached state
       #
-      # TODO: find a better name
-      root_state_path:
-        required: false
-        type: string
-        default: '/zebrad-cache'
-        description: 'Cached state base directory path'
-      # TODO: find a better name
       zebra_state_dir:
         required: false
         type: string
-        default: ''
+        default: '/var/cache/zebrad-cache'
         description: 'Zebra cached state directory and input image prefix to search in GCP'
-      # TODO: find a better name
       lwd_state_dir:
         required: false
         type: string
-        default: ''
+        default: '/var/cache/lwd-cache'
         description: 'Lightwalletd cached state directory and input image prefix to search in GCP'
       disk_prefix:
         required: false
@@ -61,6 +53,7 @@ on:
       disk_suffix:
         required: false
         type: string
+        default: 'tip'
         description: 'Image name suffix'
       needs_zebra_state:
         required: true
@@ -104,6 +97,29 @@ env:
   CACHED_STATE_UPDATE_LIMIT: 576
 
 jobs:
+  # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
+  # - disk cached state prefix -> zebrad-cache or lwd-cache
+  # - state version (from the source code) - v{N}
+  # - network (network) - mainnet or testnet
+  # - disk target height kind (disk_suffix) - checkpoint or tip
+  #
+  # If the test needs a lightwalletd state (needs_lwd_state) set the input disk_prefix accordingly
+  # - To lwd-cache if needed
+  # - To zebrad-cache if not
+  #
+  # Passes the disk name to subsequent jobs using `cached_disk_name` output
+  # Passes the state version to subsequent jobs using `state_version` output
+  #
+  get-disk-name:
+    name: Get disk name
+    uses: ./.github/workflows/sub-find-cached-disks.yml
+    with:
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      disk_prefix: ${{ inputs.needs_lwd_state && 'lwd-cache' || inputs.needs_zebra_state && 'zebrad-cache' }}
+      disk_suffix: ${{ inputs.disk_suffix }}
+      prefer_main_cached_state: ${{ inputs.prefer_main_cached_state }}
+      test_id: ${{ inputs.test_id }}
+
   # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
   # Then check the result of the test.
   #
@@ -111,9 +127,14 @@ jobs:
   test-result:
     name: Run ${{ inputs.test_id }} test
     runs-on: zfnd-runners
+    needs: [ get-disk-name ]
+    if: ${{ !cancelled() && !failure() }}
     timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
-      cached_disk_name: ${{ steps.get-disk-name.outputs.cached_disk_name }}
+      cached_disk_name: ${{ needs.get-disk-name.outputs.cached_disk_name }}
+      state_version: ${{ needs.get-disk-name.outputs.state_version }}
+    env:
+      CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -158,47 +179,8 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.1
 
-      # Find a cached state disk for this job, matching all of:
-      # - disk cached state (lwd_state_dir/zebra_state_dir or disk_prefix) - zebrad-cache or lwd-cache
-      # - state version (from the source code) - v{N}
-      # - network (network) - mainnet or testnet
-      # - disk target height kind (disk_suffix) - checkpoint or tip
-      #
-      # If the test needs a lightwalletd state (needs_lwd_state) set the variable DISK_PREFIX accordingly
-      # - To ${{ inputs.lwd_state_dir }}" if needed
-      # - To ${{ inputs.zebra_state_dir || inputs.disk_prefix }} if not
-      #
-      # If there are multiple disks:
-      # - prefer images generated from the same commit, then
-      # - if prefer_main_cached_state is true, prefer images from the `main` branch, then
-      # - use any images from any other branch or commit.
-      # Within each of these categories:
-      # - prefer newer images to older images
-      #
-      # Passes the disk name to subsequent steps using $CACHED_DISK_NAME env variable
-      # Passes the state version to subsequent steps using $STATE_VERSION env variable
-      #
-      # TODO: move this script into a file, and call it from sub-find-cached-disks.yml as well.
-      - name: Find ${{ inputs.test_id }} cached state disk
-        id: get-disk-name
-        if: ${{ inputs.needs_zebra_state || inputs.needs_lwd_state }}
-        env:
-          GITHUB_SHA_SHORT: ${{ env.GITHUB_SHA_SHORT }}
-          NEEDS_LWD_STATE: ${{ inputs.needs_lwd_state }}
-          LWD_STATE_DIR: ${{ inputs.lwd_state_dir }}
-          ZEBRA_STATE_DIR: ${{ inputs.zebra_state_dir }}
-          DISK_PREFIX: ${{ inputs.disk_prefix }}
-          NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
-          DISK_SUFFIX: ${{ inputs.disk_suffix }}
-          PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
-        run: |
-          source ./.github/workflows/scripts/gcp-get-cached-disks.sh
-          echo "STATE_VERSION=${LOCAL_STATE_VERSION}" >> "${GITHUB_ENV}"
-          echo "CACHED_DISK_NAME=${CACHED_DISK_NAME}" >> "${GITHUB_ENV}"
-          echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
-
       # Create a Compute Engine virtual machine and attach a cached state disk using the
-      # $CACHED_DISK_NAME variable as the source image to populate the disk cached state
+      # $CACHED_DISK_NAME env as the source image to populate the disk cached state
       # if the test needs it.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
@@ -256,8 +238,7 @@ jobs:
       #
       # The disk mounted in the VM is located at /dev/$DISK_NAME, we mount the root `/` of this disk to the docker
       # container, and might have two different paths (if lightwalletd state is needed):
-      # - /var/cache/zebrad-cache -> ${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }} -> $ZEBRA_CACHED_STATE_DIR
-      # - /var/cache/lwd-cache -> ${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }} -> $LIGHTWALLETD_DATA_DIR
+      # - ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
       #
       # Currently we do this by mounting the same disk at both paths.
       #
@@ -268,7 +249,7 @@ jobs:
       # These paths must match the variables used by the tests in Rust, which are also set in
       # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
-      # Although we're mounting the disk root to both directories, Zebra and Lightwalletd
+      # Although we're mounting the disk root to both directories, Zebra and Lightwalletd, tests
       # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
       # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
       # are only used to match those variables paths.
@@ -286,12 +267,12 @@ jobs:
           # Extract the correct disk name based on the device-name
           DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-)
 
-          MOUNT_FLAGS="--mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.zebra_state_dir }}"
+          MOUNT_FLAGS="--mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.zebra_state_dir }}"
 
           # Check if we need to mount for Lightwalletd state
           # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
-            MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.root_state_path }}/${{ inputs.lwd_state_dir }}"
+            MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.lwd_state_dir }}"
           fi
 
           sudo docker run \
@@ -401,6 +382,9 @@ jobs:
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
     if: ${{ !cancelled() && !failure() && (inputs.saves_to_disk || inputs.force_save_to_disk) }}
+    env:
+      STATE_VERSION: ${{ needs.test-result.outputs.state_version }}
+      CACHED_DISK_NAME: ${{ needs.test-result.outputs.cached_disk_name }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -456,17 +440,6 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.1
-
-      # Get the state version from the local constants.rs file to be used in the image creation,
-      # as the state version is part of the disk image name.
-      #
-      # Passes the state version to subsequent steps using $STATE_VERSION env variable
-      - name: Get state version from constants.rs
-        run: |
-          LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" $GITHUB_WORKSPACE/zebra-state/src/constants.rs | grep -oE "[0-9]+" | tail -n1)
-          echo "STATE_VERSION: $LOCAL_STATE_VERSION"
-
-          echo "STATE_VERSION=$LOCAL_STATE_VERSION" >> "$GITHUB_ENV"
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
@@ -641,7 +614,7 @@ jobs:
       - name: Get original cached state height from google cloud
         run: |
           ORIGINAL_HEIGHT="0"
-          ORIGINAL_DISK_NAME="${{ format('{0}', needs.test-result.outputs.cached_disk_name) }}"
+          ORIGINAL_DISK_NAME="${{ format('{0}', env.CACHED_DISK_NAME) }}"
 
           if [[ -n "$ORIGINAL_DISK_NAME" ]]; then
               ORIGINAL_HEIGHT=$(gcloud compute images list --filter="status=READY AND name=$ORIGINAL_DISK_NAME" --format="value(labels.height)")
