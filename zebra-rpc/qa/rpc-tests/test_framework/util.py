@@ -52,7 +52,7 @@ PORT_MIN = 11000
 PORT_RANGE = 5000
 
 def default_binary():
-    return os.getenv("CARGO_BIN_EXE_zebrad", "zebrad")
+    return os.getenv("CARGO_BIN_EXE_zebrad", os.path.join("..", "target", "debug", "zebrad"))
 
 def zcashd_binary():
     return os.getenv("ZEBRAD", default_binary())
