@@ -10,8 +10,6 @@
 # 4. Node Startup: Starts the node, allowing it to begin its operations.
 #
 
-# Show the commands we are executing
-set -x
 # Exit if a command fails
 set -e
 # Exit if any command in a pipeline fails
