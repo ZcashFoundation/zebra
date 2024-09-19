@@ -220,7 +220,9 @@ def run_tests(test_handler, test_list, src_dir, build_dir, exeext, jobs=1, enabl
 
             print('\n' + BOLD[1] + name + BOLD[0] + ":")
             print('' if passed else stdout + '\n', end='')
-            print('' if stderr == '' else 'stderr:\n' + stderr + '\n', end='')
+            # TODO: Zebrad always produce the welcome message in the stderr.
+            # Ignoring stderr output here until that is fixed.
+            #print('' if stderr == '' else 'stderr:\n' + stderr + '\n', end='')
             print("Pass: %s%s%s" % (BOLD[1], passed, BOLD[0]), end='')
             if deterministic:
                 print("\n", end='')
