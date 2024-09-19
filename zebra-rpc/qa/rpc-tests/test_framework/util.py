@@ -51,11 +51,8 @@ PORT_MIN = 11000
 # The number of ports to "reserve" for p2p and rpc, each
 PORT_RANGE = 5000
 
-def default_binary():
-    return os.getenv("CARGO_BIN_EXE_zebrad", os.path.join("..", "target", "debug", "zebrad"))
-
 def zcashd_binary():
-    return os.getenv("ZEBRAD", default_binary())
+    return os.getenv("CARGO_BIN_EXE_zebrad", os.path.join("..", "target", "debug", "zebrad"))
 
 def zebrad_config(datadir):
     base_location = os.path.join('qa', 'base_config.toml')
