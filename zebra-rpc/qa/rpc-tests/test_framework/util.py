@@ -220,8 +220,6 @@ def update_zebrad_conf(datadir, rpc_port, p2p_port):
     config_file['rpc']['listen_addr'] = '127.0.0.1:'+str(rpc_port)
     config_file['network']['listen_addr'] = '127.0.0.1:'+str(p2p_port)
     config_file['state']['cache_dir'] = datadir
-    config_file['state']['ephemeral'] = False
-    config_file['network']['network'] = 'Regtest'
 
     with open(config_path, 'w') as f:
         toml.dump(config_file, f)
