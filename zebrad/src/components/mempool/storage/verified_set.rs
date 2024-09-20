@@ -22,8 +22,10 @@ use zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 
 #[derive(Default)]
 struct TransactionDependencies {
-    /// Lists of mempool transactions that create UTXOs spent
-    /// by a mempool transaction.
+    /// Lists of mempool transactions that create UTXOs spent by
+    /// a mempool transaction. Used during block template construction
+    /// to exclude transactions from block templates unless all of the
+    /// transactions they depend on have been included.
     dependencies: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 
     /// Lists of transaction ids in the mempool that spend UTXOs created
@@ -65,7 +67,7 @@ impl TransactionDependencies {
     }
 
     /// Removes the hash of a transaction in the mempool and the hashes of any transactions
-    /// that are tracked as being directly dependant on that transaction from
+    /// that are tracked as being directly dependent on that transaction from
     /// this [`TransactionDependencies`].
     ///
     /// Returns a list of transaction hashes that depend on the transaction being removed.

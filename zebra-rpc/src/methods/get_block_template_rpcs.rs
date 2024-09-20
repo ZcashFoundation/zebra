@@ -886,7 +886,7 @@ where
             tracing::debug!(
                 selected_mempool_tx_hashes = ?mempool_txs
                     .iter()
-                    .map(|tx| tx.transaction.id.mined_id())
+                    .map(|(_, tx)| tx.transaction.id.mined_id())
                     .collect::<Vec<_>>(),
                 "selected transactions for the template from the mempool"
             );
