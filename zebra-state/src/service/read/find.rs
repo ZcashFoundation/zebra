@@ -104,7 +104,7 @@ where
                     return Ok(None);
                 };
 
-                let value_balance = db.finalized_value_pool();
+                let value_balance = db.finalized_tip_value_pool();
 
                 if tip == db.tip() {
                     return Ok(Some((tip_height, tip_hash, value_balance)));

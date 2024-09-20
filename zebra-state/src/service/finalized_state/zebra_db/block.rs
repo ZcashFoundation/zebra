@@ -392,7 +392,7 @@ impl ZebraDb {
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
             address_balances,
-            self.finalized_value_pool(),
+            self.finalized_tip_value_pool(),
             prev_note_commitment_trees,
         )?;
 

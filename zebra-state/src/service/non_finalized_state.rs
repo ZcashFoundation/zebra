@@ -288,7 +288,7 @@ impl NonFinalizedState {
             finalized_state.sapling_tree_for_tip(),
             finalized_state.orchard_tree_for_tip(),
             finalized_state.history_tree(),
-            finalized_state.finalized_value_pool(),
+            finalized_state.finalized_tip_value_pool(),
         );
 
         let (height, hash) = (prepared.height, prepared.hash);

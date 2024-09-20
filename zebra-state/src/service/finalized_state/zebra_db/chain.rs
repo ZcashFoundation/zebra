@@ -60,7 +60,7 @@ pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
-pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNegative>>;
+pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, Height, ValueBalance<NonNegative>>;
 
 impl ZebraDb {
     // Column family convenience methods
@@ -154,12 +154,22 @@ impl ZebraDb {
 
     // Value pool methods
 
-    /// Returns the stored `ValueBalance` for the best chain at the finalized tip height.
-    pub fn finalized_value_pool(&self) -> ValueBalance<NonNegative> {
+    /// Returns the stored `ValueBalance` for the best chain at the provided height.
+    pub fn finalized_value_pool(&self, height: Height) -> ValueBalance<NonNegative> {
         let chain_value_pools_cf = self.chain_value_pools_cf();
 
         chain_value_pools_cf
-            .zs_get(&())
+            .zs_get(&height)
+            .unwrap_or_else(ValueBalance::zero)
+    }
+
+    /// Returns the stored `ValueBalance` for the best chain at the finalized tip.
+    pub fn finalized_tip_value_pool(&self) -> ValueBalance<NonNegative> {
+        let chain_value_pools_cf = self.chain_value_pools_cf();
+
+        chain_value_pools_cf
+            .zs_last_key_value()
+            .map(|(_k, v)| v)
             .unwrap_or_else(ValueBalance::zero)
     }
 }
@@ -231,7 +241,7 @@ impl DiskWriteBatch {
             .chain_value_pools_cf()
             .with_batch_for_writing(self)
             .zs_insert(
-                &(),
+                &finalized.height,
                 &value_pool.add_chain_value_pool_change(
                     finalized.block.chain_value_pool_change(
                         &utxos_spent_by_block,

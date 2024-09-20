@@ -403,7 +403,7 @@ proptest! {
         // We're waiting to verify each block here, so we don't need the maximum checkpoint height.
         let (mut state_service, _, _, _) = StateService::new(Config::ephemeral(), &network, Height::MAX, 0);
 
-        prop_assert_eq!(state_service.read_service.db.finalized_value_pool(), ValueBalance::zero());
+        prop_assert_eq!(state_service.read_service.db.finalized_tip_value_pool(), ValueBalance::zero());
         prop_assert_eq!(
             state_service.read_service.latest_non_finalized_state().best_chain().map(|chain| chain.chain_value_pools).unwrap_or_else(ValueBalance::zero),
             ValueBalance::zero()
@@ -414,14 +414,14 @@ proptest! {
         // the expected transparent pool value, calculated using the slow start rate
         let mut expected_transparent_pool = ValueBalance::zero();
 
-        let mut expected_finalized_value_pool = Ok(ValueBalance::zero());
+        let mut expected_finalized_tip_value_pool = Ok(ValueBalance::zero());
         for block in finalized_blocks {
             // the genesis block has a zero-valued transparent output,
             // which is not included in the UTXO set
             if block.height > block::Height(0) {
                 let utxos = &block.new_outputs.iter().map(|(k, ordered_utxo)| (*k, ordered_utxo.utxo.clone())).collect();
                 let block_value_pool = &block.block.chain_value_pool_change(utxos, None)?;
-                expected_finalized_value_pool += *block_value_pool;
+                expected_finalized_tip_value_pool += *block_value_pool;
             }
 
             let result_receiver = state_service.queue_and_commit_to_finalized_state(block.clone());
@@ -430,8 +430,8 @@ proptest! {
             prop_assert!(result.is_ok(), "unexpected failed finalized block commit: {:?}", result);
 
             prop_assert_eq!(
-                state_service.read_service.db.finalized_value_pool(),
-                expected_finalized_value_pool.clone()?.constrain()?
+                state_service.read_service.db.finalized_tip_value_pool(),
+                expected_finalized_tip_value_pool.clone()?.constrain()?
             );
 
             let transparent_value = SLOW_START_RATE * i64::from(block.height.0);
@@ -439,16 +439,16 @@ proptest! {
             let transparent_value = ValueBalance::from_transparent_amount(transparent_value);
             expected_transparent_pool = (expected_transparent_pool + transparent_value).unwrap();
             prop_assert_eq!(
-                state_service.read_service.db.finalized_value_pool(),
+                state_service.read_service.db.finalized_tip_value_pool(),
                 expected_transparent_pool
             );
         }
 
-        let mut expected_non_finalized_value_pool = Ok(expected_finalized_value_pool?);
+        let mut expected_non_finalized_tip_value_pool = Ok(expected_finalized_tip_value_pool?);
         for block in non_finalized_blocks {
             let utxos = block.new_outputs.clone();
             let block_value_pool = &block.block.chain_value_pool_change(&transparent::utxos_from_ordered_utxos(utxos), None)?;
-            expected_non_finalized_value_pool += *block_value_pool;
+            expected_non_finalized_tip_value_pool += *block_value_pool;
 
             let result_receiver = state_service.queue_and_commit_to_non_finalized_state(block.clone());
             let result = result_receiver.blocking_recv();
@@ -457,7 +457,7 @@ proptest! {
 
             prop_assert_eq!(
                 state_service.read_service.latest_non_finalized_state().best_chain().unwrap().chain_value_pools,
-                expected_non_finalized_value_pool.clone()?.constrain()?
+                expected_non_finalized_tip_value_pool.clone()?.constrain()?
             );
 
             let transparent_value = SLOW_START_RATE * i64::from(block.height.0);
