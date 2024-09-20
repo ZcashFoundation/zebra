@@ -158,3 +158,9 @@ $RECYCLE.BIN/
 
 # Windows shortcuts
 *.lnk
+
+# Python pycache
+__pycache__/
+
+# RPC tests cache 
+zebra-rpc/qa/cache/
