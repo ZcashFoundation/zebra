@@ -290,6 +290,7 @@ impl ZebraDb {
     ///
     /// - Propagates any errors from writing to the DB
     /// - Propagates any errors from updating history and note commitment trees
+    #[allow(clippy::unwrap_in_result)]
     pub(in super::super) fn write_block(
         &mut self,
         finalized: FinalizedBlock,

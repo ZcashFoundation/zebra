@@ -22,6 +22,7 @@ pub mod amount;
 pub mod block;
 pub mod chain_sync_status;
 pub mod chain_tip;
+pub mod common;
 pub mod diagnostic;
 pub mod error;
 pub mod fmt;

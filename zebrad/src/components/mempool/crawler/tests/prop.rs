@@ -6,7 +6,7 @@ use proptest::{
     collection::{hash_set, vec},
     prelude::*,
 };
-use tokio::time;
+use tokio::{sync::oneshot, time};
 
 use zebra_chain::{
     chain_sync_status::ChainSyncStatus, parameters::Network, transaction::UnminedTxId,
@@ -317,9 +317,17 @@ async fn respond_to_queue_request(
     expected_transaction_ids: HashSet<UnminedTxId>,
     response: impl IntoIterator<Item = Result<(), MempoolError>>,
 ) -> Result<(), TestCaseError> {
-    let response = response
+    let response: Vec<Result<oneshot::Receiver<Result<(), BoxError>>, BoxError>> = response
         .into_iter()
-        .map(|result| result.map_err(BoxError::from))
+        .map(|result| {
+            result
+                .map(|_| {
+                    let (rsp_tx, rsp_rx) = oneshot::channel();
+                    let _ = rsp_tx.send(Ok(()));
+                    rsp_rx
+                })
+                .map_err(BoxError::from)
+        })
         .collect();
 
     mempool
