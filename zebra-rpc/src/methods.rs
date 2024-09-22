@@ -301,6 +301,19 @@ pub trait Rpc {
         &self,
         address_strings: AddressStrings,
     ) -> BoxFuture<Result<Vec<GetAddressUtxos>>>;
+
+    /// Stop the running zebrad process.
+    ///
+    /// # Notes
+    ///
+    /// - Works for non windows targets only.
+    /// - Works only if the network of the running zebrad process is `Regtest`.
+    ///
+    /// zcashd reference: [`stop`](https://zcash.github.io/rpc/stop.html)
+    /// method: post
+    /// tags: control
+    #[rpc(name = "stop")]
+    fn stop(&self) -> Result<String>;
 }
 
 /// RPC method implementations.
@@ -664,7 +677,7 @@ where
 
             let response = mempool.oneshot(request).await.map_server_error()?;
 
-            let queue_results = match response {
+            let mut queue_results = match response {
                 mempool::Response::Queued(results) => results,
                 _ => unreachable!("incorrect response variant from mempool service"),
             };
@@ -675,10 +688,17 @@ where
                 "mempool service returned more results than expected"
             );
 
-            tracing::debug!("sent transaction to mempool: {:?}", &queue_results[0]);
+            let queue_result = queue_results
+                .pop()
+                .expect("there should be exactly one item in Vec")
+                .inspect_err(|err| tracing::debug!("sent transaction to mempool: {:?}", &err))
+                .map_server_error()?
+                .await;
 
-            queue_results[0]
-                .as_ref()
+            tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
+
+            queue_result
+                .map_server_error()?
                 .map(|_| SentTransactionHash(transaction_hash))
                 .map_server_error()
         }
@@ -1336,6 +1356,32 @@ where
             Ok(response_utxos)
         }
         .boxed()
+    }
+
+    fn stop(&self) -> Result<String> {
+        #[cfg(not(target_os = "windows"))]
+        if self.network.is_regtest() {
+            match nix::sys::signal::raise(nix::sys::signal::SIGINT) {
+                Ok(_) => Ok("Zebra server stopping".to_string()),
+                Err(error) => Err(Error {
+                    code: ErrorCode::InternalError,
+                    message: format!("Failed to shut down: {}", error),
+                    data: None,
+                }),
+            }
+        } else {
+            Err(Error {
+                code: ErrorCode::MethodNotFound,
+                message: "stop is only available on regtest networks".to_string(),
+                data: None,
+            })
+        }
+        #[cfg(target_os = "windows")]
+        Err(Error {
+            code: ErrorCode::MethodNotFound,
+            message: "stop is not available in windows targets".to_string(),
+            data: None,
+        })
     }
 }
 

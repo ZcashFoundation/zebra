@@ -39,6 +39,9 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_chain::{block::Height, serialization::ZcashSerialize};
+
 use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
@@ -1901,6 +1904,46 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         Ok(ReadResponse::ValidBlockProposal)
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::TipBlockSize => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        // Get the best chain tip height.
+                        let tip_height = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
+                                read::tip_height(non_finalized_state.best_chain(), &state.db)
+                            })
+                            .unwrap_or(Height(0));
+
+                        // Get the block at the best chain tip height.
+                        let block = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    tip_height.into(),
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::TipBlockSize");
+
+                        // Respond with the length of the obtained block if any.
+                        match block {
+                            Some(b) => Ok(ReadResponse::TipBlockSize(Some(
+                                b.zcash_serialize_to_vec()?.len(),
+                            ))),
+                            None => Ok(ReadResponse::TipBlockSize(None)),
+                        }
                     })
                 })
                 .wait_for_panics()

@@ -174,9 +174,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     let all_methods = Methods { paths: methods };
 
     // Add openapi header and write to file
-    let yaml_string = serde_yaml::to_string(&all_methods)?;
+    let yml_string = serde_yml::to_string(&all_methods)?;
     let mut w = File::create("openapi.yaml")?;
-    w.write_all(format!("{}{}", create_yaml(), yaml_string).as_bytes())?;
+    w.write_all(format!("{}{}", create_yaml(), yml_string).as_bytes())?;
 
     Ok(())
 }
@@ -543,6 +543,7 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         )?,
         // control
         "getinfo" => default_property(type_, items.clone(), GetInfo::default())?,
+        "stop" => default_property(type_, items.clone(), ())?,
         // transaction
         "sendrawtransaction" => {
             default_property(type_, items.clone(), SentTransactionHash::default())?

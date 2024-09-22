@@ -59,7 +59,7 @@ pub(crate) async fn run() -> Result<()> {
         ?rpc_address,
         "spawned isolated zebrad with shorter chain, waiting for zebrad to open its RPC port..."
     );
-    zebrad.expect_stdout_line_matches(&format!("Opened RPC endpoint at {rpc_address}"))?;
+    zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {rpc_address}"))?;
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
