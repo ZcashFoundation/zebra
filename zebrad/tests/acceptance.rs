@@ -29,9 +29,10 @@
 //! - `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
 //!   will allow this test to run or give up. Value for the Mainnet full sync tests.
 //! - `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
-//!   will allow this test to run or give up. Value for the Testnet ful  sync tests.
-//! - `/zebrad-cache` directory: For some sync tests, this needs to be created in
-//!   the file system, the created directory should have write permissions.
+//!   will allow this test to run or give up. Value for the Testnet full sync tests.
+//! - `ZEBRA_CACHED_STATE_DIR` env variable: The path to a Zebra cached state directory.
+//!   If not set, it defaults to `/zebrad-cache`. For some sync tests, this directory needs to be
+//!   created in the file system with write permissions.
 //!
 //! Here are some examples on how to run each of the tests:
 //!
@@ -40,13 +41,15 @@
 //!
 //! $ cargo test sync_large_checkpoints_mempool_mainnet -- --ignored --nocapture
 //!
-//! $ sudo mkdir /zebrad-cache
-//! $ sudo chmod 777 /zebrad-cache
+//! $ export ZEBRA_CACHED_STATE_DIR="/zebrad-cache"
+//! $ sudo mkdir -p "$ZEBRA_CACHED_STATE_DIR"
+//! $ sudo chmod 777 "$ZEBRA_CACHED_STATE_DIR"
 //! $ export FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600
 //! $ cargo test full_sync_mainnet -- --ignored --nocapture
 //!
-//! $ sudo mkdir /zebrad-cache
-//! $ sudo chmod 777 /zebrad-cache
+//! $ export ZEBRA_CACHED_STATE_DIR="/zebrad-cache"
+//! $ sudo mkdir -p "$ZEBRA_CACHED_STATE_DIR"
+//! $ sudo chmod 777 "$ZEBRA_CACHED_STATE_DIR"
 //! $ export FULL_SYNC_TESTNET_TIMEOUT_MINUTES=600
 //! $ cargo test full_sync_testnet -- --ignored --nocapture
 //! ```
@@ -67,9 +70,10 @@
 //! at least the `ZEBRA_TEST_LIGHTWALLETD` environment variable is present:
 //!
 //! - `ZEBRA_TEST_LIGHTWALLETD` env variable: Needs to be present to run any of the lightwalletd tests.
-//! - `ZEBRA_CACHED_STATE_DIR` env var: The path to a zebra blockchain database.
-//! - `LIGHTWALLETD_DATA_DIR` env variable. The path to a lightwalletd database.
-//! - `--features lightwalletd-grpc-tests` cargo flag. The flag given to cargo to build the source code of the running test.
+//! - `ZEBRA_CACHED_STATE_DIR` env variable: The path to a Zebra cached state directory.
+//!   If not set, it defaults to `/zebrad-cache`.
+//! - `LIGHTWALLETD_DATA_DIR` env variable: The path to a lightwalletd database.
+//! - `--features lightwalletd-grpc-tests` cargo flag: The flag given to cargo to build the source code of the running test.
 //!
 //! Here are some examples of running each test:
 //!
