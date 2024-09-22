@@ -106,7 +106,7 @@ impl ChainTip for MockChainTip {
     }
 
     fn best_tip_mined_transaction_ids(&self) -> Arc<[transaction::Hash]> {
-        unreachable!("Method not used in tests");
+        Arc::new([])
     }
 
     fn estimate_distance_to_network_chain_tip(
