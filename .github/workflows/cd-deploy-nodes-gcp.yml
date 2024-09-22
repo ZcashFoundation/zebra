@@ -42,27 +42,26 @@ on:
         type: boolean
         default: false
 
-  # TODO: Temporarily disabled to reduce network load, see #6894.
-  #push:
-  #  # Skip main branch updates where Rust code and dependencies aren't modified.
-  #  branches:
-  #    - main
-  #  paths:
-  #    # code and tests
-  #    - '**/*.rs'
-  #    # hard-coded checkpoints and proptest regressions
-  #    - '**/*.txt'
-  #    # dependencies
-  #    - '**/Cargo.toml'
-  #    - '**/Cargo.lock'
-  #    # configuration files
-  #    - '.cargo/config.toml'
-  #    - '**/clippy.toml'
-  #    # workflow definitions
-  #    - 'docker/**'
-  #    - '.dockerignore'
-  #    - '.github/workflows/cd-deploy-nodes-gcp.yml'
-  #    - '.github/workflows/sub-build-docker-image.yml'
+  push:
+   # Skip main branch updates where Rust code and dependencies aren't modified.
+   branches:
+     - main
+   paths:
+     # code and tests
+     - '**/*.rs'
+     # hard-coded checkpoints and proptest regressions
+     - '**/*.txt'
+     # dependencies
+     - '**/Cargo.toml'
+     - '**/Cargo.lock'
+     # configuration files
+     - '.cargo/config.toml'
+     - '**/clippy.toml'
+     # workflow definitions
+     - 'docker/**'
+     - '.dockerignore'
+     - '.github/workflows/cd-deploy-nodes-gcp.yml'
+     - '.github/workflows/sub-build-docker-image.yml'
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
@@ -176,6 +175,19 @@ jobs:
       test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
+  # Finds a `tip` cached state disk for zebra from the main branch
+  #
+  # Passes the disk name to subsequent jobs using `cached_disk_name` output
+  #
+  get-disk-name:
+    name: Get disk name
+    uses: ./.github/workflows/sub-find-cached-disks.yml
+    with:
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      disk_prefix: zebrad-cache
+      disk_suffix: tip
+      prefer_main_cached_state: true
+
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
   #
@@ -196,9 +208,11 @@ jobs:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path ]
+    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path, get-disk-name ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    env:
+      CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -240,24 +254,31 @@ jobs:
       # but the implementation is failing as it's requiring the disk names, contrary to what is stated in the official documentation
       - name: Create instance template for ${{ matrix.network }}
         run: |
+          NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
+          DISK_PARAMS="name=${NAME},device-name=${NAME},size=400GB,type=pd-ssd"
+          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
+            DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
+          else
+            echo "No cached disk found for ${{ matrix.network }} in main branch"
+            exit 1
+          fi
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
-          --boot-disk-size 300GB \
+          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
+          --boot-disk-size 50GB \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --user-output-enabled \
-          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --create-disk="${DISK_PARAMS}" \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${NAME},mode=rw \
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
-          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
-          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
-          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
-          --labels=app=zebrad,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
+          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+          --labels=app=zebrad,environment=staging,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad
 
       # Check if our destination instance group exists already
@@ -297,9 +318,11 @@ jobs:
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single ${{ inputs.network }} instance
-    needs: [ build, test-configuration-file, test-zebra-conf-path ]
+    needs: [ build, test-configuration-file, test-zebra-conf-path, get-disk-name ]
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -340,22 +363,30 @@ jobs:
       # Create instance template from container image
       - name: Manual deploy of a single ${{ inputs.network }} instance running zebrad
         run: |
+          NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
+          DISK_PARAMS="name=${NAME},device-name=${NAME},size=400GB,type=pd-ssd"
+          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
+            DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
+          else
+            echo "No cached disk found for ${{ matrix.network }} in main branch"
+            exit 1
+          fi
           gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
-          --boot-disk-size 300GB \
+          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
+          --boot-disk-size 50GB \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --user-output-enabled \
-          --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --create-disk="${DISK_PARAMS}" \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${NAME},mode=rw \
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
           --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
-          --create-disk=name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},device-name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},auto-delete=yes,size=300GB,type=pd-ssd,mode=rw \
-          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=zebrad-cache-${{ env.GITHUB_SHA_SHORT }}-${NETWORK},mode=rw \
-          --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
+          --scopes cloud-platform \
+          --metadata google-logging-enabled=true,google-monitoring-enabled=true \
           --labels=app=zebrad,environment=qa,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \
           --tags zebrad \
           --zone ${{ vars.GCP_ZONE }}
