@@ -27,7 +27,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, oneshot};
 use tokio_stream::StreamExt;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
@@ -560,7 +560,7 @@ impl Service<Request> for Mempool {
                 for tx in tx_retries {
                     // This is just an efficiency optimisation, so we don't care if queueing
                     // transaction requests fails.
-                    let _result = tx_downloads.download_if_needed_and_verify(tx);
+                    let _result = tx_downloads.download_if_needed_and_verify(tx, None);
                 }
             }
 
@@ -608,8 +608,8 @@ impl Service<Request> for Mempool {
                             tracing::trace!("chain grew during tx verification, retrying ..",);
 
                             // We don't care if re-queueing the transaction request fails.
-                            let _result =
-                                tx_downloads.download_if_needed_and_verify(tx.transaction.into());
+                            let _result = tx_downloads
+                                .download_if_needed_and_verify(tx.transaction.into(), None);
                         }
                     }
                     Ok(Err((txid, error))) => {
@@ -758,16 +758,24 @@ impl Service<Request> for Mempool {
                 Request::Queue(gossiped_txs) => {
                     trace!(req_count = ?gossiped_txs.len(), "got mempool Queue request");
 
-                    let rsp: Vec<Result<(), BoxError>> = gossiped_txs
-                        .into_iter()
-                        .map(|gossiped_tx| -> Result<(), MempoolError> {
-                            storage.should_download_or_verify(gossiped_tx.id())?;
-                            tx_downloads.download_if_needed_and_verify(gossiped_tx)?;
+                    let rsp: Vec<Result<oneshot::Receiver<Result<(), BoxError>>, BoxError>> =
+                        gossiped_txs
+                            .into_iter()
+                            .map(
+                                |gossiped_tx| -> Result<
+                                    oneshot::Receiver<Result<(), BoxError>>,
+                                    MempoolError,
+                                > {
+                                    let (rsp_tx, rsp_rx) = oneshot::channel();
+                                    storage.should_download_or_verify(gossiped_tx.id())?;
+                                    tx_downloads
+                                        .download_if_needed_and_verify(gossiped_tx, Some(rsp_tx))?;
 
-                            Ok(())
-                        })
-                        .map(|result| result.map_err(BoxError::from))
-                        .collect();
+                                    Ok(rsp_rx)
+                                },
+                            )
+                            .map(|result| result.map_err(BoxError::from))
+                            .collect();
 
                     // We've added transactions to the queue
                     self.update_metrics();
