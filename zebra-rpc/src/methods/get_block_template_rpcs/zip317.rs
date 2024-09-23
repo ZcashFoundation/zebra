@@ -26,7 +26,7 @@ use crate::methods::get_block_template_rpcs::{
     get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
 };
 
-use super::get_block_template::MinimumTxIndex;
+use super::get_block_template::InBlockTxDependenciesDepth;
 
 /// Selects mempool transactions for block production according to [ZIP-317],
 /// using a fake coinbase transaction and the mempool.
@@ -48,7 +48,7 @@ pub fn select_mempool_transactions(
     mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
-) -> Vec<(MinimumTxIndex, VerifiedUnminedTx)> {
+) -> Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
     let fake_coinbase_tx = fake_coinbase_transaction(
@@ -167,7 +167,7 @@ fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<Weight
 
 fn has_dependencies(
     candidate_tx_deps: Option<&HashSet<transaction::Hash>>,
-    selected_txs: &Vec<(MinimumTxIndex, VerifiedUnminedTx)>,
+    selected_txs: &Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
 ) -> bool {
     let Some(deps) = candidate_tx_deps else {
         return true;
@@ -185,17 +185,18 @@ fn has_dependencies(
 
 /// Returns the minimum valid transaction index in the block for a candidate
 /// transaction with the provided dependencies.
-fn min_tx_index(
+fn dependencies_depth(
     candidate_tx_deps: Option<&HashSet<transaction::Hash>>,
     mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
-) -> MinimumTxIndex {
+) -> InBlockTxDependenciesDepth {
     let Some(deps) = candidate_tx_deps else {
         return 0;
     };
 
+    // TODO: Use iteration instead of recursion to avoid potential stack overflow
     1 + deps
         .iter()
-        .map(|dep| min_tx_index(mempool_tx_deps.get(dep), mempool_tx_deps))
+        .map(|dep| dependencies_depth(mempool_tx_deps.get(dep), mempool_tx_deps))
         .max()
         .unwrap_or_default()
 }
@@ -213,7 +214,7 @@ fn min_tx_index(
 fn checked_add_transaction_weighted_random(
     candidate_txs: &mut Vec<VerifiedUnminedTx>,
     tx_weights: WeightedIndex<f32>,
-    selected_txs: &mut Vec<(MinimumTxIndex, VerifiedUnminedTx)>,
+    selected_txs: &mut Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
     mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
     remaining_block_bytes: &mut usize,
     remaining_block_sigops: &mut u64,
@@ -249,7 +250,7 @@ fn checked_add_transaction_weighted_random(
         )
     {
         selected_txs.push((
-            min_tx_index(candidate_tx_deps, mempool_tx_deps),
+            dependencies_depth(candidate_tx_deps, mempool_tx_deps),
             candidate_tx.clone(),
         ));
 

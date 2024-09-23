@@ -35,10 +35,10 @@ pub mod proposal;
 pub use parameters::{GetBlockTemplateCapability, GetBlockTemplateRequestMode, JsonParameters};
 pub use proposal::{proposal_block_from_template, ProposalResponse};
 
-/// An alias to indicate that a usize value is meant to be a minimum valid transaction index in block.
+/// An alias to indicate that a usize value represents the depth of in-block dependencies of a transaction.
 ///
-/// See the `min_tx_index()` function in [`zip317`](super::super::zip317) for more details.
-pub type MinimumTxIndex = usize;
+/// See the `dependencies_depth()` function in [`zip317`](super::super::zip317) for more details.
+pub type InBlockTxDependenciesDepth = usize;
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 #[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -232,7 +232,7 @@ impl GetBlockTemplate {
         miner_address: &transparent::Address,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
-        mempool_txs: Vec<(MinimumTxIndex, VerifiedUnminedTx)>,
+        mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
         like_zcashd: bool,
         extra_coinbase_data: Vec<u8>,
@@ -243,7 +243,7 @@ impl GetBlockTemplate {
 
         // Convert transactions into TransactionTemplates
         let mut mempool_txs_with_templates: Vec<(
-            MinimumTxIndex,
+            InBlockTxDependenciesDepth,
             TransactionTemplate<amount::NonNegative>,
             VerifiedUnminedTx,
         )> = mempool_txs
