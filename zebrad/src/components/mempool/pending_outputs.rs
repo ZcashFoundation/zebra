@@ -32,7 +32,6 @@ impl PendingOutputs {
             receiver
                 .recv()
                 .await
-                .map(Some)
                 .map(Response::UnspentOutput)
                 .map_err(BoxError::from)
         }

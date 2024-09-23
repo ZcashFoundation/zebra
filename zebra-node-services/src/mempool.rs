@@ -2,7 +2,7 @@
 //!
 //! A service that manages known unmined Zcash transactions.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use tokio::sync::oneshot;
 use zebra_chain::{
@@ -10,6 +10,8 @@ use zebra_chain::{
     transparent,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use std::collections::HashMap;
 #[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::transaction::VerifiedUnminedTx;
 
@@ -117,8 +119,8 @@ pub enum Response {
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
 
-    /// Response to [`Request::UnspentOutput`] with the transparent output
-    UnspentOutput(Option<transparent::Output>),
+    /// Response to [`Request::AwaitOutput`] with the transparent output
+    UnspentOutput(transparent::Output),
 
     /// Returns all [`VerifiedUnminedTx`] in the mempool.
     //

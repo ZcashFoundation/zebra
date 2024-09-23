@@ -828,7 +828,12 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
-                    Request::AwaitOutput(_) => Response::UnspentOutput(None),
+                    Request::AwaitOutput(_) => {
+                        return async move {
+                            Err("mempool is not active: wait for Zebra to sync to the tip".into())
+                        }
+                        .boxed()
+                    }
 
                     #[cfg(feature = "getblocktemplate-rpcs")]
                     Request::FullTransactions => {

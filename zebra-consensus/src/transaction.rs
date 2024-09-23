@@ -15,7 +15,12 @@ use futures::{
     FutureExt,
 };
 use tokio::sync::oneshot;
-use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
+use tower::{
+    buffer::Buffer,
+    timeout::{error::Elapsed, Timeout},
+    util::BoxService,
+    Service, ServiceExt,
+};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -656,11 +661,16 @@ where
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
 
-                let mempool::Response::UnspentOutput(output) = query.await? else {
-                    unreachable!("UnspentOutput always responds with UnspentOutput")
+                let output = match query.await {
+                    Ok(mempool::Response::UnspentOutput(output)) => output,
+                    Ok(_) => unreachable!("UnspentOutput always responds with UnspentOutput"),
+                    Err(err) => {
+                        return match err.downcast::<Elapsed>() {
+                            Ok(_) => Err(TransactionError::TransparentInputNotFound),
+                            Err(err) => Err(err.into()),
+                        };
+                    }
                 };
-
-                let output = output.ok_or(TransactionError::TransparentInputNotFound)?;
 
                 spent_outputs.push(output.clone());
             }
