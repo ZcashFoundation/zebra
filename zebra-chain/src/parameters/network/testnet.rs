@@ -217,6 +217,8 @@ pub struct ParametersBuilder {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// The halving interval for this network
+    halving_interval: Height,
 }
 
 impl Default for ParametersBuilder {
@@ -249,6 +251,7 @@ impl Default for ParametersBuilder {
             disable_pow: false,
             pre_nu6_funding_streams: PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
             post_nu6_funding_streams: POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
+            halving_interval: FIRST_HALVING_TESTNET,
         }
     }
 }
@@ -411,6 +414,12 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the halving interval to be used in the [`Parameters`] being built.
+    pub fn with_halving_interval(mut self, halving_interval: Height) -> Self {
+        self.halving_interval = halving_interval;
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     pub fn finish(self) -> Parameters {
         let Self {
@@ -423,6 +432,7 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            halving_interval,
         } = self;
         Parameters {
             network_name,
@@ -435,6 +445,7 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            halving_interval,
         }
     }
 
@@ -455,6 +466,7 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            halving_interval,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -465,6 +477,7 @@ impl ParametersBuilder {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
+            && self.halving_interval == halving_interval
     }
 }
 
@@ -495,6 +508,8 @@ pub struct Parameters {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// The halving interval for this network
+    halving_interval: Height,
 }
 
 impl Default for Parameters {
@@ -568,6 +583,7 @@ impl Parameters {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            halving_interval,
         } = Self::new_regtest(None, None);
 
         self.network_name == network_name
@@ -578,6 +594,7 @@ impl Parameters {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
+            && self.halving_interval == halving_interval
     }
 
     /// Returns the network name
@@ -628,6 +645,11 @@ impl Parameters {
     /// Returns true if proof-of-work validation should be disabled for this network
     pub fn disable_pow(&self) -> bool {
         self.disable_pow
+    }
+
+    /// Returns the halving interval for this network
+    pub fn halving_interval(&self) -> Height {
+        self.halving_interval
     }
 }
 

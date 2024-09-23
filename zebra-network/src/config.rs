@@ -597,6 +597,7 @@ impl<'de> Deserialize<'de> for Config {
             activation_heights: Option<ConfiguredActivationHeights>,
             pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
             post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+            halving_interval: Option<u32>,
         }
 
         #[derive(Deserialize)]
@@ -686,6 +687,7 @@ impl<'de> Deserialize<'de> for Config {
                     activation_heights,
                     pre_nu6_funding_streams,
                     post_nu6_funding_streams,
+                    halving_interval,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
@@ -731,6 +733,12 @@ impl<'de> Deserialize<'de> for Config {
                 // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
                 if let Some(activation_heights) = activation_heights.clone() {
                     params_builder = params_builder.with_activation_heights(activation_heights)
+                }
+
+                if let Some(halving_interval) = halving_interval {
+                    params_builder = params_builder.with_halving_interval(
+                        halving_interval.try_into().map_err(de::Error::custom)?,
+                    )
                 }
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet

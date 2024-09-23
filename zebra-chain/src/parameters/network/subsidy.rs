@@ -50,6 +50,11 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
 
+/// The first halving height in the regtest is at block height `114`
+/// as [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
+/// is 114 blocks.
+pub const FIRST_HALVING_REGTEST: Height = Height(114);
+
 /// The funding stream receiver categories.
 #[derive(Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FundingStreamReceiver {
@@ -391,8 +396,15 @@ impl ParameterSubsidy for Network {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(self)
                 .expect("canopy activation height should be available"),
-            // TODO: Check what zcashd does here, consider adding a field to `testnet::Parameters` to make this configurable.
-            Network::Testnet(_params) => FIRST_HALVING_TESTNET,
+            Network::Testnet(params) => {
+                if params.is_regtest() {
+                    FIRST_HALVING_REGTEST
+                } else if params.is_default_testnet() {
+                    FIRST_HALVING_TESTNET
+                } else {
+                    params.halving_interval()
+                }
+            }
         }
     }
 }
