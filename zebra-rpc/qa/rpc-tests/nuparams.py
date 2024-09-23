@@ -77,7 +77,7 @@ class NuparamsTest(BitcoinTestFramework):
         assert_equal(nu5['status'], 'pending')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
-        assert_equal(nu6['name'], 'Nu6')
+        assert_equal(nu6['name'], 'NU6')
         assert_equal(nu6['activationheight'], 151)
         assert_equal(nu6['status'], 'pending')
 
@@ -122,7 +122,7 @@ class NuparamsTest(BitcoinTestFramework):
         assert_equal(nu5['status'], 'pending')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
-        assert_equal(nu6['name'], 'Nu6')
+        assert_equal(nu6['name'], 'NU6')
         assert_equal(nu6['activationheight'], 151)
         assert_equal(nu6['status'], 'pending')
 
@@ -165,7 +165,7 @@ class NuparamsTest(BitcoinTestFramework):
         assert_equal(nu5['status'], 'pending')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
-        assert_equal(nu6['name'], 'Nu6')
+        assert_equal(nu6['name'], 'NU6')
         assert_equal(nu6['activationheight'], 151)
         assert_equal(nu6['status'], 'pending')
 
@@ -210,7 +210,7 @@ class NuparamsTest(BitcoinTestFramework):
         assert_equal(nu5['status'], 'active')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
-        assert_equal(nu6['name'], 'Nu6')
+        assert_equal(nu6['name'], 'NU6')
         assert_equal(nu6['activationheight'], 151)
         assert_equal(nu6['status'], 'pending')
 
@@ -254,7 +254,7 @@ class NuparamsTest(BitcoinTestFramework):
         assert_equal(nu5['status'], 'active')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
-        assert_equal(nu6['name'], 'Nu6')
+        assert_equal(nu6['name'], 'NU6')
         assert_equal(nu6['activationheight'], 151)
         assert_equal(nu6['status'], 'active')
 
