@@ -452,6 +452,13 @@ impl Storage {
         self.verified.transaction_dependencies()
     }
 
+    /// Returns a reference to the [`HashMap`] of transaction dependents in the verified set.
+    pub fn transaction_dependents(
+        &self,
+    ) -> &HashMap<transaction::Hash, HashSet<transaction::Hash>> {
+        self.verified.transaction_dependents()
+    }
+
     /// Returns a [`transparent::Output`] created by a mempool transaction for the provided
     /// [`transparent::OutPoint`] if one exists, or None otherwise.
     pub fn created_output(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Output> {

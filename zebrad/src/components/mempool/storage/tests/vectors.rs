@@ -4,6 +4,7 @@ use std::iter;
 
 use color_eyre::eyre::Result;
 
+use transparent::OutPoint;
 use zebra_chain::{
     amount::Amount,
     block::{Block, Height},
@@ -288,6 +289,97 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     // No transaction will be sent to peers
     let send_to_peers = Mempool::remove_expired_from_peer_list(&everything_in_mempool, &expired);
     assert_eq!(send_to_peers.len(), 0);
+
+    Ok(())
+}
+
+/// Check that the transaction dependencies are updated when transactions with spent mempool outputs
+/// are inserted into storage, and that the `Storage.remove()` method also removes any transactions
+/// that directly or indirectly spend outputs of a removed transaction.
+#[test]
+fn mempool_removes_dependent_transactions() -> Result<()> {
+    let network = Network::Mainnet;
+
+    // Create an empty storage
+    let mut storage: Storage = Storage::new(&config::Config {
+        tx_cost_limit: 160_000_000,
+        eviction_memory_time: EVICTION_MEMORY_TIME,
+        ..Default::default()
+    });
+
+    let unmined_txs_with_transparent_outputs = || {
+        unmined_transactions_in_blocks(.., &network)
+            .filter(|tx| !tx.transaction.transaction.outputs().is_empty())
+    };
+
+    let mut fake_spent_outpoints: Vec<OutPoint> = Vec::new();
+    let mut expected_transaction_dependencies = HashMap::new();
+    let mut expected_transaction_dependents = HashMap::new();
+    for unmined_tx in unmined_txs_with_transparent_outputs() {
+        let tx_id = unmined_tx.transaction.id.mined_id();
+        let num_outputs = unmined_tx.transaction.transaction.outputs().len();
+
+        if let Some(&fake_spent_outpoint) = fake_spent_outpoints.first() {
+            expected_transaction_dependencies
+                .insert(tx_id, [fake_spent_outpoint.hash].into_iter().collect());
+            expected_transaction_dependents
+                .insert(fake_spent_outpoint.hash, [tx_id].into_iter().collect());
+        }
+
+        storage
+            .insert(unmined_tx.clone(), fake_spent_outpoints)
+            .expect("should insert transaction");
+
+        // Add up to 5 of this transaction's outputs as fake spent outpoints for the next transaction
+        fake_spent_outpoints = (0..num_outputs.min(5))
+            .map(|i| OutPoint::from_usize(tx_id, i))
+            .collect();
+    }
+
+    assert_eq!(
+        storage.transaction_dependencies().len(),
+        unmined_txs_with_transparent_outputs()
+            .count()
+            .checked_sub(1)
+            .expect("at least one unmined transaction with transparent outputs"),
+        "should have an entry all inserted txns except the first one"
+    );
+
+    assert_eq!(
+        storage.transaction_dependencies(),
+        &expected_transaction_dependencies,
+        "should have expected transaction dependencies"
+    );
+
+    assert_eq!(
+        storage.transaction_dependents(),
+        &expected_transaction_dependents,
+        "should have expected transaction dependents"
+    );
+
+    // Remove the first transaction and check that everything in storage is emptied.
+    let first_tx = unmined_txs_with_transparent_outputs()
+        .next()
+        .expect("at least one unmined transaction with transparent outputs");
+
+    let expected_num_removed = storage.transaction_count();
+    let num_removed = storage.remove_exact(&[first_tx.transaction.id].into_iter().collect());
+
+    assert_eq!(
+        num_removed, expected_num_removed,
+        "remove_exact should total storage transaction count"
+    );
+
+    assert!(
+        storage.transaction_dependencies().is_empty(),
+        "tx deps should be empty"
+    );
+
+    assert_eq!(
+        storage.transaction_count(),
+        0,
+        "verified set should be empty"
+    );
 
     Ok(())
 }
