@@ -185,7 +185,6 @@ impl StartCmd {
                 config.consensus.clone(),
                 &config.network.network,
                 state.clone(),
-                // TODO: Pass actual setup channel receiver
                 tx_verifier_setup_rx,
             )
             .await;
