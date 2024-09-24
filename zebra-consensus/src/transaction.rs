@@ -60,6 +60,23 @@ mod tests;
 ///     chain in the correct order.)
 const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6 * 60);
 
+/// A timeout applied to output lookup requests sent to the mempool. This is shorter than the
+/// timeout for the state UTXO lookups because a block is likely to be mined every 75 seconds
+/// after Blossom is active, changing the best chain tip and requiring re-verification of transactions
+/// in the mempool.
+///
+/// This is how long Zebra will wait for an output to be added to the mempool before verification
+/// of the transaction that spends it will fail.
+const MEMPOOL_OUTPUT_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long to wait after responding to a mempool request with a transaction that creates new
+/// transparent outputs before polling the mempool service so that it will try adding the verified
+/// transaction and responding to any potential `AwaitOutput` requests.
+///
+/// This should be long enough for the mempool service's `Downloads` to finish processing the
+/// response from the transaction verifier.
+const POLL_MEMPOOL_DELAY: std::time::Duration = Duration::from_millis(50);
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -339,7 +356,7 @@ where
 
         if self.mempool.is_none() {
             if let Ok(mempool) = self.mempool_setup_rx.try_recv() {
-                self.mempool = Some(Timeout::new(mempool, UTXO_LOOKUP_TIMEOUT));
+                self.mempool = Some(Timeout::new(mempool, MEMPOOL_OUTPUT_LOOKUP_TIMEOUT));
             }
         }
 
@@ -534,7 +551,7 @@ where
                     if let Some(mut mempool) = mempool {
                         if !transaction.transaction.transaction.outputs().is_empty() {
                             tokio::spawn(async move {
-                                tokio::time::sleep(Duration::from_millis(50)).await;
+                                tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
                                 mempool.ready().await.expect("mempool poll_ready() method should not return an error");
                             });
                         }

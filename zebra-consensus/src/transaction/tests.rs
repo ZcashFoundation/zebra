@@ -32,7 +32,7 @@ use zebra_node_services::mempool;
 use zebra_state::ValidateContextError;
 use zebra_test::mock_service::MockService;
 
-use crate::error::TransactionError;
+use crate::{error::TransactionError, transaction::POLL_MEMPOOL_DELAY};
 
 use super::{check, Request, Verifier};
 
@@ -587,9 +587,9 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
 }
 
 #[tokio::test]
-async fn mempool_request_with_mempool_output_is_accepted() {
+async fn mempool_request_with_unmined_output_spends_is_accepted() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
     let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
     mempool_setup_tx
@@ -650,8 +650,9 @@ async fn mempool_request_with_mempool_output_is_accepted() {
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 
+    let mut mempool_clone = mempool.clone();
     tokio::spawn(async move {
-        mempool
+        mempool_clone
             .expect_request(mempool::Request::AwaitOutput(input_outpoint))
             .await
             .expect("verifier should call mock state service with correct request")
@@ -689,6 +690,16 @@ async fn mempool_request_with_mempool_output_is_accepted() {
         spent_mempool_outpoints,
         vec![input_outpoint],
         "spent_mempool_outpoints in tx verifier response should match input_outpoint"
+    );
+
+    tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
+    assert_eq!(
+        mempool.poll_count(),
+        2,
+        "the mempool service should have been polled twice, \
+     first before being called with an AwaitOutput request, \
+     then again shortly after a mempool transaction with transparent outputs \
+     is successfully verified"
     );
 }
 
