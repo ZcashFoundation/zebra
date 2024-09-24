@@ -1017,6 +1017,25 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         "AwaitOutput response should match expected output"
     );
 
+    // Check that the mempool responds to AwaitOutput requests correctly when the outpoint is already in its `created_outputs` collection too.
+
+    let request = Request::AwaitOutput(outpoint);
+    let await_output_response_fut = mempool.ready().await.unwrap().call(request);
+    let response_fut = tokio::time::timeout(Duration::from_secs(30), await_output_response_fut);
+    let response = response_fut
+        .await
+        .expect("should not time out")
+        .expect("should not return RecvError");
+
+    let Response::UnspentOutput(response) = response else {
+        panic!("wrong response from mempool to AwaitOutput request");
+    };
+
+    assert_eq!(
+        response, expected_output,
+        "AwaitOutput response should match expected output"
+    );
+
     Ok(())
 }
 
