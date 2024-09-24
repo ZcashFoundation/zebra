@@ -34,6 +34,7 @@ pub fn unmined_transactions_in_blocks(
     selected_blocks
         .flat_map(|block| block.transactions)
         .map(UnminedTx::from)
+        // Skip transactions that fail ZIP-317 mempool checks
         .filter_map(|transaction| {
             VerifiedUnminedTx::new(
                 transaction,

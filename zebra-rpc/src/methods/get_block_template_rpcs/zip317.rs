@@ -165,7 +165,10 @@ fn setup_fee_weighted_index(transactions: &[VerifiedUnminedTx]) -> Option<Weight
     WeightedIndex::new(tx_weights).ok()
 }
 
-fn has_dependencies(
+/// Checks if every item in `candidate_tx_deps` is present in `selected_txs`.
+///
+/// Requires items in `selected_txs` to be unique to work correctly.
+fn has_direct_dependencies(
     candidate_tx_deps: Option<&HashSet<transaction::Hash>>,
     selected_txs: &Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
 ) -> bool {
@@ -183,22 +186,24 @@ fn has_dependencies(
     num_available_deps == deps.len()
 }
 
-/// Returns the minimum valid transaction index in the block for a candidate
+/// Returns the depth of a transaction's dependencies in the block for a candidate
 /// transaction with the provided dependencies.
 fn dependencies_depth(
     candidate_tx_deps: Option<&HashSet<transaction::Hash>>,
     mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 ) -> InBlockTxDependenciesDepth {
-    let Some(deps) = candidate_tx_deps else {
-        return 0;
-    };
+    let mut current_level_deps = candidate_tx_deps.cloned().unwrap_or_default();
+    let mut current_level = 0;
 
-    // TODO: Use iteration instead of recursion to avoid potential stack overflow
-    1 + deps
-        .iter()
-        .map(|dep| dependencies_depth(mempool_tx_deps.get(dep), mempool_tx_deps))
-        .max()
-        .unwrap_or_default()
+    while !current_level_deps.is_empty() {
+        current_level += 1;
+        current_level_deps = current_level_deps
+            .iter()
+            .flat_map(|dep| mempool_tx_deps.get(dep).cloned().unwrap_or_default())
+            .collect();
+    }
+
+    current_level
 }
 
 /// Chooses a random transaction from `txs` using the weighted index `tx_weights`,
@@ -244,7 +249,7 @@ fn checked_add_transaction_weighted_random(
         // 
         // TODO: If it gets here but the dependencies aren't selected, add it to a list of transactions
         //       to be added immediately if there's room once their dependencies have been selected?
-        && has_dependencies(
+        && has_direct_dependencies(
             candidate_tx_deps,
             selected_txs,
         )

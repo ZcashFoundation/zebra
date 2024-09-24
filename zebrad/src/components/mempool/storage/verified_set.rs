@@ -67,13 +67,28 @@ impl TransactionDependencies {
     }
 
     /// Removes the hash of a transaction in the mempool and the hashes of any transactions
-    /// that are tracked as being directly dependent on that transaction from
+    /// that are tracked as being directly or indirectly dependent on that transaction from
     /// this [`TransactionDependencies`].
     ///
-    /// Returns a list of transaction hashes that depend on the transaction being removed.
-    fn remove(&mut self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
-        self.dependencies.remove(tx_hash);
-        self.dependents.remove(tx_hash).unwrap_or_default()
+    /// Returns a list of transaction hashes that have been removed if they were previously
+    /// in this [`TransactionDependencies`].
+    fn remove(&mut self, &tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+        let mut current_level_dependents: HashSet<_> = [tx_hash].into();
+        let mut all_dependents = current_level_dependents.clone();
+
+        while !current_level_dependents.is_empty() {
+            current_level_dependents = current_level_dependents
+                .iter()
+                .flat_map(|dep| {
+                    self.dependencies.remove(dep);
+                    self.dependents.remove(dep).unwrap_or_default()
+                })
+                .collect();
+
+            all_dependents.extend(&current_level_dependents);
+        }
+
+        all_dependents
     }
 
     /// Clear the maps of transaction dependencies.
@@ -316,27 +331,26 @@ impl VerifiedSet {
     ///
     /// Also removes its outputs from the internal caches.
     fn remove(&mut self, key_to_remove: &transaction::Hash) -> Vec<VerifiedUnminedTx> {
-        let Some(removed_tx) = self.transactions.remove(key_to_remove) else {
-            // Transaction key not found, it may have been removed as a dependent
-            // of another transaction that was removed.
-            return Vec::new();
-        };
+        let removed_transactions: Vec<_> = self
+            .transaction_dependencies
+            .remove(key_to_remove)
+            .iter()
+            .map(|key_to_remove| {
+                let removed_tx = self
+                    .transactions
+                    .remove(key_to_remove)
+                    .expect("invalid transaction key");
 
-        self.transactions_serialized_size -= removed_tx.transaction.size;
-        self.total_cost -= removed_tx.cost();
-        self.remove_outputs(&removed_tx.transaction);
+                self.transactions_serialized_size -= removed_tx.transaction.size;
+                self.total_cost -= removed_tx.cost();
+                self.remove_outputs(&removed_tx.transaction);
+
+                removed_tx
+            })
+            .collect();
 
         self.update_metrics();
-
-        let mut removed_txs = vec![removed_tx];
-        let dependent_transactions = self.transaction_dependencies.remove(key_to_remove);
-
-        // TODO: Use iteration instead of recursion to avoid potential stack overflow
-        for dependent_tx in dependent_transactions {
-            removed_txs.extend(self.remove(&dependent_tx));
-        }
-
-        removed_txs
+        removed_transactions
     }
 
     /// Returns `true` if the given `transaction` has any spend conflicts with transactions in the
