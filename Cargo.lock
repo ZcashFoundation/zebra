@@ -1372,7 +1372,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "blake2b_simd",
 ]
@@ -1744,7 +1744,7 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.3.0"
-source = "git+https://github.com/QED-it/halo2?rev=7f5c0babd61f8ca46c9165a1adfac298d3fd3a11#7f5c0babd61f8ca46c9165a1adfac298d3fd3a11"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#1195c9af90205829ba20662bdfaf20dcc878807d"
 dependencies = [
  "arrayvec",
  "bitvec",
@@ -1767,7 +1767,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_proofs"
 version = "0.3.0"
-source = "git+https://github.com/QED-it/halo2?rev=7f5c0babd61f8ca46c9165a1adfac298d3fd3a11#7f5c0babd61f8ca46c9165a1adfac298d3fd3a11"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#1195c9af90205829ba20662bdfaf20dcc878807d"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -2865,7 +2865,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.8.0"
-source = "git+https://github.com/QED-it/orchard?branch=zsa1#6e6112c80eb751a93c0fd1d881e9ca69887e1154"
+source = "git+https://github.com/QED-it/orchard?branch=zsa1#3ba9e5b8d208bb44222cb2fe8bcd603c71abf444"
 dependencies = [
  "aes",
  "bitvec",
@@ -3957,7 +3957,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.1.3"
-source = "git+https://github.com/QED-it/sapling-crypto?branch=zsa1#e19f4d916360842becf2842bfd9b27228e66fa81"
+source = "git+https://github.com/QED-it/sapling-crypto?branch=zsa1#99ad0a5f0bdef332bdc91d577086abd3aca59553"
 dependencies = [
  "aes",
  "bellman",
@@ -5779,7 +5779,7 @@ checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
 [[package]]
 name = "zcash_address"
 version = "0.3.2"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "bech32",
  "bs58",
@@ -5791,7 +5791,7 @@ dependencies = [
 [[package]]
 name = "zcash_client_backend"
 version = "0.12.1"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "base64 0.21.7",
  "bech32",
@@ -5830,7 +5830,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -5839,7 +5839,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -5875,7 +5875,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -5900,7 +5900,7 @@ dependencies = [
 [[package]]
 name = "zcash_note_encryption"
 version = "0.4.0"
-source = "git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1#58384553aab76b2ee6d6eb328cf2187fa824ec9a"
+source = "git+https://github.com/QED-it/zcash_note_encryption?branch=zsa1#76745f00551d4442dee11ad64a8400b75132d18f"
 dependencies = [
  "chacha20",
  "chacha20poly1305",
@@ -5912,7 +5912,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.15.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "aes",
  "bip0039",
@@ -5973,7 +5973,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.1.1"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "document-features",
  "memuse",
@@ -6512,7 +6512,7 @@ dependencies = [
 [[package]]
 name = "zip321"
 version = "0.0.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#04ebee7fb22303c1e1dc6428def3dd3cecc4715d"
+source = "git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2#8149034c53c9a33b5ca417689c42ec4d47d0eff5"
 dependencies = [
  "base64 0.21.7",
  "nom",

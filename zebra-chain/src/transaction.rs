@@ -1092,7 +1092,7 @@ impl Transaction {
         orchard_shielded_data_field!(self, flags)
     }
 
-    // FIXME: add doc
+    /// FIXME: add doc
     pub fn orchard_shared_anchor(&self) -> Option<orchard::tree::Root> {
         orchard_shielded_data_field!(self, shared_anchor)
     }
