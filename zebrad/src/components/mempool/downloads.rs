@@ -400,6 +400,7 @@ where
             };
 
             // Send the result to responder channel if one was provided.
+            // TODO: Wait until transactions are added to the verified set before sending an Ok to `rsp_tx`.
             if let Some(rsp_tx) = rsp_tx {
                 let _ = rsp_tx.send(
                     result
