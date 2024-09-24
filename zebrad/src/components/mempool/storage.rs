@@ -402,6 +402,7 @@ impl Storage {
     pub fn clear(&mut self) {
         self.verified.clear();
         self.tip_rejected_exact.clear();
+        self.pending_outputs.clear();
         self.tip_rejected_same_effects.clear();
         self.chain_rejected_same_effects.clear();
         self.update_rejected_metrics();

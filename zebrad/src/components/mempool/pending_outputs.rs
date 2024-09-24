@@ -55,4 +55,9 @@ impl PendingOutputs {
     pub fn prune(&mut self) {
         self.0.retain(|_, chan| chan.receiver_count() > 0);
     }
+
+    /// Clears the inner [`HashMap`] of queued pending output requests.
+    pub fn clear(&mut self) {
+        self.0.clear();
+    }
 }

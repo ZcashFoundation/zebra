@@ -75,6 +75,12 @@ impl TransactionDependencies {
         self.dependencies.remove(tx_hash);
         self.dependents.remove(tx_hash).unwrap_or_default()
     }
+
+    /// Clear the maps of transaction dependencies.
+    fn clear(&mut self) {
+        self.dependencies.clear();
+        self.dependents.clear();
+    }
 }
 
 /// The set of verified transactions stored in the mempool.
@@ -187,10 +193,12 @@ impl VerifiedSet {
     /// Also clears all internal caches.
     pub fn clear(&mut self) {
         self.transactions.clear();
+        self.transaction_dependencies.clear();
         self.spent_outpoints.clear();
         self.sprout_nullifiers.clear();
         self.sapling_nullifiers.clear();
         self.orchard_nullifiers.clear();
+        self.created_outputs.clear();
         self.transactions_serialized_size = 0;
         self.total_cost = 0;
         self.update_metrics();
@@ -323,6 +331,7 @@ impl VerifiedSet {
         let mut removed_txs = vec![removed_tx];
         let dependent_transactions = self.transaction_dependencies.remove(key_to_remove);
 
+        // TODO: Use iteration instead of recursion to avoid potential stack overflow
         for dependent_tx in dependent_transactions {
             removed_txs.extend(self.remove(&dependent_tx));
         }
