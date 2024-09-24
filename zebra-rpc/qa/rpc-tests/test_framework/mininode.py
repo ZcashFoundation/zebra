@@ -425,6 +425,7 @@ class RedPallasSignature(object):
         return "RedPallasSignature(%s)" % bytes_to_hex_str(self.data)
 
 
+# FIXME: add support of OrchardZSA
 class OrchardAction(object):
     def __init__(self):
         self.cv = None
@@ -441,7 +442,7 @@ class OrchardAction(object):
         self.rk = deser_uint256(f)
         self.cmx = deser_uint256(f)
         self.ephemeralKey = deser_uint256(f)
-        self.encCiphertext = f.read(580)
+        self.encCiphertext = f.read(580) # FIXME: works for OrchardVanilla only
         self.outCiphertext = f.read(80)
 
     def serialize(self):

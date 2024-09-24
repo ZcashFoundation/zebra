@@ -94,6 +94,7 @@ impl<V: OrchardFlavorExt> ZcashDeserialize for Action<V> {
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 580 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
+            // FIXME: don't mention about 580 here as this should work for OrchardZSA too?
             enc_ciphertext: V::EncryptedNote::zcash_deserialize(&mut reader)?,
             // Type is `Sym.C`, i.e. `𝔹^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
