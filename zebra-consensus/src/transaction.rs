@@ -33,7 +33,7 @@ use zebra_chain::{
     transaction::{
         self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
     },
-    transparent::{self, OrderedUtxo},
+    transparent,
 };
 
 use zebra_node_services::mempool;
@@ -427,7 +427,7 @@ where
             // Load spent UTXOs from state.
             // The UTXOs are required for almost all the async checks.
             let load_spent_utxos_fut =
-                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone(), mempool.clone());
+                Self::spent_utxos(tx.clone(), req.clone(), state.clone(), mempool.clone(),);
             let (spent_utxos, spent_outputs, spent_mempool_outpoints) = load_spent_utxos_fut.await?;
 
             // WONTFIX: Return an error for Request::Block as well to replace this check in
@@ -595,8 +595,7 @@ where
     /// in the same order as the matching inputs in the transaction.
     async fn spent_utxos(
         tx: Arc<Transaction>,
-        known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
-        is_mempool: bool,
+        req: Request,
         state: Timeout<ZS>,
         mempool: Option<Timeout<Mempool>>,
     ) -> Result<
@@ -607,6 +606,9 @@ where
         ),
         TransactionError,
     > {
+        let is_mempool = req.is_mempool();
+        let known_utxos = req.known_utxos();
+
         let inputs = tx.inputs();
         let mut spent_utxos = HashMap::new();
         let mut spent_outputs = Vec::new();
@@ -655,8 +657,6 @@ where
 
         if let Some(mempool) = mempool {
             for &spent_mempool_outpoint in &spent_mempool_outpoints {
-                // TODO: Respond to AwaitOutput requests immediately if the output is already available in the mempool
-                //       instead of calling the mempool service twice (using 2 queries introduces a concurrency bug).
                 let query = mempool
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
@@ -673,6 +673,16 @@ where
                 };
 
                 spent_outputs.push(output.clone());
+                spent_utxos.insert(
+                    spent_mempool_outpoint,
+                    // Assume the Utxo height will be next height after the best chain tip height
+                    //
+                    // # Correctness
+                    //
+                    // If the tip height changes while an umined transaction is being verified,
+                    // the transaction must be re-verified before being added to the mempool.
+                    transparent::Utxo::new(output, req.height(), false),
+                );
             }
         } else if !spent_mempool_outpoints.is_empty() {
             return Err(TransactionError::TransparentInputNotFound);

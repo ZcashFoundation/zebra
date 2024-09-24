@@ -28,6 +28,7 @@ use zebra_chain::{
     transparent::{self, CoinbaseData},
 };
 
+use zebra_node_services::mempool;
 use zebra_state::ValidateContextError;
 use zebra_test::mock_service::MockService;
 
@@ -582,6 +583,112 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
     assert!(
         verifier_response.is_ok(),
         "expected successful verification, got: {verifier_response:?}"
+    );
+}
+
+#[tokio::test]
+async fn mempool_request_with_mempool_output_is_accepted() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mut mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
+    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
+    mempool_setup_tx
+        .send(mempool.clone())
+        .ok()
+        .expect("send should succeed");
+
+    let height = NetworkUpgrade::Canopy
+        .activation_height(&Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V4 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        joinsplit_data: None,
+        sapling_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    tokio::spawn(async move {
+        mempool
+            .expect_request(mempool::Request::AwaitOutput(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(mempool::Response::UnspentOutput(
+                known_utxos
+                    .get(&input_outpoint)
+                    .expect("input outpoint should exist in known_utxos")
+                    .utxo
+                    .output
+                    .clone(),
+            ));
+    });
+
+    let verifier_response = verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await;
+
+    assert!(
+        verifier_response.is_ok(),
+        "expected successful verification, got: {verifier_response:?}"
+    );
+
+    let crate::transaction::Response::Mempool {
+        transaction: _,
+        spent_mempool_outpoints,
+    } = verifier_response.expect("already checked that response is ok")
+    else {
+        panic!("unexpected response variant from transaction verifier for Mempool request")
+    };
+
+    assert_eq!(
+        spent_mempool_outpoints,
+        vec![input_outpoint],
+        "spent_mempool_outpoints in tx verifier response should match input_outpoint"
     );
 }
 
