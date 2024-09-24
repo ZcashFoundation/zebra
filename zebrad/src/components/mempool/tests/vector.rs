@@ -1,6 +1,6 @@
 //! Fixed test vectors for the mempool.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use color_eyre::Report;
 use tokio::time::{self, timeout};
@@ -8,7 +8,7 @@ use tower::{ServiceBuilder, ServiceExt};
 
 use zebra_chain::{
     amount::Amount, block::Block, fmt::humantime_seconds, parameters::Network,
-    serialization::ZcashDeserializeInto, transaction::VerifiedUnminedTx,
+    serialization::ZcashDeserializeInto, transaction::VerifiedUnminedTx, transparent::OutPoint,
 };
 use zebra_consensus::transaction as tx;
 use zebra_state::{Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
@@ -922,6 +922,104 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
     Ok(())
 }
 
+/// Checks that the mempool service responds to AwaitOutput requests after verifying transactions
+/// that create those outputs, or immediately if the outputs had been created by transaction that
+/// are already in the mempool.
+#[tokio::test(flavor = "multi_thread")]
+async fn mempool_responds_to_await_output() -> Result<(), Report> {
+    let network = Network::Mainnet;
+
+    let (
+        mut mempool,
+        _peer_set,
+        _state_service,
+        _chain_tip_change,
+        mut tx_verifier,
+        mut recent_syncs,
+    ) = setup(&network, u64::MAX, true).await;
+    mempool.enable(&mut recent_syncs).await;
+
+    let verified_unmined_tx = unmined_transactions_in_blocks(1..=10, &network)
+        .find(|tx| !tx.transaction.transaction.outputs().is_empty())
+        .expect("should have at least 1 tx with transparent outputs");
+
+    let unmined_tx = verified_unmined_tx.transaction.clone();
+    let output_index = 0;
+    let outpoint = OutPoint::from_usize(unmined_tx.id.mined_id(), output_index);
+    let expected_output = unmined_tx
+        .transaction
+        .outputs()
+        .get(output_index)
+        .expect("already checked that tx has outputs")
+        .clone();
+
+    // Call mempool with an AwaitOutput request
+
+    let request = Request::AwaitOutput(outpoint);
+    let await_output_response_fut = mempool.ready().await.unwrap().call(request);
+
+    // Queue the transaction with the pending output to be added to the mempool
+
+    let request = Request::Queue(vec![Gossip::Tx(unmined_tx)]);
+    let queue_response_fut = mempool.ready().await.unwrap().call(request);
+    let mock_verify_tx_fut = tx_verifier.expect_request_that(|_| true).map(|responder| {
+        responder.respond(transaction::Response::Mempool {
+            transaction: verified_unmined_tx,
+            spent_mempool_outpoints: Vec::new(),
+        });
+    });
+
+    let (response, _) = futures::join!(queue_response_fut, mock_verify_tx_fut);
+    let Response::Queued(mut results) = response.expect("response should be Ok") else {
+        panic!("wrong response from mempool to Queued request");
+    };
+
+    let result_rx = results.remove(0).expect("should pass initial checks");
+    assert!(results.is_empty(), "should have 1 result for 1 queued tx");
+
+    tokio::time::timeout(Duration::from_secs(10), result_rx)
+        .await
+        .expect("should not time out")
+        .expect("mempool tx verification result channel should not be closed")
+        .expect("mocked verification should be successful");
+
+    mempool
+        .ready()
+        .await
+        .expect("polling mempool should succeed");
+
+    assert_eq!(
+        mempool.storage().transaction_count(),
+        1,
+        "should have 1 transaction in mempool's verified set"
+    );
+
+    assert_eq!(
+        mempool.storage().created_output(&outpoint),
+        Some(expected_output.clone()),
+        "created output should match expected output"
+    );
+
+    // Check that the AwaitOutput request has been responded to after the relevant tx was added to the verified set
+
+    let response_fut = tokio::time::timeout(Duration::from_secs(30), await_output_response_fut);
+    let response = response_fut
+        .await
+        .expect("should not time out")
+        .expect("should not return RecvError");
+
+    let Response::UnspentOutput(response) = response else {
+        panic!("wrong response from mempool to AwaitOutput request");
+    };
+
+    assert_eq!(
+        response, expected_output,
+        "AwaitOutput response should match expected output"
+    );
+
+    Ok(())
+}
+
 /// Create a new [`Mempool`] instance using mocked services.
 async fn setup(
     network: &Network,
@@ -947,7 +1045,7 @@ async fn setup(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
 
-    let (mempool, _mempool_transaction_receiver) = Mempool::new(
+    let (mempool, mut mempool_transaction_receiver) = Mempool::new(
         &mempool::Config {
             tx_cost_limit,
             ..Default::default()
@@ -959,6 +1057,8 @@ async fn setup(
         latest_chain_tip,
         chain_tip_change.clone(),
     );
+
+    tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });
 
     if should_commit_genesis_block {
         let genesis_block: Arc<Block> = zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES
