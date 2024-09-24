@@ -200,7 +200,7 @@ jobs:
         # See: https://github.com/docker/scout-action/issues/56
         if: ${{ inputs.dockerfile_target == 'runtime' && contains(github.event.pull_request.title, 'Release v') }}
         with:
-          command: cves,recommendations,compare
+          command: cves,recommendations,compare,environment
           image: us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}:${{ steps.meta.outputs.version }}
           to: zfnd/zebra:latest
           ignore-base: true
