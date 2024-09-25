@@ -355,6 +355,10 @@ impl ZebraDb {
                 .iter()
                 .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
                 .collect();
+        let out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> = spent_utxos
+            .iter()
+            .map(|(outpoint, out_loc, _utxo)| (*outpoint, *out_loc))
+            .collect();
         let spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = spent_utxos
             .into_iter()
             .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
@@ -392,6 +396,7 @@ impl ZebraDb {
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
+            out_loc_by_outpoint,
             address_balances,
             self.finalized_value_pool(),
             prev_note_commitment_trees,
@@ -448,6 +453,7 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation>,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
@@ -479,12 +485,13 @@ impl DiskWriteBatch {
         if !finalized.height.is_min() {
             // Commit transaction indexes
             self.prepare_transparent_transaction_batch(
-                db,
+                zebra_db,
                 network,
                 finalized,
                 &new_outputs_by_out_loc,
                 &spent_utxos_by_outpoint,
                 &spent_utxos_by_out_loc,
+                &out_loc_by_outpoint,
                 address_balances,
             )?;
 
