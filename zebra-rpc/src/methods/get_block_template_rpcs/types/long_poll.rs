@@ -297,3 +297,28 @@ impl TryFrom<String> for LongPollId {
         s.parse()
     }
 }
+
+/// Check that [`LongPollInput::new`] will sort mempool transaction ids.
+///
+/// The mempool does not currently gaurantee the order in which it will return transactions and
+/// may return the same items in a different order, while the long poll id should be the same if
+/// its other components are equal and no transactions have been added or removed in the mempool.
+#[test]
+fn long_poll_input_mempool_tx_ids_are_sorted() {
+    let mempool_tx_ids = || {
+        (0..10)
+            .map(|i| transaction::Hash::from([i; 32]))
+            .map(UnminedTxId::Legacy)
+    };
+
+    assert_eq!(
+        LongPollInput::new(Height::MIN, Default::default(), 0.into(), mempool_tx_ids()),
+        LongPollInput::new(
+            Height::MIN,
+            Default::default(),
+            0.into(),
+            mempool_tx_ids().rev()
+        ),
+        "long poll input should sort mempool tx ids"
+    );
+}
