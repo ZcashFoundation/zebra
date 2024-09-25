@@ -248,7 +248,10 @@ fn checked_add_transaction_weighted_random(
         // must appear after the transaction that created those outputs
         // 
         // TODO: If it gets here but the dependencies aren't selected, add it to a list of transactions
-        //       to be added immediately if there's room once their dependencies have been selected?
+        //       to be added immediately if there's room once their dependencies have been selected.
+        //       Unlike the other checks in this if statement, candidate transactions that fail this
+        //       check may pass it in the next round, but are currently removed from the candidate set
+        //       and will not be re-considered.
         && has_direct_dependencies(
             candidate_tx_deps,
             selected_txs,
