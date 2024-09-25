@@ -237,7 +237,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') || github.event_name == 'workflow_dispatch' }}
 
     steps:
       - uses: actions/checkout@v4.2.1
@@ -293,8 +293,15 @@ jobs:
           echo "zebra_tip_disk=${ZEBRA_TIP_DISK}" >> "${GITHUB_OUTPUT}"
           echo "zebra_checkpoint_disk=${ZEBRA_CHECKPOINT_DISK}" >> "${GITHUB_OUTPUT}"
 
+      - name: Get IP address for long-running release nodes
+        # if: ${{ github.event_name == 'release' }}
+        run: echo "IP_ADDRESS=$(gcloud compute addresses describe zebra-${NETWORK} --region ${{ vars.GCP_REGION }} --format='value(address)')" >> "$GITHUB_ENV"
+
       - name: Create instance template for ${{ matrix.network }}
         run: |
+          if [ -n "${{ env.IP_ADDRESS }}" ]; then
+            IP_FLAG="--address=${{ env.IP_ADDRESS }}"
+          fi
           DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
           DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
@@ -311,7 +318,7 @@ jobs:
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} ${IP_FLAG} \
           --create-disk="${DISK_PARAMS}" \
           --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${DISK_NAME},mode=rw \
           --container-stdin \
