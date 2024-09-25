@@ -286,3 +286,70 @@ fn choose_transaction_weighted_random(
     // <https://github.com/rust-random/rand/blob/4bde8a0adb517ec956fcec91665922f6360f974b/src/distributions/weighted_index.rs#L173-L183>
     (setup_fee_weighted_index(candidate_txs), candidate_tx)
 }
+
+#[test]
+fn excludes_tx_with_unselected_dependencies() {
+    use zebra_chain::{
+        amount::Amount, block::Block, serialization::ZcashDeserializeInto, transaction::UnminedTx,
+    };
+
+    let network = Network::Mainnet;
+    let next_block_height = Height(1_000_000);
+    let miner_address = transparent::Address::from_pub_key_hash(network.kind(), [0; 20]);
+    let mut mempool_txns: Vec<_> = network
+        .block_iter()
+        .map(|(_, block)| {
+            block
+                .zcash_deserialize_into::<Block>()
+                .expect("block test vector is structurally valid")
+        })
+        .flat_map(|block| block.transactions)
+        .map(UnminedTx::from)
+        // Skip transactions that fail ZIP-317 mempool checks
+        .filter_map(|transaction| {
+            VerifiedUnminedTx::new(
+                transaction,
+                Amount::try_from(1_000_000).expect("invalid value"),
+                0,
+            )
+            .ok()
+        })
+        .take(2)
+        .collect();
+
+    let dep_tx_id = mempool_txns
+        .pop()
+        .expect("should not be empty")
+        .transaction
+        .id
+        .mined_id();
+
+    let mut mempool_tx_deps = HashMap::new();
+
+    mempool_tx_deps.insert(
+        mempool_txns
+            .first()
+            .expect("should not be empty")
+            .transaction
+            .id
+            .mined_id(),
+        [dep_tx_id].into(),
+    );
+
+    let like_zcashd = true;
+    let extra_coinbase_data = Vec::new();
+
+    assert!(
+        select_mempool_transactions(
+            &network,
+            next_block_height,
+            &miner_address,
+            mempool_txns,
+            &mempool_tx_deps,
+            like_zcashd,
+            extra_coinbase_data,
+        )
+        .is_empty(),
+        "should not select any transactions when dependencies are unavailable"
+    );
+}
