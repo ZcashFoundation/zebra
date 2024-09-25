@@ -94,6 +94,15 @@ pub struct ChainInner {
     /// including those created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
 
+    // TODO:
+    // - Add a field for tracking spending tx ids by spent outpoint
+    // - Update the field when committing blocks to non-finalized chain
+    // - Add a read fn for querying tx ids by spent outpoint
+    // - Add a db format upgrade for indexing spending tx ids (transaction locations) by
+    //   spent outpoints (output locations) in the finalized state
+    // - Add ReadRequest & ReadResponse variants for querying spending tx ids by
+    //   spent outpoints and handle them in the ReadStateService
+
     // Note commitment trees
     //
     /// The Sprout note commitment tree for each anchor.
