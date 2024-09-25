@@ -736,9 +736,8 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 if let Some(halving_interval) = pre_blossom_halving_interval {
-                    params_builder = params_builder.with_halving_interval(
-                        halving_interval.try_into().map_err(de::Error::custom)?,
-                    )
+                    params_builder =
+                        params_builder.with_pre_blossom_halving_interval(halving_interval.into())
                 }
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet

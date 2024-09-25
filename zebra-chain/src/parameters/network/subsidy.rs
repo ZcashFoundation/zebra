@@ -40,9 +40,17 @@ pub const BLOSSOM_POW_TARGET_SPACING_RATIO: u32 = 2;
 /// `(60 * 60 * 24 * 365 * 4) / 150 = 840960`
 pub const PRE_BLOSSOM_HALVING_INTERVAL: HeightDiff = 840_000;
 
+/// The halving height interval in the regtest is 6 hours.
+/// [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
+pub const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
+
 /// After Blossom the block time is reduced to 75 seconds but halving period should remain around 4 years.
 pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
     PRE_BLOSSOM_HALVING_INTERVAL * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
+
+/// After Blossom the block time is reduced to 75 seconds but halving period should remain 6 hours.
+pub const POST_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff =
+    PRE_BLOSSOM_REGTEST_HALVING_INTERVAL * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
 
 /// The first halving height in the testnet is at block height `1_116_000`
 /// as specified in [protocol specification §7.10.1][7.10.1]
@@ -50,10 +58,8 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
 pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
 
-/// The first halving height in the regtest is at block height `114`
-/// as [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
-/// is 114 blocks.
-pub const FIRST_HALVING_REGTEST: Height = Height(114);
+/// The first halving height in the regtest is at block height `287`.
+pub const FIRST_HALVING_REGTEST: Height = Height(287);
 
 /// The funding stream receiver categories.
 #[derive(Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -384,6 +390,12 @@ pub trait ParameterSubsidy {
     ///
     /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     fn height_for_first_halving(&self) -> Height;
+
+    /// Returns the halving interval after Blossom
+    fn post_blossom_halving_interval(&self) -> HeightDiff;
+
+    /// Returns the halving interval before Blossom
+    fn pre_blossom_halving_interval(&self) -> HeightDiff;
 }
 
 /// Network methods related to Block Subsidy and Funding Streams
@@ -402,7 +414,30 @@ impl ParameterSubsidy for Network {
                 } else if params.is_default_testnet() {
                     FIRST_HALVING_TESTNET
                 } else {
-                    params.halving_interval()
+                    Height(
+                        self.post_blossom_halving_interval()
+                            .try_into()
+                            .expect("post blossom halving interval should fit in a Height"),
+                    )
+                }
+            }
+        }
+    }
+
+    fn post_blossom_halving_interval(&self) -> HeightDiff {
+        self.pre_blossom_halving_interval() * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff)
+    }
+
+    fn pre_blossom_halving_interval(&self) -> HeightDiff {
+        match self {
+            Network::Mainnet => PRE_BLOSSOM_HALVING_INTERVAL,
+            Network::Testnet(params) => {
+                if params.is_regtest() {
+                    PRE_BLOSSOM_REGTEST_HALVING_INTERVAL
+                } else if params.is_default_testnet() {
+                    PRE_BLOSSOM_HALVING_INTERVAL
+                } else {
+                    params.pre_blossom_halving_interval()
                 }
             }
         }
@@ -515,7 +550,7 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
 
     let height_after_first_halving = height - network.height_for_first_halving();
 
-    let address_period = (height_after_first_halving + POST_BLOSSOM_HALVING_INTERVAL)
+    let address_period = (height_after_first_halving + network.post_blossom_halving_interval())
         / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
 
     address_period

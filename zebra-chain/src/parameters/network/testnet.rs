@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::{
-    block::{self, Height},
+    block::{self, Height, HeightDiff},
     parameters::{
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
@@ -16,8 +16,10 @@ use super::{
     magic::Magic,
     subsidy::{
         FundingStreamReceiver, FundingStreamRecipient, FundingStreams, ParameterSubsidy,
-        FIRST_HALVING_TESTNET, POST_NU6_FUNDING_STREAMS_MAINNET, POST_NU6_FUNDING_STREAMS_TESTNET,
-        PRE_NU6_FUNDING_STREAMS_MAINNET, PRE_NU6_FUNDING_STREAMS_TESTNET,
+        FIRST_HALVING_TESTNET, POST_BLOSSOM_HALVING_INTERVAL, POST_NU6_FUNDING_STREAMS_MAINNET,
+        POST_NU6_FUNDING_STREAMS_TESTNET, PRE_BLOSSOM_HALVING_INTERVAL,
+        PRE_BLOSSOM_REGTEST_HALVING_INTERVAL, PRE_NU6_FUNDING_STREAMS_MAINNET,
+        PRE_NU6_FUNDING_STREAMS_TESTNET,
     },
 };
 
@@ -56,6 +58,13 @@ struct TestnetParameterSubsidyImpl;
 impl ParameterSubsidy for TestnetParameterSubsidyImpl {
     fn height_for_first_halving(&self) -> Height {
         FIRST_HALVING_TESTNET
+    }
+    fn post_blossom_halving_interval(&self) -> block::HeightDiff {
+        POST_BLOSSOM_HALVING_INTERVAL
+    }
+
+    fn pre_blossom_halving_interval(&self) -> block::HeightDiff {
+        PRE_BLOSSOM_HALVING_INTERVAL
     }
 }
 
@@ -217,8 +226,8 @@ pub struct ParametersBuilder {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
-    /// The halving interval for this network
-    halving_interval: Height,
+    /// The pre-Blossom halving interval for this network
+    pre_blossom_halving_interval: HeightDiff,
 }
 
 impl Default for ParametersBuilder {
@@ -251,7 +260,7 @@ impl Default for ParametersBuilder {
             disable_pow: false,
             pre_nu6_funding_streams: PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
             post_nu6_funding_streams: POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
-            halving_interval: FIRST_HALVING_TESTNET,
+            pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
         }
     }
 }
@@ -415,8 +424,11 @@ impl ParametersBuilder {
     }
 
     /// Sets the halving interval to be used in the [`Parameters`] being built.
-    pub fn with_halving_interval(mut self, halving_interval: Height) -> Self {
-        self.halving_interval = halving_interval;
+    pub fn with_pre_blossom_halving_interval(
+        mut self,
+        pre_blossom_halving_interval: HeightDiff,
+    ) -> Self {
+        self.pre_blossom_halving_interval = pre_blossom_halving_interval;
         self
     }
 
@@ -432,7 +444,7 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
-            halving_interval,
+            pre_blossom_halving_interval,
         } = self;
         Parameters {
             network_name,
@@ -445,7 +457,7 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
-            halving_interval,
+            pre_blossom_halving_interval,
         }
     }
 
@@ -466,7 +478,7 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
-            halving_interval,
+            pre_blossom_halving_interval,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -477,7 +489,7 @@ impl ParametersBuilder {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
-            && self.halving_interval == halving_interval
+            && self.pre_blossom_halving_interval == pre_blossom_halving_interval
     }
 }
 
@@ -509,7 +521,7 @@ pub struct Parameters {
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
     /// The halving interval for this network
-    halving_interval: Height,
+    pre_blossom_halving_interval: HeightDiff,
 }
 
 impl Default for Parameters {
@@ -555,6 +567,7 @@ impl Parameters {
                     nu6: nu6_activation_height,
                     ..Default::default()
                 })
+                .with_pre_blossom_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
                 .finish()
         }
     }
@@ -583,7 +596,7 @@ impl Parameters {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
-            halving_interval,
+            pre_blossom_halving_interval,
         } = Self::new_regtest(None, None);
 
         self.network_name == network_name
@@ -594,7 +607,7 @@ impl Parameters {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
-            && self.halving_interval == halving_interval
+            && self.pre_blossom_halving_interval == pre_blossom_halving_interval
     }
 
     /// Returns the network name
@@ -648,8 +661,8 @@ impl Parameters {
     }
 
     /// Returns the halving interval for this network
-    pub fn halving_interval(&self) -> Height {
-        self.halving_interval
+    pub fn pre_blossom_halving_interval(&self) -> HeightDiff {
+        self.pre_blossom_halving_interval
     }
 }
 

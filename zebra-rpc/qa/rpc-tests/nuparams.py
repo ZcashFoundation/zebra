@@ -73,12 +73,12 @@ class NuparamsTest(BitcoinTestFramework):
 
         nu5 = upgrades[nustr(NU5_BRANCH_ID)]
         assert_equal(nu5['name'], 'NU5')
-        assert_equal(nu5['activationheight'], 150)
+        assert_equal(nu5['activationheight'], 290)
         assert_equal(nu5['status'], 'pending')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
         assert_equal(nu6['name'], 'NU6')
-        assert_equal(nu6['activationheight'], 151)
+        assert_equal(nu6['activationheight'], 291)
         assert_equal(nu6['status'], 'pending')
 
         # Zebra can't call `getblocksubsidy` before the first halving.
@@ -118,20 +118,20 @@ class NuparamsTest(BitcoinTestFramework):
 
         nu5 = upgrades[nustr(NU5_BRANCH_ID)]
         assert_equal(nu5['name'], 'NU5')
-        assert_equal(nu5['activationheight'], 150)
+        assert_equal(nu5['activationheight'], 290)
         assert_equal(nu5['status'], 'pending')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
         assert_equal(nu6['name'], 'NU6')
-        assert_equal(nu6['activationheight'], 151)
+        assert_equal(nu6['activationheight'], 291)
         assert_equal(nu6['status'], 'pending')
 
         # Zebra can't call `getblocksubsidy` before the first halving.
 
         # Activate First Halving
-        node.generate(144)
+        node.generate(287)
         bci = node.getblockchaininfo()
-        assert_equal(bci['blocks'], 145)
+        assert_equal(bci['blocks'], 288)
         upgrades = bci['upgrades']
 
         overwinter = upgrades[nustr(OVERWINTER_BRANCH_ID)]
@@ -161,22 +161,22 @@ class NuparamsTest(BitcoinTestFramework):
 
         nu5 = upgrades[nustr(NU5_BRANCH_ID)]
         assert_equal(nu5['name'], 'NU5')
-        assert_equal(nu5['activationheight'], 150)
+        assert_equal(nu5['activationheight'], 290)
         assert_equal(nu5['status'], 'pending')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
         assert_equal(nu6['name'], 'NU6')
-        assert_equal(nu6['activationheight'], 151)
+        assert_equal(nu6['activationheight'], 291)
         assert_equal(nu6['status'], 'pending')
 
         # The founders' reward ends at Canopy and there are no funding streams
         # configured by default for regtest.
-        assert_equal(node.getblocksubsidy()["miner"], Decimal("6.25"))
+        assert_equal(node.getblocksubsidy()["miner"], Decimal("3.125"))
 
         # Activate NU5
-        node.generate(5)
+        node.generate(2)
         bci = node.getblockchaininfo()
-        assert_equal(bci['blocks'], 150)
+        assert_equal(bci['blocks'], 290)
         upgrades = bci['upgrades']
 
         overwinter = upgrades[nustr(OVERWINTER_BRANCH_ID)]
@@ -206,21 +206,21 @@ class NuparamsTest(BitcoinTestFramework):
 
         nu5 = upgrades[nustr(NU5_BRANCH_ID)]
         assert_equal(nu5['name'], 'NU5')
-        assert_equal(nu5['activationheight'], 150)
+        assert_equal(nu5['activationheight'], 290)
         assert_equal(nu5['status'], 'active')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
         assert_equal(nu6['name'], 'NU6')
-        assert_equal(nu6['activationheight'], 151)
+        assert_equal(nu6['activationheight'], 291)
         assert_equal(nu6['status'], 'pending')
 
         # Block subsidy remains the same after NU5
-        assert_equal(node.getblocksubsidy()["miner"], Decimal("6.25"))
+        assert_equal(node.getblocksubsidy()["miner"], Decimal("3.125"))
 
         # Activate NU6
         node.generate(1)
         bci = node.getblockchaininfo()
-        assert_equal(bci['blocks'], 151)
+        assert_equal(bci['blocks'], 291)
         upgrades = bci['upgrades']
 
         overwinter = upgrades[nustr(OVERWINTER_BRANCH_ID)]
@@ -250,17 +250,17 @@ class NuparamsTest(BitcoinTestFramework):
 
         nu5 = upgrades[nustr(NU5_BRANCH_ID)]
         assert_equal(nu5['name'], 'NU5')
-        assert_equal(nu5['activationheight'], 150)
+        assert_equal(nu5['activationheight'], 290)
         assert_equal(nu5['status'], 'active')
 
         nu6 = upgrades[nustr(NU6_BRANCH_ID)]
         assert_equal(nu6['name'], 'NU6')
-        assert_equal(nu6['activationheight'], 151)
+        assert_equal(nu6['activationheight'], 291)
         assert_equal(nu6['status'], 'active')
 
         # Block subsidy remains the same after NU6 as there are not funding streams
         # nor lockbox configured by default for regtest.
-        assert_equal(node.getblocksubsidy()["miner"], Decimal("6.25"))
+        assert_equal(node.getblocksubsidy()["miner"], Decimal("3.125"))
 
 if __name__ == '__main__':
     NuparamsTest().main()

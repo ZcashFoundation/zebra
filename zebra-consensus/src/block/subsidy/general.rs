@@ -29,7 +29,7 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
 
     if height < blossom_height {
         let pre_blossom_height = height - network.slow_start_shift();
-        let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL;
+        let halving_shift = pre_blossom_height / network.pre_blossom_halving_interval();
 
         let halving_div = 1u64
             .checked_shl(
@@ -47,8 +47,8 @@ pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
 
         let post_blossom_height = height - blossom_height;
 
-        let halving_shift =
-            (scaled_pre_blossom_height + post_blossom_height) / POST_BLOSSOM_HALVING_INTERVAL;
+        let halving_shift = (scaled_pre_blossom_height + post_blossom_height)
+            / network.post_blossom_halving_interval();
 
         // Some far-future shifts can be more than 63 bits
         1u64.checked_shl(
