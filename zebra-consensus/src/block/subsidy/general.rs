@@ -42,7 +42,7 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
         0
     } else if height < blossom_height {
         let pre_blossom_height = height - slow_start_shift;
-        pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL
+        pre_blossom_height / network.pre_blossom_halving_interval()
     } else {
         let pre_blossom_height = blossom_height - slow_start_shift;
         let scaled_pre_blossom_height =
@@ -50,7 +50,7 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
 
         let post_blossom_height = height - blossom_height;
 
-        (scaled_pre_blossom_height + post_blossom_height) / POST_BLOSSOM_HALVING_INTERVAL
+        (scaled_pre_blossom_height + post_blossom_height) / network.post_blossom_halving_interval()
     };
 
     halving_index
