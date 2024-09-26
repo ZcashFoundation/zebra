@@ -33,6 +33,14 @@ on:
         default: 'Mainnet'
         description: 'Network to deploy: Mainnet or Testnet'
         required: true
+      cached_disk_type:
+        default: tip
+        description: 'Type of cached disk to use'
+        required: true
+        type: choice
+        options:
+          - tip
+          - checkpoint
       log_file:
         default: ''
         description: 'Log to a file path rather than standard output'
@@ -185,8 +193,8 @@ jobs:
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
-      disk_suffix: tip
-      prefer_main_cached_state: true
+      disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
+      prefer_main_cached_state: (github.event_name == 'push' && github.ref_name == 'main' && true) || false
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -216,6 +224,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+    # TODO: Remove `|| github.event_name == 'workflow_dispatch'` condition before merging
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') || github.event_name == 'workflow_dispatch' }}
 
     steps:
