@@ -240,6 +240,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+    # TODO: Remove `|| github.event_name == 'workflow_dispatch'` condition before merging
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') || github.event_name == 'workflow_dispatch' }}
 
     steps:
