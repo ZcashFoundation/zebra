@@ -20,6 +20,7 @@ use zebra_chain::{
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
+use zebra_node_services::mempool::TransactionDependencies;
 
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{
@@ -446,18 +447,9 @@ impl Storage {
         self.verified.transactions()
     }
 
-    /// Returns a reference to the [`HashMap`] of transaction dependencies in the verified set.
-    pub fn transaction_dependencies(
-        &self,
-    ) -> &HashMap<transaction::Hash, HashSet<transaction::Hash>> {
+    /// Returns a reference to the [`TransactionDependencies`] in the verified set.
+    pub fn transaction_dependencies(&self) -> &TransactionDependencies {
         self.verified.transaction_dependencies()
-    }
-
-    /// Returns a reference to the [`HashMap`] of transaction dependents in the verified set.
-    pub fn transaction_dependents(
-        &self,
-    ) -> &HashMap<transaction::Hash, HashSet<transaction::Hash>> {
-        self.verified.transaction_dependents()
     }
 
     /// Returns a [`transparent::Output`] created by a mempool transaction for the provided

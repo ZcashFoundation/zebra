@@ -337,7 +337,7 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     }
 
     assert_eq!(
-        storage.transaction_dependencies().len(),
+        storage.transaction_dependencies().dependencies().len(),
         unmined_txs_with_transparent_outputs()
             .count()
             .checked_sub(1)
@@ -346,13 +346,13 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     );
 
     assert_eq!(
-        storage.transaction_dependencies(),
+        storage.transaction_dependencies().dependencies(),
         &expected_transaction_dependencies,
         "should have expected transaction dependencies"
     );
 
     assert_eq!(
-        storage.transaction_dependents(),
+        storage.transaction_dependencies().dependents(),
         &expected_transaction_dependents,
         "should have expected transaction dependents"
     );
@@ -371,7 +371,7 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     );
 
     assert!(
-        storage.transaction_dependencies().is_empty(),
+        storage.transaction_dependencies().dependencies().is_empty(),
         "tx deps should be empty"
     );
 

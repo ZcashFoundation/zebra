@@ -752,7 +752,8 @@ impl Service<Request> for Mempool {
                     trace!(?req, "got mempool request");
 
                     let transactions: Vec<_> = storage.transactions().values().cloned().collect();
-                    let transaction_dependencies = storage.transaction_dependencies().clone();
+                    let transaction_dependencies =
+                        storage.transaction_dependencies().dependencies().clone();
 
                     trace!(?req, transactions_count = ?transactions.len(), "answered mempool request");
 

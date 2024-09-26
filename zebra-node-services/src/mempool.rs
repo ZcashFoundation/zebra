@@ -18,6 +18,10 @@ use zebra_chain::transaction::VerifiedUnminedTx;
 use crate::BoxError;
 
 mod gossip;
+mod transaction_dependencies;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
+pub use transaction_dependencies::TransactionDependencies;
 
 pub use self::gossip::Gossip;
 
