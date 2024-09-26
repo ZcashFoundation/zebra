@@ -39,7 +39,7 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
         .expect("blossom activation height should be available");
 
     let halving_index = if height < slow_start_shift {
-        panic!("unsupported block height {height:?}: checkpoints should handle blocks below {slow_start_shift:?}")
+        0
     } else if height < blossom_height {
         let pre_blossom_height = height - slow_start_shift;
         pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL
