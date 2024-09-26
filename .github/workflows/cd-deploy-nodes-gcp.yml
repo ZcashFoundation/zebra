@@ -186,7 +186,7 @@ jobs:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
       disk_suffix: tip
-      prefer_main_cached_state: true
+      prefer_main_cached_state: (github.event_name == 'push' && github.ref_name == 'main' && true) || false
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
