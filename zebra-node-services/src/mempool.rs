@@ -11,13 +11,13 @@ use zebra_chain::{
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use std::collections::HashMap;
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::transaction::VerifiedUnminedTx;
 
 use crate::BoxError;
 
 mod gossip;
+
+#[cfg(feature = "getblocktemplate-rpcs")]
 mod transaction_dependencies;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -136,7 +136,7 @@ pub enum Response {
         transactions: Vec<VerifiedUnminedTx>,
 
         /// All transaction dependencies in the mempool
-        transaction_dependencies: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
+        transaction_dependencies: TransactionDependencies,
 
         /// Last seen chain tip hash by mempool service
         last_seen_tip_hash: zebra_chain::block::Hash,

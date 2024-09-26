@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use zebra_chain::{transaction, transparent};
 
 /// Representation of mempool transactions' dependencies on other transactions in the mempool.
-#[derive(Default, Debug)]
+#[derive(Default, Debug, Clone)]
 pub struct TransactionDependencies {
     /// Lists of mempool transactions that create UTXOs spent by
     /// a mempool transaction. Used during block template construction

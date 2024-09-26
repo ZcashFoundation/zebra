@@ -1,10 +1,6 @@
 //! Support functions for the `get_block_template()` RPC.
 
-use std::{
-    collections::{HashMap, HashSet},
-    iter,
-    sync::Arc,
-};
+use std::{collections::HashMap, iter, sync::Arc};
 
 use jsonrpc_core::{Error, ErrorCode, Result};
 use tower::{Service, ServiceExt};
@@ -20,13 +16,13 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{subsidy::FundingStreamReceiver, Network, NetworkUpgrade},
     serialization::ZcashDeserializeInto,
-    transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
+    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
 use zebra_consensus::{
     block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
 };
-use zebra_node_services::mempool;
+use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::{
@@ -257,12 +253,7 @@ where
 pub async fn fetch_mempool_transactions<Mempool>(
     mempool: Mempool,
     chain_tip_hash: block::Hash,
-) -> Result<
-    Option<(
-        Vec<VerifiedUnminedTx>,
-        HashMap<transaction::Hash, HashSet<transaction::Hash>>,
-    )>,
->
+) -> Result<Option<(Vec<VerifiedUnminedTx>, TransactionDependencies)>>
 where
     Mempool: Service<
             mempool::Request,

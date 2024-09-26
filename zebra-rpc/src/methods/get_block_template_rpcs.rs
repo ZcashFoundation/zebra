@@ -878,7 +878,7 @@ where
                 next_block_height,
                 &miner_address,
                 mempool_txs,
-                &mempool_tx_deps,
+                mempool_tx_deps,
                 debug_like_zcashd,
                 extra_coinbase_data.clone(),
             );

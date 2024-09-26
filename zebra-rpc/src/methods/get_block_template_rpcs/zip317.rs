@@ -21,6 +21,7 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
+use zebra_node_services::mempool::TransactionDependencies;
 
 use crate::methods::get_block_template_rpcs::{
     get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
@@ -45,7 +46,7 @@ pub fn select_mempool_transactions(
     next_block_height: Height,
     miner_address: &transparent::Address,
     mempool_txs: Vec<VerifiedUnminedTx>,
-    mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
+    mut mempool_tx_deps: TransactionDependencies,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)> {
@@ -84,7 +85,7 @@ pub fn select_mempool_transactions(
             &mut conventional_fee_txs,
             tx_weights,
             &mut selected_txs,
-            mempool_tx_deps,
+            &mut mempool_tx_deps,
             &mut remaining_block_bytes,
             &mut remaining_block_sigops,
             // The number of unpaid actions is always zero for transactions that pay the
@@ -101,7 +102,7 @@ pub fn select_mempool_transactions(
             &mut low_fee_txs,
             tx_weights,
             &mut selected_txs,
-            mempool_tx_deps,
+            &mut mempool_tx_deps,
             &mut remaining_block_bytes,
             &mut remaining_block_sigops,
             &mut remaining_block_unpaid_actions,
@@ -220,7 +221,7 @@ fn checked_add_transaction_weighted_random(
     candidate_txs: &mut Vec<VerifiedUnminedTx>,
     tx_weights: WeightedIndex<f32>,
     selected_txs: &mut Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
-    mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
+    mempool_tx_deps: &mut TransactionDependencies,
     remaining_block_bytes: &mut usize,
     remaining_block_sigops: &mut u64,
     remaining_block_unpaid_actions: &mut u32,
@@ -230,7 +231,9 @@ fn checked_add_transaction_weighted_random(
     let (new_tx_weights, candidate_tx) =
         choose_transaction_weighted_random(candidate_txs, tx_weights);
 
-    let candidate_tx_deps = mempool_tx_deps.get(&candidate_tx.transaction.id.mined_id());
+    let candidate_tx_deps = mempool_tx_deps
+        .dependencies()
+        .get(&candidate_tx.transaction.id.mined_id());
 
     // > If the block template with this transaction included
     // > would be within the block size limit and block sigop limit,
@@ -258,7 +261,7 @@ fn checked_add_transaction_weighted_random(
         )
     {
         selected_txs.push((
-            dependencies_depth(candidate_tx_deps, mempool_tx_deps),
+            dependencies_depth(candidate_tx_deps, mempool_tx_deps.dependencies()),
             candidate_tx.clone(),
         ));
 
@@ -294,6 +297,7 @@ fn choose_transaction_weighted_random(
 fn excludes_tx_with_unselected_dependencies() {
     use zebra_chain::{
         amount::Amount, block::Block, serialization::ZcashDeserializeInto, transaction::UnminedTx,
+        transparent::OutPoint,
     };
 
     let network = Network::Mainnet;
@@ -327,16 +331,16 @@ fn excludes_tx_with_unselected_dependencies() {
         .id
         .mined_id();
 
-    let mut mempool_tx_deps = HashMap::new();
+    let mut mempool_tx_deps = TransactionDependencies::default();
 
-    mempool_tx_deps.insert(
+    mempool_tx_deps.add(
         mempool_txns
             .first()
             .expect("should not be empty")
             .transaction
             .id
             .mined_id(),
-        [dep_tx_id].into(),
+        vec![OutPoint::from_usize(dep_tx_id, 0)],
     );
 
     let like_zcashd = true;
@@ -348,7 +352,7 @@ fn excludes_tx_with_unselected_dependencies() {
             next_block_height,
             &miner_address,
             mempool_txns,
-            &mempool_tx_deps,
+            mempool_tx_deps,
             like_zcashd,
             extra_coinbase_data,
         )
