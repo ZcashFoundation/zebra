@@ -17,7 +17,7 @@ categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 # Zebra is only supported on the latest stable Rust version. See the README for details.
 # Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.73"
+rust-version = "1.81"
 
 [[bin]]
 name = "zebra-checkpoints"
