@@ -410,7 +410,8 @@ impl ParameterSubsidy for Network {
                 } else if params.is_default_testnet() {
                     FIRST_HALVING_TESTNET
                 } else {
-                    height_for_halving_index(1, self).unwrap()
+                    height_for_halving_index(1, self)
+                        .expect("first halving height should be available")
                 }
             }
         }

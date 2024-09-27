@@ -507,7 +507,11 @@ mod test {
     fn check_height_for_num_halvings() {
         for network in Network::iter() {
             for halving_index in 1..1000 {
-                let Some(height_for_halving) = zebra_chain::parameters::subsidy::height_for_halving_index(halving_index, &network)
+                let Some(height_for_halving) =
+                    zebra_chain::parameters::subsidy::height_for_halving_index(
+                        halving_index,
+                        &network,
+                    )
                 else {
                     panic!("could not find height for halving {halving_index}");
                 };

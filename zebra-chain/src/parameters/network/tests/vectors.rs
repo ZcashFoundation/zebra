@@ -450,4 +450,3 @@ fn check_configured_funding_stream_constraints() {
     expected_panic_wrong_addr_network
         .expect_err("should panic when recipient addresses are for Mainnet");
 }
-
