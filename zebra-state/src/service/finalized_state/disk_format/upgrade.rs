@@ -549,6 +549,9 @@ impl DbFormatChange {
             Self::mark_as_upgraded_to(db, &version_for_upgrading_value_balance_format)
         }
 
+        // TODO: Add a db format upgrade for indexing spending tx ids (transaction locations) by
+        //       spent outpoints (output locations) in the finalized state
+
         // # New Upgrades Usually Go Here
         //
         // New code goes above this comment!
