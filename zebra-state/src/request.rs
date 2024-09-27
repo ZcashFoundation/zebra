@@ -1020,6 +1020,12 @@ pub enum ReadRequest {
         height_range: RangeInclusive<block::Height>,
     },
 
+    /// Looks up a spending transaction id by its spent transparent input.
+    ///
+    /// Returns [`ReadResponse::TransactionId`] with the hash of the transaction
+    /// that spent the output at the provided [`transparent::OutPoint`].
+    TransactionIdForSpentOutPoint(transparent::OutPoint),
+
     /// Looks up utxos for the provided addresses.
     ///
     /// Returns a type with found utxos and transaction information.
@@ -1100,6 +1106,7 @@ impl ReadRequest {
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
+            ReadRequest::TransactionIdForSpentOutPoint { .. } => "transaction_id_by_spent_outpoint",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
