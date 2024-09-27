@@ -90,18 +90,15 @@ pub struct ChainInner {
     //
     // TODO: replace OutPoint with OutputLocation?
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    /// The [`transparent::OutPoint`]s spent by `blocks`,
+    /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
-    pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
-
     // TODO:
-    // - Add a field for tracking spending tx ids by spent outpoint
-    // - Update the field when committing blocks to non-finalized chain
     // - Add a read fn for querying tx ids by spent outpoint
     // - Add a db format upgrade for indexing spending tx ids (transaction locations) by
     //   spent outpoints (output locations) in the finalized state
     // - Add ReadRequest & ReadResponse variants for querying spending tx ids by
     //   spent outpoints and handle them in the ReadStateService
+    pub(crate) spent_utxos: HashMap<transparent::OutPoint, transaction::Hash>,
 
     // Note commitment trees
     //
@@ -1249,7 +1246,7 @@ impl Chain {
     /// and removed from the relevant chain(s).
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
         let mut unspent_utxos = self.created_utxos.clone();
-        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains(outpoint));
+        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains_key(outpoint));
 
         unspent_utxos
     }
@@ -1854,9 +1851,12 @@ impl
             };
 
             // Index the spent outpoint in the chain
-            let first_spend = self.spent_utxos.insert(spent_outpoint);
+            let was_spend_already_present = self
+                .spent_utxos
+                .insert(spent_outpoint, *spending_tx_hash)
+                .is_some();
             assert!(
-                first_spend,
+                was_spend_already_present,
                 "unexpected duplicate spent output: should be checked earlier"
             );
 
@@ -1904,9 +1904,9 @@ impl
             };
 
             // Revert the spent outpoint in the chain
-            let spent_outpoint_was_removed = self.spent_utxos.remove(&spent_outpoint);
+            let was_spent_outpoint_removed = self.spent_utxos.remove(&spent_outpoint).is_some();
             assert!(
-                spent_outpoint_was_removed,
+                was_spent_outpoint_removed,
                 "spent_utxos must be present if block was added to chain"
             );
 
