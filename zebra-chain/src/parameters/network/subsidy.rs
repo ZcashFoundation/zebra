@@ -42,24 +42,20 @@ pub const PRE_BLOSSOM_HALVING_INTERVAL: HeightDiff = 840_000;
 
 /// The halving height interval in the regtest is 6 hours.
 /// [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
-pub const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
+pub(crate) const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
 
 /// After Blossom the block time is reduced to 75 seconds but halving period should remain around 4 years.
 pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
     PRE_BLOSSOM_HALVING_INTERVAL * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
 
-/// After Blossom the block time is reduced to 75 seconds but halving period should remain 6 hours.
-pub const POST_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff =
-    PRE_BLOSSOM_REGTEST_HALVING_INTERVAL * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
-
 /// The first halving height in the testnet is at block height `1_116_000`
 /// as specified in [protocol specification §7.10.1][7.10.1]
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
+pub(crate) const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
 
 /// The first halving height in the regtest is at block height `287`.
-pub const FIRST_HALVING_REGTEST: Height = Height(287);
+const FIRST_HALVING_REGTEST: Height = Height(287);
 
 /// The funding stream receiver categories.
 #[derive(Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
