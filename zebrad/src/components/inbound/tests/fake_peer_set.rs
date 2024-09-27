@@ -31,8 +31,8 @@ use crate::{
     components::{
         inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
         mempool::{
-            gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
-            Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
+            gossip_mempool_transaction_id, Config as MempoolConfig, Mempool, MempoolError,
+            SameEffectsChainRejectionError, UnboxMempoolError,
         },
         sync::{self, BlockGossipError, SyncStatus, PEER_GOSSIP_DELAY},
     },
@@ -1054,7 +1054,8 @@ fn add_some_stuff_to_mempool(
     network: Network,
 ) -> Vec<VerifiedUnminedTx> {
     // get the genesis block coinbase transaction from the Zcash blockchain.
-    let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, &network)
+    let genesis_transactions: Vec<_> = network
+        .unmined_transactions_in_blocks(..=0)
         .take(1)
         .collect();
 

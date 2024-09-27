@@ -42,7 +42,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     let network = Network::Mainnet;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let mut unmined_transactions = unmined_transactions_in_blocks(1..=10, &network);
+    let mut unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
     let genesis_transaction = unmined_transactions
         .next()
         .expect("Missing genesis transaction");
@@ -187,7 +187,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
     let network = Network::Mainnet;
 
     // Get transactions to use in the test
-    let unmined_transactions = unmined_transactions_in_blocks(1..=10, &network);
+    let unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
     let mut transactions = unmined_transactions.collect::<Vec<_>>();
     // Split unmined_transactions into:
     // [transactions..., new_tx]
@@ -280,7 +280,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
         setup(&network, u64::MAX, true).await;
 
     // get the genesis block transactions from the Zcash blockchain.
-    let mut unmined_transactions = unmined_transactions_in_blocks(1..=10, &network);
+    let mut unmined_transactions = network.unmined_transactions_in_blocks(1..=10);
     let genesis_transaction = unmined_transactions
         .next()
         .expect("Missing genesis transaction");
@@ -618,7 +618,7 @@ async fn mempool_failed_verification_is_rejected() -> Result<(), Report> {
     ) = setup(&network, u64::MAX, true).await;
 
     // Get transactions to use in the test
-    let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, &network);
+    let mut unmined_transactions = network.unmined_transactions_in_blocks(1..=2);
     let rejected_tx = unmined_transactions.next().unwrap().clone();
 
     // Enable the mempool
@@ -693,7 +693,7 @@ async fn mempool_failed_download_is_not_rejected() -> Result<(), Report> {
     ) = setup(&network, u64::MAX, true).await;
 
     // Get transactions to use in the test
-    let mut unmined_transactions = unmined_transactions_in_blocks(1..=2, &network);
+    let mut unmined_transactions = network.unmined_transactions_in_blocks(1..=2);
     let rejected_valid_tx = unmined_transactions.next().unwrap().clone();
 
     // Enable the mempool
@@ -939,7 +939,8 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     ) = setup(&network, u64::MAX, true).await;
     mempool.enable(&mut recent_syncs).await;
 
-    let verified_unmined_tx = unmined_transactions_in_blocks(1..=10, &network)
+    let verified_unmined_tx = network
+        .unmined_transactions_in_blocks(1..=10)
         .find(|tx| !tx.transaction.transaction.outputs().is_empty())
         .expect("should have at least 1 tx with transparent outputs");
 

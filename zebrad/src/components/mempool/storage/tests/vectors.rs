@@ -11,9 +11,7 @@ use zebra_chain::{
     parameters::Network,
 };
 
-use crate::components::mempool::{
-    storage::tests::unmined_transactions_in_blocks, storage::*, Mempool,
-};
+use crate::components::mempool::{storage::*, Mempool};
 
 /// Eviction memory time used for tests. Most tests won't care about this
 /// so we use a large enough value that will never be reached in the tests.
@@ -36,7 +34,8 @@ fn mempool_storage_crud_exact_mainnet() {
     });
 
     // Get one (1) unmined transaction
-    let unmined_tx = unmined_transactions_in_blocks(.., &network)
+    let unmined_tx = network
+        .unmined_transactions_in_blocks(..)
         .next()
         .expect("at least one unmined transaction");
 
@@ -70,7 +69,7 @@ fn mempool_storage_basic() -> Result<()> {
 
 fn mempool_storage_basic_for_network(network: Network) -> Result<()> {
     // Get transactions from the first 10 blocks of the Zcash blockchain
-    let unmined_transactions: Vec<_> = unmined_transactions_in_blocks(..=10, &network).collect();
+    let unmined_transactions: Vec<_> = network.unmined_transactions_in_blocks(..=10).collect();
 
     assert!(
         MEMPOOL_TX_COUNT < unmined_transactions.len(),
@@ -163,7 +162,8 @@ fn mempool_storage_crud_same_effects_mainnet() {
     });
 
     // Get one (1) unmined transaction
-    let unmined_tx_1 = unmined_transactions_in_blocks(.., &network)
+    let unmined_tx_1 = network
+        .unmined_transactions_in_blocks(..)
         .next()
         .expect("at least one unmined transaction");
 
@@ -194,7 +194,8 @@ fn mempool_storage_crud_same_effects_mainnet() {
     );
 
     // Get a different unmined transaction
-    let unmined_tx_2 = unmined_transactions_in_blocks(1.., &network)
+    let unmined_tx_2 = network
+        .unmined_transactions_in_blocks(1..)
         .find(|tx| {
             tx.transaction
                 .transaction
@@ -308,7 +309,8 @@ fn mempool_removes_dependent_transactions() -> Result<()> {
     });
 
     let unmined_txs_with_transparent_outputs = || {
-        unmined_transactions_in_blocks(.., &network)
+        network
+            .unmined_transactions_in_blocks(..)
             .filter(|tx| !tx.transaction.transaction.outputs().is_empty())
     };
 

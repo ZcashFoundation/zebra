@@ -69,7 +69,7 @@ pub use storage::{
 };
 
 #[cfg(test)]
-pub use self::{storage::tests::unmined_transactions_in_blocks, tests::UnboxMempoolError};
+pub use self::tests::UnboxMempoolError;
 
 use downloads::{
     Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
