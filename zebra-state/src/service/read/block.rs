@@ -181,6 +181,22 @@ where
     }
 }
 
+/// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
+/// the provided [`transparent::OutPoint`], if it exists and is spent in the non-finalized
+/// `chain` or finalized `db`.
+pub fn spending_transaction_hash<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    outpoint: transparent::OutPoint,
+) -> Option<transaction::Hash>
+where
+    C: AsRef<Chain>,
+{
+    chain
+        .and_then(|chain| chain.as_ref().spending_tx_id(&outpoint))
+        .or_else(|| db.spending_tx_id(&outpoint))
+}
+
 /// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists in any chain
 /// in the `non_finalized_state`, or in the finalized `db`.
 ///
