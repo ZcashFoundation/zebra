@@ -92,12 +92,6 @@ pub struct ChainInner {
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
     /// including those created by earlier transactions or blocks in the chain.
-    // TODO:
-    // - Add a read fn for querying tx ids by spent outpoint
-    // - Add a db format upgrade for indexing spending tx ids (transaction locations) by
-    //   spent outpoints (output locations) in the finalized state
-    // - Add ReadRequest & ReadResponse variants for querying spending tx ids by
-    //   spent outpoints and handle them in the ReadStateService
     pub(crate) spent_utxos: HashMap<transparent::OutPoint, transaction::Hash>,
 
     // Note commitment trees
