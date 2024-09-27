@@ -76,6 +76,28 @@ impl TransactionDependencies {
         all_dependents
     }
 
+    /// Returns a list of lists of transaction hashes that directly on the transaction
+    /// with the provided transaction hash or one of the transactions in the prior list.
+    // TODO: Improve this method's documentation.
+    pub fn all_dependents_leveled(
+        &self,
+        &tx_hash: &transaction::Hash,
+    ) -> Vec<HashSet<transaction::Hash>> {
+        let mut current_level_dependents: HashSet<_> = [tx_hash].into();
+        let mut all_dependents = Vec::new();
+
+        while !current_level_dependents.is_empty() {
+            current_level_dependents = current_level_dependents
+                .iter()
+                .flat_map(|dep| self.dependents.get(dep).cloned().unwrap_or_default())
+                .collect();
+
+            all_dependents.push(current_level_dependents.clone());
+        }
+
+        all_dependents
+    }
+
     /// Clear the maps of transaction dependencies.
     pub fn clear(&mut self) {
         self.dependencies.clear();
