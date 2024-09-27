@@ -58,38 +58,6 @@ pub fn num_halvings(height: Height, network: &Network) -> u32 {
         .expect("already checked for negatives")
 }
 
-/// The first block height of the halving at the provided halving index for a network.
-///
-/// See `Halving(height)`, as described in [protocol specification §7.8][7.8]
-///
-/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn height_for_halving_index(halving_index: u32, network: &Network) -> Option<Height> {
-    if halving_index == 0 {
-        return Some(Height(0));
-    }
-
-    let slow_start_shift = i64::from(network.slow_start_shift().0);
-    let blossom_height = i64::from(
-        Blossom
-            .activation_height(network)
-            .expect("blossom activation height should be available")
-            .0,
-    );
-    let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
-    let halving_index = i64::from(halving_index);
-
-    let unscaled_height = halving_index * pre_blossom_halving_interval;
-    let pre_blossom_height = unscaled_height.min(blossom_height) + slow_start_shift;
-    let post_blossom_height = 0.max(unscaled_height - blossom_height)
-        * i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
-        + slow_start_shift;
-
-    let height = pre_blossom_height + post_blossom_height;
-
-    let height = u32::try_from(height).ok()?;
-    height.try_into().ok()
-}
-
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
@@ -539,7 +507,7 @@ mod test {
     fn check_height_for_num_halvings() {
         for network in Network::iter() {
             for halving_index in 1..1000 {
-                let Some(height_for_halving) = height_for_halving_index(halving_index, &network)
+                let Some(height_for_halving) = zebra_chain::parameters::subsidy::height_for_halving_index(halving_index, &network)
                 else {
                     panic!("could not find height for halving {halving_index}");
                 };

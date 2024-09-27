@@ -410,11 +410,7 @@ impl ParameterSubsidy for Network {
                 } else if params.is_default_testnet() {
                     FIRST_HALVING_TESTNET
                 } else {
-                    Height(
-                        self.post_blossom_halving_interval()
-                            .try_into()
-                            .expect("post blossom halving interval should fit in a Height"),
-                    )
+                    height_for_halving_index(1, self).unwrap()
                 }
             }
         }
@@ -427,15 +423,7 @@ impl ParameterSubsidy for Network {
     fn pre_blossom_halving_interval(&self) -> HeightDiff {
         match self {
             Network::Mainnet => PRE_BLOSSOM_HALVING_INTERVAL,
-            Network::Testnet(params) => {
-                if params.is_regtest() {
-                    PRE_BLOSSOM_REGTEST_HALVING_INTERVAL
-                } else if params.is_default_testnet() {
-                    PRE_BLOSSOM_HALVING_INTERVAL
-                } else {
-                    params.pre_blossom_halving_interval()
-                }
-            }
+            Network::Testnet(params) => params.pre_blossom_halving_interval(),
         }
     }
 }
@@ -552,4 +540,36 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
     address_period
         .try_into()
         .expect("all values are positive and smaller than the input height")
+}
+
+/// The first block height of the halving at the provided halving index for a network.
+///
+/// See `Halving(height)`, as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn height_for_halving_index(halving_index: u32, network: &Network) -> Option<Height> {
+    if halving_index == 0 {
+        return Some(Height(0));
+    }
+
+    let slow_start_shift = i64::from(network.slow_start_shift().0);
+    let blossom_height = i64::from(
+        NetworkUpgrade::Blossom
+            .activation_height(network)
+            .expect("blossom activation height should be available")
+            .0,
+    );
+    let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
+    let halving_index = i64::from(halving_index);
+
+    let unscaled_height = halving_index * pre_blossom_halving_interval;
+    let pre_blossom_height = unscaled_height.min(blossom_height) + slow_start_shift;
+    let post_blossom_height = 0.max(unscaled_height - blossom_height)
+        * i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO)
+        + slow_start_shift;
+
+    let height = pre_blossom_height + post_blossom_height;
+
+    let height = u32::try_from(height).ok()?;
+    height.try_into().ok()
 }
