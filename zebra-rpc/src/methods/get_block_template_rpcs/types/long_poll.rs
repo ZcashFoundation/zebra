@@ -300,7 +300,7 @@ impl TryFrom<String> for LongPollId {
 
 /// Check that [`LongPollInput::new`] will sort mempool transaction ids.
 ///
-/// The mempool does not currently gaurantee the order in which it will return transactions and
+/// The mempool does not currently guarantee the order in which it will return transactions and
 /// may return the same items in a different order, while the long poll id should be the same if
 /// its other components are equal and no transactions have been added or removed in the mempool.
 #[test]
