@@ -91,7 +91,7 @@ pub struct ChainInner {
     // TODO: replace OutPoint with OutputLocation?
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
-    /// including those created by earlier transactions or blocks in the chain.
+    /// including spent outputs created by earlier transactions or blocks in the chain.
     pub(crate) spent_utxos: HashMap<transparent::OutPoint, transaction::Hash>,
 
     // Note commitment trees
@@ -1849,12 +1849,12 @@ impl
             };
 
             // Index the spent outpoint in the chain
-            let was_spend_already_present = self
+            let was_spend_newly_inserted = self
                 .spent_utxos
                 .insert(spent_outpoint, *spending_tx_hash)
-                .is_some();
+                .is_none();
             assert!(
-                was_spend_already_present,
+                was_spend_newly_inserted,
                 "unexpected duplicate spent output: should be checked earlier"
             );
 
