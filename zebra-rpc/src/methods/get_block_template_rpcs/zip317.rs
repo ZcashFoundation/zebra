@@ -29,6 +29,9 @@ use crate::methods::get_block_template_rpcs::{
 
 use super::get_block_template::InBlockTxDependenciesDepth;
 
+#[cfg(test)]
+mod tests;
+
 /// Selects mempool transactions for block production according to [ZIP-317],
 /// using a fake coinbase transaction and the mempool.
 ///
@@ -351,64 +354,4 @@ fn choose_transaction_weighted_random(
     // If we don't, some chosen transactions can end up with a tiny non-zero weight, leading to duplicates.
     // <https://github.com/rust-random/rand/blob/4bde8a0adb517ec956fcec91665922f6360f974b/src/distributions/weighted_index.rs#L173-L183>
     (setup_fee_weighted_index(candidate_txs), candidate_tx)
-}
-
-#[test]
-fn excludes_tx_with_unselected_dependencies() {
-    use zebra_chain::{
-        amount::Amount, block::Block, serialization::ZcashDeserializeInto, transaction::UnminedTx,
-        transparent::OutPoint,
-    };
-
-    let network = Network::Mainnet;
-    let next_block_height = Height(1_000_000);
-    let miner_address = transparent::Address::from_pub_key_hash(network.kind(), [0; 20]);
-    let mempool_txns: Vec<_> = network
-        .block_iter()
-        .map(|(_, block)| {
-            block
-                .zcash_deserialize_into::<Block>()
-                .expect("block test vector is structurally valid")
-        })
-        .flat_map(|block| block.transactions)
-        .take(1)
-        .map(UnminedTx::from)
-        .map(|transaction| {
-            VerifiedUnminedTx::new(
-                transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
-                0,
-            )
-            .unwrap()
-        })
-        .collect();
-
-    let mut mempool_tx_deps = TransactionDependencies::default();
-
-    mempool_tx_deps.add(
-        mempool_txns
-            .first()
-            .expect("should not be empty")
-            .transaction
-            .id
-            .mined_id(),
-        vec![OutPoint::from_usize(transaction::Hash([0; 32]), 0)],
-    );
-
-    let like_zcashd = true;
-    let extra_coinbase_data = Vec::new();
-
-    assert_eq!(
-        select_mempool_transactions(
-            &network,
-            next_block_height,
-            &miner_address,
-            mempool_txns,
-            mempool_tx_deps,
-            like_zcashd,
-            extra_coinbase_data,
-        ),
-        vec![],
-        "should not select any transactions when dependencies are unavailable"
-    );
 }
