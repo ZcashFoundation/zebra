@@ -1256,11 +1256,15 @@ impl Chain {
     ///
     /// UTXOs are returned regardless of whether they have been spent.
     pub fn created_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        if let Some(utxo) = self.created_utxos.get(outpoint) {
-            return Some(utxo.utxo.clone());
-        }
+        self.created_utxos
+            .get(outpoint)
+            .map(|utxo| utxo.utxo.clone())
+    }
 
-        None
+    /// Returns the [`transaction::Hash`] of the transaction that spent the given
+    /// [`transparent::OutPoint`], if it was spent by this chain.
+    pub fn spending_tx_id(&self, outpoint: &transparent::OutPoint) -> Option<transaction::Hash> {
+        self.spent_utxos.get(outpoint).cloned()
     }
 
     // Address index queries

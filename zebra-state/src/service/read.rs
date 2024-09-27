@@ -31,7 +31,8 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos},
 };
 pub use block::{
-    any_utxo, block, block_header, mined_transaction, transaction_hashes_for_block, unspent_utxo,
+    any_utxo, block, block_header, mined_transaction, spending_transaction_hash,
+    transaction_hashes_for_block, unspent_utxo,
 };
 pub use find::{
     best_tip, block_locator, depth, finalized_state_contains_block_hash, find_chain_hashes,
