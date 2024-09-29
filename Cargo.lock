@@ -5685,10 +5685,10 @@ dependencies = [
 [[package]]
 name = "zcash_script"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2122a042c77d529d3c60b899e74705eda39ae96a8a992460caeb06afa76990a2"
+source = "git+https://github.com/ZcashFoundation/zcash_script.git?rev=9d16e79#9d16e79c72ea469642ae991f064c30de424bba99"
 dependencies = [
  "bindgen 0.70.1",
+ "bitflags 2.6.0",
  "cc",
 ]
 
