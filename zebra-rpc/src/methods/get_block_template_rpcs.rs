@@ -19,7 +19,7 @@ use zebra_chain::{
         Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     transparent::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
@@ -47,7 +47,9 @@ use crate::methods::{
         // TODO: move the types/* modules directly under get_block_template_rpcs,
         //       and combine any modules with the same names.
         types::{
-            get_block_template::GetBlockTemplate,
+            get_block_template::{
+                proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+            },
             get_mining_info,
             long_poll::LongPollInput,
             peer_info::PeerInfo,
@@ -283,6 +285,22 @@ pub trait GetBlockTemplateRpc {
         &self,
         address: String,
     ) -> BoxFuture<Result<unified_address::Response>>;
+
+    #[rpc(name = "generate")]
+    /// Mine blocks immediately. Returns the block hashes of the generated blocks.
+    ///
+    /// # Parameters
+    ///
+    /// - `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.
+    ///
+    /// # Notes
+    ///
+    /// Only works if the network of the running zebrad process is `Regtest`.
+    ///
+    /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
+    /// method: post
+    /// tags: generating
+    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>>;
 }
 
 /// RPC method implementations.
@@ -994,9 +1012,39 @@ where
 
     fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>> {
         let network = self.network.clone();
+        let mut state = self.state.clone();
+
+        let chain_tip = self.latest_chain_tip.clone();
+        let tip_height = chain_tip.best_tip_height().unwrap_or(Height(0)).0;
+
+        let mut current_block_tx = None;
+        if tip_height > 0 {
+            let mined_tx_ids = chain_tip.best_tip_mined_transaction_ids();
+            current_block_tx =
+                (!mined_tx_ids.is_empty()).then(|| mined_tx_ids.len().saturating_sub(1));
+        }
+
         let solution_rate_fut = self.get_network_sol_ps(None, None);
         async move {
+            // Get the current block size.
+            let mut current_block_size = None;
+            if tip_height > 0 {
+                let request = zebra_state::ReadRequest::TipBlockSize;
+                let response: zebra_state::ReadResponse = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_server_error()?;
+                current_block_size = match response {
+                    zebra_state::ReadResponse::TipBlockSize(Some(block_size)) => Some(block_size),
+                    _ => None,
+                };
+            }
+
             Ok(get_mining_info::Response::new(
+                tip_height,
+                current_block_size,
+                current_block_tx,
                 network,
                 solution_rate_fut.await?,
             ))
@@ -1354,6 +1402,61 @@ where
             Ok(unified_address::Response::new(
                 orchard, sapling, p2pkh, p2sh,
             ))
+        }
+        .boxed()
+    }
+
+    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>> {
+        let rpc: GetBlockTemplateRpcImpl<
+            Mempool,
+            State,
+            Tip,
+            BlockVerifierRouter,
+            SyncStatus,
+            AddressBook,
+        > = self.clone();
+        let network = self.network.clone();
+
+        async move {
+            if !network.is_regtest() {
+                return Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "generate is only supported on regtest".to_string(),
+                    data: None,
+                });
+            }
+
+            let mut block_hashes = Vec::new();
+            for _ in 0..num_blocks {
+                let block_template = rpc.get_block_template(None).await.map_server_error()?;
+
+                let get_block_template::Response::TemplateMode(block_template) = block_template
+                else {
+                    return Err(Error {
+                        code: ErrorCode::ServerError(0),
+                        message: "error generating block template".to_string(),
+                        data: None,
+                    });
+                };
+
+                let proposal_block = proposal_block_from_template(
+                    &block_template,
+                    TimeSource::CurTime,
+                    NetworkUpgrade::current(&network, Height(block_template.height)),
+                )
+                .map_server_error()?;
+                let hex_proposal_block =
+                    HexData(proposal_block.zcash_serialize_to_vec().map_server_error()?);
+
+                let _submit = rpc
+                    .submit_block(hex_proposal_block, None)
+                    .await
+                    .map_server_error()?;
+
+                block_hashes.push(GetBlockHash(proposal_block.hash()));
+            }
+
+            Ok(block_hashes)
         }
         .boxed()
     }
