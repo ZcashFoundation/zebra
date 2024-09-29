@@ -11,7 +11,7 @@ members = [
         "zebra-test",
         "zebra-utils",
         "zebra-scan",
-	"zebra-grpc",
+        "zebra-grpc",
         "tower-batch-control",
         "tower-fallback",
 ]
@@ -33,6 +33,9 @@ zcash_keys = "0.3.0"
 zcash_primitives = "0.17.0"
 zcash_proofs = "0.17.0"
 zcash_protocol = "0.3.0"
+
+[patch.crates-io]
+zcash_script = { git = 'https://github.com/ZcashFoundation/zcash_script.git' }
 
 [workspace.metadata.release]
 
