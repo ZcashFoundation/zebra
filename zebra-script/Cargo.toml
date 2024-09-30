@@ -18,7 +18,7 @@ categories = ["api-bindings", "cryptography::cryptocurrencies"]
 zcash_script = "0.2.0"
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.39" }
 
-thiserror = "1.0.63"
+thiserror = "1.0.64"
 
 [dev-dependencies]
 hex = "0.4.3"
