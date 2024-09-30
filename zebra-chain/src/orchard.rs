@@ -23,8 +23,13 @@ pub use address::Address;
 pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
-pub use orchard_flavor_ext::{OrchardFlavorExt, OrchardVanilla, OrchardZSA};
+pub use orchard_flavor_ext::{OrchardFlavorExt, OrchardVanilla};
 pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};
 
-pub(crate) use crate::orchard_zsa::issuance::IssueData;
 pub(crate) use shielded_data::ActionCommon;
+
+#[cfg(feature = "tx-v6")]
+pub use orchard_flavor_ext::OrchardZSA;
+
+#[cfg(feature = "tx-v6")]
+pub(crate) use crate::orchard_zsa::issuance::IssueData;

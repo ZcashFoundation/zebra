@@ -69,6 +69,7 @@ macro_rules! orchard_shielded_data_iter {
                 ..
             } => Box::new(orchard_shielded_data.into_iter().flat_map($mapper)),
 
+            #[cfg(feature = "tx-v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
@@ -93,6 +94,7 @@ macro_rules! orchard_shielded_data_field {
                 ..
             } => orchard_shielded_data.as_ref().map(|data| data.$field),
 
+            #[cfg(feature = "tx-v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
@@ -100,6 +102,21 @@ macro_rules! orchard_shielded_data_field {
         }
     };
 }
+
+// FIXME:
+// Define the macro for including the V6 pattern
+//#[cfg(feature = "tx-v6")]
+macro_rules! with_v6 {
+    () => {
+        | Transaction::V6 { expiry_height, .. }
+    };
+}
+
+// FIXME:
+//#[cfg(not(feature = "tx-v6"))]
+//macro_rules! with_v6 {
+//    () => {};
+//}
 
 /// A Zcash transaction.
 ///
@@ -193,6 +210,7 @@ pub enum Transaction {
     // FIXME: implement V6 properly (now it's just a coipy of V5)
     /// A `version = 6` transaction , which supports Orchard ZSA, Orchard Vanille, Sapling and
     /// transparent, but not Sprout.
+    #[cfg(feature = "tx-v6")]
     V6 {
         /// The Network Upgrade for this transaction.
         ///
@@ -210,8 +228,10 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The ZSA orchard shielded data for this transaction, if any.
+        #[cfg(feature = "tx-v6")]
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardZSA>>,
         /// The ZSA issuance data for this transaction, if any.
+        #[cfg(feature = "tx-v6")]
         orchard_zsa_issue_data: Option<orchard::IssueData>,
     },
 }
@@ -319,7 +339,9 @@ impl Transaction {
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => None,
-            Transaction::V5 { .. } | Transaction::V6 { .. } => Some(AuthDigest::from(self)),
+            Transaction::V5 { .. } => Some(AuthDigest::from(self)),
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 { .. } => Some(AuthDigest::from(self)),
         }
     }
 
@@ -392,10 +414,9 @@ impl Transaction {
     pub fn is_overwintered(&self) -> bool {
         match self {
             Transaction::V1 { .. } | Transaction::V2 { .. } => false,
-            Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 { .. }
-            | Transaction::V6 { .. } => true,
+            Transaction::V3 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => true,
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 { .. } => true,
         }
     }
 
@@ -407,6 +428,7 @@ impl Transaction {
             Transaction::V3 { .. } => 3,
             Transaction::V4 { .. } => 4,
             Transaction::V5 { .. } => 5,
+            #[cfg(feature = "tx-v6")]
             Transaction::V6 { .. } => 6,
         }
     }
@@ -418,8 +440,9 @@ impl Transaction {
             | Transaction::V2 { lock_time, .. }
             | Transaction::V3 { lock_time, .. }
             | Transaction::V4 { lock_time, .. }
-            | Transaction::V5 { lock_time, .. }
-            | Transaction::V6 { lock_time, .. } => *lock_time,
+            | Transaction::V5 { lock_time, .. } => *lock_time,
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 { lock_time, .. } => *lock_time,
         };
 
         // `zcashd` checks that the block height is greater than the lock height.
@@ -466,8 +489,9 @@ impl Transaction {
             | Transaction::V2 { lock_time, .. }
             | Transaction::V3 { lock_time, .. }
             | Transaction::V4 { lock_time, .. }
-            | Transaction::V5 { lock_time, .. }
-            | Transaction::V6 { lock_time, .. } => *lock_time,
+            | Transaction::V5 { lock_time, .. } => *lock_time,
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 { lock_time, .. } => *lock_time,
         };
         let mut lock_time_bytes = Vec::new();
         lock_time
