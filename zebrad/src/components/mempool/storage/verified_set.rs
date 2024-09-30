@@ -247,7 +247,7 @@ impl VerifiedSet {
     fn remove(&mut self, key_to_remove: &transaction::Hash) -> Vec<VerifiedUnminedTx> {
         let removed_transactions: Vec<_> = self
             .transaction_dependencies
-            .remove(key_to_remove)
+            .remove_all(key_to_remove)
             .iter()
             .map(|key_to_remove| {
                 let removed_tx = self

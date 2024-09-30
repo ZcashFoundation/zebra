@@ -42,11 +42,15 @@ impl TransactionDependencies {
                 .insert(dependent);
         }
 
+        // Only add an entries to `dependencies` for transactions that spend unmined outputs so it
+        // can be used to handle transactions with dependencies differently during block production.
         if !spent_mempool_outpoints.is_empty() {
-            self.dependencies.entry(dependent).or_default().extend(
+            self.dependencies.insert(
+                dependent,
                 spent_mempool_outpoints
                     .into_iter()
-                    .map(|outpoint| outpoint.hash),
+                    .map(|outpoint| outpoint.hash)
+                    .collect(),
             );
         }
     }
@@ -57,7 +61,7 @@ impl TransactionDependencies {
     ///
     /// Returns a list of transaction hashes that have been removed if they were previously
     /// in this [`TransactionDependencies`].
-    pub fn remove(&mut self, &tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+    pub fn remove_all(&mut self, &tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
         let mut current_level_dependents: HashSet<_> = [tx_hash].into();
         let mut all_dependents = current_level_dependents.clone();
 
@@ -76,26 +80,14 @@ impl TransactionDependencies {
         all_dependents
     }
 
-    /// Returns a list of lists of transaction hashes that directly on the transaction
-    /// with the provided transaction hash or one of the transactions in the prior list.
-    // TODO: Improve this method's documentation.
-    pub fn all_dependents_leveled(
-        &self,
-        &tx_hash: &transaction::Hash,
-    ) -> Vec<HashSet<transaction::Hash>> {
-        let mut current_level_dependents: HashSet<_> = [tx_hash].into();
-        let mut all_dependents = Vec::new();
+    /// Returns a list of hashes of transactions that directly depend on the transaction for `tx_hash`.
+    pub fn direct_dependents(&self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+        self.dependents.get(tx_hash).cloned().unwrap_or_default()
+    }
 
-        while !current_level_dependents.is_empty() {
-            current_level_dependents = current_level_dependents
-                .iter()
-                .flat_map(|dep| self.dependents.get(dep).cloned().unwrap_or_default())
-                .collect();
-
-            all_dependents.push(current_level_dependents.clone());
-        }
-
-        all_dependents
+    /// Returns a list of hashes of transactions that are direct dependencies of the transaction for `tx_hash`.
+    pub fn direct_dependencies(&self, tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+        self.dependencies.get(tx_hash).cloned().unwrap_or_default()
     }
 
     /// Clear the maps of transaction dependencies.

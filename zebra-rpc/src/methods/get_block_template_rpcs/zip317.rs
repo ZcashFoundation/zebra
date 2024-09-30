@@ -63,14 +63,12 @@ pub fn select_mempool_transactions(
         extra_coinbase_data,
     );
 
-    let dependent_tx_ids: HashSet<transaction::Hash> =
-        mempool_tx_deps.dependencies().keys().copied().collect();
-
+    let tx_dependencies = mempool_tx_deps.dependencies();
     let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
         mempool_txs
             .into_iter()
             .map(|tx| (tx.transaction.id.mined_id(), tx))
-            .partition(|(tx_id, _tx)| !dependent_tx_ids.contains(tx_id));
+            .partition(|(tx_id, _tx)| !tx_dependencies.contains_key(tx_id));
 
     // Setup the transaction lists.
     let (mut conventional_fee_txs, mut low_fee_txs): (Vec<_>, Vec<_>) = independent_mempool_txs
@@ -195,27 +193,31 @@ fn has_direct_dependencies(
     for (_, tx) in selected_txs {
         if deps.contains(&tx.transaction.id.mined_id()) {
             num_available_deps += 1;
+        } else {
+            continue;
+        }
+
+        if num_available_deps == deps.len() {
+            return true;
         }
     }
 
-    num_available_deps == deps.len()
+    false
 }
 
 /// Returns the depth of a transaction's dependencies in the block for a candidate
 /// transaction with the provided dependencies.
-// TODO: Add a method for removing dependents from `TransactionDependencies` with their dependency depths
 fn dependencies_depth(
-    candidate_tx_deps: Option<&HashSet<transaction::Hash>>,
-    mempool_tx_deps: &HashMap<transaction::Hash, HashSet<transaction::Hash>>,
+    dependent_tx_id: &transaction::Hash,
+    mempool_tx_deps: &TransactionDependencies,
 ) -> InBlockTxDependenciesDepth {
-    let mut current_level_deps = candidate_tx_deps.cloned().unwrap_or_default();
     let mut current_level = 0;
-
+    let mut current_level_deps = mempool_tx_deps.direct_dependencies(dependent_tx_id);
     while !current_level_deps.is_empty() {
         current_level += 1;
         current_level_deps = current_level_deps
             .iter()
-            .flat_map(|dep| mempool_tx_deps.get(dep).cloned().unwrap_or_default())
+            .flat_map(|dep_id| mempool_tx_deps.direct_dependencies(dep_id))
             .collect();
     }
 
@@ -232,6 +234,7 @@ fn dependencies_depth(
 ///
 /// Returns the updated transaction weights.
 /// If all transactions have been chosen, returns `None`.
+// TODO: Refactor these arguments into a struct and this function into a method.
 #[allow(clippy::too_many_arguments)]
 fn checked_add_transaction_weighted_random(
     candidate_txs: &mut Vec<VerifiedUnminedTx>,
@@ -248,53 +251,59 @@ fn checked_add_transaction_weighted_random(
     let (new_tx_weights, candidate_tx) =
         choose_transaction_weighted_random(candidate_txs, tx_weights);
 
-    // > If the block template with this transaction included
-    // > would be within the block size limit and block sigop limit,
-    // > and block_unpaid_actions <=  block_unpaid_action_limit,
-    // > add the transaction to the block template
-    //
-    // Unpaid actions are always zero for transactions that pay the conventional fee,
-    // so the unpaid action check always passes for those transactions.
-    if candidate_tx.try_update_block_limits(
+    if !candidate_tx.try_update_block_template_limits(
         remaining_block_bytes,
         remaining_block_sigops,
         remaining_block_unpaid_actions,
     ) {
-        let selected_tx_id = candidate_tx.transaction.id.mined_id();
-        selected_txs.push((0, candidate_tx));
+        return new_tx_weights;
+    }
 
-        for dependent_candidate_tx_ids_by_level in
-            mempool_tx_deps.all_dependents_leveled(&selected_tx_id)
-        {
-            for dependent_candidate_tx_id in &dependent_candidate_tx_ids_by_level {
-                let mempool_tx_deps = mempool_tx_deps.dependencies();
-                let candidate_tx_deps = mempool_tx_deps.get(dependent_candidate_tx_id);
+    let tx_dependencies = mempool_tx_deps.dependencies();
+    let selected_tx_id = &candidate_tx.transaction.id.mined_id();
+    debug_assert!(
+        !tx_dependencies.contains_key(selected_tx_id),
+        "all candidate transactions should be independent"
+    );
 
-                if has_direct_dependencies(candidate_tx_deps, selected_txs) {
-                    let Some(candidate_tx) = dependent_txs.remove(dependent_candidate_tx_id) else {
-                        continue;
-                    };
+    selected_txs.push((0, candidate_tx));
 
-                    // Transactions that don't pay the conventional fee should not have
-                    // the same probability of being included as their dependencies.
-                    if !candidate_tx.pays_conventional_fee() {
-                        continue;
-                    }
+    // Try adding any dependent transactions if all of their dependencies have been selected.
 
-                    if candidate_tx.try_update_block_limits(
-                        remaining_block_bytes,
-                        remaining_block_sigops,
-                        remaining_block_unpaid_actions,
-                    ) {
-                        let candidate_tx_deps = mempool_tx_deps.get(dependent_candidate_tx_id);
-                        selected_txs.push((
-                            dependencies_depth(candidate_tx_deps, mempool_tx_deps),
-                            candidate_tx,
-                        ));
-                    }
+    let mut current_level_dependents = mempool_tx_deps.direct_dependents(selected_tx_id);
+    while !current_level_dependents.is_empty() {
+        let mut next_level_dependents = HashSet::new();
+
+        for dependent_tx_id in &current_level_dependents {
+            if has_direct_dependencies(tx_dependencies.get(dependent_tx_id), selected_txs) {
+                let Some(candidate_tx) = dependent_txs.remove(dependent_tx_id) else {
+                    continue;
+                };
+
+                // Transactions that don't pay the conventional fee should not have
+                // the same probability of being included as their dependencies.
+                if !candidate_tx.pays_conventional_fee() {
+                    continue;
                 }
+
+                if !candidate_tx.try_update_block_template_limits(
+                    remaining_block_bytes,
+                    remaining_block_sigops,
+                    remaining_block_unpaid_actions,
+                ) {
+                    continue;
+                }
+
+                selected_txs.push((
+                    dependencies_depth(dependent_tx_id, mempool_tx_deps),
+                    candidate_tx,
+                ));
+
+                next_level_dependents.extend(mempool_tx_deps.direct_dependents(dependent_tx_id));
             }
         }
+
+        current_level_dependents = next_level_dependents;
     }
 
     new_tx_weights
@@ -306,7 +315,7 @@ trait TryUpdateBlockLimits {
     ///
     /// Updates the limits and returns true if the transaction does fit, or
     /// returns false otherwise.
-    fn try_update_block_limits(
+    fn try_update_block_template_limits(
         &self,
         remaining_block_bytes: &mut usize,
         remaining_block_sigops: &mut u64,
@@ -315,12 +324,19 @@ trait TryUpdateBlockLimits {
 }
 
 impl TryUpdateBlockLimits for VerifiedUnminedTx {
-    fn try_update_block_limits(
+    fn try_update_block_template_limits(
         &self,
         remaining_block_bytes: &mut usize,
         remaining_block_sigops: &mut u64,
         remaining_block_unpaid_actions: &mut u32,
     ) -> bool {
+        // > If the block template with this transaction included
+        // > would be within the block size limit and block sigop limit,
+        // > and block_unpaid_actions <=  block_unpaid_action_limit,
+        // > add the transaction to the block template
+        //
+        // Unpaid actions are always zero for transactions that pay the conventional fee,
+        // so the unpaid action check always passes for those transactions.
         if self.transaction.size <= *remaining_block_bytes
             && self.legacy_sigop_count <= *remaining_block_sigops
             && self.unpaid_actions <= *remaining_block_unpaid_actions
