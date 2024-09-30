@@ -314,6 +314,10 @@ pub trait Rpc {
     /// tags: control
     #[rpc(name = "stop")]
     fn stop(&self) -> Result<String>;
+
+    #[rpc(name = "unauthenticated")]
+    /// A dummy RPC method that just returns a non-authenticated RPC error.
+    fn unauthenticated(&self) -> Result<()>;
 }
 
 /// RPC method implementations.
@@ -1380,6 +1384,14 @@ where
         Err(Error {
             code: ErrorCode::MethodNotFound,
             message: "stop is not available in windows targets".to_string(),
+            data: None,
+        })
+    }
+
+    fn unauthenticated(&self) -> Result<()> {
+        Err(Error {
+            code: ErrorCode::ServerError(401),
+            message: "unauthenticated method".to_string(),
             data: None,
         })
     }

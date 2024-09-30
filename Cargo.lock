@@ -6164,6 +6164,7 @@ dependencies = [
 name = "zebra-rpc"
 version = "1.0.0-beta.39"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "futures",
  "hex",

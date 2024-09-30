@@ -8,6 +8,8 @@ use jsonrpc_http_server::{
     RequestMiddleware, RequestMiddlewareAction,
 };
 
+use crate::server::cookie;
+
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
 /// This middleware makes the following changes to HTTP requests:
@@ -34,8 +36,8 @@ use jsonrpc_http_server::{
 /// Any user-specified data in RPC requests is hex or base58check encoded.
 /// We assume lightwalletd validates data encodings before sending it on to Zebra.
 /// So any fixes Zebra performs won't change user-specified data.
-#[derive(Copy, Clone, Debug)]
-pub struct FixHttpRequestMiddleware;
+#[derive(Clone, Debug)]
+pub struct FixHttpRequestMiddleware(String);
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
     fn on_request(&self, mut request: Request<Body>) -> RequestMiddlewareAction {
@@ -45,7 +47,7 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
         FixHttpRequestMiddleware::insert_or_replace_content_type_header(request.headers_mut());
 
         // Fix the request body
-        let request = request.map(|body| {
+        let mut request = request.map(|body| {
             let body = body.map_ok(|data| {
                 // To simplify data handling, we assume that any search strings won't be split
                 // across multiple `Bytes` data buffers.
@@ -69,6 +71,18 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
 
             Body::wrap_stream(body)
         });
+
+        // Check if the request is authenticated
+        match cookie::get() {
+            Some(password) => {
+                if password != self.0 {
+                    request = Self::unauthenticated(request);
+                }
+            }
+            None => {
+                request = Self::unauthenticated(request);
+            }
+        }
 
         tracing::trace!(?request, "modified HTTP request");
 
@@ -140,5 +154,34 @@ impl FixHttpRequestMiddleware {
                 header::HeaderValue::from_static("application/json"),
             );
         }
+    }
+
+    /// Create a new `FixHttpRequestMiddleware`.
+    pub fn new(password: String) -> Self {
+        Self(password)
+    }
+
+    /// Change the method name in the JSON request.
+    fn change_method_name(data: String) -> String {
+        let mut json_data: serde_json::Value = serde_json::from_str(&data).expect("Invalid JSON");
+
+        if let Some(method) = json_data.get_mut("method") {
+            *method = serde_json::json!("unauthenticated");
+        }
+
+        serde_json::to_string(&json_data).expect("Failed to serialize JSON")
+    }
+
+    /// Modify the request name to be `unauthenticated`.
+    fn unauthenticated(request: Request<Body>) -> Request<Body> {
+        request.map(|body| {
+            let body = body.map_ok(|data| {
+                let mut data = String::from_utf8_lossy(data.as_ref()).to_string();
+                data = Self::change_method_name(data);
+                Bytes::from(data)
+            });
+
+            Body::wrap_stream(body)
+        })
     }
 }
