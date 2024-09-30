@@ -984,6 +984,11 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
         .expect("mempool tx verification result channel should not be closed")
         .expect("mocked verification should be successful");
 
+    // Wait for next steps in mempool's Downloads to finish
+    // TODO: Move this and the `ready().await` below above waiting for the mempool verification result above after
+    //       waiting to respond with a transaction's verification result until after it's been inserted into the mempool.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
     mempool
         .ready()
         .await
