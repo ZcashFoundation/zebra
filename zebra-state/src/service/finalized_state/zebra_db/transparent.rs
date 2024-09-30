@@ -38,8 +38,10 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError, TypedColumnFamily,
+    BoxError,
 };
+
+use super::super::TypedColumnFamily;
 
 /// The name of the transaction hash by spent outpoints column family.
 ///
