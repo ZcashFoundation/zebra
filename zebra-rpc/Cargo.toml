@@ -33,7 +33,6 @@ indexer-rpcs = [
 
 # Mining RPC support
 getblocktemplate-rpcs = [
-    "rand",
     "zcash_address",
     "zebra-consensus/getblocktemplate-rpcs",
     "zebra-state/getblocktemplate-rpcs",
@@ -70,6 +69,7 @@ indexmap = { version = "2.3.0", features = ["serde"] }
 
 # RPC endpoint basic auth
 base64 = "0.22.1"
+rand = "0.8.5"
 
 tokio = { version = "1.39.2", features = [
     "time",
@@ -95,8 +95,6 @@ nix = { version = "0.29.0", features = ["signal"] }
 
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 
-# Experimental feature getblocktemplate-rpcs
-rand = { version = "0.8.5", optional = true }
 # ECC deps used by getblocktemplate-rpcs feature
 zcash_address = { workspace = true, optional = true}
 
