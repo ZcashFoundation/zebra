@@ -23,7 +23,7 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::Transaction,
+    transaction::{self, Transaction},
 };
 
 use crate::{
@@ -33,7 +33,7 @@ use crate::{
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    BoxError,
+    BoxError, TransactionLocation,
 };
 
 // Doc-only items
@@ -59,6 +59,42 @@ impl ZebraDb {
     pub fn contains_orchard_nullifier(&self, orchard_nullifier: &orchard::Nullifier) -> bool {
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
         self.db.zs_contains(&orchard_nullifiers, &orchard_nullifier)
+    }
+
+    /// Returns the [`transaction::Hash`] of the transaction that revealed
+    /// the given [`sprout::Nullifier`], if it is revealed in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sprout_revealing_tx_id(
+        &self,
+        sprout_nullifier: &sprout::Nullifier,
+    ) -> Option<transaction::Hash> {
+        let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
+        let revealing_tx_location = self.db.zs_get(&sprout_nullifiers, &sprout_nullifier)?;
+        self.transaction_hash(revealing_tx_location)
+    }
+
+    /// Returns the [`transaction::Hash`] of the transaction that revealed
+    /// the given [`sapling::Nullifier`], if it is revealed in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sapling_revealing_tx_id(
+        &self,
+        sapling_nullifier: &sapling::Nullifier,
+    ) -> Option<transaction::Hash> {
+        let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
+        let revealing_tx_location = self.db.zs_get(&sapling_nullifiers, &sapling_nullifier)?;
+        self.transaction_hash(revealing_tx_location)
+    }
+
+    /// Returns the [`transaction::Hash`] of the transaction that revealed
+    /// the given [`orchard::Nullifier`], if it is revealed in the finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn orchard_revealing_tx_id(
+        &self,
+        orchard_nullifier: &orchard::Nullifier,
+    ) -> Option<transaction::Hash> {
+        let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
+        let revealing_tx_location = self.db.zs_get(&orchard_nullifiers, &orchard_nullifier)?;
+        self.transaction_hash(revealing_tx_location)
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
@@ -440,11 +476,12 @@ impl DiskWriteBatch {
         db: &DiskDb,
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
-        let FinalizedBlock { block, .. } = finalized;
+        let FinalizedBlock { block, height, .. } = finalized;
 
         // Index each transaction's shielded data
-        for transaction in &block.transactions {
-            self.prepare_nullifier_batch(db, transaction)?;
+        for (tx_index, transaction) in block.transactions.iter().enumerate() {
+            let tx_loc = TransactionLocation::from_usize(*height, tx_index);
+            self.prepare_nullifier_batch(db, transaction, tx_loc)?;
         }
 
         Ok(())
@@ -461,6 +498,7 @@ impl DiskWriteBatch {
         &mut self,
         db: &DiskDb,
         transaction: &Transaction,
+        transaction_location: TransactionLocation,
     ) -> Result<(), BoxError> {
         let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
         let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
@@ -468,13 +506,13 @@ impl DiskWriteBatch {
 
         // Mark sprout, sapling and orchard nullifiers as spent
         for sprout_nullifier in transaction.sprout_nullifiers() {
-            self.zs_insert(&sprout_nullifiers, sprout_nullifier, ());
+            self.zs_insert(&sprout_nullifiers, sprout_nullifier, transaction_location);
         }
         for sapling_nullifier in transaction.sapling_nullifiers() {
-            self.zs_insert(&sapling_nullifiers, sapling_nullifier, ());
+            self.zs_insert(&sapling_nullifiers, sapling_nullifier, transaction_location);
         }
         for orchard_nullifier in transaction.orchard_nullifiers() {
-            self.zs_insert(&orchard_nullifiers, orchard_nullifier, ());
+            self.zs_insert(&orchard_nullifiers, orchard_nullifier, transaction_location);
         }
 
         Ok(())

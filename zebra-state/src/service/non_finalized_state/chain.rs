@@ -177,11 +177,11 @@ pub struct ChainInner {
     // Nullifiers
     //
     /// The Sprout nullifiers revealed by `blocks`.
-    pub(crate) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    pub(crate) sprout_nullifiers: HashMap<sprout::Nullifier, transaction::Hash>,
     /// The Sapling nullifiers revealed by `blocks`.
-    pub(crate) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    pub(crate) sapling_nullifiers: HashMap<sapling::Nullifier, transaction::Hash>,
     /// The Orchard nullifiers revealed by `blocks`.
-    pub(crate) orchard_nullifiers: HashSet<orchard::Nullifier>,
+    pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, transaction::Hash>,
 
     // Transparent Transfers
     // TODO: move to the transparent section
@@ -1546,10 +1546,13 @@ impl Chain {
             self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
 
             // add the shielded data
-            self.update_chain_tip_with(joinsplit_data)?;
-            self.update_chain_tip_with(sapling_shielded_data_per_spend_anchor)?;
-            self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
-            self.update_chain_tip_with(orchard_shielded_data)?;
+            self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
+            self.update_chain_tip_with(&(
+                sapling_shielded_data_per_spend_anchor,
+                &transaction_hash,
+            ))?;
+            self.update_chain_tip_with(&(sapling_shielded_data_shared_anchor, &transaction_hash))?;
+            self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
         }
 
         // update the chain value pool balances
@@ -1704,10 +1707,17 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             );
 
             // remove the shielded data
-            self.revert_chain_with(joinsplit_data, position);
-            self.revert_chain_with(sapling_shielded_data_per_spend_anchor, position);
-            self.revert_chain_with(sapling_shielded_data_shared_anchor, position);
-            self.revert_chain_with(orchard_shielded_data, position);
+
+            self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
+            self.revert_chain_with(
+                &(sapling_shielded_data_per_spend_anchor, transaction_hash),
+                position,
+            );
+            self.revert_chain_with(
+                &(sapling_shielded_data_shared_anchor, transaction_hash),
+                position,
+            );
+            self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
@@ -1939,11 +1949,19 @@ impl
     }
 }
 
-impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
+impl
+    UpdateWith<(
+        &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &transaction::Hash,
+    )> for Chain
+{
     #[instrument(skip(self, joinsplit_data))]
     fn update_chain_tip_with(
         &mut self,
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &(joinsplit_data, revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &transaction::Hash,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -1951,6 +1969,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -1964,7 +1983,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_with(
         &mut self,
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &(joinsplit_data, _revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &transaction::Hash,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
@@ -1980,14 +2002,17 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     }
 }
 
-impl<AnchorV> UpdateWith<Option<sapling::ShieldedData<AnchorV>>> for Chain
+impl<AnchorV> UpdateWith<(&Option<sapling::ShieldedData<AnchorV>>, &transaction::Hash)> for Chain
 where
     AnchorV: sapling::AnchorVariant + Clone,
 {
     #[instrument(skip(self, sapling_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+        &(sapling_shielded_data, revealing_tx_id): &(
+            &Option<sapling::ShieldedData<AnchorV>>,
+            &transaction::Hash,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -1995,6 +2020,7 @@ where
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sapling_nullifiers,
                 sapling_shielded_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -2008,7 +2034,10 @@ where
     #[instrument(skip(self, sapling_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+        &(sapling_shielded_data, _revealing_tx_id): &(
+            &Option<sapling::ShieldedData<AnchorV>>,
+            &transaction::Hash,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
@@ -2024,11 +2053,14 @@ where
     }
 }
 
-impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
+impl UpdateWith<(&Option<orchard::ShieldedData>, &transaction::Hash)> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        &(orchard_shielded_data, revealing_tx_id): &(
+            &Option<orchard::ShieldedData>,
+            &transaction::Hash,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2036,6 +2068,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -2049,7 +2082,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        (orchard_shielded_data, _revealing_tx_id): &(
+            &Option<orchard::ShieldedData>,
+            &transaction::Hash,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
