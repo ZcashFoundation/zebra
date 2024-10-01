@@ -17,7 +17,7 @@ categories = ["cryptography::cryptocurrencies"]
 [dependencies]
 
 futures-util = "0.3.28"
-tonic = "0.12.1"
+tonic = "0.12.2"
 tonic-reflection = "0.12.1"
 prost = "0.13.1"
 serde = { version = "1.0.204", features = ["serde_derive"] }

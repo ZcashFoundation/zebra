@@ -271,7 +271,7 @@ tokio-stream = "0.1.15"
 
 # test feature lightwalletd-grpc-tests
 prost = "0.13.1"
-tonic = "0.12.1"
+tonic = "0.12.2"
 
 proptest = "1.4.0"
 proptest-derive = "0.5.0"
