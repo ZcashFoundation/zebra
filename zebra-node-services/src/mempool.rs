@@ -17,10 +17,8 @@ use crate::BoxError;
 
 mod gossip;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 mod transaction_dependencies;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub use transaction_dependencies::TransactionDependencies;
 
 pub use self::gossip::Gossip;
