@@ -27,6 +27,7 @@ use crate::{
 pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
+pub(crate) mod track_tx_locs_by_inputs;
 
 /// The kind of database format change or validity check we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -549,8 +550,26 @@ impl DbFormatChange {
             Self::mark_as_upgraded_to(db, &version_for_upgrading_value_balance_format)
         }
 
-        // TODO: Add a db format upgrade for indexing spending tx ids (transaction locations) by
-        //       spent outpoints (output locations) in the finalized state
+        // Indexing transaction locations by their spent outpoints and revealed nullifiers.
+
+        let version_for_tx_loc_by_inputs_and_revealed_nullifiers =
+            Version::parse("26.1.0").expect("Hardcoded version string should be valid.");
+
+        // Check if we need to do the upgrade.
+        if older_disk_version < &version_for_tx_loc_by_inputs_and_revealed_nullifiers {
+            let timer = CodeTimer::start();
+
+            track_tx_locs_by_inputs::run(initial_tip_height, db, cancel_receiver)?;
+
+            // TODO: Add a db format upgrade for indexing spending tx ids (transaction locations) by
+            //       spent outpoints (output locations) in the finalized state
+
+            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
+            // database is marked, so the upgrade MUST be complete at this point.
+            Self::mark_as_upgraded_to(db, &version_for_tree_keys_and_caches);
+
+            timer.finish(module_path!(), line!(), "tree keys and caches upgrade");
+        }
 
         // # New Upgrades Usually Go Here
         //
