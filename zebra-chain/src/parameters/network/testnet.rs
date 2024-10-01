@@ -16,7 +16,8 @@ use super::{
     magic::Magic,
     subsidy::{
         FundingStreamReceiver, FundingStreamRecipient, FundingStreams, ParameterSubsidy,
-        FIRST_HALVING_TESTNET, POST_BLOSSOM_HALVING_INTERVAL, POST_NU6_FUNDING_STREAMS_MAINNET,
+        FIRST_HALVING_TESTNET, FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL,
+        POST_BLOSSOM_HALVING_INTERVAL, POST_NU6_FUNDING_STREAMS_MAINNET,
         POST_NU6_FUNDING_STREAMS_TESTNET, PRE_BLOSSOM_HALVING_INTERVAL,
         PRE_BLOSSOM_REGTEST_HALVING_INTERVAL, PRE_NU6_FUNDING_STREAMS_MAINNET,
         PRE_NU6_FUNDING_STREAMS_TESTNET,
@@ -65,6 +66,10 @@ impl ParameterSubsidy for TestnetParameterSubsidyImpl {
 
     fn pre_blossom_halving_interval(&self) -> block::HeightDiff {
         PRE_BLOSSOM_HALVING_INTERVAL
+    }
+
+    fn funding_stream_address_change_interval(&self) -> HeightDiff {
+        FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL
     }
 }
 

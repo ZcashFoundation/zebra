@@ -392,6 +392,9 @@ pub trait ParameterSubsidy {
 
     /// Returns the halving interval before Blossom
     fn pre_blossom_halving_interval(&self) -> HeightDiff;
+
+    /// Returns the address change interval for funding streams
+    fn funding_stream_address_change_interval(&self) -> HeightDiff;
 }
 
 /// Network methods related to Block Subsidy and Funding Streams
@@ -426,6 +429,10 @@ impl ParameterSubsidy for Network {
             Network::Mainnet => PRE_BLOSSOM_HALVING_INTERVAL,
             Network::Testnet(params) => params.pre_blossom_halving_interval(),
         }
+    }
+
+    fn funding_stream_address_change_interval(&self) -> HeightDiff {
+        self.post_blossom_halving_interval() / 48
     }
 }
 
@@ -536,7 +543,7 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
     let height_after_first_halving = height - network.height_for_first_halving();
 
     let address_period = (height_after_first_halving + network.post_blossom_halving_interval())
-        / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
+        / network.funding_stream_address_change_interval();
 
     address_period
         .try_into()
