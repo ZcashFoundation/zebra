@@ -2,6 +2,7 @@
 //!
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
+use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use futures::TryStreamExt;
 use jsonrpc_http_server::{
     hyper::{body::Bytes, header, Body, Request},
@@ -37,17 +38,22 @@ use crate::server::cookie;
 /// We assume lightwalletd validates data encodings before sending it on to Zebra.
 /// So any fixes Zebra performs won't change user-specified data.
 #[derive(Clone, Debug)]
-pub struct FixHttpRequestMiddleware(String);
+pub struct FixHttpRequestMiddleware;
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
     fn on_request(&self, mut request: Request<Body>) -> RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
 
+        // Check if the request is authenticated
+        if !FixHttpRequestMiddleware::check_credentials(request.headers_mut()) {
+            request = Self::unauthenticated(request);
+        }
+
         // Fix the request headers if needed and we can do so.
         FixHttpRequestMiddleware::insert_or_replace_content_type_header(request.headers_mut());
 
         // Fix the request body
-        let mut request = request.map(|body| {
+        let request = request.map(|body| {
             let body = body.map_ok(|data| {
                 // To simplify data handling, we assume that any search strings won't be split
                 // across multiple `Bytes` data buffers.
@@ -71,18 +77,6 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
 
             Body::wrap_stream(body)
         });
-
-        // Check if the request is authenticated
-        match cookie::get() {
-            Some(password) => {
-                if password != self.0 {
-                    request = Self::unauthenticated(request);
-                }
-            }
-            None => {
-                request = Self::unauthenticated(request);
-            }
-        }
 
         tracing::trace!(?request, "modified HTTP request");
 
@@ -156,11 +150,6 @@ impl FixHttpRequestMiddleware {
         }
     }
 
-    /// Create a new `FixHttpRequestMiddleware`.
-    pub fn new(password: String) -> Self {
-        Self(password)
-    }
-
     /// Change the method name in the JSON request.
     fn change_method_name(data: String) -> String {
         let mut json_data: serde_json::Value = serde_json::from_str(&data).expect("Invalid JSON");
@@ -183,5 +172,28 @@ impl FixHttpRequestMiddleware {
 
             Body::wrap_stream(body)
         })
+    }
+
+    /// Check if the request is authenticated.
+    pub fn check_credentials(headers: &header::HeaderMap) -> bool {
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|auth_header| auth_header.to_str().ok())
+            .and_then(|auth| auth.split_whitespace().nth(1))
+            .and_then(|token| URL_SAFE.decode(token).ok())
+            .and_then(|decoded| String::from_utf8(decoded).ok())
+            .and_then(|decoded_str| {
+                decoded_str
+                    .split(':')
+                    .nth(1)
+                    .map(|password| password.to_string())
+            })
+            .map_or(false, |password| {
+                if let Some(cookie_password) = cookie::get() {
+                    cookie_password == password
+                } else {
+                    false
+                }
+            })
     }
 }

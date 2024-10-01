@@ -195,7 +195,7 @@ impl RpcServer {
             }
 
             // generate a cookie
-            let generated_password = cookie::generate().unwrap_or("".to_string());
+            cookie::generate();
 
             // The server is a blocking task, which blocks on executor shutdown.
             // So we need to start it in a std::thread.
@@ -209,7 +209,7 @@ impl RpcServer {
                         .threads(parallel_cpu_threads)
                         // TODO: disable this security check if we see errors from lightwalletd
                         //.allowed_hosts(DomainsValidation::Disabled)
-                        .request_middleware(FixHttpRequestMiddleware::new(generated_password))
+                        .request_middleware(FixHttpRequestMiddleware)
                         .start_http(&listen_addr)
                         .expect("Unable to start RPC server");
 

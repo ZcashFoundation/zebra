@@ -1,6 +1,6 @@
 //! Cookie-based authentication for the RPC server.
 
-use base64::Engine;
+use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use rand::RngCore;
 
 use std::{
@@ -14,10 +14,10 @@ pub const COOKIEAUTH_USER: &str = "__cookie__";
 const COOKIEAUTH_FILE: &str = ".cookie";
 
 /// Generate a new auth cookie and return the encoded password.
-pub fn generate() -> Option<String> {
+pub fn generate() -> Option<()> {
     let mut data = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut data);
-    let encoded_password = base64::prelude::BASE64_STANDARD.encode(data);
+    let encoded_password = URL_SAFE.encode(data);
     let cookie_content = format!("{}:{}", COOKIEAUTH_USER, encoded_password);
 
     let mut file = File::create(COOKIEAUTH_FILE).ok()?;
@@ -25,7 +25,7 @@ pub fn generate() -> Option<String> {
 
     tracing::info!("RPC auth cookie generated successfully");
 
-    Some(encoded_password)
+    Some(())
 }
 
 /// Get the encoded password from the auth cookie.
