@@ -67,9 +67,16 @@ where
         .take(POW_ADJUSTMENT_BLOCK_SPAN)
         .collect();
 
-    let parent_block = relevant_chain
-        .first()
-        .expect("state must contain parent block to do contextual validation");
+    let Some(parent_block) = relevant_chain.first() else {
+        warn!(
+            ?semantically_verified,
+            ?finalized_tip_height,
+            "state must contain parent block to do contextual validation"
+        );
+
+        return Err(ValidateContextError::NotReadyToBeCommitted);
+    };
+
     let parent_block = parent_block.borrow();
     let parent_height = parent_block
         .coinbase_height()
