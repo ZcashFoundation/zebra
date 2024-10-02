@@ -988,11 +988,7 @@ fn binding_signatures_for_network(network: Network) {
                         .expect("must pass verification");
                     }
                 }
-                Transaction::V5 {
-                    sapling_shielded_data,
-                    ..
-                }
-                | Transaction::V6 {
+                tx_v5_and_v6! {
                     sapling_shielded_data,
                     ..
                 } => {

@@ -12,10 +12,7 @@ use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
     orchard::OrchardFlavorExt,
-    parameters::{
-        OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID,
-        TX_V6_VERSION_GROUP_ID,
-    },
+    parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
@@ -23,6 +20,9 @@ use crate::{
         TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
 };
+
+#[cfg(feature = "tx-v6")]
+use crate::parameters::TX_V6_VERSION_GROUP_ID;
 
 use super::*;
 use crate::sapling;
@@ -689,6 +689,7 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
             }
 
+            #[cfg(feature = "tx-v6")]
             Transaction::V6 {
                 network_upgrade,
                 lock_time,
@@ -997,6 +998,7 @@ impl ZcashDeserialize for Transaction {
                 })
             }
             // FIXME: implement a proper deserialization for V6
+            #[cfg(feature = "tx-v6")]
             (6, true) => {
                 // FIXME: fix spec or use another link as the current version of the PDF
                 // doesn't contain V6 description.

@@ -415,7 +415,8 @@ where
                     orchard_shielded_data,
                 )?,
                 // FIXME: implement proper V6 verification
-                | Transaction::V6 {
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 {
                     ..
                 } =>  {
                     tracing::debug!(?tx, "V6 transaction verification is not supported for now");

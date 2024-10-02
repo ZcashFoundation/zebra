@@ -63,7 +63,7 @@ bench = ["zebra-test"]
 
 # Support for transaction version 6
 tx-v6 = [
-  "nonempty"
+    "nonempty"
 ]
 
 [dependencies]
