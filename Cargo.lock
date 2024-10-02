@@ -299,7 +299,7 @@ dependencies = [
  "rustversion",
  "serde",
  "sync_wrapper 1.0.1",
- "tower 0.4.13",
+ "tower",
  "tower-layer",
  "tower-service",
 ]
@@ -2077,9 +2077,9 @@ dependencies = [
 
 [[package]]
 name = "impl-codec"
-version = "0.7.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67aa010c1e3da95bf151bd8b4c059b2ed7e75387cdb969b4f8f2723a43f9941"
+checksum = "ba6a270039626615617f3f36d15fc827041df3b78c439da2cadfa47455a77f2f"
 dependencies = [
  "parity-scale-codec",
 ]
@@ -3147,18 +3147,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b34d9fd68ae0b74a41b21c03c2f62847aa0ffea044eee893b4c140b37e244e2"
 dependencies = [
  "fixed-hash",
- "uint 0.9.5",
-]
-
-[[package]]
-name = "primitive-types"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d15600a7d856470b7d278b3fe0e311fe28c2526348549f8ef2ff7db3299c87f5"
-dependencies = [
- "fixed-hash",
  "impl-codec",
- "uint 0.10.0",
+ "uint 0.9.5",
 ]
 
 [[package]]
@@ -4692,7 +4682,7 @@ dependencies = [
  "socket2",
  "tokio",
  "tokio-stream",
- "tower 0.4.13",
+ "tower",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -4733,29 +4723,12 @@ checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
 dependencies = [
  "futures-core",
  "futures-util",
+ "hdrhistogram",
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
  "rand 0.8.5",
  "slab",
- "tokio",
- "tokio-util 0.7.12",
- "tower-layer",
- "tower-service",
- "tracing",
-]
-
-[[package]]
-name = "tower"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "36b837f86b25d7c0d7988f00a54e74739be6477f2aac6201b8f429a7569991b7"
-dependencies = [
- "futures-core",
- "futures-util",
- "hdrhistogram",
- "pin-project-lite",
- "sync_wrapper 0.1.2",
  "tokio",
  "tokio-util 0.7.12",
  "tower-layer",
@@ -4778,7 +4751,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tokio-util 0.7.12",
- "tower 0.5.0",
+ "tower",
  "tower-fallback",
  "tower-test",
  "tracing",
@@ -4793,22 +4766,22 @@ dependencies = [
  "futures-core",
  "pin-project",
  "tokio",
- "tower 0.5.0",
+ "tower",
  "tracing",
  "zebra-test",
 ]
 
 [[package]]
 name = "tower-layer"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c20c8dbed6283a09604c3e69b4b7eeb54e298b8a600d4d5ecb5ad39de609f1d0"
+checksum = "121c2a6cda46980bb0fcd1647ffaf6cd3fc79a013de288782836f6df9c48780e"
 
 [[package]]
 name = "tower-service"
-version = "0.3.2"
+version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6bc1c9ce2b5135ac7f93c72918fc37feb872bdc6a5533a8b85eb4b86bfdae52"
+checksum = "8df9b6e13f2d32c91b9bd719c00d1958837bc7dec474d94952798cc8e69eeec3"
 
 [[package]]
 name = "tower-test"
@@ -4830,6 +4803,7 @@ version = "0.1.40"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3523ab5a71916ccf420eebdf5521fcef02141234bbc0b8a49f2fdc4544364ef"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -5772,7 +5746,7 @@ checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
- "primitive-types 0.12.2",
+ "primitive-types",
 ]
 
 [[package]]
@@ -6049,7 +6023,7 @@ dependencies = [
  "lazy_static",
  "num-integer",
  "orchard",
- "primitive-types 0.13.1",
+ "primitive-types",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -6115,7 +6089,7 @@ dependencies = [
  "thiserror",
  "tinyvec",
  "tokio",
- "tower 0.5.0",
+ "tower",
  "tower-batch-control",
  "tower-fallback",
  "tracing",
@@ -6145,7 +6119,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.5.0",
+ "tower",
  "zcash_primitives 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zebra-chain",
  "zebra-node-services",
@@ -6186,7 +6160,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util 0.7.12",
  "toml 0.8.19",
- "tower 0.5.0",
+ "tower",
  "tracing",
  "tracing-error",
  "tracing-futures",
@@ -6231,7 +6205,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.5.0",
+ "tower",
  "tracing",
  "zcash_address 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "zcash_primitives 0.17.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6273,7 +6247,7 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
  "tonic",
- "tower 0.5.0",
+ "tower",
  "tracing",
  "tracing-subscriber",
  "zcash_address 0.5.0 (git+https://github.com/zcash/librustzcash/)",
@@ -6341,7 +6315,7 @@ dependencies = [
  "thiserror",
  "tinyvec",
  "tokio",
- "tower 0.5.0",
+ "tower",
  "tracing",
  "zebra-chain",
  "zebra-test",
@@ -6369,7 +6343,7 @@ dependencies = [
  "thiserror",
  "tinyvec",
  "tokio",
- "tower 0.5.0",
+ "tower",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
@@ -6457,7 +6431,7 @@ dependencies = [
  "toml 0.8.19",
  "tonic",
  "tonic-build",
- "tower 0.5.0",
+ "tower",
  "tracing",
  "tracing-appender",
  "tracing-error",

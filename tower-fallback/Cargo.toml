@@ -17,7 +17,7 @@ categories = ["algorithms", "asynchronous"]
 
 [dependencies]
 pin-project = "1.1.5"
-tower = "0.5.0"
+tower = "0.4.13"
 futures-core = "0.3.28"
 tracing = "0.1.39"
 

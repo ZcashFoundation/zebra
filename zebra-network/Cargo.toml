@@ -64,7 +64,7 @@ futures = "0.3.30"
 tokio = { version = "1.40.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.16", features = ["sync", "time"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
-tower = { version = "0.5.0", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.23.0"
 tracing-futures = "0.2.5"
