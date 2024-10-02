@@ -67,8 +67,7 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 
 ENV CARGO_HOME="${APP_HOME}/.cargo/"
 
-# Copy the entrypoint script to be used on both images
-COPY ./docker/entrypoint.sh /etc/zebrad/entrypoint.sh
+COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 # This stage builds tests without running them.
 #
@@ -131,7 +130,7 @@ ARG EXPERIMENTAL_FEATURES="journald prometheus filter-reload"
 ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
-ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]
+ENTRYPOINT [ "entrypoint.sh" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
@@ -168,59 +167,40 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
 # from the `release` stage.
 FROM debian:bookworm-slim AS runtime
 
-# Set the default path for the zebrad binary
-ARG APP_HOME
-ENV APP_HOME=${APP_HOME}
-WORKDIR ${APP_HOME}
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
-    rocksdb-tools \
-    gosu \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
+    gosu
 
-# Create a non-privileged user that the app will run under.
-# Running as root inside the container is running as root in the Docker host
-# If an attacker manages to break out of the container, they will have root access to the host
-# See https://docs.docker.com/go/dockerfile-user-best-practices/
-ARG USER=zebra
-ENV USER=${USER}
-ARG UID=10001
-ENV UID=${UID}
-ARG GID=10001
-ENV GID=${GID}
+RUN rm -rf /var/lib/apt/lists/* /tmp/*
 
-RUN addgroup --system --gid ${GID} ${USER} \
-    && adduser \
-    --system \
-    --disabled-login \
-    --shell /bin/bash \
-    --home ${APP_HOME} \
-    --uid "${UID}" \
-    --gid "${GID}" \
-    ${USER}
+COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
+COPY --from=release /usr/local/bin/entrypoint.sh /usr/local/bin/
 
-# Config settings for zebrad
+EXPOSE 8233 18233
+
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
-# Path and name of the config file
-# These are set to a default value when not defined in the environment
-ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR:-/etc/zebrad}
-ENV ZEBRA_CONF_FILE=${ZEBRA_CONF_FILE:-zebrad.toml}
+# Create a non-privileged user for running `zebrad`.
+#
+# ## Security
+#
+# If an attacker manages to break out of the container, they will have root
+# access to the host. [1][1]
+#
+# [1]: https://docs.docker.com/go/dockerfile-user-best-practices/
+ENV USER="zebra"
 
-RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${UID}:${UID} ${ZEBRA_CONF_DIR} \
-    && chown ${UID}:${UID} ${APP_HOME}
+RUN adduser --system ${USER}
 
-COPY --from=release /usr/local/bin/zebrad /usr/local/bin
-COPY --from=release /etc/zebrad/entrypoint.sh /etc/zebrad
+ENV ZEBRA_CONF_DIR="/etc/zebrad"
+ENV ZEBRA_CACHED_STATE_DIR="/var/cache/zebrad"
 
-# Expose configured ports
-EXPOSE 8233 18233
+RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${USER} ${ZEBRA_CONF_DIR}
+# TODO: Shorten `ZEBRA_CACHED_STATE_DIR` to `ZEBRA_CACHE_DIR`
+RUN mkdir -p ${ZEBRA_CACHED_STATE_DIR} && chown ${USER} ${ZEBRA_CACHED_STATE_DIR}
 
-# Update the config file based on the Docker run variables,
-# and launch zebrad with it
-ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]
+USER $USER
+
+ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
