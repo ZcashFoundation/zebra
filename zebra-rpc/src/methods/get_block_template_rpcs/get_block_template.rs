@@ -25,12 +25,8 @@ use zebra_consensus::{
 use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
 
-use crate::methods::{
-    errors::OkOrServerError,
-    get_block_template_rpcs::{
-        constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
-        types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
-    },
+use crate::methods::get_block_template_rpcs::types::{
+    default_roots::DefaultRoots, transaction::TransactionTemplate,
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -162,51 +158,14 @@ where
 /// Returns early with `Ok(())` if Proof-of-Work is disabled on the provided `network`.
 /// This error might be incorrect if the local clock is skewed.
 pub fn check_synced_to_tip<Tip, SyncStatus>(
-    network: &Network,
-    latest_chain_tip: Tip,
-    sync_status: SyncStatus,
+    _network: &Network,
+    _latest_chain_tip: Tip,
+    _sync_status: SyncStatus,
 ) -> Result<()>
 where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    return Ok(());
-
-    // TODO:
-    // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
-    // - Check the field in `sync_status` so it applies to the mempool as well.
-    if network.disable_pow() {
-        return Ok(());
-    }
-
-    // The tip estimate may not be the same as the one coming from the state
-    // but this is ok for an estimate
-    let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
-        .estimate_distance_to_network_chain_tip(network)
-        .ok_or_server_error("no chain tip available yet")?;
-
-    if !sync_status.is_close_to_tip()
-        || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP
-    {
-        tracing::info!(
-            ?estimated_distance_to_chain_tip,
-            ?local_tip_height,
-            "Zebra has not synced to the chain tip. \
-             Hint: check your network connection, clock, and time zone settings."
-        );
-
-        return Err(Error {
-            code: NOT_SYNCED_ERROR_CODE,
-            message: format!(
-                "Zebra has not synced to the chain tip, \
-                 estimated distance: {estimated_distance_to_chain_tip:?}, \
-                 local tip: {local_tip_height:?}. \
-                 Hint: check your network connection, clock, and time zone settings."
-            ),
-            data: None,
-        });
-    }
-
     Ok(())
 }
 
