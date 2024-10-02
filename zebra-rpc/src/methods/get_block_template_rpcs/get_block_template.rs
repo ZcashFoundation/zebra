@@ -25,8 +25,9 @@ use zebra_consensus::{
 use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
 
-use crate::methods::get_block_template_rpcs::types::{
-    default_roots::DefaultRoots, transaction::TransactionTemplate,
+use crate::methods::get_block_template_rpcs::{
+    constants::NOT_SYNCED_ERROR_CODE,
+    types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -159,14 +160,28 @@ where
 /// This error might be incorrect if the local clock is skewed.
 pub fn check_synced_to_tip<Tip, SyncStatus>(
     _network: &Network,
-    _latest_chain_tip: Tip,
+    latest_chain_tip: Tip,
     _sync_status: SyncStatus,
 ) -> Result<()>
 where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    Ok(())
+    let local_tip_height = latest_chain_tip.best_tip_height();
+    if local_tip_height > Some(Height(3001875)) {
+        Ok(())
+    } else {
+        Err(Error {
+            code: NOT_SYNCED_ERROR_CODE,
+            message: format!(
+                "Zebra has not synced to the chain tip, \
+                 estimated network tip: 3001875, \
+                 local tip: {local_tip_height:?}. \
+                 Hint: check your network connection, clock, and time zone settings."
+            ),
+            data: None,
+        })
+    }
 }
 
 // - State and mempool data fetches
