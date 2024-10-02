@@ -722,6 +722,7 @@ impl Arbitrary for orchard::ShieldedData<orchard::OrchardVanilla> {
                         .try_into()
                         .expect("arbitrary vector size range produces at least one action"),
                     binding_sig: binding_sig.0,
+                    #[cfg(feature = "tx-v6")]
                     burn: Default::default(),
                 },
             )
@@ -919,6 +920,7 @@ pub fn transaction_to_fake_v5(
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
+        #[cfg(feature = "tx-v6")]
         V6 {
             inputs,
             outputs,
@@ -1077,6 +1079,7 @@ pub fn insert_fake_orchard_shielded_data(
         proof: Halo2Proof(vec![]),
         actions: at_least_one![dummy_authorized_action],
         binding_sig: Signature::from([0u8; 64]),
+        #[cfg(feature = "tx-v6")]
         burn: Default::default(),
     };
 

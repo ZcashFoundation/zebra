@@ -108,6 +108,7 @@ fn generate_test_vectors() {
                     .unwrap(),
                 binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
                 // FIXME: use a proper value when implementing V6
+                #[cfg(feature = "tx-v6")]
                 burn: Default::default(),
             }
         })
