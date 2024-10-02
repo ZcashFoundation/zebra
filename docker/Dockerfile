@@ -70,7 +70,7 @@ ENV CARGO_HOME="${APP_HOME}/.cargo/"
 # Copy the entrypoint script to be used on both images
 COPY ./docker/entrypoint.sh /etc/zebrad/entrypoint.sh
 
-# In this stage we build tests (without running then)
+# This stage builds tests without running them.
 #
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
@@ -116,9 +116,9 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=cache,target=${APP_HOME}/target/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
-cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run && \
-cp ${APP_HOME}/target/release/zebrad /usr/local/bin && \
-cp ${APP_HOME}/target/release/zebra-checkpoints /usr/local/bin
+    cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run && \
+    cp ${APP_HOME}/target/release/zebrad /usr/local/bin && \
+    cp ${APP_HOME}/target/release/zebra-checkpoints /usr/local/bin
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
@@ -161,13 +161,11 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=cache,target=${APP_HOME}/target/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
-cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
-cp ${APP_HOME}/target/release/zebrad /usr/local/bin
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
+    cp ${APP_HOME}/target/release/zebrad /usr/local/bin
 
-# This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
-#
-# To save space, this step starts from scratch using debian, and only adds the resulting
-# binary from the `release` stage
+# This step starts from scratch using Debian and only adds the resulting binary
+# from the `release` stage.
 FROM debian:bookworm-slim AS runtime
 
 # Set the default path for the zebrad binary
