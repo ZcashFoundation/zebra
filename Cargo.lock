@@ -5819,7 +5819,7 @@ dependencies = [
  "which",
  "zcash_address",
  "zcash_encoding",
- "zcash_keys 0.2.0 (git+https://github.com/QED-it/librustzcash?branch=txv6-separate-bundles-rebased-dd2)",
+ "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_protocol",
@@ -5844,32 +5844,6 @@ dependencies = [
  "blake2b_simd",
  "byteorder",
  "primitive-types",
-]
-
-[[package]]
-name = "zcash_keys"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "663489ffb4e51bc4436ff8796832612a9ff3c6516f1c620b5a840cb5dcd7b866"
-dependencies = [
- "bech32",
- "blake2b_simd",
- "bls12_381",
- "bs58",
- "document-features",
- "group",
- "memuse",
- "nonempty",
- "rand_core 0.6.4",
- "sapling-crypto",
- "secrecy",
- "subtle",
- "tracing",
- "zcash_address",
- "zcash_encoding",
- "zcash_primitives",
- "zcash_protocol",
- "zip32",
 ]
 
 [[package]]
@@ -6257,7 +6231,7 @@ dependencies = [
  "tracing-subscriber",
  "zcash_address",
  "zcash_client_backend",
- "zcash_keys 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
  "zebra-chain",
