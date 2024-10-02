@@ -459,7 +459,7 @@ where
     let service = ScannerRPC { scan_service };
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(crate::scanner::FILE_DESCRIPTOR_SET)
-        .build()
+        .build_v1()
         .unwrap();
 
     let tcp_listener = tokio::net::TcpListener::bind(listen_addr).await?;
