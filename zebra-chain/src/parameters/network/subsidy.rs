@@ -421,7 +421,10 @@ impl ParameterSubsidy for Network {
     }
 
     fn post_blossom_halving_interval(&self) -> HeightDiff {
-        self.pre_blossom_halving_interval() * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff)
+        match self {
+            Network::Mainnet => POST_BLOSSOM_HALVING_INTERVAL,
+            Network::Testnet(params) => params.post_blossom_halving_interval(),
+        }
     }
 
     fn pre_blossom_halving_interval(&self) -> HeightDiff {
