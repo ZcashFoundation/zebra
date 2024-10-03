@@ -3,9 +3,9 @@
 # This script finds a cached Google Cloud Compute image based on specific criteria.
 #
 # If there are multiple disks:
-# - prefer images generated from the same commit, then
+# - prefer images generated from the same branch, then
 # - if prefer_main_cached_state is true, prefer images from the `main` branch, then
-# - use any images from any other branch or commit.
+# - use any images from any other branch or branch.
 #
 # Within each of these categories:
 # - prefer newer images to older images
@@ -20,7 +20,7 @@ echo "Extracting local state version..."
 LOCAL_STATE_VERSION=$(grep -oE "DATABASE_FORMAT_VERSION: .* [0-9]+" "${GITHUB_WORKSPACE}/zebra-state/src/constants.rs" | grep -oE "[0-9]+" | tail -n1)
 echo "STATE_VERSION: ${LOCAL_STATE_VERSION}"
 
-# Function to find a cached disk image based on the git pattern (commit, main, or any branch)
+# Function to find a cached disk image based on the git pattern (branch, main, or any branch)
 find_cached_disk_image() {
     local git_pattern="${1}"
     local git_source="${2}"
@@ -43,31 +43,29 @@ find_cached_disk_image() {
 # Check if both $DISK_PREFIX and $DISK_SUFFIX are set, as they are required to find a cached disk image
 if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     # Find the most suitable cached disk image
-    echo "Finding the most suitable cached disk image..."
+    echo "Finding a ${DISK_PREFIX}--${DISK_SUFFIX} cached disk image for ${NETWORK}..."
     CACHED_DISK_NAME=""
 
-    # First, try to find a cached disk image from the current commit
-    CACHED_DISK_NAME=$(find_cached_disk_image ".+-${GITHUB_SHA_SHORT}" "commit")
-
-    # If no cached disk image is found
-    if [[ -z "${CACHED_DISK_NAME}" ]]; then
-        # Check if main branch images are preferred
-        if [[ "${PREFER_MAIN_CACHED_STATE}" == "true" ]]; then
-            CACHED_DISK_NAME=$(find_cached_disk_image "main-[0-9a-f]+" "main branch")
-        # Else, try to find one from any branch
-        else
+    # Check if main branch images are preferred
+    if [[ "${PREFER_MAIN_CACHED_STATE}" == "true" ]]; then
+        CACHED_DISK_NAME=$(find_cached_disk_image "main-[0-9a-f]+" "main branch")
+    # Else, try to find a cached disk image from the current branch (or PR)
+    else
+        CACHED_DISK_NAME=$(find_cached_disk_image ".+-${GITHUB_REF}" "branch")
+        # If no cached disk image is found, try to find one from any branch
+        if [[ -z "${CACHED_DISK_NAME}" ]]; then
             CACHED_DISK_NAME=$(find_cached_disk_image ".+-[0-9a-f]+" "any branch")
         fi
     fi
 
     # Handle case where no suitable disk image is found
     if [[ -z "${CACHED_DISK_NAME}" ]]; then
-        echo "No suitable cached state disk available."
-        echo "Cached state test jobs must depend on the cached state rebuild job."
+        echo "No suitable cached state disk available. Try running the cached state rebuild job."
         exit 1
+    else
+        echo "Selected Disk: ${CACHED_DISK_NAME}"
     fi
 
-    echo "Selected Disk: ${CACHED_DISK_NAME}"
 else
     echo "DISK_PREFIX or DISK_SUFFIX is not set. Skipping disk image search."
 fi
@@ -77,7 +75,6 @@ find_available_disk_type() {
     local base_name="${1}"
     local disk_type="${2}"
     local disk_pattern="${base_name}-cache"
-    local output_var="${base_name}_${disk_type}_disk"
     local disk_name
 
     disk_name=$(gcloud compute images list --filter="status=READY AND name~${disk_pattern}-.+-[0-9a-f]+-v${LOCAL_STATE_VERSION}-${NETWORK}-${disk_type}" --format="value(NAME)" --sort-by=~creationTimestamp --limit=1)
