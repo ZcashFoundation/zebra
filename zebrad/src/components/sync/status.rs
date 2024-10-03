@@ -52,6 +52,8 @@ impl SyncStatus {
 impl ChainSyncStatus for SyncStatus {
     /// Check if the synchronization is likely close to the chain tip.
     fn is_close_to_tip(&self) -> bool {
+        return true;
+
         let sync_lengths = self.latest_sync_length.borrow();
 
         // Return early if sync_lengths is empty.
