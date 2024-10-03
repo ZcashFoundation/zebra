@@ -43,7 +43,7 @@ find_cached_disk_image() {
 # Check if both $DISK_PREFIX and $DISK_SUFFIX are set, as they are required to find a cached disk image
 if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     # Find the most suitable cached disk image
-    echo "Finding a ${DISK_PREFIX}--${DISK_SUFFIX} cached disk image for ${NETWORK}..."
+    echo "Finding a ${DISK_PREFIX}-${DISK_SUFFIX} disk image for ${NETWORK}..."
     CACHED_DISK_NAME=""
 
     # Check if main branch images are preferred
