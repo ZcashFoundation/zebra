@@ -11,7 +11,7 @@
 #
 
 # Exit if a command fails
-set -e
+set -xe
 # Exit if any command in a pipeline fails
 set -o pipefail
 
