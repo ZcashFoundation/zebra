@@ -23,7 +23,7 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::{self, Transaction},
+    transaction::Transaction,
 };
 
 use crate::{
@@ -61,40 +61,37 @@ impl ZebraDb {
         self.db.zs_contains(&orchard_nullifiers, &orchard_nullifier)
     }
 
-    /// Returns the [`transaction::Hash`] of the transaction that revealed
+    /// Returns the [`TransactionLocation`] of the transaction that revealed
     /// the given [`sprout::Nullifier`], if it is revealed in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sprout_revealing_tx_id(
+    pub fn sprout_revealing_tx_loc(
         &self,
         sprout_nullifier: &sprout::Nullifier,
-    ) -> Option<transaction::Hash> {
+    ) -> Option<TransactionLocation> {
         let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
-        let revealing_tx_location = self.db.zs_get(&sprout_nullifiers, &sprout_nullifier)?;
-        self.transaction_hash(revealing_tx_location)
+        self.db.zs_get(&sprout_nullifiers, &sprout_nullifier)
     }
 
-    /// Returns the [`transaction::Hash`] of the transaction that revealed
+    /// Returns the [`TransactionLocation`] of the transaction that revealed
     /// the given [`sapling::Nullifier`], if it is revealed in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn sapling_revealing_tx_id(
+    pub fn sapling_revealing_tx_loc(
         &self,
         sapling_nullifier: &sapling::Nullifier,
-    ) -> Option<transaction::Hash> {
+    ) -> Option<TransactionLocation> {
         let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
-        let revealing_tx_location = self.db.zs_get(&sapling_nullifiers, &sapling_nullifier)?;
-        self.transaction_hash(revealing_tx_location)
+        self.db.zs_get(&sapling_nullifiers, &sapling_nullifier)
     }
 
-    /// Returns the [`transaction::Hash`] of the transaction that revealed
+    /// Returns the [`TransactionLocation`] of the transaction that revealed
     /// the given [`orchard::Nullifier`], if it is revealed in the finalized state.
     #[allow(clippy::unwrap_in_result)]
-    pub fn orchard_revealing_tx_id(
+    pub fn orchard_revealing_tx_loc(
         &self,
         orchard_nullifier: &orchard::Nullifier,
-    ) -> Option<transaction::Hash> {
+    ) -> Option<TransactionLocation> {
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
-        let revealing_tx_location = self.db.zs_get(&orchard_nullifiers, &orchard_nullifier)?;
-        self.transaction_hash(revealing_tx_location)
+        self.db.zs_get(&orchard_nullifiers, &orchard_nullifier)
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.

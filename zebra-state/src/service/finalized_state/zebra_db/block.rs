@@ -30,7 +30,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::FinalizedBlock,
+    request::{FinalizedBlock, Spend},
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
@@ -227,6 +227,19 @@ impl ZebraDb {
     pub fn transaction_hash(&self, location: TransactionLocation) -> Option<transaction::Hash> {
         let hash_by_tx_loc = self.db.cf_handle("hash_by_tx_loc").unwrap();
         self.db.zs_get(&hash_by_tx_loc, &location)
+    }
+
+    /// Returns the [`transaction::Hash`] of the transaction that spent or revealed the given
+    /// [`transparent::OutPoint`] or nullifier, if it is spent or revealed in the finalized state.
+    pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
+        let tx_loc = match spend {
+            Spend::OutPoint(outpoint) => self.spending_tx_loc(outpoint)?,
+            Spend::Sprout(nullifier) => self.sprout_revealing_tx_loc(nullifier)?,
+            Spend::Sapling(nullifier) => self.sapling_revealing_tx_loc(nullifier)?,
+            Spend::Orchard(nullifier) => self.orchard_revealing_tx_loc(nullifier)?,
+        };
+
+        self.transaction_hash(tx_loc)
     }
 
     /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],

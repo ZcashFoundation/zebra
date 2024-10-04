@@ -29,6 +29,42 @@ use crate::{
     ReadResponse, Response,
 };
 
+/// Identify a spend by a transparent outpoint or revealed nullifier.
+///
+/// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
+/// [`sapling::Nullifier`], and [`orchard::Nullifier`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum Spend {
+    OutPoint(transparent::OutPoint),
+    Sprout(sprout::Nullifier),
+    Sapling(sapling::Nullifier),
+    Orchard(orchard::Nullifier),
+}
+
+impl From<transparent::OutPoint> for Spend {
+    fn from(outpoint: transparent::OutPoint) -> Self {
+        Self::OutPoint(outpoint)
+    }
+}
+
+impl From<sprout::Nullifier> for Spend {
+    fn from(sprout_nullifier: sprout::Nullifier) -> Self {
+        Self::Sprout(sprout_nullifier)
+    }
+}
+
+impl From<sapling::Nullifier> for Spend {
+    fn from(sapling_nullifier: sapling::Nullifier) -> Self {
+        Self::Sapling(sapling_nullifier)
+    }
+}
+
+impl From<orchard::Nullifier> for Spend {
+    fn from(orchard_nullifier: orchard::Nullifier) -> Self {
+        Self::Orchard(orchard_nullifier)
+    }
+}
+
 /// Identify a block by hash or height.
 ///
 /// This enum implements `From` for [`block::Hash`] and [`block::Height`],
@@ -1024,7 +1060,7 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::TransactionId`] with the hash of the transaction
     /// that spent the output at the provided [`transparent::OutPoint`].
-    TransactionIdForSpentOutPoint(transparent::OutPoint),
+    SpendingTransactionId(Spend),
 
     /// Looks up utxos for the provided addresses.
     ///
@@ -1106,7 +1142,7 @@ impl ReadRequest {
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
-            ReadRequest::TransactionIdForSpentOutPoint { .. } => "transaction_id_by_spent_outpoint",
+            ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"

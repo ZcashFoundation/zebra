@@ -29,8 +29,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
-    TransactionLocation, ValidateContextError,
+    request::{Spend, Treestate},
+    service::check,
+    ContextuallyVerifiedBlock, HashOrHeight, OutputLocation, TransactionLocation,
+    ValidateContextError,
 };
 
 use self::index::TransparentTransfers;
@@ -1255,10 +1257,17 @@ impl Chain {
             .map(|utxo| utxo.utxo.clone())
     }
 
-    /// Returns the [`transaction::Hash`] of the transaction that spent the given
-    /// [`transparent::OutPoint`], if it was spent by this chain.
-    pub fn spending_tx_id(&self, outpoint: &transparent::OutPoint) -> Option<transaction::Hash> {
-        self.spent_utxos.get(outpoint).cloned()
+    /// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
+    /// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
+    /// and is spent or revealed by this chain.
+    pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
+        match spend {
+            Spend::OutPoint(outpoint) => self.spent_utxos.get(outpoint),
+            Spend::Sprout(nullifier) => self.sprout_nullifiers.get(nullifier),
+            Spend::Sapling(nullifier) => self.sapling_nullifiers.get(nullifier),
+            Spend::Orchard(nullifier) => self.orchard_nullifiers.get(nullifier),
+        }
+        .cloned()
     }
 
     // Address index queries

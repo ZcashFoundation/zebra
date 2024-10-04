@@ -124,13 +124,11 @@ impl ZebraDb {
         self.utxo_by_location(output_location)
     }
 
-    /// Returns the [`transaction::Hash`] of the transaction that spent the given
+    /// Returns the [`TransactionLocation`] of the transaction that spent the given
     /// [`transparent::OutPoint`], if it is unspent in the finalized state.
-    pub fn spending_tx_id(&self, outpoint: &transparent::OutPoint) -> Option<transaction::Hash> {
+    pub fn spending_tx_loc(&self, outpoint: &transparent::OutPoint) -> Option<TransactionLocation> {
         let output_location = self.output_location(outpoint)?;
-        let spending_tx_location = self.tx_location_by_spent_output_location(&output_location)?;
-
-        self.transaction_hash(spending_tx_location)
+        self.tx_location_by_spent_output_location(&output_location)
     }
 
     /// Returns the transparent output for an [`OutputLocation`],
