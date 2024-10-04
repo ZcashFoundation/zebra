@@ -21,6 +21,7 @@ use zebra_chain::{
 };
 
 use crate::{
+    request::Spend,
     response::MinedTx,
     service::{
         finalized_state::ZebraDb,
@@ -182,19 +183,19 @@ where
 }
 
 /// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
-/// the provided [`transparent::OutPoint`], if it exists and is spent in the non-finalized
-/// `chain` or finalized `db`.
+/// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
+/// and is spent or revealed in the non-finalized `chain` or finalized `db`.
 pub fn spending_transaction_hash<C>(
     chain: Option<C>,
     db: &ZebraDb,
-    outpoint: transparent::OutPoint,
+    spend: Spend,
 ) -> Option<transaction::Hash>
 where
     C: AsRef<Chain>,
 {
     chain
-        .and_then(|chain| chain.as_ref().spending_tx_id(&outpoint))
-        .or_else(|| db.spending_tx_id(&outpoint))
+        .and_then(|chain| chain.as_ref().spending_transaction_hash(&spend))
+        .or_else(|| db.spending_transaction_hash(&spend))
 }
 
 /// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists in any chain
