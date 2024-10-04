@@ -16,7 +16,7 @@
 #
 # Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES and vars.RUST_TEST_FEATURES
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
-ARG FEATURES="default-release-binaries internal-miner"
+ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ARG EXPERIMENTAL_FEATURES=""
 

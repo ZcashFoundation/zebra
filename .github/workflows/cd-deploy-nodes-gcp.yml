@@ -63,6 +63,9 @@ on:
       log_file:
         default: ''
         description: 'Log to a file path rather than standard output'
+      docker_features:
+        default: 'default-release-binaries'
+        description: 'Features to build the Zebra binary with'
 
   push:
    # Skip main branch updates where Rust code and dependencies aren't modified.
@@ -157,6 +160,7 @@ jobs:
       image_name: zebrad
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
+      features: ${{ inputs.docker_features || 'default-release-binaries' }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 
