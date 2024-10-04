@@ -149,7 +149,7 @@ EOF
 [mempool]
 debug_enable_at_height = 0
 [mining]
-miner_address = "${MINER_ADDRESS:=t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v}"
+miner_address = ${MINER_ADDRESS:=t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v}
 internal_miner = true
 EOF
   fi
