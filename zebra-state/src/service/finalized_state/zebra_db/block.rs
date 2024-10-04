@@ -11,6 +11,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::RangeBounds,
     sync::Arc,
 };
 
@@ -212,6 +213,33 @@ impl ZebraDb {
 
     // Read transaction methods
 
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
+    /// if a transaction with that hash exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        let transaction_location = self.transaction_location(hash)?;
+
+        self.db
+            .zs_get(&tx_by_loc, &transaction_location)
+            .map(|tx| (tx, transaction_location.height))
+    }
+
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
+    /// if a transaction with that hash exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transactions_by_location_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_
+    where
+        R: RangeBounds<TransactionLocation>,
+    {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        self.db.zs_forward_range_iter(tx_by_loc, range)
+    }
+
     /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
     /// if it exists in the finalized chain.
     #[allow(clippy::unwrap_in_result)]
@@ -240,21 +268,6 @@ impl ZebraDb {
         };
 
         self.transaction_hash(tx_loc)
-    }
-
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
-    /// if a transaction with that hash exists in the finalized chain.
-    //
-    // TODO: move this method to the start of the section
-    #[allow(clippy::unwrap_in_result)]
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-
-        let transaction_location = self.transaction_location(hash)?;
-
-        self.db
-            .zs_get(&tx_by_loc, &transaction_location)
-            .map(|tx| (tx, transaction_location.height))
     }
 
     /// Returns the [`transaction::Hash`]es in the block with `hash_or_height`,
@@ -482,7 +495,7 @@ impl DiskWriteBatch {
         // which is already present from height 1 to the first shielded transaction.
         //
         // In Zebra we include the nullifiers and note commitments in the genesis block because it simplifies our code.
-        self.prepare_shielded_transaction_batch(db, finalized)?;
+        self.prepare_shielded_transaction_batch(zebra_db, finalized)?;
         self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 
         // # Consensus
