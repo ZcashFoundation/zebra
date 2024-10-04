@@ -29,7 +29,7 @@ use zebra_chain::{
 use crate::{
     request::{FinalizedBlock, Treestate},
     service::finalized_state::{
-        disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
+        disk_db::{DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
@@ -470,7 +470,7 @@ impl DiskWriteBatch {
     /// - Propagates any errors from updating note commitment trees
     pub fn prepare_shielded_transaction_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         let FinalizedBlock { block, height, .. } = finalized;
@@ -478,7 +478,7 @@ impl DiskWriteBatch {
         // Index each transaction's shielded data
         for (tx_index, transaction) in block.transactions.iter().enumerate() {
             let tx_loc = TransactionLocation::from_usize(*height, tx_index);
-            self.prepare_nullifier_batch(db, transaction, tx_loc)?;
+            self.prepare_nullifier_batch(zebra_db, transaction, tx_loc)?;
         }
 
         Ok(())
@@ -493,10 +493,11 @@ impl DiskWriteBatch {
     #[allow(clippy::unwrap_in_result)]
     pub fn prepare_nullifier_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         transaction: &Transaction,
         transaction_location: TransactionLocation,
     ) -> Result<(), BoxError> {
+        let db = &zebra_db.db;
         let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
         let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
         let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
