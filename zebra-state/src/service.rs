@@ -1368,7 +1368,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            ReadRequest::TransactionIdForSpentOutPoint(outpoint) => {
+            ReadRequest::SpendingTransactionId(spend) => {
                 let state = self.clone();
 
                 tokio::task::spawn_blocking(move || {
@@ -1379,7 +1379,7 @@ impl Service<ReadRequest> for ReadStateService {
                                 read::spending_transaction_hash(
                                     non_finalized_state.best_chain(),
                                     &state.db,
-                                    outpoint,
+                                    spend,
                                 )
                             });
 
