@@ -122,6 +122,12 @@
 //! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test submit_block --features getblocktemplate-rpcs --release -- --ignored --nocapture
 //! ```
 //!
+//! Example of how to run the has_spending_transaction_ids_in_finalized_state test:
+//!
+//! ```console
+//! RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test has_spending_transaction_ids_in_finalized_state --release -- --ignored --nocapture
+//! ```
+//!
 //! Please refer to the documentation of each test for more information.
 //!
 //! ## Checkpoint Generation Tests
@@ -3535,6 +3541,95 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         submit_block::Response::Accepted,
         "valid block should be accepted"
     );
+
+    Ok(())
+}
+
+/// Checks that the finalized state has the spending transaction ids for every
+/// spent outpoint and revealed nullifier in the last 100 blocks of a cached state.
+//
+// TODO: Check that the spending transaction ids are available in the non-finalized state,
+//       (check for existing tests in `zebra-state` using the partial chain strategy, otherwise,
+//       load future blocks, commit them via state svc requests, and check those here too.)
+#[tokio::test]
+#[ignore]
+async fn has_spending_transaction_ids_in_finalized_state() -> Result<()> {
+    use tower::Service;
+    use zebra_chain::{chain_tip::ChainTip, transparent::Input};
+    use zebra_state::{ReadRequest, ReadResponse, Spend};
+
+    let _init_guard = zebra_test::init();
+
+    let zebrad_state_path = env::var_os(common::cached_state::ZEBRA_CACHED_STATE_DIR).expect(
+        "has_spending_transaction_hash_indexes_in_finalized_state test requires cached state",
+    );
+
+    let (_state, mut read_state, latest_chain_tip, _chain_tip_change) =
+        common::cached_state::start_state_service_with_cache_dir(&Mainnet, zebrad_state_path)
+            .await?;
+
+    let mut tip_hash = latest_chain_tip
+        .best_tip_hash()
+        .expect("cached state must not be empty");
+
+    // Read the last 100 blocks
+    let num_blocks_to_check = 100;
+    for i in 0..num_blocks_to_check {
+        let ReadResponse::Block(block) = read_state
+            .ready()
+            .await
+            .map_err(|err| eyre!(err))?
+            .call(ReadRequest::Block(tip_hash.into()))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            panic!("unexpected response to Block request");
+        };
+
+        let block = block.expect("should have block with latest_chain_tip hash");
+
+        let spends_with_spending_tx_hashes = block.transactions.iter().cloned().flat_map(|tx| {
+            let tx_hash = tx.hash();
+            tx.inputs()
+                .iter()
+                .filter_map(Input::outpoint)
+                .map(Spend::from)
+                .chain(tx.sprout_nullifiers().cloned().map(Spend::from))
+                .chain(tx.sapling_nullifiers().cloned().map(Spend::from))
+                .chain(tx.orchard_nullifiers().cloned().map(Spend::from))
+                .map(|spend| (spend, tx_hash))
+                .collect::<Vec<_>>()
+        });
+
+        for (spend, expected_transaction_hash) in spends_with_spending_tx_hashes {
+            let ReadResponse::TransactionId(transaction_hash) = read_state
+                .ready()
+                .await
+                .map_err(|err| eyre!(err))?
+                .call(ReadRequest::SpendingTransactionId(spend))
+                .await
+                .map_err(|err| eyre!(err))?
+            else {
+                panic!("unexpected response to Block request");
+            };
+
+            let transaction_hash = transaction_hash.expect("should have spending transaction hash");
+
+            assert_eq!(
+                transaction_hash, expected_transaction_hash,
+                "spending transaction hash should match expected transaction hash"
+            );
+        }
+
+        if i % 10 == 0 {
+            tracing::info!(
+                height = ?block.coinbase_height(),
+                "has all spending tx ids at and above block"
+            );
+        }
+
+        tip_hash = block.header.previous_block_hash;
+    }
 
     Ok(())
 }
