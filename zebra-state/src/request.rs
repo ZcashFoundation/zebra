@@ -35,9 +35,13 @@ use crate::{
 /// [`sapling::Nullifier`], and [`orchard::Nullifier`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Spend {
+    /// A spend identified by a [`transparent::OutPoint`].
     OutPoint(transparent::OutPoint),
+    /// A spend identified by a [`sprout::Nullifier`].
     Sprout(sprout::Nullifier),
+    /// A spend identified by a [`sapling::Nullifier`].
     Sapling(sapling::Nullifier),
+    /// A spend identified by a [`orchard::Nullifier`].
     Orchard(orchard::Nullifier),
 }
 
