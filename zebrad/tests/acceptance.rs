@@ -122,10 +122,10 @@
 //! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test submit_block --features getblocktemplate-rpcs --release -- --ignored --nocapture
 //! ```
 //!
-//! Example of how to run the has_spending_transaction_ids_in_finalized_state test:
+//! Example of how to run the has_spending_transaction_ids test:
 //!
 //! ```console
-//! RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test has_spending_transaction_ids_in_finalized_state --release -- --ignored --nocapture
+//! RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test has_spending_transaction_ids --release -- --ignored --nocapture
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
@@ -153,6 +153,7 @@ use std::{
     collections::HashSet,
     env, fs, panic,
     path::PathBuf,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -171,7 +172,9 @@ use zebra_chain::{
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
-use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
+use zebra_state::{
+    constants::LOCK_FILE_ERROR, state_database_format_version_in_code, SemanticallyVerifiedBlock,
+};
 
 #[cfg(not(target_os = "windows"))]
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -188,6 +191,7 @@ use zebra_test::net::random_known_port;
 mod common;
 
 use common::{
+    cached_state::future_blocks,
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
@@ -3547,33 +3551,55 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
 /// Checks that the finalized state has the spending transaction ids for every
 /// spent outpoint and revealed nullifier in the last 100 blocks of a cached state.
-//
-// TODO: Check that the spending transaction ids are available in the non-finalized state,
-//       (check for existing tests in `zebra-state` using the partial chain strategy, otherwise,
-//       load future blocks, commit them via state svc requests, and check those here too.)
 #[tokio::test]
 #[ignore]
-async fn has_spending_transaction_ids_in_finalized_state() -> Result<()> {
+async fn has_spending_transaction_ids() -> Result<()> {
     use tower::Service;
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
-    use zebra_state::{ReadRequest, ReadResponse, Spend};
+    use zebra_state::{ReadRequest, ReadResponse, Request, Response, Spend};
 
     let _init_guard = zebra_test::init();
+    let test_type = UpdateZebraCachedStateWithRpc;
+    let test_name = "has_spending_transaction_ids_test";
+    let network = Mainnet;
 
-    let zebrad_state_path = env::var_os(common::cached_state::ZEBRA_CACHED_STATE_DIR).expect(
-        "has_spending_transaction_hash_indexes_in_finalized_state test requires cached state",
-    );
+    let non_finalized_blocks = future_blocks(&network, test_type, test_name, 100).await?;
 
-    let (_state, mut read_state, latest_chain_tip, _chain_tip_change) =
+    let zebrad_state_path = test_type
+        .zebrad_state_path(test_name)
+        .expect("test requires a cached state");
+
+    let (mut state, mut read_state, latest_chain_tip, _chain_tip_change) =
         common::cached_state::start_state_service_with_cache_dir(&Mainnet, zebrad_state_path)
             .await?;
+
+    for block in non_finalized_blocks {
+        let expected_hash = block.hash();
+        let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), expected_hash);
+        let Response::Committed(block_hash) = state
+            .ready()
+            .await
+            .map_err(|err| eyre!(err))?
+            .call(Request::CommitSemanticallyVerifiedBlock(block))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            panic!("unexpected response to Block request");
+        };
+
+        assert_eq!(
+            expected_hash, block_hash,
+            "state should respond with expected block hash"
+        );
+    }
 
     let mut tip_hash = latest_chain_tip
         .best_tip_hash()
         .expect("cached state must not be empty");
 
-    // Read the last 100 blocks
-    let num_blocks_to_check = 100;
+    // Read the last 500 blocks - should be greater than the MAX_BLOCK_REORG_HEIGHT so that
+    // both the finalized and non-finalized state are checked.
+    let num_blocks_to_check = 500;
     for i in 0..num_blocks_to_check {
         let ReadResponse::Block(block) = read_state
             .ready()
