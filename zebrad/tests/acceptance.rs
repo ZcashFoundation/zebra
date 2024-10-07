@@ -3563,13 +3563,14 @@ async fn has_spending_transaction_ids() -> Result<()> {
     let test_name = "has_spending_transaction_ids_test";
     let network = Mainnet;
 
+    let Some(zebrad_state_path) = test_type.zebrad_state_path(test_name) else {
+        // Skip test if there's no cached state.
+        return Ok(());
+    };
+
     tracing::info!("loading blocks for non-finalized state");
 
     let non_finalized_blocks = future_blocks(&network, test_type, test_name, 100).await?;
-
-    let zebrad_state_path = test_type
-        .zebrad_state_path(test_name)
-        .expect("test requires a cached state");
 
     let (mut state, mut read_state, latest_chain_tip, _chain_tip_change) =
         common::cached_state::start_state_service_with_cache_dir(&Mainnet, zebrad_state_path)

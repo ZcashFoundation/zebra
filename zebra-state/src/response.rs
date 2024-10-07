@@ -175,7 +175,7 @@ pub enum ReadResponse {
     /// or `None` if the block was not found.
     TransactionIdsForBlock(Option<Arc<[transaction::Hash]>>),
 
-    /// Response to [`ReadRequest::TransactionIdForSpentOutPoint`],
+    /// Response to [`ReadRequest::SpendingTransactionId`],
     /// with an list of transaction hashes in block order,
     /// or `None` if the block was not found.
     TransactionId(Option<transaction::Hash>),
