@@ -3563,6 +3563,8 @@ async fn has_spending_transaction_ids() -> Result<()> {
     let test_name = "has_spending_transaction_ids_test";
     let network = Mainnet;
 
+    tracing::info!("loading blocks for non-finalized state");
+
     let non_finalized_blocks = future_blocks(&network, test_type, test_name, 100).await?;
 
     let zebrad_state_path = test_type
@@ -3572,6 +3574,8 @@ async fn has_spending_transaction_ids() -> Result<()> {
     let (mut state, mut read_state, latest_chain_tip, _chain_tip_change) =
         common::cached_state::start_state_service_with_cache_dir(&Mainnet, zebrad_state_path)
             .await?;
+
+    tracing::info!("committing blocks to non-finalized state");
 
     for block in non_finalized_blocks {
         let expected_hash = block.hash();
@@ -3596,6 +3600,8 @@ async fn has_spending_transaction_ids() -> Result<()> {
     let mut tip_hash = latest_chain_tip
         .best_tip_hash()
         .expect("cached state must not be empty");
+
+    tracing::info!("checking indexes of spending transaction ids");
 
     // Read the last 500 blocks - should be greater than the MAX_BLOCK_REORG_HEIGHT so that
     // both the finalized and non-finalized state are checked.
@@ -3647,7 +3653,7 @@ async fn has_spending_transaction_ids() -> Result<()> {
             );
         }
 
-        if i % 10 == 0 {
+        if i % 25 == 0 {
             tracing::info!(
                 height = ?block.coinbase_height(),
                 "has all spending tx ids at and above block"
