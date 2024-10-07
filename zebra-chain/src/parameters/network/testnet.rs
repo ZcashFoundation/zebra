@@ -19,8 +19,8 @@ use super::{
         BLOSSOM_POW_TARGET_SPACING_RATIO, FIRST_HALVING_TESTNET,
         FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL, POST_BLOSSOM_HALVING_INTERVAL,
         POST_NU6_FUNDING_STREAMS_MAINNET, POST_NU6_FUNDING_STREAMS_TESTNET,
-        PRE_BLOSSOM_HALVING_INTERVAL, PRE_BLOSSOM_REGTEST_HALVING_INTERVAL,
-        PRE_NU6_FUNDING_STREAMS_MAINNET, PRE_NU6_FUNDING_STREAMS_TESTNET,
+        PRE_BLOSSOM_HALVING_INTERVAL, PRE_NU6_FUNDING_STREAMS_MAINNET,
+        PRE_NU6_FUNDING_STREAMS_TESTNET,
     },
 };
 
@@ -52,6 +52,10 @@ const REGTEST_GENESIS_HASH: &str =
 /// The block hash of the Testnet genesis block, `zcash-cli -testnet getblockhash 0`
 const TESTNET_GENESIS_HASH: &str =
     "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38";
+
+/// The halving height interval in the regtest is 6 hours.
+/// [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
+const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
 
 /// Used to validate number of funding stream recipient addresses on configured Testnets.
 struct TestnetParameterSubsidyImpl;

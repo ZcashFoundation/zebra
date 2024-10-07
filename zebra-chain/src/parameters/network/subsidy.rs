@@ -40,10 +40,6 @@ pub const BLOSSOM_POW_TARGET_SPACING_RATIO: u32 = 2;
 /// `(60 * 60 * 24 * 365 * 4) / 150 = 840960`
 pub const PRE_BLOSSOM_HALVING_INTERVAL: HeightDiff = 840_000;
 
-/// The halving height interval in the regtest is 6 hours.
-/// [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
-pub(crate) const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
-
 /// After Blossom the block time is reduced to 75 seconds but halving period should remain around 4 years.
 pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
     PRE_BLOSSOM_HALVING_INTERVAL * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
