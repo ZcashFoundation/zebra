@@ -144,10 +144,15 @@ EOF
     fi
   fi
 
-  if [[ -n "${MINER_ADDRESS}" ]]; then
+  if [[ " ${FEATURES} " =~ " internal-miner " ]]; then
     cat <<EOF >> "${ZEBRA_CONF_PATH}"
+[mempool]
+debug_enable_at_height = 0
+
 [mining]
-miner_address = "${MINER_ADDRESS}"
+miner_address = "${MINER_ADDRESS:='t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v'}"
+internal_miner = true
+
 EOF
   fi
 fi

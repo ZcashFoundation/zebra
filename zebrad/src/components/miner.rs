@@ -209,7 +209,7 @@ where
 }
 
 /// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
-#[instrument(skip(rpc, template_sender))]
+#[instrument(skip(rpc, template_sender, network))]
 pub async fn generate_block_templates<
     Mempool,
     State,
@@ -263,6 +263,10 @@ where
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
         let template: Result<_, _> = rpc.get_block_template(Some(parameters.clone())).await;
+
+        if template.is_err() {
+            info!(?template, "error getting block template")
+        }
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
