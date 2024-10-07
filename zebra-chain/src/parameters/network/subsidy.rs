@@ -394,6 +394,11 @@ pub trait ParameterSubsidy {
     fn pre_blossom_halving_interval(&self) -> HeightDiff;
 
     /// Returns the address change interval for funding streams
+    /// as described in [protocol specification §7.10][7.10].
+    ///
+    /// > FSRecipientChangeInterval := PostBlossomHalvingInterval / 48
+    ///
+    /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     fn funding_stream_address_change_interval(&self) -> HeightDiff;
 }
 
