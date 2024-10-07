@@ -1,6 +1,11 @@
 
 # cargo-vet audits file
 
+[[audits.anstyle]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.7 -> 1.0.8"
+
 [[audits.axum]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -11,6 +16,21 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.4 -> 0.4.3"
 
+[[audits.bip32]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.1 -> 0.5.2"
+
+[[audits.bridgetree]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.5.0"
+
+[[audits.bytemuck]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.16.3 -> 1.16.1"
+
 [[audits.bytes]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -20,6 +40,11 @@ delta = "1.6.0 -> 1.6.1"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.6.1 -> 1.7.1"
+
+[[audits.cfg_aliases]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.1.1"
 
 [[audits.clap_derive]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -66,6 +91,18 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
 
+[[audits.equihash]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
+[[audits.f4jumble]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.0 -> 0.1.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
 [[audits.git2]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -81,10 +118,25 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.3.1 -> 1.4.1"
 
+[[audits.hyper-util]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.6 -> 0.1.9"
+
+[[audits.incrementalmerkletree]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.1 -> 0.6.0"
+
 [[audits.indexmap]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "2.2.6 -> 2.3.0"
+
+[[audits.indexmap]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "2.3.0 -> 2.5.0"
 
 [[audits.inferno]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -96,10 +148,25 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.11.20 -> 0.11.21"
 
+[[audits.insta]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.39.0 -> 1.40.0"
+
+[[audits.libc]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.155 -> 0.2.159"
+
 [[audits.libgit2-sys]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.2+1.7.2 -> 0.17.0+1.8.1"
+
+[[audits.libyml]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.0.5"
 
 [[audits.log]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -131,6 +198,21 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.8.11 -> 1.0.1"
 
+[[audits.nix]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.15.0"
+
+[[audits.orchard]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.0 -> 0.9.0"
+
+[[audits.owo-colors]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "4.0.0 -> 4.1.0"
+
 [[audits.proptest-derive]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -140,6 +222,11 @@ delta = "0.4.0 -> 0.5.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.12.6 -> 0.13.1"
+
+[[audits.prost]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.13.3"
 
 [[audits.prost-build]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -151,6 +238,11 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.12.6 -> 0.13.1"
 
+[[audits.prost-derive]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.13.1 -> 0.13.3"
+
 [[audits.prost-types]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -160,6 +252,36 @@ delta = "0.12.6 -> 0.13.1"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.10.5 -> 1.10.6"
+
+[[audits.regex]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.10.6 -> 1.11.0"
+
+[[audits.regex-automata]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.7 -> 0.4.8"
+
+[[audits.regex-syntax]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.8.4 -> 0.8.5"
+
+[[audits.rlimit]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.1 -> 0.10.2"
+
+[[audits.rustix]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.38.34 -> 0.38.37"
+
+[[audits.sapling-crypto]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.3 -> 0.2.0"
 
 [[audits.serde_spanned]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -186,20 +308,45 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "3.8.3 -> 3.9.0"
 
+[[audits.serde_yml]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.0.12"
+
+[[audits.shardtree]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.1 -> 0.4.0"
+
 [[audits.tempfile]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "3.10.1 -> 3.11.0"
+
+[[audits.tempfile]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "3.11.0 -> 3.13.0"
 
 [[audits.thiserror]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.0.61 -> 1.0.62"
 
+[[audits.thiserror]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.63 -> 1.0.64"
+
 [[audits.thiserror-impl]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "1.0.63 -> 1.0.62"
+
+[[audits.thiserror-impl]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.63 -> 1.0.64"
 
 [[audits.tokio]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -215,6 +362,16 @@ delta = "1.38.1 -> 1.39.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "2.3.0 -> 2.4.0"
+
+[[audits.tokio-stream]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.15 -> 0.1.16"
+
+[[audits.tokio-util]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.11 -> 0.7.12"
 
 [[audits.toml]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -261,6 +418,16 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.11.0 -> 0.12.0"
 
+[[audits.tonic]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.12.3"
+
+[[audits.tonic-build]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.12.3"
+
 [[audits.tonic-reflection]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -271,15 +438,232 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.12.0 -> 0.12.1"
 
+[[audits.tonic-reflection]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.12.3"
+
+[[audits.tower-batch-control]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.41-beta.14 -> 0.2.41-beta.15"
+
+[[audits.tower-fallback]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.41-beta.14 -> 0.2.41-beta.15"
+
+[[audits.tower-layer]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.2 -> 0.3.3"
+
+[[audits.tower-service]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.2 -> 0.3.3"
+
+[[audits.uint]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.9.5 -> 0.10.0"
+
 [[audits.vergen]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "8.3.1 -> 8.3.2"
 
+[[audits.version_check]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.9.4 -> 0.9.5"
+
+[[audits.windows-sys]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.0 -> 0.59.0"
+
+[[audits.windows-targets]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_aarch64_gnullvm]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_aarch64_msvc]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_i686_gnu]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_i686_gnullvm]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_i686_msvc]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_x86_64_gnu]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_x86_64_gnullvm]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
+[[audits.windows_x86_64_msvc]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.52.5 -> 0.52.6"
+
 [[audits.winnow]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.13 -> 0.6.18"
+
+[[audits.zcash_address]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.5.0"
+
+[[audits.zcash_address]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.5.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
+[[audits.zcash_client_backend]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.12.1 -> 0.13.0"
+
+[[audits.zcash_client_backend]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.13.0 -> 0.13.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
+[[audits.zcash_encoding]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.1 -> 0.2.1@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
+[[audits.zcash_keys]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.3.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
+[[audits.zcash_primitives]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.17.0"
+
+[[audits.zcash_primitives]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.17.0 -> 0.17.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
+[[audits.zcash_proofs]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.16.0 -> 0.17.0"
+
+[[audits.zcash_protocol]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.1 -> 0.2.0"
+
+[[audits.zcash_protocol]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.1 -> 0.3.0"
+
+[[audits.zcash_protocol]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.3.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
+
+[[audits.zebra-chain]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-consensus]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-grpc]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.0-alpha.5 -> 0.1.0-alpha.6"
+
+[[audits.zebra-network]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-node-services]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-rpc]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-script]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-state]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-test]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebra-utils]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.0.0-beta.38 -> 1.0.0-beta.39"
+
+[[audits.zebrad]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "1.8.0 -> 1.9.0"
+
+[[audits.zip321]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+version = "0.1.0"
+
+[[audits.zip321]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.0 -> 0.1.0@git:a1047adf0b6f324dad415db34762dc26f8367ce4"
+importable = false
 
 [[trusted.clap]]
 criteria = "safe-to-deploy"
