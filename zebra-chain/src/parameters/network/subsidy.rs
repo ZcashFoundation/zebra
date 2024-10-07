@@ -413,8 +413,7 @@ impl ParameterSubsidy for Network {
                 } else if params.is_default_testnet() {
                     FIRST_HALVING_TESTNET
                 } else {
-                    height_for_halving_index(1, self)
-                        .expect("first halving height should be available")
+                    height_for_halving(1, self).expect("first halving height should be available")
                 }
             }
         }
@@ -558,8 +557,8 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
 /// See `Halving(height)`, as described in [protocol specification §7.8][7.8]
 ///
 /// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn height_for_halving_index(halving_index: u32, network: &Network) -> Option<Height> {
-    if halving_index == 0 {
+pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
+    if halving == 0 {
         return Some(Height(0));
     }
 
@@ -571,7 +570,7 @@ pub fn height_for_halving_index(halving_index: u32, network: &Network) -> Option
             .0,
     );
     let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
-    let halving_index = i64::from(halving_index);
+    let halving_index = i64::from(halving);
 
     let unscaled_height = halving_index
         .checked_mul(pre_blossom_halving_interval)

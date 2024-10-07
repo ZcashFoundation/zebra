@@ -506,14 +506,11 @@ mod test {
     #[test]
     fn check_height_for_num_halvings() {
         for network in Network::iter() {
-            for halving_index in 1..1000 {
+            for halving in 1..1000 {
                 let Some(height_for_halving) =
-                    zebra_chain::parameters::subsidy::height_for_halving_index(
-                        halving_index,
-                        &network,
-                    )
+                    zebra_chain::parameters::subsidy::height_for_halving(halving, &network)
                 else {
-                    panic!("could not find height for halving {halving_index}");
+                    panic!("could not find height for halving {halving}");
                 };
 
                 let prev_height = height_for_halving
@@ -521,13 +518,13 @@ mod test {
                     .expect("there should be a previous height");
 
                 assert_eq!(
-                    halving_index,
+                    halving,
                     num_halvings(height_for_halving, &network),
                     "num_halvings should match the halving index"
                 );
 
                 assert_eq!(
-                    halving_index - 1,
+                    halving - 1,
                     num_halvings(prev_height, &network),
                     "num_halvings for the prev height should be 1 less than the halving index"
                 );
