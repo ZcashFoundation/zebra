@@ -6151,6 +6151,7 @@ dependencies = [
 name = "zebra-node-services"
 version = "1.0.0-beta.39"
 dependencies = [
+ "base64 0.22.1",
  "color-eyre",
  "jsonrpc-core",
  "reqwest",

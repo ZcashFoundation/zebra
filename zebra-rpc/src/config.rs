@@ -1,8 +1,10 @@
 //! User-configurable RPC settings.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+use zebra_chain::common::default_cache_dir;
 
 pub mod mining;
 
@@ -71,6 +73,9 @@ pub struct Config {
     /// Test-only option that makes Zebra say it is at the chain tip,
     /// no matter what the estimated height or local clock is.
     pub debug_force_finished_sync: bool,
+
+    /// The directory where Zebra stores RPC cookies.
+    pub cookie_dir: PathBuf,
 }
 
 // This impl isn't derivable because it depends on features.
@@ -94,6 +99,9 @@ impl Default for Config {
 
             // Debug options are always off by default.
             debug_force_finished_sync: false,
+
+            //
+            cookie_dir: default_cache_dir(),
         }
     }
 }

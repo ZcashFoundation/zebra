@@ -38,14 +38,14 @@ use crate::server::cookie;
 /// We assume lightwalletd validates data encodings before sending it on to Zebra.
 /// So any fixes Zebra performs won't change user-specified data.
 #[derive(Clone, Debug)]
-pub struct FixHttpRequestMiddleware;
+pub struct FixHttpRequestMiddleware(pub crate::config::Config);
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
     fn on_request(&self, mut request: Request<Body>) -> RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
 
         // Check if the request is authenticated
-        if !FixHttpRequestMiddleware::check_credentials(request.headers_mut()) {
+        if !self.check_credentials(request.headers_mut()) {
             request = Self::unauthenticated(request);
         }
 
@@ -175,7 +175,7 @@ impl FixHttpRequestMiddleware {
     }
 
     /// Check if the request is authenticated.
-    pub fn check_credentials(headers: &header::HeaderMap) -> bool {
+    pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
         headers
             .get(header::AUTHORIZATION)
             .and_then(|auth_header| auth_header.to_str().ok())
@@ -189,7 +189,7 @@ impl FixHttpRequestMiddleware {
                     .map(|password| password.to_string())
             })
             .map_or(false, |password| {
-                if let Some(cookie_password) = cookie::get() {
+                if let Some(cookie_password) = cookie::get(self.0.cookie_dir.clone()) {
                     cookie_password == password
                 } else {
                     false

@@ -16,11 +16,15 @@ use zebra_chain::{
     serialization::ZcashSerialize,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::{
-        proposal::TimeSource, GetBlockTemplate, JsonParameters, ProposalResponse,
+use zebra_rpc::{
+    config::Config as RpcConfig,
+    methods::get_block_template_rpcs::{
+        get_block_template::{
+            proposal::TimeSource, GetBlockTemplate, JsonParameters, ProposalResponse,
+        },
+        types::get_block_template::proposal_block_from_template,
     },
-    types::get_block_template::proposal_block_from_template,
+    server::cookie,
 };
 
 use crate::common::{
@@ -94,7 +98,8 @@ pub(crate) async fn run() -> Result<()> {
         true,
     )?;
 
-    let client = RpcRequestClient::new(rpc_address);
+    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
+    let client = RpcRequestClient::new(rpc_address, auth_cookie);
 
     tracing::info!(
         "calling getblocktemplate RPC method at {rpc_address}, \

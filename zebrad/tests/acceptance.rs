@@ -164,7 +164,12 @@ use zebra_chain::{
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
+
+use zebra_rpc::{
+    config::Config as RpcConfig,
+    server::{cookie, OPENED_RPC_ENDPOINT_MSG},
+};
+
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
 #[cfg(not(target_os = "windows"))]
@@ -1591,8 +1596,11 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
     // Wait until port is open.
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    // Get the auth cookie
+    let auth_cookie =
+        zebra_rpc::server::cookie::get(config.rpc.cookie_dir).expect("cookie should exist");
     // Create an http client
-    let client = RpcRequestClient::new(rpc_address);
+    let client = RpcRequestClient::new(rpc_address, auth_cookie);
 
     // Make the call to the `getinfo` RPC method
     let res = client.call("getinfo", "[]".to_string()).await?;
@@ -1648,8 +1656,12 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
     // Wait until port is open.
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
+    // Get the auth cookie
+    let auth_cookie =
+        zebra_rpc::server::cookie::get(config.rpc.cookie_dir).expect("cookie should exist");
+
     // Create an http client
-    let client = RpcRequestClient::new(rpc_address);
+    let client = RpcRequestClient::new(rpc_address, auth_cookie);
 
     // Call to `getinfo` RPC method with a no content type.
     let res = client
@@ -1734,8 +1746,12 @@ fn non_blocking_logger() -> Result<()> {
         // Wait until port is open.
         let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
+        // Get the auth cookie
+        let auth_cookie =
+            zebra_rpc::server::cookie::get(config.rpc.cookie_dir).expect("cookie should exist");
+
         // Create an http client
-        let client = RpcRequestClient::new(rpc_address);
+        let client = RpcRequestClient::new(rpc_address, auth_cookie);
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
@@ -2406,7 +2422,10 @@ async fn fully_synced_rpc_test() -> Result<()> {
 
     zebrad.expect_stdout_line_matches(format!("Opened RPC endpoint at {zebra_rpc_address}"))?;
 
-    let client = RpcRequestClient::new(zebra_rpc_address);
+    // Get the auth cookie
+    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
+
+    let client = RpcRequestClient::new(zebra_rpc_address, auth_cookie);
 
     // Make a getblock test that works only on synced node (high block number).
     // The block is before the mandatory checkpoint, so the checkpoint cached state can be used
@@ -2846,9 +2865,14 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     // Wait for zebrad to load the full cached blockchain.
     zebrad.expect_stdout_line_matches(SYNC_FINISHED_REGEX)?;
 
+    // Get the auth cookie
+    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
+
     // Create an http client
-    let client =
-        RpcRequestClient::new(zebra_rpc_address.expect("already checked that address is valid"));
+    let client = RpcRequestClient::new(
+        zebra_rpc_address.expect("already checked that address is valid"),
+        auth_cookie,
+    );
 
     // Create test vector matrix
     let zcashd_test_vectors = vec![
@@ -2999,7 +3023,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
     let (read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
         zebra_rpc::sync::init_read_state_with_syncer(
-            config.state,
+            config.state.clone(),
+            config.rpc,
             &config.network.network,
             rpc_address,
         )
@@ -3017,7 +3042,10 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     tracing::info!("got genesis chain tip change, submitting more blocks ..");
 
-    let rpc_client = RpcRequestClient::new(rpc_address);
+    // Get the auth cookie
+    let auth_cookie = cookie::get(config.state.cache_dir).expect("cookie should exist");
+
+    let rpc_client = RpcRequestClient::new(rpc_address, auth_cookie);
     let mut blocks = Vec::new();
     for _ in 0..10 {
         let (block, height) = rpc_client.submit_block_from_template().await?;
@@ -3211,6 +3239,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
         zebra_rpc::sync::init_read_state_with_syncer(
             config.state,
+            config.rpc,
             &config.network.network,
             rpc_address,
         )

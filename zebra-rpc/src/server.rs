@@ -33,7 +33,7 @@ use crate::{
 #[cfg(feature = "getblocktemplate-rpcs")]
 use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
-mod cookie;
+pub mod cookie;
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
 
@@ -195,7 +195,7 @@ impl RpcServer {
             }
 
             // generate a cookie
-            cookie::generate();
+            cookie::generate(config.cookie_dir.clone());
 
             // The server is a blocking task, which blocks on executor shutdown.
             // So we need to start it in a std::thread.
@@ -209,7 +209,7 @@ impl RpcServer {
                         .threads(parallel_cpu_threads)
                         // TODO: disable this security check if we see errors from lightwalletd
                         //.allowed_hosts(DomainsValidation::Disabled)
-                        .request_middleware(FixHttpRequestMiddleware)
+                        .request_middleware(FixHttpRequestMiddleware(config.clone()))
                         .start_http(&listen_addr)
                         .expect("Unable to start RPC server");
 

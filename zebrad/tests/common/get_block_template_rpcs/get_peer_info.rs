@@ -4,7 +4,10 @@ use color_eyre::eyre::{eyre, Context, Result};
 
 use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
+use zebra_rpc::{
+    config::Config as RpcConfig, methods::get_block_template_rpcs::types::peer_info::PeerInfo,
+    server::cookie,
+};
 
 use crate::common::{
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
@@ -38,8 +41,11 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
+    // Get the auth cookie
+    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
+
     // call `getpeerinfo` RPC method
-    let peer_info_result: Vec<PeerInfo> = RpcRequestClient::new(rpc_address)
+    let peer_info_result: Vec<PeerInfo> = RpcRequestClient::new(rpc_address, auth_cookie)
         .json_result_from_call("getpeerinfo", "[]".to_string())
         .await
         .map_err(|err| eyre!(err))?;
