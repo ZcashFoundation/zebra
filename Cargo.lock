@@ -539,11 +539,11 @@ dependencies = [
 
 [[package]]
 name = "bridgetree"
-version = "0.5.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f62227647af796dd9f1637da0392676a2e200973b817b082fc9be89bf93ddd74"
+checksum = "cef977c7f8e75aa81fc589064c121ab8d32448b7939d34d58df479aa93e65ea5"
 dependencies = [
- "incrementalmerkletree",
+ "incrementalmerkletree 0.7.0",
 ]
 
 [[package]]
@@ -2106,6 +2106,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "incrementalmerkletree"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d45063fbc4b0a37837f6bfe0445f269d13d730ad0aa3b5a7f74aa7bf27a0f4df"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "indenter"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2812,7 +2821,7 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -3805,7 +3814,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -4141,7 +4150,7 @@ checksum = "78222845cd8bbe5eb95687407648ff17693a35de5e8abaa39a4681fb21e033f9"
 dependencies = [
  "bitflags 2.6.0",
  "either",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "tracing",
 ]
 
@@ -5633,7 +5642,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "memuse",
  "nom",
  "nonempty",
@@ -5672,7 +5681,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "memuse",
  "nom",
  "nonempty",
@@ -5808,7 +5817,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "jubjub",
  "memuse",
  "nonempty",
@@ -5845,7 +5854,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "jubjub",
  "memuse",
  "nonempty",
@@ -5882,7 +5891,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "jubjub",
  "memuse",
  "nonempty",
@@ -5996,7 +6005,7 @@ dependencies = [
  "halo2_proofs",
  "hex",
  "humantime",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "itertools 0.13.0",
  "jubjub",
  "lazy_static",
