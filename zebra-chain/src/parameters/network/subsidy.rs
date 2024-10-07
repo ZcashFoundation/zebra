@@ -234,8 +234,7 @@ lazy_static! {
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                // TODO: Update these addresses
-                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
+                FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
             ),
         ]
         .into_iter()
@@ -405,6 +404,18 @@ pub const FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 pub const FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
     ["t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
 
+/// Number of addresses for each post-NU6 funding stream on Mainnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 12;
+
+/// List of addresses for the Major Grants post-NU6 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
+pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
+    POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
+    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+
 /// Number of addresses for each funding stream in the Testnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
@@ -482,7 +493,7 @@ pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
 
-/// List of addresses for the Major Grants post-NU6 funding stream in the Testnet administered by the Financial Privacy Fund (FPF).
+/// List of addresses for the Major Grants post-NU6 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
 pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;
     POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
     ["t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
