@@ -4,6 +4,7 @@
 #![allow(clippy::all)]
 #![allow(clippy::range_plus_one)]
 #![allow(clippy::fallible_impl_from)]
+#![allow(missing_docs)]
 
 use uint::construct_uint;
 
