@@ -41,6 +41,9 @@ pub mod transparent;
 pub mod value_balance;
 pub mod work;
 
+#[cfg(feature = "tx-v6")]
+pub mod orchard_zsa;
+
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::LedgerState;
 

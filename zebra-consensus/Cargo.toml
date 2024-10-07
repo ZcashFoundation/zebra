@@ -16,6 +16,7 @@ categories = ["asynchronous", "cryptography::cryptocurrencies"]
 
 [features]
 default = []
+#default = ["tx-v6"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -33,6 +34,12 @@ getblocktemplate-rpcs = [
 
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
+
+# Support for transaction version 6
+tx-v6 = [
+    "zebra-state/tx-v6",
+    "zebra-chain/tx-v6"
+]
 
 [dependencies]
 blake2b_simd = "1.0.2"

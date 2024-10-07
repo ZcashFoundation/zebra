@@ -4,10 +4,7 @@ use reddsa::{orchard::SpendAuth, Signature};
 
 use crate::{
     block::MAX_BLOCK_BYTES,
-    orchard::{
-        shielded_data::{ACTION_SIZE, AUTHORIZED_ACTION_SIZE},
-        Action, AuthorizedAction,
-    },
+    orchard::{Action, AuthorizedAction, OrchardVanilla},
     serialization::{arbitrary::max_allocation_is_big_enough, TrustedPreallocate, ZcashSerialize},
 };
 
@@ -17,16 +14,16 @@ proptest! {
     /// Confirm that each `AuthorizedAction` takes exactly AUTHORIZED_ACTION_SIZE
     /// bytes when serialized.
     #[test]
-    fn authorized_action_size_is_small_enough(authorized_action in <AuthorizedAction>::arbitrary_with(())) {
+    fn authorized_action_size_is_small_enough(authorized_action in <AuthorizedAction<OrchardVanilla>>::arbitrary_with(())) {
         let (action, spend_auth_sig) = authorized_action.into_parts();
         let mut serialized_len = action.zcash_serialize_to_vec().expect("Serialization to vec must succeed").len();
         serialized_len += spend_auth_sig.zcash_serialize_to_vec().expect("Serialization to vec must succeed").len();
-        prop_assert!(serialized_len as u64 == AUTHORIZED_ACTION_SIZE)
+        prop_assert!(serialized_len as u64 == AuthorizedAction::<OrchardVanilla>::AUTHORIZED_ACTION_SIZE)
     }
 
     /// Verify trusted preallocation for `AuthorizedAction` and its split fields
     #[test]
-    fn authorized_action_max_allocation_is_big_enough(authorized_action in <AuthorizedAction>::arbitrary_with(())) {
+    fn authorized_action_max_allocation_is_big_enough(authorized_action in <AuthorizedAction<OrchardVanilla>>::arbitrary_with(())) {
         let (action, spend_auth_sig) = authorized_action.into_parts();
 
         let (
@@ -37,12 +34,14 @@ proptest! {
         ) = max_allocation_is_big_enough(action);
 
         // Calculate the actual size of all required Action fields
-        prop_assert!((smallest_disallowed_serialized_len as u64)/ACTION_SIZE*AUTHORIZED_ACTION_SIZE >= MAX_BLOCK_BYTES);
-        prop_assert!((largest_allowed_serialized_len as u64)/ACTION_SIZE*AUTHORIZED_ACTION_SIZE <= MAX_BLOCK_BYTES);
+        prop_assert!((smallest_disallowed_serialized_len as u64)/AuthorizedAction::<OrchardVanilla>::ACTION_SIZE*
+            AuthorizedAction::<OrchardVanilla>::AUTHORIZED_ACTION_SIZE >= MAX_BLOCK_BYTES);
+        prop_assert!((largest_allowed_serialized_len as u64)/AuthorizedAction::<OrchardVanilla>::ACTION_SIZE*
+            AuthorizedAction::<OrchardVanilla>::AUTHORIZED_ACTION_SIZE <= MAX_BLOCK_BYTES);
 
         // Check the serialization limits for `Action`
-        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == Action::max_allocation());
-        prop_assert!((largest_allowed_vec_len as u64) == Action::max_allocation());
+        prop_assert!(((smallest_disallowed_vec_len - 1) as u64) == Action::<OrchardVanilla>::max_allocation());
+        prop_assert!((largest_allowed_vec_len as u64) == Action::<OrchardVanilla>::max_allocation());
         prop_assert!((largest_allowed_serialized_len as u64) <= MAX_BLOCK_BYTES);
 
         let (

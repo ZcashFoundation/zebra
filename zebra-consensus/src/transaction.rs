@@ -405,7 +405,8 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } => Self::verify_v5_transaction(
+                }
+                => Self::verify_v5_transaction(
                     &req,
                     &network,
                     script_verifier,
@@ -413,6 +414,14 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                // FIXME: implement proper V6 verification
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 {
+                    ..
+                } =>  {
+                    tracing::debug!(?tx, "V6 transaction verification is not supported for now");
+                    return Err(TransactionError::WrongVersion);
+                }
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -716,7 +725,7 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
@@ -1013,7 +1022,7 @@ where
 
     /// Verifies a transaction's Orchard shielded data.
     fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();

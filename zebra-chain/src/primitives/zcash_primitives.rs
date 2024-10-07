@@ -10,7 +10,7 @@ use crate::{
     amount::{Amount, NonNegative},
     parameters::{ConsensusBranchId, Network},
     serialization::ZcashSerialize,
-    transaction::{AuthDigest, HashType, SigHash, Transaction},
+    transaction::{tx_v5_and_v6, AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
 };
 
@@ -137,6 +137,17 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
     }
 }
 
+// FIXME: is this implemetation correct?
+// FIXME: remove this cfg
+//#[cfg(zcash_unstable = "nu6")]
+impl zp_tx::components::issuance::MapIssueAuth<orchard::issuance::Signed, orchard::issuance::Signed>
+    for IdentityMap
+{
+    fn map_issue_authorization(&self, s: orchard::issuance::Signed) -> orchard::issuance::Signed {
+        s
+    }
+}
+
 #[derive(Debug)]
 struct PrecomputedAuth<'a> {
     _phantom: std::marker::PhantomData<&'a ()>,
@@ -146,6 +157,16 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
     type TransparentAuth = TransparentAuth<'a>;
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
+
+    // FIXME: is this correct?
+    // FIXME: remove this cfg
+    //#[cfg(zcash_unstable = "nu6")]
+    type OrchardZsaAuth = orchard::bundle::Authorized;
+
+    // FIXME: is this correct?
+    // FIXME: remove this cfg
+    //#[cfg(zcash_unstable = "nu6")]
+    type IssueAuth = orchard::issuance::Signed;
 }
 
 // End of (mostly) copied code
@@ -157,12 +178,12 @@ impl TryFrom<&Transaction> for zp_tx::Transaction {
     ///
     /// # Panics
     ///
-    /// If the transaction is not V5. (Currently there is no need for this
+    /// If the transaction is not V5/V6. (Currently there is no need for this
     /// conversion for other versions.)
     #[allow(clippy::unwrap_in_result)]
     fn try_from(trans: &Transaction) -> Result<Self, Self::Error> {
         let network_upgrade = match trans {
-            Transaction::V5 {
+            tx_v5_and_v6! {
                 network_upgrade, ..
             } => network_upgrade,
             Transaction::V1 { .. }
@@ -275,7 +296,14 @@ impl<'a> PrecomputedTxData<'a> {
         };
         let tx_data: zp_tx::TransactionData<PrecomputedAuth> = alt_tx
             .into_data()
-            .map_authorization(f_transparent, IdentityMap, IdentityMap);
+            // FIXME: do we need to pass another arg values or orchard_zsa and issue instead of IdentityMap?
+            .map_authorization(
+                f_transparent,
+                IdentityMap,
+                IdentityMap,
+                IdentityMap,
+                IdentityMap,
+            );
 
         PrecomputedTxData {
             tx_data,

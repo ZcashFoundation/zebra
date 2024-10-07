@@ -19,6 +19,8 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
+use zebra_chain::orchard::{OrchardFlavorExt, OrchardVanilla};
+
 use crate::BoxError;
 
 use super::{spawn_fifo, spawn_fifo_and_convert};
@@ -75,7 +77,8 @@ pub type ItemVerifyingKey = VerifyingKey;
 
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key.
-    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build();
+    // FIXME: support OrchardZSA?
+    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();
 }
 
 // === TEMPORARY BATCH HALO2 SUBSTITUTE ===
@@ -130,8 +133,8 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl From<&zebra_chain::orchard::ShieldedData> for Item {
-    fn from(shielded_data: &zebra_chain::orchard::ShieldedData) -> Item {
+impl From<&zebra_chain::orchard::ShieldedData<OrchardVanilla>> for Item {
+    fn from(shielded_data: &zebra_chain::orchard::ShieldedData<OrchardVanilla>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
@@ -142,6 +145,15 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
         let enable_output = shielded_data
             .flags
             .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
+
+        // FIXME: simplify the flags creation - make `Flags::from_parts` method pub?
+        // FIXME: support OrchardZSA?
+        let flags = match (enable_spend, enable_output) {
+            (false, false) => orchard::builder::BundleType::DISABLED.flags(),
+            (false, true) => orchard::bundle::Flags::SPENDS_DISABLED_WITHOUT_ZSA,
+            (true, false) => orchard::bundle::Flags::OUTPUTS_DISABLED,
+            (true, true) => orchard::bundle::Flags::ENABLED_WITHOUT_ZSA,
+        };
 
         let instances = shielded_data
             .actions()
@@ -155,8 +167,7 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
                     ))
                     .expect("should be a valid redpallas spendauth verification key"),
                     note::ExtractedNoteCommitment::from_bytes(&action.cm_x.into()).unwrap(),
-                    enable_spend,
-                    enable_output,
+                    flags,
                 )
             })
             .collect();
