@@ -308,17 +308,18 @@ We use the following rocksdb column families:
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
+| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
 | *Sprout*                           |                        |                               |         |
-| `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
+| `sprout_nullifiers`                | `sprout::Nullifier`    | `TransactionLocation`         | Create  |
 | `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
 | `sprout_note_commitment_tree`      | `()`                   | `sprout::NoteCommitmentTree`  | Update  |
 | *Sapling*                          |                        |                               |         |
-| `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
+| `sapling_nullifiers`               | `sapling::Nullifier`   | `TransactionLocation`         | Create  |
 | `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
 | `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
 | `sapling_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Orchard*                          |                        |                               |         |
-| `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
+| `orchard_nullifiers`               | `orchard::Nullifier`   | `TransactionLocation`         | Create  |
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
