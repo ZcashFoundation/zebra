@@ -8,7 +8,7 @@ use crate::{
     serialization::{SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize},
 };
 
-use orchard::note::AssetBase;
+use orchard::{note::AssetBase, value::NoteValue};
 
 use super::serialize::ASSET_BASE_SIZE;
 
@@ -20,6 +20,15 @@ const BURN_ITEM_SIZE: u64 = ASSET_BASE_SIZE + AMOUNT_SIZE;
 /// Represents an Orchard ZSA burn item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, Amount);
+
+// Convert from burn item type used in `orchard` crate
+impl TryFrom<(AssetBase, NoteValue)> for BurnItem {
+    type Error = crate::amount::Error;
+
+    fn try_from(item: (AssetBase, NoteValue)) -> Result<Self, Self::Error> {
+        Ok(Self(item.0, item.1.inner().try_into()?))
+    }
+}
 
 impl ZcashSerialize for BurnItem {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {

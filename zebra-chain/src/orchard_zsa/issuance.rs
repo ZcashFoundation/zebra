@@ -33,6 +33,12 @@ use super::serialize::ASSET_BASE_SIZE;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssueData(IssueBundle<Signed>);
 
+impl From<IssueBundle<Signed>> for IssueData {
+    fn from(inner: IssueBundle<Signed>) -> Self {
+        Self(inner)
+    }
+}
+
 // Sizes of the serialized values for types in bytes (used for TrustedPreallocate impls)
 // FIXME: are those values correct (43, 32 etc.)?
 //const ISSUANCE_VALIDATING_KEY_SIZE: u64 = 32;

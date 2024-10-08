@@ -16,10 +16,21 @@ use super::note;
 #[cfg(feature = "tx-v6")]
 use crate::orchard_zsa::burn::BurnItem;
 
+#[cfg(not(any(test, feature = "proptest-impl")))]
+pub trait EncryptedNoteTest {}
+
+#[cfg(not(any(test, feature = "proptest-impl")))]
+impl<T> EncryptedNoteTest for T {}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+pub trait EncryptedNoteTest: proptest::prelude::Arbitrary {}
+
+#[cfg(any(test, feature = "proptest-impl"))]
+impl<T: proptest::prelude::Arbitrary> EncryptedNoteTest for T {}
+
 /// A trait representing compile-time settings of Orchard Shielded Protocol used in
 /// the transactions `V5` and `V6`.
 pub trait OrchardFlavorExt: Clone + Debug {
-    /// A type representing an encrypted note for this protocol version.
     /// A type representing an encrypted note for this protocol version.
     type EncryptedNote: Clone
         + Debug
@@ -28,7 +39,8 @@ pub trait OrchardFlavorExt: Clone + Debug {
         + DeserializeOwned
         + Serialize
         + ZcashDeserialize
-        + ZcashSerialize;
+        + ZcashSerialize
+        + EncryptedNoteTest;
 
     /// FIXME: add doc
     type Flavor: orchard_flavor::OrchardFlavor;
@@ -37,6 +49,7 @@ pub trait OrchardFlavorExt: Clone + Debug {
     const ENCRYPTED_NOTE_SIZE: usize = Self::Flavor::ENC_CIPHERTEXT_SIZE;
 
     /// A type representing a burn field for this protocol version.
+    // FIXME: add cfg tx-v6 here?
     type BurnType: Clone + Debug + Default + ZcashDeserialize + ZcashSerialize;
 }
 
