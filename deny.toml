@@ -71,9 +71,6 @@ skip-tree = [
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
 
-    # wait for elasticsearch to update base64, darling, rustc_version, serde_with
-    { name = "elasticsearch", version = "=8.5.0-alpha.1" },
-
     # wait for reqwest to update base64
     { name = "base64", version = "=0.21.7" },
     { name = "sync_wrapper", version = "0.1.2" },
