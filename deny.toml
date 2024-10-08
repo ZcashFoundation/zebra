@@ -97,6 +97,12 @@ skip-tree = [
 
     # wait for librocksdb-sys to update bindgen to one that uses newer itertools
     { name = "itertools", version = "=0.12.1" }
+
+    # wait for halo2_gadgets and primitive-types to update uint
+    { name = "uint", version = "=0.9.5" }
+
+    # wait for dirs-sys to update windows-sys
+    { name = "windows-sys", version = "=0.48.0" }
 ]
 
 # This section is considered when running `cargo deny check sources`.
