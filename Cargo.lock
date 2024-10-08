@@ -438,7 +438,7 @@ dependencies = [
  "hmac",
  "rand_core 0.6.4",
  "ripemd",
- "secp256k1 0.27.0",
+ "secp256k1",
  "sha2",
  "subtle",
  "zeroize",
@@ -3819,21 +3819,12 @@ dependencies = [
 
 [[package]]
 name = "secp256k1"
-version = "0.26.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4124a35fe33ae14259c490fd70fa199a32b9ce9502f2ee6bc4f81ec06fa65894"
-dependencies = [
- "secp256k1-sys",
- "serde",
-]
-
-[[package]]
-name = "secp256k1"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25996b82292a7a57ed3508f052cfff8640d38d32018784acd714758b43da9c8f"
 dependencies = [
  "secp256k1-sys",
+ "serde",
 ]
 
 [[package]]
@@ -5725,7 +5716,7 @@ dependencies = [
  "redjubjub",
  "ripemd",
  "sapling-crypto",
- "secp256k1 0.27.0",
+ "secp256k1",
  "sha2",
  "subtle",
  "tracing",
@@ -5829,7 +5820,7 @@ dependencies = [
  "redjubjub",
  "ripemd",
  "sapling-crypto",
- "secp256k1 0.26.0",
+ "secp256k1",
  "serde",
  "serde-big-array",
  "serde_json",

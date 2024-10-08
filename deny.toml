@@ -86,7 +86,7 @@ skip-tree = [
 
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
-,
+
     # wait for librocksdb-sys to update bindgen to one that uses newer itertools
     { name = "itertools", version = "=0.12.1" },
 
