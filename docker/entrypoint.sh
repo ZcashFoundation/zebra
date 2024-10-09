@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 
-# This script serves as the entrypoint for the Zebra Docker container.
-#
-# Description:
 # This script serves as the primary entrypoint for the Docker container. Its main responsibilities include:
 # 1. Environment Setup: Prepares the environment by setting various flags and parameters.
 # 2. Configuration Management: Dynamically generates the `zebrad.toml` configuration file based on environment variables, ensuring the node starts with the desired settings.
@@ -37,7 +34,7 @@ set -eo pipefail
 : "${TRACING_ENDPOINT_PORT:=3000}"
 # [rpc]
 : "${RPC_LISTEN_ADDR:=0.0.0.0}"
-# if ${RPC_PORT} is not set, use the default value for the current network
+# if `${RPC_PORT}` is not set, use the default value for the current network
 if [[ -z "${RPC_PORT}" ]]; then
   if [[ "${NETWORK}" = "Mainnet" ]]; then
     : "${RPC_PORT:=8232}"
@@ -68,57 +65,60 @@ listen_addr = "${ZEBRA_LISTEN_ADDR}"
 cache_dir = "${ZEBRA_CACHED_STATE_DIR}"
 EOF
 
-  if [[ " ${FEATURES} " =~ " prometheus " ]]; then # spaces are important here to avoid partial matches
-    cat <<EOF >> "${ZEBRA_CONF_PATH}"
+    # Spaces are important here to avoid partial matches.
+    if [[ " ${FEATURES} " =~ " prometheus " ]]; then
+      cat <<EOF >>"${ZEBRA_CONF_PATH}"
 [metrics]
 endpoint_addr = "${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}"
 EOF
-  fi
+    fi
 
-  if [[ -n "${RPC_PORT}" ]]; then
-    cat <<EOF >> "${ZEBRA_CONF_PATH}"
+    if [[ -n "${RPC_PORT}" ]]; then
+      cat <<EOF >>"${ZEBRA_CONF_PATH}"
 [rpc]
 listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
 EOF
-  fi
+    fi
 
-  if [[ -n "${LOG_FILE}" ]] || [[ -n "${LOG_COLOR}" ]] || [[ -n "${TRACING_ENDPOINT_ADDR}" ]]; then
-    cat <<EOF >> "${ZEBRA_CONF_PATH}"
+    if [[ -n "${LOG_FILE}" ]] || [[ -n "${LOG_COLOR}" ]] || [[ -n "${TRACING_ENDPOINT_ADDR}" ]]; then
+      cat <<EOF >>"${ZEBRA_CONF_PATH}"
 [tracing]
 EOF
-    if [[ " ${FEATURES} " =~ " filter-reload " ]]; then # spaces are important here to avoid partial matches
-      cat <<EOF >> "${ZEBRA_CONF_PATH}"
+      # Spaces are important here to avoid partial matches.
+      if [[ " ${FEATURES} " =~ " filter-reload " ]]; then
+        cat <<EOF >>"${ZEBRA_CONF_PATH}"
 endpoint_addr = "${TRACING_ENDPOINT_ADDR}:${TRACING_ENDPOINT_PORT}"
 EOF
-    fi
-    # Set this to log to a file, if not set, logs to standard output
-    if [[ -n "${LOG_FILE}" ]]; then
-      mkdir -p "$(dirname "${LOG_FILE}")"
-      cat <<EOF >> "${ZEBRA_CONF_PATH}"
+      fi
+      # Set this to log to a file, if not set, logs to standard output.
+      if [[ -n "${LOG_FILE}" ]]; then
+        mkdir -p "$(dirname "${LOG_FILE}")"
+        cat <<EOF >>"${ZEBRA_CONF_PATH}"
 log_file = "${LOG_FILE}"
 EOF
-    fi
-    # Zebra automatically detects if it is attached to a terminal, and uses colored output.
-    # Set this to 'true' to force using color even if the output is not a terminal.
-    # Set this to 'false' to disable using color even if the output is a terminal.
-    if [[ "${LOG_COLOR}" = "true" ]]; then
-      cat <<EOF >> "${ZEBRA_CONF_PATH}"
+      fi
+      # Zebra automatically detects if it is attached to a terminal, and uses colored output.
+      # Set this to 'true' to force using color even if the output is not a terminal.
+      # Set this to 'false' to disable using color even if the output is a terminal.
+      if [[ "${LOG_COLOR}" = "true" ]]; then
+        cat <<EOF >>"${ZEBRA_CONF_PATH}"
 force_use_color = true
 EOF
-    elif [[ "${LOG_COLOR}" = "false" ]]; then
-      cat <<EOF >> "${ZEBRA_CONF_PATH}"
+      elif [[ "${LOG_COLOR}" = "false" ]]; then
+        cat <<EOF >>"${ZEBRA_CONF_PATH}"
 use_color = false
 EOF
+      fi
     fi
-  fi
 
-  if [[ -n "${MINER_ADDRESS}" ]]; then
-    cat <<EOF >> "${ZEBRA_CONF_PATH}"
+    if [[ -n "${MINER_ADDRESS}" ]]; then
+      cat <<EOF >>"${ZEBRA_CONF_PATH}"
 [mining]
 miner_address = "${MINER_ADDRESS}"
 EOF
+    fi
   fi
-fi
+}
 
 if [[ -n "${ZEBRA_CONF_PATH}" ]] && [[ -z "${ENTRYPOINT_FEATURES}" ]]; then
   # Print the config file
@@ -126,22 +126,19 @@ if [[ -n "${ZEBRA_CONF_PATH}" ]] && [[ -z "${ENTRYPOINT_FEATURES}" ]]; then
   cat "${ZEBRA_CONF_PATH}"
 fi
 
-# Function to list directory
+# Checks if a directory contains subdirectories
 check_directory_files() {
   local dir="$1"
   # Check if the directory exists
   if [[ -d "${dir}" ]]; then
     # Check if there are any subdirectories
     if find "${dir}" -mindepth 1 -type d | read -r; then
-      # Subdirectories exist, so we continue
       :
     else
-      # No subdirectories, print message and exit with status 1
       echo "No subdirectories found in ${dir}."
       exit 1
     fi
   else
-    # Directory doesn't exist, print message and exit with status 1
     echo "Directory ${dir} does not exist."
     exit 1
   fi
@@ -163,8 +160,12 @@ run_cargo_test() {
     fi
   done
 
-  # Run the command using eval, this will replace the current process with the cargo command
-  eval "${cmd}" || { echo "Cargo test failed"; exit 1; }
+  # Run the command using eval. This will replace the current process with the
+  # cargo command.
+  eval "${cmd}" || {
+    echo "Cargo test failed"
+    exit 1
+  }
 }
 
 # Main Execution Logic:
