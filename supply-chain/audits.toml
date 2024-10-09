@@ -1,11 +1,6 @@
 
 # cargo-vet audits file
 
-[audits]
-equihash = []
-f4jumble = []
-zcash_encoding = []
-
 [[audits.anstyle]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -101,6 +96,18 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
 
+[[audits.equihash]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.2.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
+
+[[audits.f4jumble]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.1.0 -> 0.1.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
+
 [[audits.git2]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -130,6 +137,12 @@ delta = "0.5.1 -> 0.6.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.0 -> 0.7.0"
+
+[[audits.incrementalmerkletree]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.7.0 -> 0.7.0@git:ffe4234788fd22662b937ba7c6ea01535fcc1293"
+importable = false
 
 [[audits.indexmap]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -216,6 +229,12 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.9.0 -> 0.10.0"
 
+[[audits.orchard]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.10.0 -> 0.9.1@git:55fb089a335bbbc1cda186c706bc037073df8eb7"
+importable = false
+
 [[audits.owo-colors]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -296,6 +315,12 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.2.0 -> 0.3.0"
 
+[[audits.sapling-crypto]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.0 -> 0.2.0@git:b1ad3694ee13a2fc5d291ad04721a6252da0993c"
+importable = false
+
 [[audits.serde_spanned]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
@@ -335,6 +360,12 @@ delta = "0.3.1 -> 0.4.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.4.0 -> 0.5.0"
+
+[[audits.shardtree]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.4.0@git:ffe4234788fd22662b937ba7c6ea01535fcc1293"
+importable = false
 
 [[audits.tempfile]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -559,6 +590,12 @@ delta = "0.4.0 -> 0.5.0"
 [[audits.zcash_address]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
+delta = "0.5.0 -> 0.5.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
+
+[[audits.zcash_address]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
 delta = "0.5.0 -> 0.6.0"
 
 [[audits.zcash_client_backend]]
@@ -571,15 +608,45 @@ who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.13.0 -> 0.14.0"
 
+[[audits.zcash_client_backend]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.14.0 -> 0.13.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
+
+[[audits.zcash_encoding]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.1 -> 0.2.1@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
+
+[[audits.zcash_history]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.4.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
+
 [[audits.zcash_keys]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
 
+[[audits.zcash_keys]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.3.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
+
 [[audits.zcash_primitives]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.0 -> 0.17.0"
+
+[[audits.zcash_primitives]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.17.0 -> 0.17.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
 
 [[audits.zcash_primitives]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -590,6 +657,12 @@ delta = "0.17.0 -> 0.19.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.0 -> 0.17.0"
+
+[[audits.zcash_proofs]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.17.0 -> 0.17.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
 
 [[audits.zcash_proofs]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -610,6 +683,12 @@ delta = "0.1.1 -> 0.3.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.3.0 -> 0.4.0"
+
+[[audits.zcash_protocol]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.0 -> 0.3.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
 
 [[audits.zebra-chain]]
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
@@ -675,6 +754,12 @@ version = "0.1.0"
 who = "Alfredo Garcia <oxarbitrage@gmail.com>"
 criteria = "safe-to-deploy"
 delta = "0.1.0 -> 0.2.0"
+
+[[audits.zip321]]
+who = "Alfredo Garcia <oxarbitrage@gmail.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.0 -> 0.1.0@git:1410f1449100a417bfbc4f6c7167aa9808e38792"
+importable = false
 
 [[trusted.clap]]
 criteria = "safe-to-deploy"
