@@ -3,9 +3,9 @@
 # This script finds a cached Google Cloud Compute image based on specific criteria.
 #
 # If there are multiple disks:
-# - prefer images generated from the same branch, then
-# - if prefer_main_cached_state is true, prefer images from the `main` branch, then
-# - use any images from any other branch or branch.
+# - if `PREFER_MAIN_CACHED_STATE` is "true", then select an image from the `main` branch, else
+# - try to find a cached disk image from the current branch (or PR), else
+# - try to find an image from any branch.
 #
 # Within each of these categories:
 # - prefer newer images to older images
