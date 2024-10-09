@@ -8,12 +8,8 @@
 # 2. Configuration Management: Dynamically generates the `zebrad.toml` configuration file based on environment variables, ensuring the node starts with the desired settings.
 # 3. Test Execution: Can run a series of tests to validate functionality based on specified environment variables.
 # 4. Node Startup: Starts the node, allowing it to begin its operations.
-#
 
-# Exit if a command fails
-set -e
-# Exit if any command in a pipeline fails
-set -o pipefail
+set -eo pipefail
 
 ####
 # General Variables
