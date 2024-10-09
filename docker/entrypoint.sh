@@ -50,34 +50,6 @@ if [[ -z "${RPC_PORT}" ]]; then
   fi
 fi
 
-####
-# Test Variables
-# These variables are used to run tests in the Dockerfile.
-####
-
-: "${RUN_ALL_TESTS:=}"
-: "${RUN_ALL_EXPERIMENTAL_TESTS:=}"
-: "${TEST_FAKE_ACTIVATION_HEIGHTS:=}"
-: "${TEST_ZEBRA_EMPTY_SYNC:=}"
-: "${ZEBRA_TEST_LIGHTWALLETD:=}"
-: "${FULL_SYNC_MAINNET_TIMEOUT_MINUTES:=}"
-: "${FULL_SYNC_TESTNET_TIMEOUT_MINUTES:=}"
-: "${TEST_DISK_REBUILD:=}"
-: "${TEST_UPDATE_SYNC:=}"
-: "${TEST_CHECKPOINT_SYNC:=}"
-: "${GENERATE_CHECKPOINTS_MAINNET:=}"
-: "${GENERATE_CHECKPOINTS_TESTNET:=}"
-: "${TEST_LWD_RPC_CALL:=}"
-: "${TEST_LWD_FULL_SYNC:=}"
-: "${TEST_LWD_UPDATE_SYNC:=}"
-: "${TEST_LWD_GRPC:=}"
-: "${TEST_LWD_TRANSACTIONS:=}"
-: "${TEST_GET_BLOCK_TEMPLATE:=}"
-: "${TEST_SUBMIT_BLOCK:=}"
-: "${TEST_SCAN_START_WHERE_LEFT:=}"
-: "${ENTRYPOINT_FEATURES:=}"
-: "${TEST_SCAN_TASK_COMMANDS:=}"
-
 # Configuration file path
 if [[ -n "${ZEBRA_CONF_DIR}" ]] && [[ -n "${ZEBRA_CONF_FILE}" ]] && [[ -z "${ZEBRA_CONF_PATH}" ]]; then
   ZEBRA_CONF_PATH="${ZEBRA_CONF_DIR}/${ZEBRA_CONF_FILE}"
