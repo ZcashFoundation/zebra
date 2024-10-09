@@ -13,18 +13,17 @@ set -eo pipefail
 # These variables are used to run the Zebra node.
 ####
 
-# Path and name of the config file. These two have defaults set in the Dockerfile.
+# Path and name of the config file.
 : "${ZEBRA_CONF_DIR:=}"
-: "${ZEBRA_CONF_FILE:=}"
+: "${ZEBRA_CONF_FILE:=zebrad.toml}"
 # [network]
 : "${NETWORK:=Mainnet}"
 : "${ZEBRA_LISTEN_ADDR:=0.0.0.0}"
 # [consensus]
 : "${ZEBRA_CHECKPOINT_SYNC:=true}"
 # [state]
-# Set this to change the default cached state directory
-: "${ZEBRA_CACHED_STATE_DIR:=/var/cache/zebrad-cache}"
-: "${LIGHTWALLETD_DATA_DIR:=/var/cache/lwd-cache}"
+: "${ZEBRA_CACHED_STATE_DIR:=/var/cache/zebrad}"
+: "${LIGHTWALLETD_DATA_DIR:=/var/cache/lwd}"
 # [metrics]
 : "${METRICS_ENDPOINT_ADDR:=0.0.0.0}"
 : "${METRICS_ENDPOINT_PORT:=9999}"
