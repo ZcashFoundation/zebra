@@ -350,7 +350,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     # Run even if we don't need a cached disk, but only when triggered by a workflow_dispatch
-    if: ${{ !failure(needs.get-disk-name) && github.event_name == 'workflow_dispatch' }}
+    if: ${{ !failure() && github.event_name == 'workflow_dispatch' }}
 
     steps:
       - uses: actions/checkout@v4.2.1
