@@ -94,7 +94,16 @@ skip-tree = [
     { name = "uint", version = "=0.9.5" },
 
     # wait for dirs-sys to update windows-sys
-    { name = "windows-sys", version = "=0.48.0" }
+    { name = "windows-sys", version = "=0.48.0" },
+
+    # Remove after release candicate period is over and the ECC crates are not patched anymore
+    { name = "equihash", version = "=0.2.0" },
+    { name = "f4jumble", version = "=0.1.0" },
+    { name = "incrementalmerkletree", version = "=0.6.0" },
+    { name = "zcash_address", version = "=0.4.0" },
+    { name = "zcash_keys", version = "=0.3.0" },
+    { name = "zcash_primitives", version = "=0.16.0" },
+    { name = "zcash_protocol", version = "=0.2.0" }
 ]
 
 # This section is considered when running `cargo deny check sources`.
