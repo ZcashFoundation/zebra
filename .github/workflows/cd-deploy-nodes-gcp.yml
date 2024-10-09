@@ -279,7 +279,7 @@ jobs:
           DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
-          elif [ ${{ !inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
+          elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
            echo "No cached disk required"
           else
             echo "No cached disk found for ${{ matrix.network }} in main branch"
@@ -391,7 +391,7 @@ jobs:
           DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
-          elif [ ${{ !inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
+          elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
            echo "No cached disk required"
           else
             echo "No cached disk found for ${{ matrix.network }} in main branch"
