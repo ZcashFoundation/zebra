@@ -26,7 +26,7 @@ use orchard::{
     Address, Note,
 };
 
-use super::serialize::ASSET_BASE_SIZE;
+use super::common::ASSET_BASE_SIZE;
 
 /// Wrapper for `IssueBundle` used in the context of Transaction V6. This allows the implementation of
 /// a Serde serializer for unit tests within this crate.

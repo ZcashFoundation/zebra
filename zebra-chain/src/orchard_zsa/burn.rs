@@ -10,14 +10,15 @@ use crate::{
 
 use orchard::{note::AssetBase, value::NoteValue};
 
-use super::serialize::ASSET_BASE_SIZE;
+use super::common::ASSET_BASE_SIZE;
 
 // Sizes of the serialized values for types in bytes (used for TrustedPreallocate impls)
 const AMOUNT_SIZE: u64 = 8;
+
 // FIXME: is this a correct way to calculate (simple sum of sizes of components)?
 const BURN_ITEM_SIZE: u64 = ASSET_BASE_SIZE + AMOUNT_SIZE;
 
-/// Represents an Orchard ZSA burn item.
+/// Orchard ZSA burn item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, Amount);
 
@@ -59,18 +60,16 @@ impl TrustedPreallocate for BurnItem {
     }
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
 impl serde::Serialize for BurnItem {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: serde::Serializer,
     {
-        // FIXME: return custom error with a meaningful description?
+        // FIXME: return a custom error with a meaningful description?
         (self.0.to_bytes(), &self.1).serialize(serializer)
     }
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
 impl<'de> serde::Deserialize<'de> for BurnItem {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -85,5 +84,45 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
                 .ok_or_else(|| serde::de::Error::custom("Invalid orchard_zsa AssetBase"))?,
             amount,
         ))
+    }
+}
+
+/// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5` transactions.
+/// Useful for unifying ShieldedData serialization and deserialization implementations across various
+/// Orchard protocol variants (i.e. various transaction versions).
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct NoBurn;
+
+impl ZcashSerialize for NoBurn {
+    fn zcash_serialize<W: io::Write>(&self, mut _writer: W) -> Result<(), io::Error> {
+        Ok(())
+    }
+}
+
+impl ZcashDeserialize for NoBurn {
+    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+        Ok(Self)
+    }
+}
+
+/// Orchard ZSA burn items (assets intended for burning)
+#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Burn(Vec<BurnItem>);
+
+impl From<Vec<BurnItem>> for Burn {
+    fn from(inner: Vec<BurnItem>) -> Self {
+        Self(inner)
+    }
+}
+
+impl ZcashSerialize for Burn {
+    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
+        self.0.zcash_serialize(writer)
+    }
+}
+
+impl ZcashDeserialize for Burn {
+    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
+        Ok(Burn(Vec::<BurnItem>::zcash_deserialize(reader)?))
     }
 }

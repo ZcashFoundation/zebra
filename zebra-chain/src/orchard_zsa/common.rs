@@ -7,7 +7,7 @@ use crate::serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, Z
 use orchard::note::AssetBase;
 
 // The size of the serialized AssetBase in bytes (used for TrustedPreallocate impls)
-pub(crate) const ASSET_BASE_SIZE: u64 = 32;
+pub(super) const ASSET_BASE_SIZE: u64 = 32;
 
 impl ZcashSerialize for AssetBase {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {

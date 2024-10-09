@@ -5,31 +5,12 @@ use proptest::prelude::*;
 use orchard::{bundle::testing::BundleArb, issuance::testing::arb_signed_issue_bundle};
 
 // FIXME: consider using another value, i.e. define MAX_BURN_ITEMS constant for that
-use crate::{
-    orchard::{OrchardFlavorExt, OrchardVanilla, OrchardZSA},
-    transaction::arbitrary::MAX_ARBITRARY_ITEMS,
+use crate::transaction::arbitrary::MAX_ARBITRARY_ITEMS;
+
+use super::{
+    burn::{Burn, BurnItem, NoBurn},
+    issuance::IssueData,
 };
-
-use super::{burn::BurnItem, issuance::IssueData};
-
-pub(crate) trait ArbitraryBurn: OrchardFlavorExt {
-    fn arbitrary_burn() -> BoxedStrategy<Self::BurnType>;
-    // FIXME: remove the following lines
-    //   where
-    //       Self: Sized
-}
-
-impl ArbitraryBurn for OrchardVanilla {
-    fn arbitrary_burn() -> BoxedStrategy<Self::BurnType> {
-        Just(Default::default()).boxed()
-    }
-}
-
-impl ArbitraryBurn for OrchardZSA {
-    fn arbitrary_burn() -> BoxedStrategy<Self::BurnType> {
-        prop::collection::vec(any::<BurnItem>(), 0..MAX_ARBITRARY_ITEMS).boxed()
-    }
-}
 
 impl Arbitrary for BurnItem {
     type Parameters = ();
@@ -45,6 +26,29 @@ impl Arbitrary for BurnItem {
             .prop_filter_map("Conversion to Amount failed", |(asset_base, value)| {
                 BurnItem::try_from((asset_base, value)).ok()
             })
+            .boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for NoBurn {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        // FIXME: consider using this instead, for clarity: any::<()>().prop_map(|_| NoBurn).boxed()
+        Just(Self).boxed()
+    }
+
+    type Strategy = BoxedStrategy<Self>;
+}
+
+impl Arbitrary for Burn {
+    type Parameters = ();
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        prop::collection::vec(any::<BurnItem>(), 0..MAX_ARBITRARY_ITEMS)
+            .prop_map(|inner| inner.into())
             .boxed()
     }
 
