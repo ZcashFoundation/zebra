@@ -130,8 +130,8 @@ ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
 ARG EXPERIMENTAL_FEATURES="journald prometheus filter-reload"
 ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
-# By default, runs the entrypoint tests specified by the environmental variables (if any are set)
-ENTRYPOINT [ "entrypoint.sh" ]
+# Run tests specified by the env vars
+ENTRYPOINT [ "entrypoint.sh" "test" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
@@ -177,11 +177,6 @@ RUN rm -rf /var/lib/apt/lists/* /tmp/*
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --from=release /usr/local/bin/entrypoint.sh /usr/local/bin/
 
-EXPOSE 8233 18233
-
-ARG FEATURES
-ENV FEATURES=${FEATURES}
-
 # Create a non-privileged user for running `zebrad`.
 #
 # ## Security
@@ -190,15 +185,18 @@ ENV FEATURES=${FEATURES}
 # access to the host. [1][1]
 #
 # [1]: https://docs.docker.com/go/dockerfile-user-best-practices/
-ENV USER="zebra"
+ARG USER="zebra"
+ENV USER=${USER}
 
 RUN adduser --system ${USER}
 
-ENV ZEBRA_CONF_DIR="/etc/zebrad"
-ENV ZEBRA_CACHED_STATE_DIR="/var/cache/zebrad"
-
+ARG ZEBRA_CONF_DIR="/etc/zebrad"
+ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR}
 RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${USER} ${ZEBRA_CONF_DIR}
+
 # TODO: Shorten `ZEBRA_CACHED_STATE_DIR` to `ZEBRA_CACHE_DIR`
+ARG ZEBRA_CACHED_STATE_DIR="/var/cache/zebrad"
+ENV ZEBRA_CACHED_STATE_DIR=${ZEBRA_CACHED_STATE_DIR}
 RUN mkdir -p ${ZEBRA_CACHED_STATE_DIR} && chown ${USER} ${ZEBRA_CACHED_STATE_DIR}
 
 USER $USER
