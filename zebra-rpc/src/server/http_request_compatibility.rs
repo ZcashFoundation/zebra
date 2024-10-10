@@ -2,11 +2,14 @@
 //!
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
+use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use futures::TryStreamExt;
 use jsonrpc_http_server::{
     hyper::{body::Bytes, header, Body, Request},
     RequestMiddleware, RequestMiddlewareAction,
 };
+
+use crate::server::cookie;
 
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
@@ -34,12 +37,17 @@ use jsonrpc_http_server::{
 /// Any user-specified data in RPC requests is hex or base58check encoded.
 /// We assume lightwalletd validates data encodings before sending it on to Zebra.
 /// So any fixes Zebra performs won't change user-specified data.
-#[derive(Copy, Clone, Debug)]
-pub struct FixHttpRequestMiddleware;
+#[derive(Clone, Debug)]
+pub struct FixHttpRequestMiddleware(pub crate::config::Config);
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
     fn on_request(&self, mut request: Request<Body>) -> RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
+
+        // Check if the request is authenticated
+        if !self.check_credentials(request.headers_mut()) {
+            request = Self::unauthenticated(request);
+        }
 
         // Fix the request headers if needed and we can do so.
         FixHttpRequestMiddleware::insert_or_replace_content_type_header(request.headers_mut());
@@ -140,5 +148,52 @@ impl FixHttpRequestMiddleware {
                 header::HeaderValue::from_static("application/json"),
             );
         }
+    }
+
+    /// Change the method name in the JSON request.
+    fn change_method_name(data: String) -> String {
+        let mut json_data: serde_json::Value = serde_json::from_str(&data).expect("Invalid JSON");
+
+        if let Some(method) = json_data.get_mut("method") {
+            *method = serde_json::json!("unauthenticated");
+        }
+
+        serde_json::to_string(&json_data).expect("Failed to serialize JSON")
+    }
+
+    /// Modify the request name to be `unauthenticated`.
+    fn unauthenticated(request: Request<Body>) -> Request<Body> {
+        request.map(|body| {
+            let body = body.map_ok(|data| {
+                let mut data = String::from_utf8_lossy(data.as_ref()).to_string();
+                data = Self::change_method_name(data);
+                Bytes::from(data)
+            });
+
+            Body::wrap_stream(body)
+        })
+    }
+
+    /// Check if the request is authenticated.
+    pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|auth_header| auth_header.to_str().ok())
+            .and_then(|auth| auth.split_whitespace().nth(1))
+            .and_then(|token| URL_SAFE.decode(token).ok())
+            .and_then(|decoded| String::from_utf8(decoded).ok())
+            .and_then(|decoded_str| {
+                decoded_str
+                    .split(':')
+                    .nth(1)
+                    .map(|password| password.to_string())
+            })
+            .map_or(false, |password| {
+                if let Some(cookie_password) = cookie::get(self.0.cookie_dir.clone()) {
+                    cookie_password == password
+                } else {
+                    false
+                }
+            })
     }
 }

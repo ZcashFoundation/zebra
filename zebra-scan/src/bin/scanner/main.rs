@@ -7,6 +7,7 @@ use structopt::StructOpt;
 use tracing::*;
 
 use zebra_chain::{block::Height, parameters::Network};
+use zebra_rpc::config::Config as RpcConfig;
 use zebra_state::SaplingScanningKey;
 
 use core::net::SocketAddr;
@@ -74,10 +75,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         db_config,
     };
 
+    let rpc_config = RpcConfig::default();
+
     // Get a read-only state and the database.
     let (read_state, _latest_chain_tip, chain_tip_change, sync_task) =
         zebra_rpc::sync::init_read_state_with_syncer(
             state_config,
+            rpc_config,
             &network,
             args.zebra_rpc_listen_addr,
         )

@@ -30,6 +30,7 @@ use zebra_node_services::{
     constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP},
     rpc_client::RpcRequestClient,
 };
+use zebra_rpc::{config::Config as RpcConfig, server::cookie};
 use zebra_utils::init_tracing;
 
 pub mod args;
@@ -60,7 +61,8 @@ where
     let addr = our_args
         .addr
         .unwrap_or_else(|| "127.0.0.1:8232".parse().expect("valid address"));
-    let client = RpcRequestClient::new(addr);
+    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
+    let client = RpcRequestClient::new(addr, auth_cookie);
 
     // Launch a request with the RPC method and arguments
     //

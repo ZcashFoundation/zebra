@@ -22,6 +22,8 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
+
+use zebra_rpc::{config::Config as RpcConfig, server::cookie};
 use zebra_state::{ChainTipChange, LatestChainTip, MAX_BLOCK_REORG_HEIGHT};
 use zebra_test::command::TestChild;
 
@@ -228,8 +230,11 @@ pub async fn get_raw_future_blocks(
         true,
     )?;
 
+    // Get the auth cookie
+    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
+
     // Create an http client
-    let rpc_client = RpcRequestClient::new(rpc_address);
+    let rpc_client = RpcRequestClient::new(rpc_address, auth_cookie);
 
     let blockchain_info: serde_json::Value = serde_json::from_str(
         &rpc_client
