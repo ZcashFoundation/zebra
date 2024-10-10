@@ -356,6 +356,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .map(|responder| {
             responder.respond(mempool::Response::FullTransactions {
                 transactions: vec![],
+                transaction_dependencies: Default::default(),
                 last_seen_tip_hash: blocks[blocks.len() - 1].hash(),
             });
         });

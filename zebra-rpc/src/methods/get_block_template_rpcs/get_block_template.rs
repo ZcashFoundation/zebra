@@ -22,7 +22,7 @@ use zebra_chain::{
 use zebra_consensus::{
     block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
 };
-use zebra_node_services::mempool;
+use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::methods::{
@@ -253,7 +253,7 @@ where
 pub async fn fetch_mempool_transactions<Mempool>(
     mempool: Mempool,
     chain_tip_hash: block::Hash,
-) -> Result<Option<Vec<VerifiedUnminedTx>>>
+) -> Result<Option<(Vec<VerifiedUnminedTx>, TransactionDependencies)>>
 where
     Mempool: Service<
             mempool::Request,
@@ -271,8 +271,11 @@ where
             data: None,
         })?;
 
+    // TODO: Order transactions in block templates based on their dependencies
+
     let mempool::Response::FullTransactions {
         transactions,
+        transaction_dependencies,
         last_seen_tip_hash,
     } = response
     else {
@@ -280,7 +283,7 @@ where
     };
 
     // Check that the mempool and state were in sync when we made the requests
-    Ok((last_seen_tip_hash == chain_tip_hash).then_some(transactions))
+    Ok((last_seen_tip_hash == chain_tip_hash).then_some((transactions, transaction_dependencies)))
 }
 
 // - Response processing

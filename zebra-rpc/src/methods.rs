@@ -965,6 +965,7 @@ where
                 #[cfg(feature = "getblocktemplate-rpcs")]
                 mempool::Response::FullTransactions {
                     mut transactions,
+                    transaction_dependencies: _,
                     last_seen_tip_hash: _,
                 } => {
                     // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker

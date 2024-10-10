@@ -86,8 +86,12 @@ pub async fn test_responses<State, ReadState>(
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), network, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        network,
+        state.clone(),
+    )
+    .await;
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -261,6 +265,7 @@ pub async fn test_responses<State, ReadState>(
                 .await
                 .respond(mempool::Response::FullTransactions {
                     transactions: vec![],
+                    transaction_dependencies: Default::default(),
                     // tip hash needs to match chain info for long poll requests
                     last_seen_tip_hash: fake_tip_hash,
                 });
