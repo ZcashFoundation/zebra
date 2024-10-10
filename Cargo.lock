@@ -6399,8 +6399,3 @@ dependencies = [
  "zcash_address 0.5.0",
  "zcash_protocol 0.3.0",
 ]
-
-[[patch.unused]]
-name = "incrementalmerkletree-testing"
-version = "0.1.0"
-source = "git+https://github.com/zcash/incrementalmerkletree?rev=ffe4234788fd22662b937ba7c6ea01535fcc1293#ffe4234788fd22662b937ba7c6ea01535fcc1293"
