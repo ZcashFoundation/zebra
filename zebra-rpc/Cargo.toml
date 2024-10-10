@@ -65,10 +65,10 @@ jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.122", features = ["preserve_order"] }
-indexmap = { version = "2.3.0", features = ["serde"] }
+serde_json = { version = "1.0.128", features = ["preserve_order"] }
+indexmap = { version = "2.5.0", features = ["serde"] }
 
-tokio = { version = "1.39.2", features = [
+tokio = { version = "1.40.0", features = [
     "time",
     "rt-multi-thread",
     "macros",
@@ -77,15 +77,15 @@ tokio = { version = "1.39.2", features = [
 tower = "0.4.13"
 
 # indexer-rpcs dependencies
-tonic = { version = "0.12.1", optional = true }
-tonic-reflection = { version = "0.12.1", optional = true }
-prost = { version = "0.13.1", optional = true }
-tokio-stream = { version = "0.1.15", optional = true }
+tonic = { version = "0.12.3", optional = true }
+tonic-reflection = { version = "0.12.3", optional = true }
+prost = { version = "0.13.3", optional = true }
+tokio-stream = { version = "0.1.16", optional = true }
 
 tracing = "0.1.39"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.204", features = ["serde_derive"] }
+serde = { version = "1.0.210", features = ["serde_derive"] }
 
 # For the `stop` RPC method.
 nix = { version = "0.29.0", features = ["signal"] }
@@ -112,15 +112,15 @@ zebra-script = { path = "../zebra-script", version = "1.0.0-beta.39" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.39" }
 
 [build-dependencies]
-tonic-build = { version = "0.12.1", optional = true }
+tonic-build = { version = "0.12.3", optional = true }
 
 [dev-dependencies]
-insta = { version = "1.39.0", features = ["redactions", "json", "ron"] }
+insta = { version = "1.40.0", features = ["redactions", "json", "ron"] }
 
 proptest = "1.4.0"
 
-thiserror = "1.0.63"
-tokio = { version = "1.39.2", features = ["full", "tracing", "test-util"] }
+thiserror = "1.0.64"
+tokio = { version = "1.40.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.39", features = [
     "proptest-impl",

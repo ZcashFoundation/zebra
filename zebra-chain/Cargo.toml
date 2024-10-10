@@ -81,7 +81,7 @@ group = "0.13.0"
 incrementalmerkletree.workspace = true
 jubjub = "0.10.0"
 lazy_static = "1.4.0"
-tempfile = "3.11.0"
+tempfile = "3.13.0"
 dirs = "5.0.1"
 num-integer = "0.1.46"
 primitive-types = "0.12.2"
@@ -90,7 +90,7 @@ ripemd = "0.1.3"
 # Matches version used by hdwallet
 secp256k1 = { version = "0.26.0", features = ["serde"] }
 sha2 = { version = "0.10.7", features = ["compress"] }
-uint = "0.9.5"
+uint = "0.10.0"
 x25519-dalek = { version = "2.0.1", features = ["serde"] }
 
 # ECC deps
@@ -110,12 +110,12 @@ humantime = "2.1.0"
 
 # Error Handling & Formatting
 static_assertions = "1.1.0"
-thiserror = "1.0.63"
+thiserror = "1.0.64"
 tracing = "0.1.39"
 
 # Serialization
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.204", features = ["serde_derive", "rc"] }
+serde = { version = "1.0.210", features = ["serde_derive", "rc"] }
 serde_with = "3.9.0"
 serde-big-array = "0.5.1"
 
@@ -130,10 +130,10 @@ redjubjub = "0.7.0"
 reddsa = "0.5.1"
 
 # Production feature json-conversion
-serde_json = { version = "1.0.122", optional = true }
+serde_json = { version = "1.0.128", optional = true }
 
 # Production feature async-error and testing feature proptest-impl
-tokio = { version = "1.39.2", optional = true }
+tokio = { version = "1.40.0", optional = true }
 
 # Experimental feature shielded-scan
 zcash_client_backend = { workspace = true, optional = true }
@@ -166,7 +166,7 @@ proptest-derive = "0.5.0"
 rand = "0.8.5"
 rand_chacha = "0.3.1"
 
-tokio = { version = "1.39.2", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.40.0", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.39" }
 
