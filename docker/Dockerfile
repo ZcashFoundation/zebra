@@ -3,11 +3,12 @@
 
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
-# We are using 4 stages:
+# We are using 4 (TODO: 5) stages:
 # - deps: install build dependencies and sets the needed variables
 # - tests: builds tests binaries
 # - release: builds release binaries
 # - runtime: runs the release binaries
+# - TODO: Add a `monitoring` stage
 #
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
@@ -203,3 +204,12 @@ USER $USER
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
+
+# TODO: Add a `monitoring` stage
+#
+# This stage will be based on `runtime`, and initially:
+#
+# - run `zebrad` on Testnet
+# - with mining enabled using S-nomp and `nheqminer`.
+#
+# We can add further functionality to this stage for further purposes.
