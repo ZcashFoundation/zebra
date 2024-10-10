@@ -23,40 +23,39 @@ use crate::{block::SubsidyError, funding_stream_values};
 ///
 /// Returns `None` if the divisor would overflow a `u64`.
 pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
+    // Some far-future shifts can be more than 63 bits
+    1u64.checked_shl(num_halvings(height, network))
+}
+
+/// The halving index for a block height and network.
+///
+/// `Halving(height)`, as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn num_halvings(height: Height, network: &Network) -> u32 {
+    let slow_start_shift = network.slow_start_shift();
     let blossom_height = Blossom
         .activation_height(network)
         .expect("blossom activation height should be available");
 
-    if height < blossom_height {
-        let pre_blossom_height = height - network.slow_start_shift();
-        let halving_shift = pre_blossom_height / PRE_BLOSSOM_HALVING_INTERVAL;
-
-        let halving_div = 1u64
-            .checked_shl(
-                halving_shift
-                    .try_into()
-                    .expect("already checked for negatives"),
-            )
-            .expect("pre-blossom heights produce small shifts");
-
-        Some(halving_div)
+    let halving_index = if height < slow_start_shift {
+        0
+    } else if height < blossom_height {
+        let pre_blossom_height = height - slow_start_shift;
+        pre_blossom_height / network.pre_blossom_halving_interval()
     } else {
-        let pre_blossom_height = blossom_height - network.slow_start_shift();
+        let pre_blossom_height = blossom_height - slow_start_shift;
         let scaled_pre_blossom_height =
             pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
 
         let post_blossom_height = height - blossom_height;
 
-        let halving_shift =
-            (scaled_pre_blossom_height + post_blossom_height) / POST_BLOSSOM_HALVING_INTERVAL;
+        (scaled_pre_blossom_height + post_blossom_height) / network.post_blossom_halving_interval()
+    };
 
-        // Some far-future shifts can be more than 63 bits
-        1u64.checked_shl(
-            halving_shift
-                .try_into()
-                .expect("already checked for negatives"),
-        )
-    }
+    halving_index
+        .try_into()
+        .expect("already checked for negatives")
 }
 
 /// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
@@ -502,5 +501,34 @@ mod test {
         );
 
         Ok(())
+    }
+
+    #[test]
+    fn check_height_for_num_halvings() {
+        for network in Network::iter() {
+            for halving in 1..1000 {
+                let Some(height_for_halving) =
+                    zebra_chain::parameters::subsidy::height_for_halving(halving, &network)
+                else {
+                    panic!("could not find height for halving {halving}");
+                };
+
+                let prev_height = height_for_halving
+                    .previous()
+                    .expect("there should be a previous height");
+
+                assert_eq!(
+                    halving,
+                    num_halvings(height_for_halving, &network),
+                    "num_halvings should match the halving index"
+                );
+
+                assert_eq!(
+                    halving - 1,
+                    num_halvings(prev_height, &network),
+                    "num_halvings for the prev height should be 1 less than the halving index"
+                );
+            }
+        }
     }
 }

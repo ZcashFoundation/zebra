@@ -48,7 +48,10 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
 /// as specified in [protocol specification §7.10.1][7.10.1]
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
+pub(crate) const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
+
+/// The first halving height in the regtest is at block height `287`.
+const FIRST_HALVING_REGTEST: Height = Height(287);
 
 /// The funding stream receiver categories.
 #[derive(Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -378,6 +381,20 @@ pub trait ParameterSubsidy {
     ///
     /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     fn height_for_first_halving(&self) -> Height;
+
+    /// Returns the halving interval after Blossom
+    fn post_blossom_halving_interval(&self) -> HeightDiff;
+
+    /// Returns the halving interval before Blossom
+    fn pre_blossom_halving_interval(&self) -> HeightDiff;
+
+    /// Returns the address change interval for funding streams
+    /// as described in [protocol specification §7.10][7.10].
+    ///
+    /// > FSRecipientChangeInterval := PostBlossomHalvingInterval / 48
+    ///
+    /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    fn funding_stream_address_change_interval(&self) -> HeightDiff;
 }
 
 /// Network methods related to Block Subsidy and Funding Streams
@@ -390,9 +407,34 @@ impl ParameterSubsidy for Network {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(self)
                 .expect("canopy activation height should be available"),
-            // TODO: Check what zcashd does here, consider adding a field to `testnet::Parameters` to make this configurable.
-            Network::Testnet(_params) => FIRST_HALVING_TESTNET,
+            Network::Testnet(params) => {
+                if params.is_regtest() {
+                    FIRST_HALVING_REGTEST
+                } else if params.is_default_testnet() {
+                    FIRST_HALVING_TESTNET
+                } else {
+                    height_for_halving(1, self).expect("first halving height should be available")
+                }
+            }
         }
+    }
+
+    fn post_blossom_halving_interval(&self) -> HeightDiff {
+        match self {
+            Network::Mainnet => POST_BLOSSOM_HALVING_INTERVAL,
+            Network::Testnet(params) => params.post_blossom_halving_interval(),
+        }
+    }
+
+    fn pre_blossom_halving_interval(&self) -> HeightDiff {
+        match self {
+            Network::Mainnet => PRE_BLOSSOM_HALVING_INTERVAL,
+            Network::Testnet(params) => params.pre_blossom_halving_interval(),
+        }
+    }
+
+    fn funding_stream_address_change_interval(&self) -> HeightDiff {
+        self.post_blossom_halving_interval() / 48
     }
 }
 
@@ -514,10 +556,54 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
 
     let height_after_first_halving = height - network.height_for_first_halving();
 
-    let address_period = (height_after_first_halving + POST_BLOSSOM_HALVING_INTERVAL)
-        / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
+    let address_period = (height_after_first_halving + network.post_blossom_halving_interval())
+        / network.funding_stream_address_change_interval();
 
     address_period
         .try_into()
         .expect("all values are positive and smaller than the input height")
+}
+
+/// The first block height of the halving at the provided halving index for a network.
+///
+/// See `Halving(height)`, as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
+    if halving == 0 {
+        return Some(Height(0));
+    }
+
+    let slow_start_shift = i64::from(network.slow_start_shift().0);
+    let blossom_height = i64::from(
+        NetworkUpgrade::Blossom
+            .activation_height(network)
+            .expect("blossom activation height should be available")
+            .0,
+    );
+    let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
+    let halving_index = i64::from(halving);
+
+    let unscaled_height = halving_index
+        .checked_mul(pre_blossom_halving_interval)
+        .expect("Multiplication overflow: consider reducing the halving interval");
+
+    let pre_blossom_height = unscaled_height
+        .min(blossom_height)
+        .checked_add(slow_start_shift)
+        .expect("Addition overflow: consider reducing the halving interval");
+
+    let post_blossom_height = 0
+        .max(unscaled_height - blossom_height)
+        .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))
+        .expect("Multiplication overflow: consider reducing the halving interval")
+        .checked_add(slow_start_shift)
+        .expect("Addition overflow: consider reducing the halving interval");
+
+    let height = pre_blossom_height
+        .checked_add(post_blossom_height)
+        .expect("Addition overflow: consider reducing the halving interval");
+
+    let height = u32::try_from(height).ok()?;
+    height.try_into().ok()
 }
