@@ -710,14 +710,6 @@ impl<'de> Deserialize<'de> for Config {
                     );
                 }
 
-                if let Some(funding_streams) = pre_nu6_funding_streams {
-                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
-                }
-
-                if let Some(funding_streams) = post_nu6_funding_streams {
-                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
-                }
-
                 if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
                     params_builder = params_builder.with_target_difficulty_limit(
                         target_difficulty_limit
@@ -737,6 +729,16 @@ impl<'de> Deserialize<'de> for Config {
 
                 if let Some(halving_interval) = pre_blossom_halving_interval {
                     params_builder = params_builder.with_halving_interval(halving_interval.into())
+                }
+
+                // Set configured funding streams after setting any parameters that affect the funding stream address period.
+
+                if let Some(funding_streams) = pre_nu6_funding_streams {
+                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
+                }
+
+                if let Some(funding_streams) = post_nu6_funding_streams {
+                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
                 }
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
