@@ -23,7 +23,7 @@ Please note that support for this release candidate is expected to conclude prio
 
 ### Changed
 
-- Regtest halving interval to match zcashd and added a configurable halving interval for custom testnets ([#8888](https://github.com/ZcashFoundation/zebra/pull/8888))
+- Regtest halving interval to match zcashd and added a configurable halving interval for custom testnets ([#8888](https://github.com/ZcashFoundation/zebra/pull/8888), [#8928](https://github.com/ZcashFoundation/zebra/pull/8928))
 - Updates post-NU6 Major Grants funding stream address on Mainnet ([#8914](https://github.com/ZcashFoundation/zebra/pull/8914))
 - Upgrade ECC dependencies to match zcashd `v6.0.0-rc1` ([#8918](https://github.com/ZcashFoundation/zebra/pull/8918))
 
