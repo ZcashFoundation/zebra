@@ -2,7 +2,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use crate::{
-    block::{self, Height},
+    block::{self, Height, HeightDiff},
     parameters::{
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
@@ -15,9 +15,11 @@ use crate::{
 use super::{
     magic::Magic,
     subsidy::{
-        FundingStreamReceiver, FundingStreamRecipient, FundingStreams, ParameterSubsidy,
-        FIRST_HALVING_TESTNET, POST_NU6_FUNDING_STREAMS_MAINNET, POST_NU6_FUNDING_STREAMS_TESTNET,
-        PRE_NU6_FUNDING_STREAMS_MAINNET, PRE_NU6_FUNDING_STREAMS_TESTNET,
+        FundingStreamReceiver, FundingStreamRecipient, FundingStreams,
+        BLOSSOM_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL,
+        POST_NU6_FUNDING_STREAMS_MAINNET, POST_NU6_FUNDING_STREAMS_TESTNET,
+        PRE_BLOSSOM_HALVING_INTERVAL, PRE_NU6_FUNDING_STREAMS_MAINNET,
+        PRE_NU6_FUNDING_STREAMS_TESTNET,
     },
 };
 
@@ -50,14 +52,9 @@ const REGTEST_GENESIS_HASH: &str =
 const TESTNET_GENESIS_HASH: &str =
     "05a60a92d99d85997cce3b87616c089f6124d7342af37106edc76126334a2c38";
 
-/// Used to validate number of funding stream recipient addresses on configured Testnets.
-struct TestnetParameterSubsidyImpl;
-
-impl ParameterSubsidy for TestnetParameterSubsidyImpl {
-    fn height_for_first_halving(&self) -> Height {
-        FIRST_HALVING_TESTNET
-    }
-}
+/// The halving height interval in the regtest is 6 hours.
+/// [zcashd regtest halving interval](https://github.com/zcash/zcash/blob/v5.10.0/src/consensus/params.h#L252)
+const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
 
 /// Configurable funding stream recipient for configured Testnets.
 #[derive(Deserialize, Clone, Debug)]
@@ -94,7 +91,12 @@ pub struct ConfiguredFundingStreams {
 impl ConfiguredFundingStreams {
     /// Converts a [`ConfiguredFundingStreams`] to a [`FundingStreams`], using the provided default values
     /// if `height_range` or `recipients` are None.
-    fn convert_with_default(self, default_funding_streams: FundingStreams) -> FundingStreams {
+    fn convert_with_default(
+        self,
+        default_funding_streams: FundingStreams,
+        parameters_builder: &ParametersBuilder,
+    ) -> FundingStreams {
+        let network = parameters_builder.to_network_unchecked();
         let height_range = self
             .height_range
             .unwrap_or(default_funding_streams.height_range().clone());
@@ -116,43 +118,7 @@ impl ConfiguredFundingStreams {
 
         let funding_streams = FundingStreams::new(height_range.clone(), recipients);
 
-        // check that receivers have enough addresses.
-
-        let expected_min_num_addresses =
-            1u32.checked_add(funding_stream_address_period(
-                height_range
-                    .end
-                    .previous()
-                    .expect("end height must be above start height and genesis height"),
-                &TestnetParameterSubsidyImpl,
-            ))
-            .expect("no overflow should happen in this sum")
-            .checked_sub(funding_stream_address_period(
-                height_range.start,
-                &TestnetParameterSubsidyImpl,
-            ))
-            .expect("no overflow should happen in this sub") as usize;
-
-        for (&receiver, recipient) in funding_streams.recipients() {
-            if receiver == FundingStreamReceiver::Deferred {
-                // The `Deferred` receiver doesn't need any addresses.
-                continue;
-            }
-
-            assert!(
-                recipient.addresses().len() >= expected_min_num_addresses,
-                "recipients must have a sufficient number of addresses for height range, \
-                 minimum num addresses required: {expected_min_num_addresses}"
-            );
-
-            for address in recipient.addresses() {
-                assert_eq!(
-                    address.network_kind(),
-                    NetworkKind::Testnet,
-                    "configured funding stream addresses must be for Testnet"
-                );
-            }
-        }
+        check_funding_stream_address_period(&funding_streams, &network);
 
         // check that sum of receiver numerators is valid.
 
@@ -169,6 +135,44 @@ impl ConfiguredFundingStreams {
         );
 
         funding_streams
+    }
+}
+
+/// Checks that the provided [`FundingStreams`] has sufficient recipient addresses for the
+/// funding stream address period of the provided [`Network`].
+fn check_funding_stream_address_period(funding_streams: &FundingStreams, network: &Network) {
+    let height_range = funding_streams.height_range();
+    let expected_min_num_addresses =
+        1u32.checked_add(funding_stream_address_period(
+            height_range
+                .end
+                .previous()
+                .expect("end height must be above start height and genesis height"),
+            network,
+        ))
+        .expect("no overflow should happen in this sum")
+        .checked_sub(funding_stream_address_period(height_range.start, network))
+        .expect("no overflow should happen in this sub") as usize;
+
+    for (&receiver, recipient) in funding_streams.recipients() {
+        if receiver == FundingStreamReceiver::Deferred {
+            // The `Deferred` receiver doesn't need any addresses.
+            continue;
+        }
+
+        assert!(
+            recipient.addresses().len() >= expected_min_num_addresses,
+            "recipients must have a sufficient number of addresses for height range, \
+         minimum num addresses required: {expected_min_num_addresses}"
+        );
+
+        for address in recipient.addresses() {
+            assert_eq!(
+                address.network_kind(),
+                NetworkKind::Testnet,
+                "configured funding stream addresses must be for Testnet"
+            );
+        }
     }
 }
 
@@ -213,10 +217,17 @@ pub struct ParametersBuilder {
     pre_nu6_funding_streams: FundingStreams,
     /// Post-NU6 funding streams for this network
     post_nu6_funding_streams: FundingStreams,
+    /// A flag indicating whether to allow changes to fields that affect
+    /// the funding stream address period.
+    should_lock_funding_stream_address_period: bool,
     /// Target difficulty limit for this network
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// The pre-Blossom halving interval for this network
+    pre_blossom_halving_interval: HeightDiff,
+    /// The post-Blossom halving interval for this network
+    post_blossom_halving_interval: HeightDiff,
 }
 
 impl Default for ParametersBuilder {
@@ -249,6 +260,9 @@ impl Default for ParametersBuilder {
             disable_pow: false,
             pre_nu6_funding_streams: PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
             post_nu6_funding_streams: POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
+            should_lock_funding_stream_address_period: false,
+            pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
+            post_blossom_halving_interval: POST_BLOSSOM_HALVING_INTERVAL,
         }
     }
 }
@@ -318,6 +332,10 @@ impl ParametersBuilder {
     ) -> Self {
         use NetworkUpgrade::*;
 
+        if self.should_lock_funding_stream_address_period {
+            panic!("activation heights on ParametersBuilder must not be set after setting funding streams");
+        }
+
         // # Correctness
         //
         // These must be in order so that later network upgrades overwrite prior ones
@@ -377,7 +395,8 @@ impl ParametersBuilder {
         funding_streams: ConfiguredFundingStreams,
     ) -> Self {
         self.pre_nu6_funding_streams =
-            funding_streams.convert_with_default(PRE_NU6_FUNDING_STREAMS_TESTNET.clone());
+            funding_streams.convert_with_default(PRE_NU6_FUNDING_STREAMS_TESTNET.clone(), &self);
+        self.should_lock_funding_stream_address_period = true;
         self
     }
 
@@ -387,7 +406,8 @@ impl ParametersBuilder {
         funding_streams: ConfiguredFundingStreams,
     ) -> Self {
         self.post_nu6_funding_streams =
-            funding_streams.convert_with_default(POST_NU6_FUNDING_STREAMS_TESTNET.clone());
+            funding_streams.convert_with_default(POST_NU6_FUNDING_STREAMS_TESTNET.clone(), &self);
+        self.should_lock_funding_stream_address_period = true;
         self
     }
 
@@ -411,8 +431,20 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the pre and post Blosssom halving intervals to be used in the [`Parameters`] being built.
+    pub fn with_halving_interval(mut self, pre_blossom_halving_interval: HeightDiff) -> Self {
+        if self.should_lock_funding_stream_address_period {
+            panic!("halving interval on ParametersBuilder must not be set after setting funding streams");
+        }
+
+        self.pre_blossom_halving_interval = pre_blossom_halving_interval;
+        self.post_blossom_halving_interval =
+            self.pre_blossom_halving_interval * (BLOSSOM_POW_TARGET_SPACING_RATIO as HeightDiff);
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
-    pub fn finish(self) -> Parameters {
+    fn finish(self) -> Parameters {
         let Self {
             network_name,
             network_magic,
@@ -421,8 +453,11 @@ impl ParametersBuilder {
             slow_start_interval,
             pre_nu6_funding_streams,
             post_nu6_funding_streams,
+            should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
             disable_pow,
+            pre_blossom_halving_interval,
+            post_blossom_halving_interval,
         } = self;
         Parameters {
             network_name,
@@ -435,12 +470,29 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            pre_blossom_halving_interval,
+            post_blossom_halving_interval,
         }
     }
 
     /// Converts the builder to a configured [`Network::Testnet`]
+    fn to_network_unchecked(&self) -> Network {
+        Network::new_configured_testnet(self.clone().finish())
+    }
+
+    /// Checks funding streams and converts the builder to a configured [`Network::Testnet`]
     pub fn to_network(self) -> Network {
-        Network::new_configured_testnet(self.finish())
+        let network = self.to_network_unchecked();
+
+        // Final check that the configured funding streams will be valid for these Testnet parameters.
+        // TODO: Always check funding stream address period once the testnet parameters are being serialized (#8920).
+        #[cfg(not(any(test, feature = "proptest-impl")))]
+        {
+            check_funding_stream_address_period(&self.pre_nu6_funding_streams, &network);
+            check_funding_stream_address_period(&self.post_nu6_funding_streams, &network);
+        }
+
+        network
     }
 
     /// Returns true if these [`Parameters`] should be compatible with the default Testnet parameters.
@@ -453,8 +505,11 @@ impl ParametersBuilder {
             slow_start_interval,
             pre_nu6_funding_streams,
             post_nu6_funding_streams,
+            should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
             disable_pow,
+            pre_blossom_halving_interval,
+            post_blossom_halving_interval,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -465,6 +520,8 @@ impl ParametersBuilder {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
+            && self.pre_blossom_halving_interval == pre_blossom_halving_interval
+            && self.post_blossom_halving_interval == post_blossom_halving_interval
     }
 }
 
@@ -495,6 +552,10 @@ pub struct Parameters {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// Pre-Blossom halving interval for this network
+    pre_blossom_halving_interval: HeightDiff,
+    /// Post-Blossom halving interval for this network
+    post_blossom_halving_interval: HeightDiff,
 }
 
 impl Default for Parameters {
@@ -523,24 +584,32 @@ impl Parameters {
         #[cfg(any(test, feature = "proptest-impl"))]
         let nu5_activation_height = nu5_activation_height.or(Some(100));
 
+        let parameters = Self::build()
+            .with_genesis_hash(REGTEST_GENESIS_HASH)
+            // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
+            .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+            .with_disable_pow(true)
+            .with_slow_start_interval(Height::MIN)
+            // Removes default Testnet activation heights if not configured,
+            // most network upgrades are disabled by default for Regtest in zcashd
+            .with_activation_heights(ConfiguredActivationHeights {
+                canopy: Some(1),
+                nu5: nu5_activation_height,
+                nu6: nu6_activation_height,
+                ..Default::default()
+            })
+            .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
+
+        // TODO: Always clear funding streams on Regtest once the testnet parameters are being serialized (#8920).
+        #[cfg(not(any(test, feature = "proptest-impl")))]
+        let parameters = parameters
+            .with_pre_nu6_funding_streams(ConfiguredFundingStreams::default())
+            .with_post_nu6_funding_streams(ConfiguredFundingStreams::default());
+
         Self {
             network_name: "Regtest".to_string(),
             network_magic: magics::REGTEST,
-            ..Self::build()
-                .with_genesis_hash(REGTEST_GENESIS_HASH)
-                // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
-                .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
-                .with_disable_pow(true)
-                .with_slow_start_interval(Height::MIN)
-                // Removes default Testnet activation heights if not configured,
-                // most network upgrades are disabled by default for Regtest in zcashd
-                .with_activation_heights(ConfiguredActivationHeights {
-                    canopy: Some(1),
-                    nu5: nu5_activation_height,
-                    nu6: nu6_activation_height,
-                    ..Default::default()
-                })
-                .finish()
+            ..parameters.finish()
         }
     }
 
@@ -568,6 +637,8 @@ impl Parameters {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            pre_blossom_halving_interval,
+            post_blossom_halving_interval,
         } = Self::new_regtest(None, None);
 
         self.network_name == network_name
@@ -578,6 +649,8 @@ impl Parameters {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
+            && self.pre_blossom_halving_interval == pre_blossom_halving_interval
+            && self.post_blossom_halving_interval == post_blossom_halving_interval
     }
 
     /// Returns the network name
@@ -628,6 +701,16 @@ impl Parameters {
     /// Returns true if proof-of-work validation should be disabled for this network
     pub fn disable_pow(&self) -> bool {
         self.disable_pow
+    }
+
+    /// Returns the pre-Blossom halving interval for this network
+    pub fn pre_blossom_halving_interval(&self) -> HeightDiff {
+        self.pre_blossom_halving_interval
+    }
+
+    /// Returns the post-Blossom halving interval for this network
+    pub fn post_blossom_halving_interval(&self) -> HeightDiff {
+        self.post_blossom_halving_interval
     }
 }
 
