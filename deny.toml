@@ -124,8 +124,7 @@ allow-git = [
     "https://github.com/zcash/librustzcash.git",
     "https://github.com/zcash/incrementalmerkletree",
     "https://github.com/zcash/orchard",
-    "https://github.com/zcash/sapling-crypto",
-    "https://github.com/zcash/incrementalmerkletree"
+    "https://github.com/zcash/sapling-crypto"
 ]
 
 [sources.allow-org]

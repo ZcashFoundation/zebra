@@ -116,5 +116,4 @@ zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "141
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "b1ad3694ee13a2fc5d291ad04721a6252da0993c" }
 orchard = { git = "https://github.com/zcash/orchard", rev = "55fb089a335bbbc1cda186c706bc037073df8eb7" }
 incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
-incrementalmerkletree-testing = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
 shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
