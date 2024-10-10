@@ -29,7 +29,7 @@ use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
 use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
-    cached_state::get_future_blocks,
+    cached_state::future_blocks,
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
     lightwalletd::{
         can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc,
@@ -287,7 +287,7 @@ async fn load_transactions_from_future_blocks(
     test_type: TestType,
     test_name: &str,
 ) -> Result<Vec<Arc<Transaction>>> {
-    let transactions = get_future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
+    let transactions = future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
         .await?
         .into_iter()
         .flat_map(|block| block.transactions)
