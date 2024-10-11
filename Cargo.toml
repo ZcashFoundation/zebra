@@ -22,7 +22,7 @@ resolver = "2"
 # `cargo release` settings
 
 [workspace.dependencies]
-incrementalmerkletree = "0.6.0"
+incrementalmerkletree = "0.7.0"
 orchard = "0.9.0"
 sapling-crypto = "0.2.0"
 zcash_address = "0.5.0"
@@ -102,3 +102,18 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+# We can remove this patches after we get out of 2.0 release candidate and upgrade the ECC dependencies above.
+# This revisions are at the commit just before setting mainnet activation heights.
+[patch.crates-io]
+zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
+zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
+zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "b1ad3694ee13a2fc5d291ad04721a6252da0993c" }
+orchard = { git = "https://github.com/zcash/orchard", rev = "55fb089a335bbbc1cda186c706bc037073df8eb7" }
+incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
+shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }

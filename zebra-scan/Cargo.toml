@@ -71,11 +71,10 @@ tracing = "0.1.39"
 futures = "0.3.30"
 
 # ECC dependencies.
-# TODO: we can't use the workspace version for all ECC dependencies in this crate yet (#8809)
-zcash_client_backend = { git = "https://github.com/zcash/librustzcash/", commit = "40ca428c6081c61d5a2bf3f2053eb9e18219ca95" }
+zcash_client_backend.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash/", commit = "40ca428c6081c61d5a2bf3f2053eb9e18219ca95" }
-zcash_address = { git = "https://github.com/zcash/librustzcash/", commit = "40ca428c6081c61d5a2bf3f2053eb9e18219ca95" }
+zcash_primitives.workspace = true
+zcash_address.workspace = true
 sapling-crypto.workspace = true
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.39", features = ["shielded-scan"] }
