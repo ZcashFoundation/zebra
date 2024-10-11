@@ -330,7 +330,18 @@ run_tests() {
     exec cargo test --locked --release --features "zebra-test" --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands
   else
-    exec "$@"
+    if [[ "$1" == "zebrad" ]] && [[ -f "${ZEBRA_CONF_PATH}" ]]; then
+      shift
+      echo "if"
+      echo "conf path: " "${ZEBRA_CONF_PATH}"
+      echo "pos param: " "$@"
+      exec zebrad -c "${ZEBRA_CONF_PATH}" "$@"
+    else
+      echo "else"
+      echo "conf path: " "${ZEBRA_CONF_PATH}"
+      echo "pos param: " "$@"
+      exec "$@"
+    fi
   fi
 }
 
