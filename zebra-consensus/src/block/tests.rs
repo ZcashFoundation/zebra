@@ -2,6 +2,7 @@
 
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
+use subsidy::general::block_subsidy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
@@ -20,7 +21,7 @@ use zebra_chain::{
 use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{block_subsidy, transaction};
+use crate::transaction;
 
 use super::*;
 
@@ -304,7 +305,8 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
         // TODO: first halving, second halving, third halving, and very large halvings
         if height >= canopy_activation_height {
             let expected_block_subsidy =
-                subsidy::general::block_subsidy(height, &network).expect("valid block subsidy");
+                subsidy::general::block_subsidy(height, &network)
+                    .expect("valid block subsidy");
 
             check::subsidy_is_valid(&block, &network, expected_block_subsidy)
                 .expect("subsidies should pass for this block");
@@ -342,7 +344,8 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::NoTransactions;
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let result =
+        check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
     assert_eq!(expected, result);
 
@@ -368,7 +371,8 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::Transaction(TransactionError::CoinbasePosition);
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let result =
+        check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
     let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
     assert_eq!(expected, result);
 
@@ -429,7 +433,8 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
         if height >= canopy_activation_height {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let expected_block_subsidy =
-                subsidy::general::block_subsidy(height, &network).expect("valid block subsidy");
+                subsidy::general::block_subsidy(height, &network)
+                    .expect("valid block subsidy");
 
             // Validate
             let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);

@@ -37,6 +37,8 @@ pub use sighash::{HashType, SigHash, SigHasher};
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
+#[cfg(zcash_unstable = "nsm")]
+use zcash_primitives::transaction::ZFUTURE_TX_VERSION;
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
@@ -142,6 +144,30 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
     },
+    /// A future version of transaction
+    #[cfg(zcash_unstable = "nsm")]
+    #[allow(non_snake_case)]
+    ZFuture {
+        /// The Network Upgrade for this transaction.
+        ///
+        /// Derived from the ConsensusBranchId field.
+        network_upgrade: NetworkUpgrade,
+        /// The earliest time or block height that this transaction can be added to the
+        /// chain.
+        lock_time: LockTime,
+        /// The latest block height that this transaction can be added to the chain.
+        expiry_height: block::Height,
+        /// The transparent inputs to the transaction.
+        inputs: Vec<transparent::Input>,
+        /// The transparent outputs from the transaction.
+        outputs: Vec<transparent::Output>,
+        /// The sapling shielded data for this transaction, if any.
+        sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        /// The orchard data for this transaction, if any.
+        orchard_shielded_data: Option<orchard::ShieldedData>,
+        /// The burn amount for this transaction, if any.
+        burn_amount: Amount<NonNegative>,
+    },
 }
 
 impl fmt::Display for Transaction {
@@ -168,6 +194,8 @@ impl fmt::Display for Transaction {
         fmter.field("sapling_spends", &self.sapling_spends_per_anchor().count());
         fmter.field("sapling_outputs", &self.sapling_outputs().count());
         fmter.field("orchard_actions", &self.orchard_actions().count());
+        #[cfg(zcash_unstable = "nsm")]
+        fmter.field("burn_amount", &self.burn_amount());
 
         fmter.field("unmined_id", &self.unmined_id());
 
@@ -248,6 +276,8 @@ impl Transaction {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => None,
             Transaction::V5 { .. } => Some(AuthDigest::from(self)),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Some(AuthDigest::from(self)),
         }
     }
 
@@ -274,6 +304,11 @@ impl Transaction {
     /// Does this transaction have transparent or shielded outputs?
     pub fn has_transparent_or_shielded_outputs(&self) -> bool {
         !self.outputs().is_empty() || self.has_shielded_outputs()
+    }
+
+    #[cfg(zcash_unstable = "nsm")]
+    pub fn has_burn_amount(&self) -> bool {
+        self.burn_amount() > Amount::<NonNegative>::zero()
     }
 
     /// Does this transaction have shielded outputs?
@@ -321,6 +356,8 @@ impl Transaction {
         match self {
             Transaction::V1 { .. } | Transaction::V2 { .. } => false,
             Transaction::V3 { .. } | Transaction::V4 { .. } | Transaction::V5 { .. } => true,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => true,
         }
     }
 
@@ -332,6 +369,8 @@ impl Transaction {
             Transaction::V3 { .. } => 3,
             Transaction::V4 { .. } => 4,
             Transaction::V5 { .. } => 5,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => ZFUTURE_TX_VERSION,
         }
     }
 
@@ -343,6 +382,8 @@ impl Transaction {
             | Transaction::V3 { lock_time, .. }
             | Transaction::V4 { lock_time, .. }
             | Transaction::V5 { lock_time, .. } => *lock_time,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { lock_time, .. } => *lock_time,
         };
 
         // `zcashd` checks that the block height is greater than the lock height.
@@ -390,6 +431,8 @@ impl Transaction {
             | Transaction::V3 { lock_time, .. }
             | Transaction::V4 { lock_time, .. }
             | Transaction::V5 { lock_time, .. } => *lock_time,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { lock_time, .. } => *lock_time,
         };
         let mut lock_time_bytes = Vec::new();
         lock_time
@@ -426,6 +469,14 @@ impl Transaction {
                 block::Height(0) => None,
                 block::Height(expiry_height) => Some(block::Height(*expiry_height)),
             },
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { expiry_height, .. } => match expiry_height {
+                // Consensus rule:
+                // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
+                // https://zips.z.cash/zip-0203#specification
+                block::Height(0) => None,
+                block::Height(expiry_height) => Some(block::Height(*expiry_height)),
+            },
         }
     }
 
@@ -452,6 +503,11 @@ impl Transaction {
                 ref mut expiry_height,
                 ..
             } => expiry_height,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                ref mut expiry_height,
+                ..
+            } => expiry_height,
         }
     }
 
@@ -468,6 +524,10 @@ impl Transaction {
             Transaction::V5 {
                 network_upgrade, ..
             } => Some(*network_upgrade),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                network_upgrade, ..
+            } => Some(*network_upgrade),
         }
     }
 
@@ -481,6 +541,8 @@ impl Transaction {
             Transaction::V3 { ref inputs, .. } => inputs,
             Transaction::V4 { ref inputs, .. } => inputs,
             Transaction::V5 { ref inputs, .. } => inputs,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { ref inputs, .. } => inputs,
         }
     }
 
@@ -493,6 +555,8 @@ impl Transaction {
             Transaction::V3 { ref mut inputs, .. } => inputs,
             Transaction::V4 { ref mut inputs, .. } => inputs,
             Transaction::V5 { ref mut inputs, .. } => inputs,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { ref mut inputs, .. } => inputs,
         }
     }
 
@@ -511,6 +575,8 @@ impl Transaction {
             Transaction::V3 { ref outputs, .. } => outputs,
             Transaction::V4 { ref outputs, .. } => outputs,
             Transaction::V5 { ref outputs, .. } => outputs,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { ref outputs, .. } => outputs,
         }
     }
 
@@ -531,6 +597,10 @@ impl Transaction {
                 ref mut outputs, ..
             } => outputs,
             Transaction::V5 {
+                ref mut outputs, ..
+            } => outputs,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 ref mut outputs, ..
             } => outputs,
         }
@@ -581,6 +651,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -616,6 +688,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => 0,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => 0,
         }
     }
 
@@ -655,6 +729,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -691,6 +767,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => None,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => None,
         }
     }
 
@@ -699,6 +777,8 @@ impl Transaction {
         match self {
             // No JoinSplits
             Transaction::V1 { .. } | Transaction::V5 { .. } => false,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => false,
 
             // JoinSplits-on-BCTV14
             Transaction::V2 { joinsplit_data, .. } | Transaction::V3 { joinsplit_data, .. } => {
@@ -746,6 +826,8 @@ impl Transaction {
             }
             | Transaction::V1 { .. }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -766,6 +848,11 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.anchors()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.anchors()),
 
             // No Spends
             Transaction::V1 { .. }
@@ -776,6 +863,11 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -804,6 +896,11 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.spends_per_anchor()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.spends_per_anchor()),
 
             // No Spends
             Transaction::V1 { .. }
@@ -814,6 +911,11 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -832,6 +934,11 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.outputs()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.outputs()),
 
             // No Outputs
             Transaction::V1 { .. }
@@ -842,6 +949,11 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -862,6 +974,11 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.nullifiers()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.nullifiers()),
 
             // No Spends
             Transaction::V1 { .. }
@@ -872,6 +989,11 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -892,6 +1014,11 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Box::new(sapling_shielded_data.note_commitments()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Box::new(sapling_shielded_data.note_commitments()),
 
             // No Spends
             Transaction::V1 { .. }
@@ -902,6 +1029,11 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 sapling_shielded_data: None,
                 ..
             } => Box::new(std::iter::empty()),
@@ -920,6 +1052,11 @@ impl Transaction {
                 sapling_shielded_data,
                 ..
             } => sapling_shielded_data.is_some(),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data,
+                ..
+            } => sapling_shielded_data.is_some(),
         }
     }
 
@@ -931,6 +1068,11 @@ impl Transaction {
         match self {
             // Maybe Orchard shielded data
             Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref(),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 orchard_shielded_data,
                 ..
             } => orchard_shielded_data.as_ref(),
@@ -952,12 +1094,22 @@ impl Transaction {
                 orchard_shielded_data: Some(orchard_shielded_data),
                 ..
             } => Some(orchard_shielded_data),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(orchard_shielded_data),
 
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. }
             | Transaction::V5 {
+                orchard_shielded_data: None,
+                ..
+            } => None,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 orchard_shielded_data: None,
                 ..
             } => None,
@@ -1087,6 +1239,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1136,6 +1290,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1183,6 +1339,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1232,6 +1390,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(std::iter::empty()),
         }
     }
 
@@ -1273,6 +1433,8 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 { .. } => Box::new(iter::empty()),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => Box::new(iter::empty()),
         };
 
         joinsplit_value_balances.map(ValueBalance::from_sprout_amount)
@@ -1314,6 +1476,11 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => sapling_shielded_data.value_balance,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => sapling_shielded_data.value_balance,
 
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
@@ -1323,6 +1490,11 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => Amount::zero(),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 sapling_shielded_data: None,
                 ..
             } => Amount::zero(),
@@ -1346,6 +1518,11 @@ impl Transaction {
                 sapling_shielded_data: Some(sapling_shielded_data),
                 ..
             } => Some(&mut sapling_shielded_data.value_balance),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(&mut sapling_shielded_data.value_balance),
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
@@ -1354,6 +1531,11 @@ impl Transaction {
                 ..
             }
             | Transaction::V5 {
+                sapling_shielded_data: None,
+                ..
+            } => None,
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture {
                 sapling_shielded_data: None,
                 ..
             } => None,
@@ -1391,6 +1573,10 @@ impl Transaction {
     }
 
     /// Returns the value balances for this transaction using the provided transparent outputs.
+    /// Get the value balances for this transaction,
+    /// using the transparent outputs spent in this transaction.
+    ///
+    /// See `value_balance` for details.
     pub(crate) fn value_balance_from_outputs(
         &self,
         outputs: &HashMap<transparent::OutPoint, transparent::Output>,
@@ -1426,5 +1612,18 @@ impl Transaction {
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+    }
+
+    /// Access the transparent inputs of this transaction, regardless of version.
+    #[cfg(zcash_unstable = "nsm")]
+    pub fn burn_amount(&self) -> Amount<NonNegative> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => Amount::zero(),
+            Transaction::ZFuture { burn_amount, .. } => *burn_amount,
+        }
     }
 }

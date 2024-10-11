@@ -22,17 +22,18 @@ resolver = "2"
 # `cargo release` settings
 
 [workspace.dependencies]
-incrementalmerkletree = { version = "0.7.0", features = ["legacy-api"] }
+incrementalmerkletree = "0.7.0"
 orchard = "0.10.0"
 sapling-crypto = "0.3.0"
-zcash_address = "0.6.0"
-zcash_client_backend = "0.14.0"
-zcash_encoding = "0.2.1"
-zcash_history = "0.4.0"
-zcash_keys = "0.4.0"
-zcash_primitives = "0.19.0"
-zcash_proofs = "0.19.0"
-zcash_protocol = "0.4.0"
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_address = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_client_backend = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_encoding = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_history = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_keys = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_primitives = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_proofs = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_protocol = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
 
 [workspace.metadata.release]
 
