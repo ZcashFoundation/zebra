@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 2.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0-rc.0) - 2024-10-11
 
-This version is a release candidate for the Zcash NU6 network upgrade on the Mainnet. While this version does not yet include the NU6 Mainnet activation heights, all required functionality and tests are in place.
+This version is a release candidate for the Zcash NU6 network upgrade on the Mainnet. While this version does not yet include the NU6 Mainnet activation height or current protocol version, all required functionality and tests are in place.
 
 Please note that support for this release candidate is expected to conclude prior to the NU6 activation heights.
 
@@ -17,20 +17,19 @@ Please note that support for this release candidate is expected to conclude prio
 
 ### Added
 
-- For regtest mode only, added `generate` ([#8849](https://github.com/ZcashFoundation/zebra/pull/8849)) and `stop` ([#8839](https://github.com/ZcashFoundation/zebra/pull/8839), [#8863](https://github.com/ZcashFoundation/zebra/pull/8863)) RPC methods
-- Added more fields to `getmininginfo` RPC method ([#8860](https://github.com/ZcashFoundation/zebra/pull/8860))
-- Moved the python RPC tests framework from zcashd into Zebra ([#8866](https://github.com/ZcashFoundation/zebra/pull/8866))
+- Added Regtest-only `generate` and `stop` RPC methods ([#8849](https://github.com/ZcashFoundation/zebra/pull/8849), [#8839](https://github.com/ZcashFoundation/zebra/pull/8839), [#8863](https://github.com/ZcashFoundation/zebra/pull/8863))
+- Added fields to `getmininginfo` RPC method response ([#8860](https://github.com/ZcashFoundation/zebra/pull/8860))
+- Copied the Python RPC test framework from zcashd into Zebra ([#8866](https://github.com/ZcashFoundation/zebra/pull/8866))
 
 ### Changed
 
 - Regtest halving interval to match zcashd and added a configurable halving interval for custom testnets ([#8888](https://github.com/ZcashFoundation/zebra/pull/8888), [#8928](https://github.com/ZcashFoundation/zebra/pull/8928))
 - Updates post-NU6 Major Grants funding stream address on Mainnet ([#8914](https://github.com/ZcashFoundation/zebra/pull/8914))
-- Upgrade ECC dependencies to match zcashd `v6.0.0-rc1` ([#8918](https://github.com/ZcashFoundation/zebra/pull/8918))
 
 ### Fixed
 
-- Multiple Docker fixes ([#8870](https://github.com/ZcashFoundation/zebra/pull/8870), [#8827](https://github.com/ZcashFoundation/zebra/pull/8827), [#8817](https://github.com/ZcashFoundation/zebra/pull/8817), [#8796](https://github.com/ZcashFoundation/zebra/pull/8796))
-- Actions fixes ([#8910](https://github.com/ZcashFoundation/zebra/pull/8910), [#8893](https://github.com/ZcashFoundation/zebra/pull/8893), [#8868](https://github.com/ZcashFoundation/zebra/pull/8868), [#8865](https://github.com/ZcashFoundation/zebra/pull/8865))
+- Remove debugging output by default in Docker image ([#8870](https://github.com/ZcashFoundation/zebra/pull/8870))
+- Fixes a typo in configuration file path of the docker-compose file ([#8893](https://github.com/ZcashFoundation/zebra/pull/8893))
 - Return verification errors from `sendrawtransaction` RPC method ([#8788](https://github.com/ZcashFoundation/zebra/pull/8788))
 - Respond to getheaders requests with a maximum of 160 block headers ([#8913](https://github.com/ZcashFoundation/zebra/pull/8913))
 - Avoids panicking during contextual validation when a parent block is missing ([#8883](https://github.com/ZcashFoundation/zebra/pull/8883))
