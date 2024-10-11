@@ -1331,6 +1331,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.2.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1359,8 +1368,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d42773cb15447644d170be20231a3268600e0c4cea8987d013b93ac973d3cf7"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
 dependencies = [
  "blake2b_simd",
 ]
@@ -2968,7 +2976,7 @@ dependencies = [
  "halo2_poseidon",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.7.0",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -4085,7 +4093,7 @@ dependencies = [
  "getset",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.7.0",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -4387,7 +4395,7 @@ checksum = "637e95dcd06bc1bb3f86ed9db1e1832a70125f32daae071ef37dcb7701b7d4fe"
 dependencies = [
  "bitflags 2.9.0",
  "either",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.6.0",
  "tracing",
 ]
 
@@ -6042,7 +6050,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.7.0",
  "memuse",
  "nom",
  "nonempty",
@@ -6050,7 +6058,7 @@ dependencies = [
  "prost",
  "rand_core 0.6.4",
  "rayon",
- "sapling-crypto",
+ "sapling-crypto 0.2.0",
  "secrecy",
  "shardtree",
  "subtle",
@@ -6082,8 +6090,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6106,7 +6113,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "rand_core 0.6.4",
- "sapling-crypto",
+ "sapling-crypto 0.2.0",
  "secrecy",
  "subtle",
  "tracing",
@@ -6141,17 +6148,17 @@ dependencies = [
  "bs58",
  "core2",
  "document-features",
- "equihash",
+ "equihash 0.2.0 (git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra)",
  "ff",
  "fpe",
  "getset",
  "group",
  "hex",
- "incrementalmerkletree",
+ "incrementalmerkletree 0.7.0",
  "jubjub",
  "memuse",
  "nonempty",
- "orchard",
+ "orchard 0.9.0",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
@@ -6187,7 +6194,7 @@ dependencies = [
  "lazy_static",
  "rand_core 0.6.4",
  "redjubjub",
- "sapling-crypto",
+ "sapling-crypto 0.2.0",
  "tracing",
  "xdg",
  "zcash_primitives",
@@ -6264,7 +6271,7 @@ dependencies = [
  "criterion",
  "dirs",
  "ed25519-zebra",
- "equihash",
+ "equihash 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "group",
  "halo2_proofs",
@@ -6275,7 +6282,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard",
+ "orchard 0.10.0",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -6333,12 +6340,12 @@ dependencies = [
  "metrics",
  "num-integer",
  "once_cell",
- "orchard",
+ "orchard 0.10.0",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
- "sapling-crypto",
+ "sapling-crypto 0.3.0",
  "serde",
  "spandoc",
  "thiserror 2.0.12",

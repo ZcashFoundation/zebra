@@ -125,7 +125,7 @@ impl fmt::Display for UnminedTxId {
                 .debug_tuple("transaction::Hash")
                 .field(&"private")
                 .finish(),
-            Witnessed(_id) => f.debug_tuple("WtxId").field(&"private").finish(),
+            Witnessed(id) => f.debug_tuple("WtxId").field(id).finish(),
         }
     }
 }

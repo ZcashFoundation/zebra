@@ -139,6 +139,8 @@ fn activates_network_upgrades_correctly() {
         (Height(1), NetworkUpgrade::Canopy),
         // TODO: Remove this once the testnet parameters are being serialized (#8920).
         (Height(100), NetworkUpgrade::Nu5),
+        #[cfg(zcash_unstable = "nsm")]
+        (Height(101), NetworkUpgrade::Nu7),
     ];
 
     for (network, expected_activation_heights) in [
