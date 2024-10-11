@@ -190,6 +190,10 @@ run_cargo_test() {
 }
 
 # Runs tests depending on the env vars.
+#
+# Positional Parameters
+#
+# - $@: Arbitrary command that will be executed if no test env var is set.
 run_tests() {
   # Validate the test variables. For these tests, we activate the test features
   # to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
@@ -325,6 +329,8 @@ run_tests() {
     check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
     exec cargo test --locked --release --features "zebra-test" --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands
+  else
+    exec "$@"
   fi
 }
 
@@ -356,9 +362,12 @@ case "$1" in
     exec zebrad "$@"
   fi
   ;;
-tests)
+test)
+  shift
+
   prepare_env_vars
-  run_tests
+
+  run_tests "$@"
   ;;
 monitoring)
   #  TODO: Impl logic for starting a monitoring node.

@@ -132,7 +132,7 @@ ARG EXPERIMENTAL_FEATURES="journald prometheus filter-reload"
 ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # Run tests specified by the env vars
-ENTRYPOINT [ "entrypoint.sh", "tests" ]
+ENTRYPOINT [ "entrypoint.sh", "test" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
