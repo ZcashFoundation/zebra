@@ -332,14 +332,8 @@ run_tests() {
   else
     if [[ "$1" == "zebrad" ]] && [[ -f "${ZEBRA_CONF_PATH}" ]]; then
       shift
-      echo "if"
-      echo "conf path: " "${ZEBRA_CONF_PATH}"
-      echo "pos param: " "$@"
       exec zebrad -c "${ZEBRA_CONF_PATH}" "$@"
     else
-      echo "else"
-      echo "conf path: " "${ZEBRA_CONF_PATH}"
-      echo "pos param: " "$@"
       exec "$@"
     fi
   fi
