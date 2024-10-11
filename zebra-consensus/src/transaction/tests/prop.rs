@@ -29,7 +29,7 @@ proptest! {
         (network, block_height) in sapling_onwards_strategy(),
         block_time in datetime_full(),
         relative_source_fund_heights in vec(0.0..1.0, 1..=MAX_TRANSPARENT_INPUTS),
-        transaction_version in 4_u8..=5,
+        transaction_version in 4_u8..=6,
     ) {
         let _init_guard = zebra_test::init();
 
@@ -300,6 +300,9 @@ fn mock_transparent_transaction(
     // Create the mock transaction
     let expiry_height = block_height;
 
+    #[cfg(zcash_unstable = "nsm")]
+    let burn_amount = Amount::zero();
+
     let transaction = match transaction_version {
         4 => Transaction::V4 {
             inputs,
@@ -309,7 +312,7 @@ fn mock_transparent_transaction(
             joinsplit_data: None,
             sapling_shielded_data: None,
         },
-        5 => Transaction::V5 {
+        5 | 6 => Transaction::V5 {
             inputs,
             outputs,
             lock_time,
@@ -317,6 +320,17 @@ fn mock_transparent_transaction(
             sapling_shielded_data: None,
             orchard_shielded_data: None,
             network_upgrade,
+        },
+        #[cfg(zcash_unstable = "nsm")]
+        255 => Transaction::ZFuture {
+            inputs,
+            outputs,
+            lock_time,
+            expiry_height,
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            network_upgrade,
+            burn_amount,
         },
         invalid_version => unreachable!("invalid transaction version: {}", invalid_version),
     };
@@ -345,6 +359,7 @@ fn sanitize_transaction_version(
             Overwinter => 3,
             Sapling | Blossom | Heartwood | Canopy => 4,
             Nu5 | Nu6 => 5,
+            ZFuture => 0x00FF,
         }
     };
 
