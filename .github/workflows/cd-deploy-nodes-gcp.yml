@@ -234,8 +234,6 @@ jobs:
     needs: [ build, versioning, test-configuration-file, test-zebra-conf-path, get-disk-name ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -253,14 +251,17 @@ jobs:
 
       # Makes the Zcash network name lowercase.
       #
-      # Labels in GCP are required to be in lowercase, but the blockchain network
-      # uses sentence case, so we need to downcase the network.
+      # Labels and disks in GCP are required to be in lowercase, but the blockchain network
+      # uses sentence case, so we need to downcase the ${{ matrix.network }}.
       #
-      # Passes the lowercase network to subsequent steps using $NETWORK env variable.
+      # Passes ${{ matrix.network }} to subsequent steps using $NETWORK env variable.
+      # Passes ${{ env.GITHUB_REF_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
       - name: Downcase network name for labels
         run: |
           NETWORK_CAPS="${{ matrix.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+          LONG_GITHUB_REF="${{ env.GITHUB_REF_SLUG_URL }}"
+          echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -272,6 +273,25 @@ jobs:
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.1
+
+      # TODO: The sub-find-cached-disks.yml reusable workflow does not supports matrix strategy
+      # We need to find a way to pass the matching network from the `get-disk-name` job
+      # In the meanwhile we're repeating the logic of sub-find-cached-disks.yml here
+      - name: Check if cached state disks exists
+        id: get-available-disks
+        env:
+          GITHUB_REF: ${{ env.SHORT_GITHUB_REF }}
+          NETWORK: ${{ matrix.network }} # use lowercase version from env, not input
+          DISK_PREFIX: zebrad-cache
+          DISK_SUFFIX: ${{ inputs.cached_disk_type || 'tip' }}
+          PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
+        run: |
+          source ./.github/workflows/scripts/gcp-get-cached-disks.sh
+          echo "state_version=${LOCAL_STATE_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "cached_disk_name=${CACHED_DISK_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "lwd_tip_disk=${LWD_TIP_DISK}" >> "${GITHUB_OUTPUT}"
+          echo "zebra_tip_disk=${ZEBRA_TIP_DISK}" >> "${GITHUB_OUTPUT}"
+          echo "zebra_checkpoint_disk=${ZEBRA_CHECKPOINT_DISK}" >> "${GITHUB_OUTPUT}"
 
       - name: Create instance template for ${{ matrix.network }}
         run: |
