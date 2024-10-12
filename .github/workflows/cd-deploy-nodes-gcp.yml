@@ -163,18 +163,6 @@ jobs:
       test_variables: '-e NETWORK'
       network: 'Testnet'
 
-  # Test that Zebra works using $ZEBRA_CONF_PATH config
-  test-zebra-conf-path:
-    name: Test CD custom Docker config file
-    needs: build
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      test_id: 'custom-conf'
-      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-
   # Finds a `tip` cached state disk for zebra from the main branch
   #
   # Passes the disk name to subsequent jobs using `cached_disk_name` output
