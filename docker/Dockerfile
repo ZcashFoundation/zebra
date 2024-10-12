@@ -169,10 +169,6 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
 # from the `release` stage.
 FROM debian:bookworm-slim AS runtime
 
-RUN apt-get update && apt-get install -y --no-install-recommends gosu
-
-RUN rm -rf /var/lib/apt/lists/* /tmp/*
-
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --from=release /usr/local/bin/entrypoint.sh /usr/local/bin/
 
