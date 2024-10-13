@@ -194,8 +194,10 @@ impl RpcServer {
                 parallel_cpu_threads = available_parallelism().map(usize::from).unwrap_or(1);
             }
 
-            // generate a cookie
-            cookie::generate(config.cookie_dir.clone());
+            // Generate a RPC authentication cookie
+            if config.enable_cookie_auth {
+                let _ = cookie::generate(config.cookie_dir.clone());
+            }
 
             // The server is a blocking task, which blocks on executor shutdown.
             // So we need to start it in a std::thread.
@@ -303,7 +305,7 @@ impl RpcServer {
             span.in_scope(|| {
                 info!("Stopping RPC server");
                 close_handle.clone().close();
-                cookie::delete(); // delete the auth cookie
+                let _ = cookie::delete(); // delete the auth cookie if exists
                 debug!("Stopped RPC server");
             })
         };

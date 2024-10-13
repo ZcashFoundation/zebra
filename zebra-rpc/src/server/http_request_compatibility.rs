@@ -180,7 +180,7 @@ impl FixHttpRequestMiddleware {
                     .map(|password| password.to_string())
             })
             .map_or(false, |password| {
-                if let Some(cookie_password) = cookie::get(self.0.cookie_dir.clone()) {
+                if let Ok(cookie_password) = cookie::get(self.0.cookie_dir.clone()) {
                     cookie_password == password
                 } else {
                     false
