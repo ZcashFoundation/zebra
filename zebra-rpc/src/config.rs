@@ -103,7 +103,7 @@ impl Default for Config {
             // Debug options are always off by default.
             debug_force_finished_sync: false,
 
-            // Use the default cache dir for cookies.
+            // Use the default cache dir for the auth cookie.
             cookie_dir: default_cache_dir(),
 
             // Enable cookie-based authentication by default.
