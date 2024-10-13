@@ -57,10 +57,8 @@ impl TrustedChainSync {
         rpc_address: SocketAddr,
         db: ZebraDb,
         non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
-        cookie_dir: std::path::PathBuf,
     ) -> (LatestChainTip, ChainTipChange, JoinHandle<()>) {
-        let auth_cookie = crate::server::cookie::get(cookie_dir).expect("cookie should exist");
-        let rpc_client = RpcRequestClient::new(rpc_address, auth_cookie);
+        let rpc_client = RpcRequestClient::new(rpc_address);
         let non_finalized_state = NonFinalizedState::new(&db.network());
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(None, &db.network());
@@ -317,8 +315,7 @@ impl TrustedChainSync {
 /// Returns a [`ReadStateService`], [`LatestChainTip`], [`ChainTipChange`], and
 /// a [`JoinHandle`] for the sync task.
 pub fn init_read_state_with_syncer(
-    state_config: zebra_state::Config,
-    rpc_config: crate::config::Config,
+    config: zebra_state::Config,
     network: &Network,
     rpc_address: SocketAddr,
 ) -> tokio::task::JoinHandle<
@@ -334,19 +331,14 @@ pub fn init_read_state_with_syncer(
 > {
     let network = network.clone();
     tokio::spawn(async move {
-        if state_config.ephemeral {
+        if config.ephemeral {
             return Err("standalone read state service cannot be used with ephemeral state".into());
         }
 
         let (read_state, db, non_finalized_state_sender) =
-            spawn_init_read_only(state_config, &network).await?;
-        let (latest_chain_tip, chain_tip_change, sync_task) = TrustedChainSync::spawn(
-            rpc_address,
-            db,
-            non_finalized_state_sender,
-            rpc_config.cookie_dir,
-        )
-        .await;
+            spawn_init_read_only(config, &network).await?;
+        let (latest_chain_tip, chain_tip_change, sync_task) =
+            TrustedChainSync::spawn(rpc_address, db, non_finalized_state_sender).await;
         Ok((read_state, latest_chain_tip, chain_tip_change, sync_task))
     })
 }

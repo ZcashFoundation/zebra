@@ -220,6 +220,7 @@ impl TestType {
             config.sync.checkpoint_verify_concurrency_limit =
                 zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
         }
+
         Some(Ok(config))
     }
 

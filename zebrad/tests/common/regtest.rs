@@ -17,7 +17,6 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    config::Config as RpcConfig,
     constants::MISSING_BLOCK_ERROR_CODE,
     methods::{
         get_block_template_rpcs::{
@@ -28,7 +27,7 @@ use zebra_rpc::{
         },
         hex_data::HexData,
     },
-    server::{cookie, OPENED_RPC_ENDPOINT_MSG},
+    server::OPENED_RPC_ENDPOINT_MSG,
 };
 use zebra_test::args;
 
@@ -74,8 +73,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
 /// Get block templates and submit blocks
 async fn submit_blocks(network: Network, rpc_address: SocketAddr) -> Result<()> {
-    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
-    let client = RpcRequestClient::new(rpc_address, auth_cookie);
+    let client = RpcRequestClient::new(rpc_address);
 
     for _ in 1..=NUM_BLOCKS_TO_SUBMIT {
         let (mut block, height) = client

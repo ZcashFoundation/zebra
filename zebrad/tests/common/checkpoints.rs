@@ -20,7 +20,6 @@ use zebra_chain::{
 };
 use zebra_consensus::MAX_CHECKPOINT_HEIGHT_GAP;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::{config::Config as RpcConfig, server::cookie};
 use zebra_state::state_database_format_version_in_code;
 use zebra_test::{
     args,
@@ -505,8 +504,7 @@ pub fn wait_for_zebra_checkpoints_generation<
 /// Returns an approximate `zebrad` tip height, using JSON-RPC.
 #[tracing::instrument]
 pub async fn zebrad_tip_height(zebra_rpc_address: SocketAddr) -> Result<Height> {
-    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
-    let client = RpcRequestClient::new(zebra_rpc_address, auth_cookie);
+    let client = RpcRequestClient::new(zebra_rpc_address);
 
     let zebrad_blockchain_info = client
         .text_from_call("getblockchaininfo", "[]".to_string())

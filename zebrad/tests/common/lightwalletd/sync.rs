@@ -9,7 +9,6 @@ use std::{
 use tempfile::TempDir;
 
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::{config::Config as RpcConfig, server::cookie};
 use zebra_test::prelude::*;
 
 use crate::common::{launch::ZebradTestDirExt, test_type::TestType};
@@ -205,9 +204,7 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
         let lightwalletd_tip_height = (lightwalletd_next_height - 1) as u64;
 
         // Get the block tip from zebrad
-        let auth_cookie =
-            cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
-        let client = RpcRequestClient::new(zebra_rpc_address, auth_cookie);
+        let client = RpcRequestClient::new(zebra_rpc_address);
         let zebrad_blockchain_info = client
             .text_from_call("getblockchaininfo", "[]".to_string())
             .await?;

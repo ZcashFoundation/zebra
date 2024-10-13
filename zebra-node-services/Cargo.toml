@@ -27,7 +27,6 @@ getblocktemplate-rpcs = [
 # Tool and test features
 
 rpc-client = [
-    "base64",
     "color-eyre",
     "jsonrpc-core",
     "reqwest",
@@ -43,7 +42,6 @@ zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.39" }
 # Optional dependencies
 
 # Tool and test feature rpc-client
-base64 = { version  = "0.22.1", optional = true }
 color-eyre = { version = "0.6.3", optional = true }
 jsonrpc-core = { version = "18.0.0", optional = true }
 # Security: avoid default dependency on openssl
@@ -54,7 +52,6 @@ tokio = { version = "1.40.0", features = ["time", "sync"] }
 
 [dev-dependencies]
 
-base64 = "0.22.1"
 color-eyre = "0.6.3"
 jsonrpc-core = "18.0.0"
 reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"] }

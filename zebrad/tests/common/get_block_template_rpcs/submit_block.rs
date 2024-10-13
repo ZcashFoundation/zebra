@@ -12,7 +12,6 @@ use color_eyre::eyre::{Context, Result};
 
 use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::{config::Config as RpcConfig, server::cookie};
 
 use crate::common::{
     cached_state::get_raw_future_blocks,
@@ -64,10 +63,8 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!(?rpc_address, "zebrad opened its RPC port",);
 
-    let auth_cookie = cookie::get(RpcConfig::default().cookie_dir).expect("cookie should exist");
-
     // Create an http client
-    let client = RpcRequestClient::new(rpc_address, auth_cookie);
+    let client = RpcRequestClient::new(rpc_address);
 
     for raw_block in raw_blocks {
         let res = client

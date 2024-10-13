@@ -176,6 +176,9 @@ impl FixHttpRequestMiddleware {
 
     /// Check if the request is authenticated.
     pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
+        if !self.0.enable_cookie_auth {
+            return true;
+        }
         headers
             .get(header::AUTHORIZATION)
             .and_then(|auth_header| auth_header.to_str().ok())

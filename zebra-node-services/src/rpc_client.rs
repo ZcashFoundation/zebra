@@ -4,7 +4,6 @@
 
 use std::net::SocketAddr;
 
-use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use reqwest::Client;
 
 use crate::BoxError;
@@ -14,16 +13,14 @@ use crate::BoxError;
 pub struct RpcRequestClient {
     client: Client,
     rpc_address: SocketAddr,
-    auth_cookie: String,
 }
 
 impl RpcRequestClient {
     /// Creates new RPCRequestSender
-    pub fn new(rpc_address: SocketAddr, auth_cookie: String) -> Self {
+    pub fn new(rpc_address: SocketAddr) -> Self {
         Self {
             client: Client::new(),
             rpc_address,
-            auth_cookie,
         }
     }
 
@@ -42,13 +39,6 @@ impl RpcRequestClient {
                 r#"{{"jsonrpc": "2.0", "method": "{method}", "params": {params}, "id":123 }}"#
             ))
             .header("Content-Type", "application/json")
-            .header(
-                "Authorization",
-                format!(
-                    "Basic {}",
-                    URL_SAFE.encode(format!("__cookie__:{}", &self.auth_cookie))
-                ),
-            )
             .send()
             .await
     }

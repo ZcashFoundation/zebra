@@ -76,6 +76,9 @@ pub struct Config {
 
     /// The directory where Zebra stores RPC cookies.
     pub cookie_dir: PathBuf,
+
+    /// Enable cookie-based authentication for RPCs.
+    pub enable_cookie_auth: bool,
 }
 
 // This impl isn't derivable because it depends on features.
@@ -100,8 +103,11 @@ impl Default for Config {
             // Debug options are always off by default.
             debug_force_finished_sync: false,
 
-            //
+            // Use the default cache dir for cookies.
             cookie_dir: default_cache_dir(),
+
+            // Enable cookie-based authentication by default.
+            enable_cookie_auth: true,
         }
     }
 }
