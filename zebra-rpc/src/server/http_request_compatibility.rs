@@ -46,7 +46,19 @@ impl RequestMiddleware for FixHttpRequestMiddleware {
 
         // Check if the request is authenticated
         if !self.check_credentials(request.headers_mut()) {
-            request = Self::unauthenticated(request);
+            let error = jsonrpc_core::Error {
+                code: jsonrpc_core::ErrorCode::ServerError(401),
+                message: "unauthenticated method".to_string(),
+                data: None,
+            };
+            return jsonrpc_http_server::Response {
+                code: jsonrpc_http_server::hyper::StatusCode::from_u16(401)
+                    .expect("hard-coded status code should be valid"),
+                content_type: header::HeaderValue::from_static("application/json; charset=utf-8"),
+                content: serde_json::to_string(&jsonrpc_core::Response::from(error, None))
+                    .expect("hard-coded result should serialize"),
+            }
+            .into();
         }
 
         // Fix the request headers if needed and we can do so.
@@ -148,30 +160,6 @@ impl FixHttpRequestMiddleware {
                 header::HeaderValue::from_static("application/json"),
             );
         }
-    }
-
-    /// Change the method name in the JSON request.
-    fn change_method_name(data: String) -> String {
-        let mut json_data: serde_json::Value = serde_json::from_str(&data).expect("Invalid JSON");
-
-        if let Some(method) = json_data.get_mut("method") {
-            *method = serde_json::json!("unauthenticated");
-        }
-
-        serde_json::to_string(&json_data).expect("Failed to serialize JSON")
-    }
-
-    /// Modify the request name to be `unauthenticated`.
-    fn unauthenticated(request: Request<Body>) -> Request<Body> {
-        request.map(|body| {
-            let body = body.map_ok(|data| {
-                let mut data = String::from_utf8_lossy(data.as_ref()).to_string();
-                data = Self::change_method_name(data);
-                Bytes::from(data)
-            });
-
-            Body::wrap_stream(body)
-        })
     }
 
     /// Check if the request is authenticated.
