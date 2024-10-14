@@ -67,7 +67,7 @@ prepare_env_vars() {
 #
 # ## Positional Parameters
 #
-# - "$1": file to write the config to
+# - "$1": the file to write the config to
 prepare_default_conf_file() {
   cat <<EOF >"$1"
 [network]
