@@ -1,6 +1,6 @@
 [package]
 name = "zebra-grpc"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Zebra gRPC interface"
 license = "MIT OR Apache-2.0"
@@ -28,8 +28,8 @@ color-eyre = "0.6.3"
 
 zcash_primitives.workspace = true
 
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.39", features = ["shielded-scan"] }
-zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.39" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.40", features = ["shielded-scan"] }
+zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.40" }
 
 [build-dependencies]
 tonic-build = "0.12.3"

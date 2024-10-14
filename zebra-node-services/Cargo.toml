@@ -1,6 +1,6 @@
 [package]
 name = "zebra-node-services"
-version = "1.0.0-beta.39"
+version = "1.0.0-beta.40"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The interfaces of some Zebra node services"
 license = "MIT OR Apache-2.0"
@@ -37,7 +37,7 @@ rpc-client = [
 shielded-scan = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.39" }
+zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.40" }
 
 # Optional dependencies
 

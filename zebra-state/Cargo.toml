@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.39"
+version = "1.0.0-beta.40"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "State contextual verification and storage code for Zebra"
 license = "MIT OR Apache-2.0"
@@ -77,13 +77,13 @@ tracing = "0.1.39"
 elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
 serde_json = { version = "1.0.128", package = "serde_json", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.39", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.40", features = ["async-error"] }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
 
 # test feature proptest-impl
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.39", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.40", optional = true }
 proptest = { version = "1.4.0", optional = true }
 proptest-derive = { version = "0.5.0", optional = true }
 
@@ -108,5 +108,5 @@ jubjub = "0.10.0"
 
 tokio = { version = "1.40.0", features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.39", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.39" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.40", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.40" }
