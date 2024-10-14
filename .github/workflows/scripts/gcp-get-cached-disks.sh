@@ -47,19 +47,22 @@ if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     echo "Finding a ${DISK_PREFIX}-${DISK_SUFFIX} disk image for ${NETWORK}..."
     CACHED_DISK_NAME=""
 
-    # Check if main branch images are preferred
+    # Try to find an image based on the `main` branch if that branch is preferred.
     if [[ "${PREFER_MAIN_CACHED_STATE}" == "true" ]]; then
         CACHED_DISK_NAME=$(find_cached_disk_image "main-[0-9a-f]+" "main branch")
-    # Else, try to find a cached disk image from the current branch (or PR)
-    else
-        CACHED_DISK_NAME=$(find_cached_disk_image ".+-${GITHUB_REF}" "branch")
-        # If no cached disk image is found, try to find one from any branch
-        if [[ -z "${CACHED_DISK_NAME}" ]]; then
-            CACHED_DISK_NAME=$(find_cached_disk_image ".+-[0-9a-f]+" "any branch")
-        fi
     fi
 
-    # Handle case where no suitable disk image is found
+    # If no image was found, try to find one from the current branch (or PR).
+    if [[ -z "${CACHED_DISK_NAME}" ]]; then
+        CACHED_DISK_NAME=$(find_cached_disk_image ".+-${GITHUB_REF}" "branch")
+    fi
+
+    # If we still have no image, try to find one from any branch.
+    if [[ -z "${CACHED_DISK_NAME}" ]]; then
+    CACHED_DISK_NAME=$(find_cached_disk_image ".+-[0-9a-f]+" "any branch")
+    fi
+
+    # Handle the case where no suitable disk image is found
     if [[ -z "${CACHED_DISK_NAME}" ]]; then
         echo "No suitable cached state disk available. Try running the cached state rebuild job."
         exit 1
