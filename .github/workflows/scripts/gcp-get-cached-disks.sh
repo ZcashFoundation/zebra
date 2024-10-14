@@ -36,7 +36,7 @@ find_cached_disk_image() {
         echo "Description: ${disk_description}" >&2
         echo "${disk_name}"  # This is the actual return value when a disk is found
     else
-        echo "No ${git_source} disk found." >&2
+        echo "No ${git_source} disk found with '${disk_search_pattern}' pattern." >&2
     fi
 }
 
