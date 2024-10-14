@@ -34,13 +34,14 @@ find_cached_disk_image() {
         echo "Found ${git_source} Disk: ${disk_name}" >&2
         disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
         echo "Description: ${disk_description}" >&2
-        echo "${disk_name}"  # This is the actual return value when a disk is found
+        echo "${disk_name}" # This is the actual return value when a disk is found
     else
         echo "No ${git_source} disk found with '${disk_search_pattern}' pattern." >&2
     fi
 }
 
-# Check if both $DISK_PREFIX and $DISK_SUFFIX are set, as they are required to find a cached disk image
+# Check if both $DISK_PREFIX and $DISK_SUFFIX are set, as they are required to
+# find a cached disk image.
 if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     # Find the most suitable cached disk image
     echo "Finding a ${DISK_PREFIX}-${DISK_SUFFIX} disk image for ${NETWORK}..."
@@ -84,10 +85,10 @@ find_available_disk_type() {
         echo "Found ${disk_type^^} disk: ${disk_name} for ${base_name^^} on network: ${NETWORK}" >&2
         disk_description=$(gcloud compute images describe "${disk_name}" --format="value(DESCRIPTION)")
         echo "Description: ${disk_description}" >&2
-        echo "true"  # This is the actual return value when a disk is found
+        echo "true" # This is the actual return value when a disk is found
     else
         echo "No ${disk_type^^} disk found for ${base_name^^} on network: ${NETWORK}" >&2
-        echo "false"  # This is the actual return value when no disk is found
+        echo "false" # This is the actual return value when no disk is found
     fi
 }
 if [[ -n "${NETWORK}" ]]; then
