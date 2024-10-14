@@ -123,5 +123,5 @@ syn = { version = "2.0.79", features = ["full"], optional = true }
 quote = { version = "1.0.37", optional = true }
 serde_yml = { version = "0.0.12", optional = true }
 serde = { version = "1.0.210", features = ["serde_derive"], optional = true }
-indexmap = "2.5.0"
+indexmap = "2.6.0"
 

@@ -61,14 +61,14 @@ results-reader = [
 [dependencies]
 
 color-eyre = "0.6.3"
-indexmap = { version = "2.5.0", features = ["serde"] }
+indexmap = { version = "2.6.0", features = ["serde"] }
 itertools = "0.13.0"
 semver = "1.0.23"
 serde = { version = "1.0.210", features = ["serde_derive"] }
 tokio = { version = "1.40.0", features = ["time"] }
-tower = "0.4.13"
+tower = "0.5.1"
 tracing = "0.1.39"
-futures = "0.3.30"
+futures = "0.3.31"
 
 # ECC dependencies.
 zcash_client_backend.workspace = true
