@@ -301,10 +301,14 @@ jobs:
       - name: Create instance template for ${{ matrix.network }}
         run: |
           if [ -n "${{ env.IP_ADDRESS }}" ]; then
-            IP_FLAG="--address=${{ env.IP_ADDRESS }} \"
+            IP_FLAG="--address=${{ env.IP_ADDRESS }}"
+          else
+            IP_FLAG=""
           fi
+
           DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
           DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
+
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
@@ -313,6 +317,7 @@ jobs:
             echo "No cached disk found for ${{ matrix.network }} in main branch"
             exit 1
           fi
+
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
           --boot-disk-size 50GB \
@@ -320,7 +325,7 @@ jobs:
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
-          ${IP_FLAG}
+          ${IP_FLAG} \
           --create-disk="${DISK_PARAMS}" \
           --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${DISK_NAME},mode=rw \
           --container-stdin \
