@@ -326,7 +326,7 @@ jobs:
           --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --subnet=${{ vars.GCP_SUBNETWORK }} \
           ${IP_FLAG} \
           --create-disk="${DISK_PARAMS}" \
           --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${DISK_NAME},mode=rw \
@@ -439,7 +439,7 @@ jobs:
           --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --subnet=${{ vars.GCP_SUBNETWORK }} \
           --create-disk="${DISK_PARAMS}" \
           --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${DISK_NAME},mode=rw \
           --container-stdin \
