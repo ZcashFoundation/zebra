@@ -54,7 +54,7 @@ and delete the peers file (`~/.cache/zebra/network/unknowntestnet.peers`).
 
 ### Run Nodes
 
-Everyone runs their nodes, and check if they connect to other nodes. You can use
+Everyone runs their nodes, and checks if they connect to other nodes. You can use
 e.g. `curl --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method":
 "getpeerinfo", "params": [] }' -H 'Content-Type: application/json'
 http://127.0.0.1:8232` to check that. See "Getting Peers" section below.
@@ -75,7 +75,7 @@ Relevant information about Zebra for the testing process.
 
 ### Getting peers
 
-It seems Zebra is not very reliable at returning its currently connecte peers;
+It seems Zebra is not very reliable at returning its currently connected peers;
 you can use `getpeerinfo` RPC as above or check the peers file
 (`~/.cache/zebra/network/unknowntestnet.peers`) if `cache_dir = true` in the
 `[network]` section. You might want to sort this out before the next private
