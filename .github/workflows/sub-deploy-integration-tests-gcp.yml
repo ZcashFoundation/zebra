@@ -200,7 +200,7 @@ jobs:
           --create-disk="${DISK_PARAMS}" \
           --container-image=gcr.io/google-containers/busybox \
           --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
