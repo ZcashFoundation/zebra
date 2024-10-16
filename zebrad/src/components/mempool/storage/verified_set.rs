@@ -151,7 +151,7 @@ impl VerifiedSet {
         }
 
         // This likely only needs to check that the transaction hash of the outpoint is still in the mempool,
-        // bu it's likely rare that a transaction spends multiple transparent outputs of
+        // but it's likely rare that a transaction spends multiple transparent outputs of
         // a single transaction in practice.
         for outpoint in &spent_mempool_outpoints {
             if !self.created_outputs.contains_key(outpoint) {
