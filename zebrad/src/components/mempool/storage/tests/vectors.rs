@@ -185,7 +185,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
 
     // Check that it's rejection is cached in the chain_rejected_same_effects' `Mined` eviction list.
     assert_eq!(
-        storage.rejection_error(&unmined_tx_1.transaction.id.mined_id()),
+        storage.rejection_error(&unmined_tx_1.transaction.id),
         Some(SameEffectsChainRejectionError::Mined.into())
     );
     assert_eq!(
@@ -226,7 +226,7 @@ fn mempool_storage_crud_same_effects_mainnet() {
 
     // Check that it's rejection is cached in the chain_rejected_same_effects' `SpendConflict` eviction list.
     assert_eq!(
-        storage.rejection_error(&unmined_tx_2.transaction.id.mined_id()),
+        storage.rejection_error(&unmined_tx_2.transaction.id),
         Some(SameEffectsChainRejectionError::DuplicateSpend.into())
     );
     assert_eq!(

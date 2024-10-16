@@ -86,7 +86,7 @@ proptest! {
             });
 
             for rejection in unique_ids {
-                storage.reject(rejection.mined_id(), SameEffectsTipRejectionError::SpendConflict.into());
+                storage.reject(rejection, SameEffectsTipRejectionError::SpendConflict.into());
             }
 
             // Make sure there were no duplicates
@@ -135,7 +135,7 @@ proptest! {
         });
 
         for rejection in unique_ids {
-            storage.reject(rejection.mined_id(), SameEffectsChainRejectionError::RandomlyEvicted.into());
+            storage.reject(rejection, SameEffectsChainRejectionError::RandomlyEvicted.into());
         }
 
         // Make sure there were no duplicates
@@ -202,7 +202,7 @@ proptest! {
         });
 
         for (index, rejection) in unique_ids.enumerate() {
-            storage.reject(rejection.mined_id(), rejection_error.clone());
+            storage.reject(rejection, rejection_error.clone());
 
             if index == MAX_EVICTION_MEMORY_ENTRIES - 1 {
                 // Make sure there were no duplicates
@@ -249,9 +249,9 @@ proptest! {
             rejection_template
         }).collect();
 
-        storage.reject(unique_ids[0].mined_id(), SameEffectsChainRejectionError::RandomlyEvicted.into());
+        storage.reject(unique_ids[0], SameEffectsChainRejectionError::RandomlyEvicted.into());
         thread::sleep(Duration::from_millis(11));
-        storage.reject(unique_ids[1].mined_id(), SameEffectsChainRejectionError::RandomlyEvicted.into());
+        storage.reject(unique_ids[1], SameEffectsChainRejectionError::RandomlyEvicted.into());
 
         prop_assert_eq!(storage.rejected_transaction_count(), 1);
     }
@@ -288,7 +288,7 @@ proptest! {
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
-            prop_assert!(storage.contains_rejected(&id_to_reject.mined_id()));
+            prop_assert!(storage.contains_rejected(&id_to_reject));
 
             storage.clear();
         }
@@ -341,7 +341,7 @@ proptest! {
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
-            prop_assert!(storage.contains_rejected(&id_to_reject.mined_id()));
+            prop_assert!(storage.contains_rejected(&id_to_reject));
 
             prop_assert_eq!(
                 storage.insert(second_transaction_to_accept, Vec::new()),
@@ -387,7 +387,7 @@ proptest! {
                 let num_removals = storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]);
                     for &removed_transaction_id in mined_ids_to_remove.iter() {
                         prop_assert_eq!(
-                            storage.rejection_error(&removed_transaction_id),
+                            storage.rejection_error(&UnminedTxId::Legacy(removed_transaction_id)),
                             Some(SameEffectsChainRejectionError::Mined.into())
                         );
                     }
