@@ -237,8 +237,7 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    # TODO: Remove `|| github.event_name == 'workflow_dispatch'` condition before merging
-    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') || github.event_name == 'workflow_dispatch' }}
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
       - uses: actions/checkout@v4.2.1
@@ -295,7 +294,7 @@ jobs:
           echo "zebra_checkpoint_disk=${ZEBRA_CHECKPOINT_DISK}" >> "${GITHUB_OUTPUT}"
 
       - name: Get IP address for long-running release nodes
-        # if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' }}
         run: echo "IP_ADDRESS=$(gcloud compute addresses describe zebra-${NETWORK} --region ${{ vars.GCP_REGION }} --format='value(address)')" >> "$GITHUB_ENV"
 
       - name: Create instance template for ${{ matrix.network }}
