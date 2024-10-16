@@ -188,6 +188,10 @@ impl Storage {
 
     /// Insert a [`VerifiedUnminedTx`] into the mempool, caching any rejections.
     ///
+    /// Accepts the [`VerifiedUnminedTx`] being inserted and `spent_mempool_outpoints`,
+    /// a list of transparent inputs of the provided [`VerifiedUnminedTx`] that were found
+    /// as newly created transparent outputs in the mempool during transaction verification.
+    ///
     /// Returns an error if the mempool's verified transactions or rejection caches
     /// prevent this transaction from being inserted.
     /// These errors should not be propagated to peers, because the transactions are valid.
@@ -282,7 +286,6 @@ impl Storage {
                 );
 
                 // If this transaction gets evicted, set its result to the same error
-                // (we could return here, but we still want to check the mempool size)
                 if victim_tx.transaction.id == unmined_tx_id {
                     result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
                 }
