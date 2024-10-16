@@ -135,7 +135,7 @@ pub struct Storage {
     /// current tip.
     ///
     /// Only transactions with the exact [`UnminedTxId`] are invalid.
-    tip_rejected_exact: HashMap<transaction::Hash, ExactTipRejectionError>,
+    tip_rejected_exact: HashMap<UnminedTxId, ExactTipRejectionError>,
 
     /// A set of transactions rejected for their effects, and their rejection
     /// reasons. These rejections only apply to the current tip.
@@ -207,7 +207,7 @@ impl Storage {
         let tx_id = unmined_tx_id.mined_id();
 
         // First, check if we have a cached rejection for this transaction.
-        if let Some(error) = self.rejection_error(&tx_id) {
+        if let Some(error) = self.rejection_error(&unmined_tx_id) {
             tracing::trace!(
                 ?tx_id,
                 ?error,
@@ -246,7 +246,7 @@ impl Storage {
             );
 
             // We could return here, but we still want to check the mempool size
-            self.reject(tx_id, rejection_error.clone().into());
+            self.reject(unmined_tx_id, rejection_error.clone().into());
             result = Err(rejection_error.into());
         }
 
@@ -277,7 +277,7 @@ impl Storage {
                 // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
                 // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
                 self.reject(
-                    victim_tx.transaction.id.mined_id(),
+                    victim_tx.transaction.id,
                     SameEffectsChainRejectionError::RandomlyEvicted.into(),
                 );
 
@@ -381,14 +381,14 @@ impl Storage {
             self.reject(
                 // the reject and rejection_error fns that store and check `SameEffectsChainRejectionError`s
                 // only use the mined id, so using `Legacy` ids will apply to v5 transactions as well.
-                mined_id,
+                UnminedTxId::Legacy(mined_id),
                 SameEffectsChainRejectionError::Mined.into(),
             );
         }
 
         for duplicate_spend_id in duplicate_spend_ids {
             self.reject(
-                duplicate_spend_id.mined_id(),
+                duplicate_spend_id,
                 SameEffectsChainRejectionError::DuplicateSpend.into(),
             );
         }
@@ -533,13 +533,13 @@ impl Storage {
     }
 
     /// Add a transaction to the rejected list for the given reason.
-    pub fn reject(&mut self, tx_id: transaction::Hash, reason: RejectionError) {
+    pub fn reject(&mut self, tx_id: UnminedTxId, reason: RejectionError) {
         match reason {
             RejectionError::ExactTip(e) => {
                 self.tip_rejected_exact.insert(tx_id, e);
             }
             RejectionError::SameEffectsTip(e) => {
-                self.tip_rejected_same_effects.insert(tx_id, e);
+                self.tip_rejected_same_effects.insert(tx_id.mined_id(), e);
             }
             RejectionError::SameEffectsChain(e) => {
                 let eviction_memory_time = self.eviction_memory_time;
@@ -548,7 +548,7 @@ impl Storage {
                     .or_insert_with(|| {
                         EvictionList::new(MAX_EVICTION_MEMORY_ENTRIES, eviction_memory_time)
                     })
-                    .insert(tx_id);
+                    .insert(tx_id.mined_id());
             }
         }
         self.limit_rejection_list_memory();
@@ -560,17 +560,17 @@ impl Storage {
     /// This matches transactions based on each rejection list's matching rule.
     ///
     /// Returns an arbitrary error if the transaction is in multiple lists.
-    pub fn rejection_error(&self, txid: &transaction::Hash) -> Option<MempoolError> {
+    pub fn rejection_error(&self, txid: &UnminedTxId) -> Option<MempoolError> {
         if let Some(error) = self.tip_rejected_exact.get(txid) {
             return Some(error.clone().into());
         }
 
-        if let Some(error) = self.tip_rejected_same_effects.get(txid) {
+        if let Some(error) = self.tip_rejected_same_effects.get(&txid.mined_id()) {
             return Some(error.clone().into());
         }
 
         for (error, set) in self.chain_rejected_same_effects.iter() {
-            if set.contains_key(txid) {
+            if set.contains_key(&txid.mined_id()) {
                 return Some(error.clone().into());
             }
         }
@@ -587,20 +587,20 @@ impl Storage {
     ) -> impl Iterator<Item = UnminedTxId> + '_ {
         tx_ids
             .into_iter()
-            .filter(move |txid| self.contains_rejected(&txid.mined_id()))
+            .filter(move |txid| self.contains_rejected(txid))
     }
 
     /// Returns `true` if a transaction matching the supplied [`UnminedTxId`] is in
     /// the mempool rejected list.
     ///
     /// This matches transactions based on each rejection list's matching rule.
-    pub fn contains_rejected(&self, txid: &transaction::Hash) -> bool {
+    pub fn contains_rejected(&self, txid: &UnminedTxId) -> bool {
         self.rejection_error(txid).is_some()
     }
 
     /// Add a transaction that failed download and verification to the rejected list
     /// if needed, depending on the reason for the failure.
-    pub fn reject_if_needed(&mut self, txid: transaction::Hash, e: TransactionDownloadVerifyError) {
+    pub fn reject_if_needed(&mut self, tx_id: UnminedTxId, e: TransactionDownloadVerifyError) {
         match e {
             // Rejecting a transaction already in state would speed up further
             // download attempts without checking the state. However it would
@@ -623,7 +623,7 @@ impl Storage {
             // Consensus verification failed. Reject transaction to avoid
             // having to download and verify it again just for it to fail again.
             TransactionDownloadVerifyError::Invalid(e) => {
-                self.reject(txid, ExactTipRejectionError::FailedVerification(e).into())
+                self.reject(tx_id, ExactTipRejectionError::FailedVerification(e).into())
             }
         }
     }
@@ -641,42 +641,39 @@ impl Storage {
         &mut self,
         tip_height: zebra_chain::block::Height,
     ) -> HashSet<transaction::Hash> {
-        let mut txid_set = HashSet::new();
+        let mut tx_ids = HashSet::new();
         // we need a separate set, since reject() takes the original unmined ID,
         // then extracts the mined ID out of it
-        let mut unmined_id_set = HashSet::new();
+        let mut mined_tx_ids = HashSet::new();
 
-        for (&tx_id, tx) in self.transactions() {
+        for (tx_id, tx) in self.transactions() {
             if let Some(expiry_height) = tx.transaction.transaction.expiry_height() {
                 if tip_height >= expiry_height {
-                    txid_set.insert(tx_id);
-                    unmined_id_set.insert(tx_id);
+                    tx_ids.insert(tx.transaction.id);
+                    mined_tx_ids.insert(*tx_id);
                 }
             }
         }
 
         // expiry height is effecting data, so we match by non-malleable TXID
         self.verified
-            .remove_all_that(|tx| txid_set.contains(&tx.transaction.id.mined_id()));
+            .remove_all_that(|tx| tx_ids.contains(&tx.transaction.id));
 
         // also reject it
-        for &id in &unmined_id_set {
+        for &id in &tx_ids {
             self.reject(id, SameEffectsChainRejectionError::Expired.into());
         }
 
-        unmined_id_set
+        mined_tx_ids
     }
 
     /// Check if transaction should be downloaded and/or verified.
     ///
     /// If it is already in the mempool (or in its rejected list)
     /// then it shouldn't be downloaded/verified.
-    pub fn should_download_or_verify(
-        &mut self,
-        txid: transaction::Hash,
-    ) -> Result<(), MempoolError> {
+    pub fn should_download_or_verify(&mut self, txid: UnminedTxId) -> Result<(), MempoolError> {
         // Check if the transaction is already in the mempool.
-        if self.contains_transaction_exact(&txid) {
+        if self.contains_transaction_exact(&txid.mined_id()) {
             return Err(MempoolError::InMempool);
         }
         if let Some(error) = self.rejection_error(&txid) {

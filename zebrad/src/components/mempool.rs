@@ -617,11 +617,11 @@ impl Service<Request> for Mempool {
                                 .download_if_needed_and_verify(tx.transaction.into(), None);
                         }
                     }
-                    Ok(Err((txid, error))) => {
-                        tracing::debug!(?txid, ?error, "mempool transaction failed to verify");
+                    Ok(Err((tx_id, error))) => {
+                        tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
-                        storage.reject_if_needed(txid.mined_id(), error);
+                        storage.reject_if_needed(tx_id, error);
                     }
                     Err(_elapsed) => {
                         // A timeout happens when the stream hangs waiting for another service,
@@ -788,8 +788,7 @@ impl Service<Request> for Mempool {
                                     MempoolError,
                                 > {
                                     let (rsp_tx, rsp_rx) = oneshot::channel();
-                                    storage
-                                        .should_download_or_verify(gossiped_tx.id().mined_id())?;
+                                    storage.should_download_or_verify(gossiped_tx.id())?;
                                     tx_downloads
                                         .download_if_needed_and_verify(gossiped_tx, Some(rsp_tx))?;
 
