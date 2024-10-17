@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tonic_build::configure()
             .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
             .file_descriptor_set_path(out_dir.unwrap().join("indexer_descriptor.bin"))
-            .compile(&["proto/indexer.proto"], &[""])?;
+            .compile_protos(&["proto/indexer.proto"], &[""])?;
     }
 
     Ok(())
