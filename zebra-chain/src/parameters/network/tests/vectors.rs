@@ -139,7 +139,7 @@ fn activates_network_upgrades_correctly() {
     let expected_default_regtest_activation_heights = &[
         (Height(0), NetworkUpgrade::Genesis),
         (Height(1), NetworkUpgrade::Canopy),
-        // TODO: Remove this once the testnet parameters are being serialized.
+        // TODO: Remove this once the testnet parameters are being serialized (#8920).
         (Height(100), NetworkUpgrade::Nu5),
     ];
 

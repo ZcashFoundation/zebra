@@ -47,7 +47,7 @@ fn main() {
         // so we can derive `Eq` as well as the default generated `PartialEq` derive.
         // This fixes `clippy::derive_partial_eq_without_eq` warnings.
         .message_attribute(".", "#[derive(Eq)]")
-        .compile(
+        .compile_protos(
             &["tests/common/lightwalletd/proto/service.proto"],
             &["tests/common/lightwalletd/proto"],
         )

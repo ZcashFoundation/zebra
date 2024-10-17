@@ -5,6 +5,42 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 2.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0-rc.0) - 2024-10-11
+
+This version is a release candidate for the Zcash NU6 network upgrade on the Mainnet. While this version does not yet include the NU6 Mainnet activation height or current protocol version, all required functionality and tests are in place.
+
+Please note that support for this release candidate is expected to conclude prior to the NU6 activation heights.
+
+### Security
+
+- Added Docker Scout vulnerabilities scanning ([#8871](https://github.com/ZcashFoundation/zebra/pull/8871))
+
+### Added
+
+- Added Regtest-only `generate` and `stop` RPC methods ([#8849](https://github.com/ZcashFoundation/zebra/pull/8849), [#8839](https://github.com/ZcashFoundation/zebra/pull/8839), [#8863](https://github.com/ZcashFoundation/zebra/pull/8863))
+- Added fields to `getmininginfo` RPC method response ([#8860](https://github.com/ZcashFoundation/zebra/pull/8860))
+- Copied the Python RPC test framework from zcashd into Zebra ([#8866](https://github.com/ZcashFoundation/zebra/pull/8866))
+
+### Changed
+
+- Regtest halving interval to match zcashd and added a configurable halving interval for custom testnets ([#8888](https://github.com/ZcashFoundation/zebra/pull/8888), [#8928](https://github.com/ZcashFoundation/zebra/pull/8928))
+- Updates post-NU6 Major Grants funding stream address on Mainnet ([#8914](https://github.com/ZcashFoundation/zebra/pull/8914))
+
+### Fixed
+
+- Remove debugging output by default in Docker image ([#8870](https://github.com/ZcashFoundation/zebra/pull/8870))
+- Fixes a typo in configuration file path of the docker-compose file ([#8893](https://github.com/ZcashFoundation/zebra/pull/8893))
+- Return verification errors from `sendrawtransaction` RPC method ([#8788](https://github.com/ZcashFoundation/zebra/pull/8788))
+- Respond to getheaders requests with a maximum of 160 block headers ([#8913](https://github.com/ZcashFoundation/zebra/pull/8913))
+- Avoids panicking during contextual validation when a parent block is missing ([#8883](https://github.com/ZcashFoundation/zebra/pull/8883))
+- Write database format version to disk atomically to avoid a rare panic ([#8795](https://github.com/ZcashFoundation/zebra/pull/8795))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @dismad, @gustavovalverde, @oxarbitrage, @skyl and @upbqdn
+
+
 ## [Zebra 1.9.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.9.0) - 2024-08-02
 
 This release includes deployment of NU6 on Testnet, configurable funding streams on custom Testnets, and updates Zebra's end-of-support (EoS)
