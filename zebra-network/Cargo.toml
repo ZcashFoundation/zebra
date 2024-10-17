@@ -47,12 +47,12 @@ chrono = { version = "0.4.38", default-features = false, features = ["clock", "s
 dirs = "5.0.1"
 hex = "0.4.3"
 humantime-serde = "1.1.1"
-indexmap = { version = "2.5.0", features = ["serde"] }
+indexmap = { version = "2.6.0", features = ["serde"] }
 itertools = "0.13.0"
 lazy_static = "1.4.0"
 num-integer = "0.1.46"
 ordered-map = "0.4.2"
-pin-project = "1.1.5"
+pin-project = "1.1.6"
 rand = "0.8.5"
 rayon = "1.10.0"
 regex = "1.11.0"
@@ -60,13 +60,13 @@ serde = { version = "1.0.210", features = ["serde_derive"] }
 tempfile = "3.13.0"
 thiserror = "1.0.64"
 
-futures = "0.3.30"
+futures = "0.3.31"
 tokio = { version = "1.40.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.16", features = ["sync", "time"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
-tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower = { version = "0.5.1", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
-metrics = "0.23.0"
+metrics = "0.24.0"
 tracing-futures = "0.2.5"
 tracing-error = { version = "0.2.0", features = ["traced-error"] }
 tracing = "0.1.39"
