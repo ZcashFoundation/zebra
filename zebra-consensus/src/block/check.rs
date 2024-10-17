@@ -191,7 +191,8 @@ pub fn subsidy_is_valid(
             network,
             expected_block_subsidy,
         )
-        .expect("We always expect a funding stream hashmap response even if empty");
+        // we always expect a funding stream hashmap response even if empty
+        .map_err(|err| BlockError::Other(err.to_string()))?;
 
         // # Consensus
         //
@@ -208,10 +209,14 @@ pub fn subsidy_is_valid(
                 continue;
             }
 
-            let address = subsidy::funding_streams::funding_stream_address(
-                height, network, receiver,
-            )
-            .expect("funding stream receivers other than the deferred pool must have an address");
+            let address =
+                subsidy::funding_streams::funding_stream_address(height, network, receiver)
+                    // funding stream receivers other than the deferred pool must have an address
+                    .ok_or_else(|| {
+                        BlockError::Other(format!(
+                            "missing funding stream address at height {height:?}"
+                        ))
+                    })?;
 
             let has_expected_output =
                 subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
