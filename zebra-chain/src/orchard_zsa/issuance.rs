@@ -5,8 +5,8 @@ use std::{fmt::Debug, io};
 use crate::{
     block::MAX_BLOCK_BYTES,
     serialization::{
-        zcash_serialize_empty_list, ReadZcashExt, SerializationError, TrustedPreallocate,
-        ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+        zcash_serialize_bytes, zcash_serialize_empty_list, ReadZcashExt, SerializationError,
+        TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
 };
 
@@ -182,8 +182,8 @@ impl TrustedPreallocate for Note {
 impl ZcashSerialize for IssueAction {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_u8(self.is_finalized().as_u8())?;
-        self.notes().zcash_serialize(&mut writer)?;
-        self.asset_desc().zcash_serialize(&mut writer)?;
+        self.notes().to_vec().zcash_serialize(&mut writer)?;
+        zcash_serialize_bytes(&self.asset_desc().to_vec(), &mut writer)?;
         Ok(())
     }
 }
