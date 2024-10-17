@@ -6070,7 +6070,9 @@ dependencies = [
 name = "zebra-rpc"
 version = "1.0.0-beta.40"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
+ "color-eyre",
  "futures",
  "hex",
  "indexmap 2.5.0",

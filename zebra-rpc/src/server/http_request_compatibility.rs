@@ -2,11 +2,14 @@
 //!
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
+use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 use futures::TryStreamExt;
 use jsonrpc_http_server::{
     hyper::{body::Bytes, header, Body, Request},
     RequestMiddleware, RequestMiddlewareAction,
 };
+
+use crate::server::cookie;
 
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
@@ -34,12 +37,29 @@ use jsonrpc_http_server::{
 /// Any user-specified data in RPC requests is hex or base58check encoded.
 /// We assume lightwalletd validates data encodings before sending it on to Zebra.
 /// So any fixes Zebra performs won't change user-specified data.
-#[derive(Copy, Clone, Debug)]
-pub struct FixHttpRequestMiddleware;
+#[derive(Clone, Debug)]
+pub struct FixHttpRequestMiddleware(pub crate::config::Config);
 
 impl RequestMiddleware for FixHttpRequestMiddleware {
     fn on_request(&self, mut request: Request<Body>) -> RequestMiddlewareAction {
         tracing::trace!(?request, "original HTTP request");
+
+        // Check if the request is authenticated
+        if !self.check_credentials(request.headers_mut()) {
+            let error = jsonrpc_core::Error {
+                code: jsonrpc_core::ErrorCode::ServerError(401),
+                message: "unauthenticated method".to_string(),
+                data: None,
+            };
+            return jsonrpc_http_server::Response {
+                code: jsonrpc_http_server::hyper::StatusCode::from_u16(401)
+                    .expect("hard-coded status code should be valid"),
+                content_type: header::HeaderValue::from_static("application/json; charset=utf-8"),
+                content: serde_json::to_string(&jsonrpc_core::Response::from(error, None))
+                    .expect("hard-coded result should serialize"),
+            }
+            .into();
+        }
 
         // Fix the request headers if needed and we can do so.
         FixHttpRequestMiddleware::insert_or_replace_content_type_header(request.headers_mut());
@@ -140,5 +160,31 @@ impl FixHttpRequestMiddleware {
                 header::HeaderValue::from_static("application/json"),
             );
         }
+    }
+
+    /// Check if the request is authenticated.
+    pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
+        if !self.0.enable_cookie_auth {
+            return true;
+        }
+        headers
+            .get(header::AUTHORIZATION)
+            .and_then(|auth_header| auth_header.to_str().ok())
+            .and_then(|auth| auth.split_whitespace().nth(1))
+            .and_then(|token| URL_SAFE.decode(token).ok())
+            .and_then(|decoded| String::from_utf8(decoded).ok())
+            .and_then(|decoded_str| {
+                decoded_str
+                    .split(':')
+                    .nth(1)
+                    .map(|password| password.to_string())
+            })
+            .map_or(false, |password| {
+                if let Ok(cookie_password) = cookie::get(self.0.cookie_dir.clone()) {
+                    cookie_password == password
+                } else {
+                    false
+                }
+            })
     }
 }
