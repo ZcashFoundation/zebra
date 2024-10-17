@@ -6,43 +6,47 @@ use rand::RngCore;
 
 use std::{
     fs::{remove_file, File},
-    io::{Read, Write},
-    path::PathBuf,
+    io::Write,
+    path::Path,
 };
 
-/// The user field in the cookie (arbitrary, only for recognizability in debugging/logging purposes)
-pub const COOKIEAUTH_USER: &str = "__cookie__";
-/// Default name for auth cookie file */
-pub const COOKIEAUTH_FILE: &str = ".cookie";
+/// The name of the cookie file on the disk
+const FILE: &str = ".cookie";
 
-/// Generate a new auth cookie and store it in the given `cookie_dir`.
-pub fn generate(cookie_dir: PathBuf) -> Result<()> {
-    let mut data = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut data);
-    let encoded_password = URL_SAFE.encode(data);
-    let cookie_content = format!("{}:{}", COOKIEAUTH_USER, encoded_password);
+/// If the RPC authentication is enabled, all requests must contain this cookie.
+#[derive(Clone, Debug)]
+pub struct Cookie(String);
 
-    let mut file = File::create(cookie_dir.join(COOKIEAUTH_FILE))?;
-    file.write_all(cookie_content.as_bytes())?;
+impl Cookie {
+    /// Checks if the given passwd matches the contents of the cookie.
+    pub fn authenticate(&self, passwd: String) -> bool {
+        *passwd == self.0
+    }
+}
 
-    tracing::info!("RPC auth cookie generated successfully");
+impl Default for Cookie {
+    fn default() -> Self {
+        let mut bytes = [0u8; 32];
+        rand::thread_rng().fill_bytes(&mut bytes);
+
+        Self(URL_SAFE.encode(bytes))
+    }
+}
+
+/// Writes the given cookie to the given dir.
+pub fn write_to_disk(cookie: &Cookie, dir: &Path) -> Result<()> {
+    File::create(dir.join(FILE))?.write_all(format!("__cookie__:{}", cookie.0).as_bytes())?;
+
+    tracing::info!("RPC auth cookie written to disk");
 
     Ok(())
 }
 
-/// Get the encoded password from the auth cookie.
-pub fn get(cookie_dir: PathBuf) -> Result<String> {
-    let mut file = File::open(cookie_dir.join(COOKIEAUTH_FILE))?;
-    let mut contents = String::new();
-    file.read_to_string(&mut contents)?;
+/// Removes a cookie from the given dir.
+pub fn remove_from_disk(dir: &Path) -> Result<()> {
+    remove_file(dir.join(FILE))?;
 
-    let parts: Vec<&str> = contents.split(":").collect();
-    Ok(parts[1].to_string())
-}
+    tracing::info!("RPC auth cookie removed from disk");
 
-/// Delete the auth cookie.
-pub fn delete() -> Result<()> {
-    remove_file(COOKIEAUTH_FILE)?;
-    tracing::info!("RPC auth cookie deleted successfully");
     Ok(())
 }
