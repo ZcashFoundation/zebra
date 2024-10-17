@@ -47,10 +47,9 @@ pub struct HttpRequestMiddleware {
     cookie: Option<Cookie>,
 }
 
-/// A trait for applying a modification to an object, consuming it and returning the modified
-/// version.
+/// A trait for updating an object, consuming it and returning the updated version.
 pub trait With<T> {
-    /// Modifies `self` with an instance of type `T` and returns the modified version of `self`.
+    /// Updates `self` with an instance of type `T` and returns the updated version of `self`.
     fn with(self, _: T) -> Self;
 }
 
