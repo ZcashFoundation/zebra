@@ -44,8 +44,7 @@ use zebra_chain::{block::Height, serialization::ZcashSerialize};
 
 use crate::{
     constants::{
-        MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
-        MAX_LEGACY_CHAIN_BLOCKS,
+        MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
     service::{
         block_iter::any_ancestor_blocks,
@@ -1476,7 +1475,7 @@ impl Service<ReadRequest> for ReadStateService {
                                     &state.db,
                                     known_blocks,
                                     stop,
-                                    MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
+                                    MAX_FIND_BLOCK_HEADERS_RESULTS,
                                 )
                             },
                         );

@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
         .file_descriptor_set_path(out_dir.join("scanner_descriptor.bin"))
-        .compile(&["proto/scanner.proto"], &[""])?;
+        .compile_protos(&["proto/scanner.proto"], &[""])?;
 
     Ok(())
 }

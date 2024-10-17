@@ -54,7 +54,7 @@ where
 
     let reflection_service = tonic_reflection::server::Builder::configure()
         .register_encoded_file_descriptor_set(crate::indexer::FILE_DESCRIPTOR_SET)
-        .build()
+        .build_v1()
         .unwrap();
 
     tracing::info!("Trying to open indexer RPC endpoint at {}...", listen_addr,);

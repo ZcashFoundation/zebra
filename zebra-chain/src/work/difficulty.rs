@@ -457,10 +457,7 @@ impl ExpandedDifficulty {
     /// Zebra displays difficulties in big-endian byte-order,
     /// following the u256 convention set by Bitcoin and zcashd.
     pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        let mut reversed_bytes = [0; 32];
-        self.0.to_big_endian(&mut reversed_bytes);
-
-        reversed_bytes
+        self.0.to_big_endian()
     }
 
     /// Convert bytes in big-endian byte-order into an [`ExpandedDifficulty`].

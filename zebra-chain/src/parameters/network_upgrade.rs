@@ -60,6 +60,7 @@ pub enum NetworkUpgrade {
     #[serde(rename = "NU5")]
     Nu5,
     /// The Zcash protocol after the NU6 upgrade.
+    #[serde(rename = "NU6")]
     Nu6,
     /// The Zcash protocol after the NU7 upgrade.
     Nu7,
