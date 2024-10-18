@@ -1,6 +1,6 @@
 # Google Cloud node deployments and tests that run when Rust code or dependencies are modified,
 # but only on PRs from the ZcashFoundation/zebra repository.
-# (External PRs are tested/deployed by mergify.) 
+# (External PRs are tested/deployed by mergify.)
 #
 # 1. `versioning`: Extracts the major version from the release semver. Useful for segregating instances based on major versions.
 # 2. `build`: Builds a Docker image named `zebrad` with the necessary tags derived from Git.
@@ -30,58 +30,80 @@ on:
   workflow_dispatch:
     inputs:
       network:
-        default: 'Mainnet'
-        description: 'Network to deploy: Mainnet or Testnet'
+        default: Mainnet
+        description: "Network to deploy: Mainnet or Testnet"
         required: true
-      log_file:
-        default: ''
-        description: 'Log to a file path rather than standard output'
+        type: choice
+        options:
+          - Mainnet
+          - Testnet
+      cached_disk_type:
+        default: tip
+        description: "Type of cached disk to use"
+        required: true
+        type: choice
+        options:
+          - tip
+          - checkpoint
+      prefer_main_cached_state:
+        default: false
+        description: "Prefer cached state from the main branch"
+        required: false
+        type: boolean
+      no_cached_disk:
+        default: false
+        description: "Do not use a cached state disk"
+        required: false
+        type: boolean
       no_cache:
-        description: 'Disable the Docker cache for this build'
+        description: "Disable the Docker cache for this build"
         required: false
         type: boolean
         default: false
+      log_file:
+        default: ""
+        description: "Log to a file path rather than standard output"
 
   push:
-   # Skip main branch updates where Rust code and dependencies aren't modified.
-   branches:
-     - main
-   paths:
-     # code and tests
-     - '**/*.rs'
-     # hard-coded checkpoints and proptest regressions
-     - '**/*.txt'
-     # dependencies
-     - '**/Cargo.toml'
-     - '**/Cargo.lock'
-     # configuration files
-     - '.cargo/config.toml'
-     - '**/clippy.toml'
-     # workflow definitions
-     - 'docker/**'
-     - '.dockerignore'
-     - '.github/workflows/cd-deploy-nodes-gcp.yml'
-     - '.github/workflows/sub-build-docker-image.yml'
+    # Skip main branch updates where Rust code and dependencies aren't modified.
+    branches:
+      - main
+    paths:
+      # code and tests
+      - "**/*.rs"
+      # hard-coded checkpoints and proptest regressions
+      - "**/*.txt"
+      # dependencies
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      # configuration files
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
+      # workflow definitions
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/cd-deploy-nodes-gcp.yml"
+      - ".github/workflows/sub-build-docker-image.yml"
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
-      - '**/*.rs'
+      - "**/*.rs"
       # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
+      - "**/*.txt"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - 'docker/**'
-      - '.dockerignore'
-      - '.github/workflows/cd-deploy-nodes-gcp.yml'
-      - '.github/workflows/sub-build-docker-image.yml'
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/cd-deploy-nodes-gcp.yml"
+      - ".github/workflows/sub-build-docker-image.yml"
 
   release:
     types:
@@ -144,11 +166,11 @@ jobs:
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'default-conf'
+      test_id: "default-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Mainnet'
+      test_variables: "-e NETWORK"
+      network: "Mainnet"
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
@@ -157,11 +179,11 @@ jobs:
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'testnet-conf'
+      test_id: "testnet-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Testnet'
+      test_variables: "-e NETWORK"
+      network: "Testnet"
 
   # Finds a `tip` cached state disk for zebra from the main branch
   #
@@ -170,11 +192,12 @@ jobs:
   get-disk-name:
     name: Get disk name
     uses: ./.github/workflows/sub-find-cached-disks.yml
+    if: ${{ !inputs.no_cached_disk }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
-      disk_suffix: tip
-      prefer_main_cached_state: true
+      disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
+      prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -196,14 +219,21 @@ jobs:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path, get-disk-name ]
+    needs:
+      [
+        build,
+        versioning,
+        test-configuration-file,
+        test-zebra-conf-path,
+        get-disk-name,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
@@ -232,20 +262,20 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.6
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.1
 
-      # TODO we should implement the fixes from https://github.com/ZcashFoundation/zebra/pull/5670 here
-      # but the implementation is failing as it's requiring the disk names, contrary to what is stated in the official documentation
       - name: Create instance template for ${{ matrix.network }}
         run: |
-          NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
-          DISK_PARAMS="name=${NAME},device-name=${NAME},size=400GB,type=pd-ssd"
+          DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
+          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
+          elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
+           echo "No cached disk required"
           else
             echo "No cached disk found for ${{ matrix.network }} in main branch"
             exit 1
@@ -258,7 +288,7 @@ jobs:
           --image-family=cos-stable \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --create-disk="${DISK_PARAMS}" \
-          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${NAME},mode=rw \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${DISK_NAME},mode=rw \
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
@@ -306,15 +336,16 @@ jobs:
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single ${{ inputs.network }} instance
-    needs: [ build, test-configuration-file, test-zebra-conf-path, get-disk-name ]
+    needs: [build, test-configuration-file, test-zebra-conf-path, get-disk-name]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
-    if: github.event_name == 'workflow_dispatch'
+      contents: "read"
+      id-token: "write"
+    # Run even if we don't need a cached disk, but only when triggered by a workflow_dispatch
+    if: ${{ !failure() && github.event_name == 'workflow_dispatch' }}
 
     steps:
       - uses: actions/checkout@v4.2.1
@@ -342,8 +373,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.6
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.1
@@ -351,10 +382,12 @@ jobs:
       # Create instance template from container image
       - name: Manual deploy of a single ${{ inputs.network }} instance running zebrad
         run: |
-          NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
-          DISK_PARAMS="name=${NAME},device-name=${NAME},size=400GB,type=pd-ssd"
+          DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
+          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
+          elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
+           echo "No cached disk required"
           else
             echo "No cached disk found for ${{ matrix.network }} in main branch"
             exit 1
@@ -367,7 +400,7 @@ jobs:
           --image-family=cos-stable \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --create-disk="${DISK_PARAMS}" \
-          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${NAME},mode=rw \
+          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${DISK_NAME},mode=rw \
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
@@ -382,7 +415,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ versioning, build, deploy-nodes, deploy-instance ]
+    needs: [versioning, build, deploy-nodes, deploy-instance]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
