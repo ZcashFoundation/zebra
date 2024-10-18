@@ -150,7 +150,8 @@ impl ZebraDb {
                 && newer_running_version.major == (older_disk_version.major + 1)
                 && RESTORABLE_DB_VERSIONS.contains(&newer_running_version.major) =>
             {
-                warn!("upgrading database format to the next major version");
+                info!("upgrading database format to the next major version");
+                // use the latest possible minor version to trigger all remaining format upgrades for the older major version
                 let db = new_db(Version::new(older_disk_version.major, u64::MAX, u64::MAX));
                 let finalized_tip = db.finalized_tip_height();
 
