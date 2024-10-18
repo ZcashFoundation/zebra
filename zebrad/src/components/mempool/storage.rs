@@ -315,6 +315,11 @@ impl Storage {
             .remove_all_that(|tx| exact_wtxids.contains(&tx.transaction.id))
     }
 
+    /// Clears a list of mined transaction ids from the verified set's tracked transaction dependencies.
+    pub fn clear_mined_dependencies(&mut self, mined_ids: &HashSet<transaction::Hash>) {
+        self.verified.clear_mined_dependencies(mined_ids);
+    }
+
     /// Reject and remove transactions from the mempool via non-malleable [`transaction::Hash`].
     /// - For v5 transactions, transactions are matched by TXID,
     ///   using only the non-malleable transaction ID.

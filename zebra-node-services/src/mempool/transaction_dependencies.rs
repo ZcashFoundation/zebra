@@ -55,6 +55,22 @@ impl TransactionDependencies {
         }
     }
 
+    /// Removes all dependents for a list of mined transaction ids and removes the mined transaction ids
+    /// from the dependencies of their dependents.
+    pub fn clear_mined_dependencies(&mut self, mined_ids: &HashSet<transaction::Hash>) {
+        for mined_tx_id in mined_ids {
+            for dependent_id in self.dependents.remove(mined_tx_id).unwrap_or_default() {
+                let Some(dependencies) = self.dependencies.get_mut(&dependent_id) else {
+                    // TODO: Move this struct to zebra-chain and log a warning here.
+                    continue;
+                };
+
+                // TODO: Move this struct to zebra-chain and log a warning here if the dependency was not found.
+                let _ = dependencies.remove(&dependent_id);
+            }
+        }
+    }
+
     /// Removes the hash of a transaction in the mempool and the hashes of any transactions
     /// that are tracked as being directly or indirectly dependent on that transaction from
     /// this [`TransactionDependencies`].

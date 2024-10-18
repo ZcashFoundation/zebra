@@ -222,6 +222,13 @@ impl VerifiedSet {
         }
     }
 
+    /// Clears a list of mined transaction ids from the lists of dependencies for
+    /// any other transactions in the mempool and removes their dependents.
+    pub fn clear_mined_dependencies(&mut self, mined_ids: &HashSet<transaction::Hash>) {
+        self.transaction_dependencies
+            .clear_mined_dependencies(mined_ids);
+    }
+
     /// Removes all transactions in the set that match the `predicate`.
     ///
     /// Returns the amount of transactions removed.
