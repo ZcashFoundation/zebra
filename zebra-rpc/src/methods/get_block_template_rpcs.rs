@@ -11,7 +11,11 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
-    block::{self, Block, Height, TryIntoHeight},
+    block::{
+        self,
+        subsidy::{funding_streams, general},
+        Block, Height, TryIntoHeight,
+    },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
@@ -25,12 +29,13 @@ use zebra_chain::{
     },
     work::difficulty::{ParameterDifficulty as _, U256},
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
-};
+
+use zebra_consensus::RouterError;
+
+use zebra_state::{ReadRequest, ReadResponse};
+
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
@@ -1202,6 +1207,8 @@ where
     fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>> {
         let latest_chain_tip = self.latest_chain_tip.clone();
         let network = self.network.clone();
+        #[cfg(zcash_unstable = "nsm")]
+        let mut state_service = self.state.clone();
 
         async move {
             let height = if let Some(height) = height {
@@ -1223,12 +1230,42 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let total_block_subsidy = block_subsidy(height, &network).map_server_error()?;
+            #[cfg(zcash_unstable = "nsm")]
+            let total_block_subsidy = {
+                let money_reserve = match state_service
+                    .ready()
+                    .await
+                    .map_err(|_| Error {
+                        code: ErrorCode::InternalError,
+                        message: "".into(),
+                        data: None,
+                    })?
+                    .call(ReadRequest::TipPoolValues)
+                    .await
+                    .map_err(|_| Error {
+                        code: ErrorCode::InternalError,
+                        message: "".into(),
+                        data: None,
+                    })? {
+                    ReadResponse::TipPoolValues {
+                        tip_hash: _,
+                        tip_height: _,
+                        value_balance,
+                    } => value_balance.money_reserve(),
+                    _ => unreachable!("wrong response to ReadRequest::TipPoolValues"),
+                };
+                general::block_subsidy(height, &network, money_reserve).map_server_error()?
+            };
+
+            #[cfg(not(zcash_unstable = "nsm"))]
+            let total_block_subsidy =
+                general::block_subsidy_pre_nsm(height, &network).map_server_error()?;
+
             let miner_subsidy =
-                miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
+                general::miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
 
             let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
-                funding_stream_values(height, &network, total_block_subsidy)
+                funding_streams::funding_stream_values(height, &network, total_block_subsidy)
                     .map_server_error()?
                     .into_iter()
                     // Separate the funding streams into deferred and non-deferred streams
@@ -1255,7 +1292,8 @@ where
                     streams
                         .into_iter()
                         .map(|(receiver, value)| {
-                            let address = funding_stream_address(height, &network, receiver);
+                            let address =
+                                funding_streams::funding_stream_address(height, &network, receiver);
                             FundingStream::new(is_nu6, receiver, value, address)
                         })
                         .collect()

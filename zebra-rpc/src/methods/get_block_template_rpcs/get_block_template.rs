@@ -6,10 +6,11 @@ use jsonrpc_core::{Error, ErrorCode, Result};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
-    amount::{self, Amount, NegativeOrZero, NonNegative},
+    amount::{self, Amount, NegativeOrZero, NonNegative, MAX_MONEY},
     block::{
         self,
         merkle::{self, AuthDataRoot},
+        subsidy::{funding_streams, general},
         Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
     },
     chain_sync_status::ChainSyncStatus,
@@ -19,11 +20,9 @@ use zebra_chain::{
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
-};
-use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
+
+use zebra_node_services::mempool;
 
 use crate::methods::{
     errors::OkOrServerError,
@@ -376,9 +375,19 @@ pub fn standard_coinbase_outputs(
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
-    let expected_block_subsidy = block_subsidy(height, network).expect("valid block subsidy");
-    let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
-        .expect("funding stream value calculations are valid for reasonable chain heights");
+    #[cfg(zcash_unstable = "nsm")]
+    let expected_block_subsidy = general::block_subsidy(
+        height,
+        network,
+        MAX_MONEY.try_into().expect("MAX_MONEY is a valid amount"),
+    )
+    .expect("valid block subsidy");
+    #[cfg(not(zcash_unstable = "nsm"))]
+    let expected_block_subsidy =
+        general::block_subsidy_pre_nsm(height, network).expect("valid block subsidy");
+    let funding_streams =
+        funding_streams::funding_stream_values(height, network, expected_block_subsidy)
+            .expect("funding stream value calculations are valid for reasonable chain heights");
 
     // Optional TODO: move this into a zebra_consensus function?
     let funding_streams: HashMap<
@@ -389,12 +398,15 @@ pub fn standard_coinbase_outputs(
         .filter_map(|(receiver, amount)| {
             Some((
                 receiver,
-                (amount, funding_stream_address(height, network, receiver)?),
+                (
+                    amount,
+                    funding_streams::funding_stream_address(height, network, receiver)?,
+                ),
             ))
         })
         .collect();
 
-    let miner_reward = miner_subsidy(height, network, expected_block_subsidy)
+    let miner_reward = general::miner_subsidy(height, network, expected_block_subsidy)
         .expect("reward calculations are valid for reasonable chain heights")
         + miner_fee;
     let miner_reward =
