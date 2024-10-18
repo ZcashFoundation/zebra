@@ -162,13 +162,7 @@ pub fn subsidy_is_valid(
         .activation_height(network)
         .expect("Canopy activation height is known");
 
-    // TODO: Add this as a field on `testnet::Parameters` instead of checking `disable_pow()`, this is 0 for Regtest in zcashd,
-    //       see <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L640>
-    let slow_start_interval = if network.disable_pow() {
-        Height(0)
-    } else {
-        network.slow_start_interval()
-    };
+    let slow_start_interval = network.slow_start_interval();
 
     if height < slow_start_interval {
         unreachable!(
@@ -205,7 +199,7 @@ pub fn subsidy_is_valid(
         for (receiver, expected_amount) in funding_streams {
             if receiver == FundingStreamReceiver::Deferred {
                 // The deferred pool contribution is checked in `miner_fees_are_valid()`
-                // TODO: Add link to lockbox stream ZIP
+                // See [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
                 continue;
             }
 
@@ -255,25 +249,23 @@ pub fn miner_fees_are_valid(
     let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
     let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
 
-    // TODO: Update the quote below once its been updated for NU6.
-    //
     // # Consensus
     //
-    // > The total value in zatoshi of transparent outputs from a coinbase transaction,
-    // > minus vbalanceSapling, minus vbalanceOrchard, MUST NOT be greater than the value
-    // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
+    // > - define the total output value of its coinbase transaction to be the total value in zatoshi of its transparent
+    // >   outputs, minus vbalanceSapling, minus vbalanceOrchard, plus totalDeferredOutput(height);
+    // > – define the total input value of its coinbase transaction to be the value in zatoshi of the block subsidy,
+    // >   plus the transaction fees paid by transactions in the block.
     //
     // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
     //
     // The expected lockbox funding stream output of the coinbase transaction is also subtracted
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
-    let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
-        .map_err(|_| SubsidyError::SumOverflow)?;
-    let right = (expected_block_subsidy + block_miner_fees - expected_deferred_amount)
-        .map_err(|_| SubsidyError::SumOverflow)?;
+    let total_output_value = (transparent_value_balance - sapling_value_balance - orchard_value_balance
+        + expected_deferred_amount.constrain().expect("valid Amount with NonNegative constraint should be valid with NegativeAllowed constraint"))
+    .map_err(|_| SubsidyError::SumOverflow)?;
+    let total_input_value =
+        (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 
-    // TODO: Updadte the quotes below if the final phrasing changes in the spec for NU6.
-    //
     // # Consensus
     //
     // > [Pre-NU6] The total output of a coinbase transaction MUST NOT be greater than its total
@@ -281,9 +273,9 @@ pub fn miner_fees_are_valid(
     //
     // > [NU6 onward] The total output of a coinbase transaction MUST be equal to its total input.
     if if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu6 {
-        left > right
+        total_output_value > total_input_value
     } else {
-        left != right
+        total_output_value != total_input_value
     } {
         Err(SubsidyError::InvalidMinerFees)?
     };
