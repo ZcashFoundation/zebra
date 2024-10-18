@@ -8,7 +8,9 @@ use core::fmt;
 use std::{borrow::Borrow, collections::HashMap};
 
 #[cfg(any(test, feature = "proptest-impl"))]
-use crate::{amount::MAX_MONEY, transaction::Transaction, transparent};
+use crate::{transaction::Transaction, transparent};
+
+use crate::amount::MAX_MONEY;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
@@ -394,6 +396,15 @@ impl ValueBalance<NonNegative> {
             orchard,
             deferred,
         })
+    }
+
+    #[cfg(zcash_unstable = "nsm")]
+    pub fn money_reserve(&self) -> Amount<NonNegative> {
+        let max_money: Amount<NonNegative> = MAX_MONEY
+            .try_into()
+            .expect("MAX_MONEY should be a valid amount");
+        (max_money - self.transparent - self.sprout - self.sapling - self.orchard - self.deferred)
+            .expect("Expected non-negative value")
     }
 }
 
