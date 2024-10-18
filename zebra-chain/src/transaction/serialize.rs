@@ -622,9 +622,8 @@ impl ZcashSerialize for Transaction {
                 }
 
                 // Denoted as `bindingSigSapling` in the spec.
-                match sapling_shielded_data {
-                    Some(sd) => writer.write_all(&<[u8; 64]>::from(sd.binding_sig)[..])?,
-                    None => {}
+                if let Some(shielded_data) = sapling_shielded_data {
+                    writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
                 }
             }
 
