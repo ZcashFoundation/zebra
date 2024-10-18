@@ -5,9 +5,16 @@ use std::{borrow::Borrow, sync::Arc};
 use chrono::Duration;
 
 use zebra_chain::{
-    block::{self, Block, ChainHistoryBlockTxAuthCommitmentHash, CommitmentError},
+    amount::{Amount, Error as AmountError, NonNegative, MAX_MONEY},
+    block::{
+        self, error::BlockError, subsidy::funding_streams, subsidy::general, Block,
+        ChainHistoryBlockTxAuthCommitmentHash, CommitmentError, Height,
+    },
+    error::{CoinbaseTransactionError, SubsidyError},
     history_tree::HistoryTree,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{subsidy::FundingStreamReceiver, Network, NetworkUpgrade},
+    transaction,
+    value_balance::ValueBalance,
     work::difficulty::CompactDifficulty,
 };
 
@@ -48,10 +55,11 @@ pub(crate) use difficulty::AdjustedDifficulty;
 /// with its parent block.
 #[tracing::instrument(skip(semantically_verified, finalized_tip_height, relevant_chain))]
 pub(crate) fn block_is_valid_for_recent_chain<C>(
-    semantically_verified: &SemanticallyVerifiedBlock,
+    semantically_verified: &mut SemanticallyVerifiedBlock,
     network: &Network,
     finalized_tip_height: Option<block::Height>,
     relevant_chain: C,
+    pool_value_balance: Option<ValueBalance<NonNegative>>,
 ) -> Result<(), ValidateContextError>
 where
     C: IntoIterator,
@@ -82,6 +90,55 @@ where
         .coinbase_height()
         .expect("valid blocks have a coinbase height");
     check::height_one_more_than_parent_height(parent_height, semantically_verified.height)?;
+
+    if semantically_verified.height > network.slow_start_interval() {
+        #[cfg(not(zcash_unstable = "nsm"))]
+        let expected_block_subsidy =
+            general::block_subsidy_pre_nsm(semantically_verified.height, network)?;
+
+        #[cfg(zcash_unstable = "nsm")]
+        let expected_block_subsidy = {
+            let money_reserve = if semantically_verified.height > 1.try_into().unwrap() {
+                pool_value_balance
+                    .expect("a chain must contain valid pool value balance")
+                    .money_reserve()
+            } else {
+                MAX_MONEY.try_into().unwrap()
+            };
+            general::block_subsidy(semantically_verified.height, network, money_reserve)?
+        };
+
+        subsidy_is_valid(
+            &semantically_verified.block,
+            network,
+            expected_block_subsidy,
+        )?;
+
+        // TODO: Add link to lockbox stream ZIP
+        let expected_deferred_amount = funding_streams::funding_stream_values(
+            semantically_verified.height,
+            network,
+            expected_block_subsidy,
+        )
+        .expect("we always expect a funding stream hashmap response even if empty")
+        .remove(&FundingStreamReceiver::Deferred)
+        .unwrap_or_default();
+
+        semantically_verified.deferred_balance = Some(expected_deferred_amount);
+
+        let coinbase_tx = coinbase_is_first(&semantically_verified.block)?;
+
+        check::transaction_miner_fees_are_valid(
+            &coinbase_tx,
+            semantically_verified.height,
+            semantically_verified
+                .block_miner_fees
+                .expect("block must have miner fees calculated"),
+            expected_block_subsidy,
+            expected_deferred_amount,
+            network,
+        )?;
+    }
 
     // skip this check during tests if we don't have enough blocks in the chain
     // process_queued also checks the chain length, so we can skip this assertion during testing
@@ -388,7 +445,7 @@ where
 pub(crate) fn initial_contextual_validity(
     finalized_state: &ZebraDb,
     non_finalized_state: &NonFinalizedState,
-    semantically_verified: &SemanticallyVerifiedBlock,
+    semantically_verified: &mut SemanticallyVerifiedBlock,
 ) -> Result<(), ValidateContextError> {
     let relevant_chain = any_ancestor_blocks(
         non_finalized_state,
@@ -396,15 +453,266 @@ pub(crate) fn initial_contextual_validity(
         semantically_verified.block.header.previous_block_hash,
     );
 
+    let pool_value_balance = non_finalized_state
+        .best_chain()
+        .map(|chain| chain.chain_value_pools)
+        .or_else(|| {
+            finalized_state
+                .finalized_tip_height()
+                .filter(|x| (*x + 1).unwrap() == semantically_verified.height)
+                .map(|_| finalized_state.finalized_value_pool())
+        });
+
     // Security: check proof of work before any other checks
     check::block_is_valid_for_recent_chain(
         semantically_verified,
         &non_finalized_state.network,
         finalized_state.finalized_tip_height(),
         relevant_chain,
+        pool_value_balance,
     )?;
 
     check::nullifier::no_duplicates_in_finalized_chain(semantically_verified, finalized_state)?;
+
+    Ok(())
+}
+
+/// Checks if there is exactly one coinbase transaction in `Block`,
+/// and if that coinbase transaction is the first transaction in the block.
+/// Returns the coinbase transaction is successful.
+///
+/// > A transaction that has a single transparent input with a null prevout field,
+/// > is called a coinbase transaction. Every block has a single coinbase
+/// > transaction as the first transaction in the block.
+///
+/// <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
+pub fn coinbase_is_first(
+    block: &Block,
+) -> Result<Arc<transaction::Transaction>, CoinbaseTransactionError> {
+    // # Consensus
+    //
+    // > A block MUST have at least one transaction
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    let first = block
+        .transactions
+        .first()
+        .ok_or(BlockError::NoTransactions)?;
+    // > The first transaction in a block MUST be a coinbase transaction,
+    // > and subsequent transactions MUST NOT be coinbase transactions.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#blockheader>
+    //
+    // > A transaction that has a single transparent input with a null prevout
+    // > field, is called a coinbase transaction.
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#coinbasetransactions>
+    let mut rest = block.transactions.iter().skip(1);
+    if !first.is_coinbase() {
+        Err(CoinbaseTransactionError::Position)?;
+    }
+    // > A transparent input in a non-coinbase transaction MUST NOT have a null prevout
+    //
+    // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+    if !rest.all(|tx| tx.is_valid_non_coinbase()) {
+        Err(CoinbaseTransactionError::AfterFirst)?;
+    }
+
+    Ok(first.clone())
+}
+
+/// Returns `Ok(())` if the block subsidy in `block` is valid for `network`
+///
+/// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
+pub fn subsidy_is_valid(
+    block: &Block,
+    network: &Network,
+    expected_block_subsidy: Amount<NonNegative>,
+) -> Result<(), SubsidyError> {
+    let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
+    let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
+
+    // Validate funding streams
+    let Some(halving_div) = subsidy::general::halving_divisor(height, network) else {
+        // Far future halving, with no founders reward or funding streams
+        return Ok(());
+    };
+
+    let canopy_activation_height = NetworkUpgrade::Canopy
+        .activation_height(network)
+        .expect("Canopy activation height is known");
+
+    let slow_start_interval = network.slow_start_interval();
+
+    if height < slow_start_interval {
+        unreachable!(
+            "unsupported block height: callers should handle blocks below {:?}",
+            slow_start_interval
+        )
+    } else if halving_div.count_ones() != 1 {
+        unreachable!("invalid halving divisor: the halving divisor must be a non-zero power of two")
+    } else if height < canopy_activation_height {
+        // Founders rewards are paid up to Canopy activation, on both mainnet and testnet.
+        // But we checkpoint in Canopy so founders reward does not apply for Zebra.
+        unreachable!("we cannot verify consensus rules before Canopy activation");
+    } else if halving_div < 8 {
+        // Funding streams are paid from Canopy activation to the second halving
+        // Note: Canopy activation is at the first halving on mainnet, but not on testnet
+        // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
+        // funding stream amount values
+        let funding_streams = subsidy::funding_streams::funding_stream_values(
+            height,
+            network,
+            expected_block_subsidy,
+        )
+        // we always expect a funding stream hashmap response even if empty
+        .map_err(|err| BlockError::Other(err.to_string()))?;
+
+        // # Consensus
+        //
+        // > [Canopy onward] The coinbase transaction at block height `height`
+        // > MUST contain at least one output per funding stream `fs` active at `height`,
+        // > that pays `fs.Value(height)` zatoshi in the prescribed way to the stream's
+        // > recipient address represented by `fs.AddressList[fs.AddressIndex(height)]
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+        for (receiver, expected_amount) in funding_streams {
+            if receiver == FundingStreamReceiver::Deferred {
+                // The deferred pool contribution is checked in `miner_fees_are_valid()`
+                // See [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
+                continue;
+            }
+
+            let address =
+                subsidy::funding_streams::funding_stream_address(height, network, receiver)
+                    // funding stream receivers other than the deferred pool must have an address
+                    .ok_or_else(|| {
+                        BlockError::Other(format!(
+                            "missing funding stream address at height {height:?}"
+                        ))
+                    })?;
+
+            let has_expected_output =
+                subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
+                    .iter()
+                    .map(zebra_chain::transparent::Output::value)
+                    .any(|value| value == expected_amount);
+
+            if !has_expected_output {
+                Err(SubsidyError::FundingStreamNotFound)?;
+            }
+        }
+        Ok(())
+    } else {
+        // Future halving, with no founders reward or funding streams
+        Ok(())
+    }
+}
+
+/// Returns `Ok(())` if the miner fees consensus rule is valid.
+///
+/// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+pub fn transaction_miner_fees_are_valid(
+    coinbase_tx: &transaction::Transaction,
+    height: Height,
+    block_miner_fees: Amount<NonNegative>,
+    expected_block_subsidy: Amount<NonNegative>,
+    expected_deferred_amount: Amount<NonNegative>,
+    network: &Network,
+) -> Result<(), SubsidyError> {
+    let network_upgrade = NetworkUpgrade::current(network, height);
+    let transparent_value_balance = general::output_amounts(coinbase_tx)
+        .iter()
+        .sum::<Result<Amount<NonNegative>, AmountError>>()
+        .map_err(|_| SubsidyError::SumOverflow)?
+        .constrain()
+        .expect("positive value always fit in `NegativeAllowed`");
+    let sapling_value_balance = coinbase_tx.sapling_value_balance().sapling_amount();
+    let orchard_value_balance = coinbase_tx.orchard_value_balance().orchard_amount();
+
+    // Coinbase transaction can still have a ZSF deposit
+    #[cfg(zcash_unstable = "nsm")]
+    let burn_amount = coinbase_tx
+        .burn_amount()
+        .constrain()
+        .expect("positive value always fit in `NegativeAllowed`");
+
+    miner_fees_are_valid(
+        transparent_value_balance,
+        sapling_value_balance,
+        orchard_value_balance,
+        #[cfg(zcash_unstable = "nsm")]
+        burn_amount,
+        expected_block_subsidy,
+        block_miner_fees,
+        expected_deferred_amount,
+        network_upgrade,
+    )
+}
+
+/// Returns `Ok(())` if the miner fees consensus rule is valid.
+///
+/// [7.1.2]: https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+#[allow(clippy::too_many_arguments)]
+pub fn miner_fees_are_valid(
+    transparent_value_balance: Amount,
+    sapling_value_balance: Amount,
+    orchard_value_balance: Amount,
+    #[cfg(zcash_unstable = "nsm")] burn_amount: Amount,
+    expected_block_subsidy: Amount<NonNegative>,
+    block_miner_fees: Amount<NonNegative>,
+    expected_deferred_amount: Amount<NonNegative>,
+    network_upgrade: NetworkUpgrade,
+) -> Result<(), SubsidyError> {
+    // TODO: Update the quote below once its been updated for NU6.
+    //
+    // # Consensus
+    //
+    // > The total value in zatoshi of transparent outputs from a coinbase transaction,
+    // > minus vbalanceSapling, minus vbalanceOrchard, MUST NOT be greater than the value
+    // > in zatoshi of block subsidy plus the transaction fees paid by transactions in this block.
+    //
+    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    //
+    // The expected lockbox funding stream output of the coinbase transaction is also subtracted
+    // from the block subsidy value plus the transaction fees paid by transactions in this block.
+    #[cfg(zcash_unstable = "nsm")]
+    let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance
+        + burn_amount)
+        .map_err(|_| SubsidyError::SumOverflow)?;
+    #[cfg(not(zcash_unstable = "nsm"))]
+    let left = (transparent_value_balance - sapling_value_balance - orchard_value_balance)
+        .map_err(|_| SubsidyError::SumOverflow)?;
+    let right = (expected_block_subsidy + block_miner_fees - expected_deferred_amount)
+        .map_err(|_| SubsidyError::SumOverflow)?;
+
+    // TODO: Updadte the quotes below if the final phrasing changes in the spec for NU6.
+    //
+    // # Consensus
+    //
+    // > [Pre-NU6] The total output of a coinbase transaction MUST NOT be greater than its total
+    // input.
+    //
+    // > [NU6 onward] The total output of a coinbase transaction MUST be equal to its total input.
+    let block_before_nu6 = network_upgrade < NetworkUpgrade::Nu6;
+    let miner_fees_valid = if block_before_nu6 {
+        left <= right
+    } else {
+        left == right
+    };
+
+    if !miner_fees_valid {
+        Err(SubsidyError::InvalidMinerFees)?
+    };
+
+    // Verify that the NSM burn amount is at least the minimum required amount (ZIP-235).
+    #[cfg(zcash_unstable = "nsm")]
+    if network_upgrade == NetworkUpgrade::ZFuture {
+        let minimum_burn_amount = ((block_miner_fees * 6).unwrap() / 10).unwrap();
+        if burn_amount < minimum_burn_amount {
+            Err(SubsidyError::InvalidBurnAmount)?
+        }
+    }
 
     Ok(())
 }

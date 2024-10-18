@@ -38,6 +38,7 @@ impl Prepare for Arc<Block> {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
+            block_miner_fees: None,
         }
     }
 }
@@ -112,6 +113,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: _,
+            block_miner_fees: _,
         } = block.into();
 
         Self {

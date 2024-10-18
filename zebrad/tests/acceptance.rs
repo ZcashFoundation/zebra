@@ -2979,7 +2979,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         primitives::byte_array::increment_big_endian,
     };
     use zebra_rpc::methods::GetBlockHash;
-    use zebra_state::{ReadResponse, Response};
+    use zebra_state::{ReadResponse, Response, SemanticallyVerifiedBlock};
 
     let _init_guard = zebra_test::init();
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
@@ -3108,10 +3108,12 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             .bytes_in_serialized_order()
             .into();
 
+        let mut semantically_verified: SemanticallyVerifiedBlock = Arc::new(block.clone()).into();
+        semantically_verified.block_miner_fees = Some(0.try_into().unwrap());
         let Response::Committed(block_hash) = state2
             .clone()
             .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
-                Arc::new(block.clone()).into(),
+                semantically_verified,
             ))
             .await
             .map_err(|err| eyre!(err))?
@@ -3284,6 +3286,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
+            #[cfg(zcash_unstable = "nsm")]
+            zfuture: Some(10),
             ..Default::default()
         });
 

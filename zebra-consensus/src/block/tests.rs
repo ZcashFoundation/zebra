@@ -2,26 +2,31 @@
 
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
-use subsidy::general::block_subsidy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
     amount::MAX_MONEY,
     block::{
+        error, subsidy,
+        subsidy::general::block_subsidy_pre_nsm,
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,
         },
         Block, Height,
     },
-    parameters::NetworkUpgrade,
+    error::CoinbaseTransactionError,
+    parameters::{subsidy::FundingStreamReceiver, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
 };
 use zebra_script::CachedFfiTransaction;
+use zebra_state::check::{
+    coinbase_is_first, miner_fees_are_valid, subsidy_is_valid, transaction_miner_fees_are_valid,
+};
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::transaction;
+use crate::{block::check, difficulty_is_valid, transaction};
 
 use super::*;
 
@@ -168,8 +173,7 @@ fn coinbase_is_first_for_historical_blocks() -> Result<(), Report> {
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
-        check::coinbase_is_first(&block)
-            .expect("the coinbase in a historical block should be valid");
+        coinbase_is_first(&block).expect("the coinbase in a historical block should be valid");
     }
 
     Ok(())
@@ -193,7 +197,7 @@ fn difficulty_is_valid_for_network(network: Network) -> Result<(), Report> {
             .zcash_deserialize_into::<Block>()
             .expect("block is structurally valid");
 
-        check::difficulty_is_valid(&block.header, &network, &Height(height), &block.hash())
+        difficulty_is_valid(&block.header, &network, &Height(height), &block.hash())
             .expect("the difficulty from a historical block should be valid");
     }
 
@@ -216,8 +220,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
     Arc::make_mut(&mut block.header).difficulty_threshold = INVALID_COMPACT_DIFFICULTY;
 
     // Validate the block
-    let result =
-        check::difficulty_is_valid(&block.header, &Network::Mainnet, &height, &hash).unwrap_err();
+    let result = difficulty_is_valid(&block.header, &Network::Mainnet, &height, &hash).unwrap_err();
     let expected = BlockError::InvalidDifficulty(height, hash);
     assert_eq!(expected, result);
 
@@ -231,8 +234,7 @@ fn difficulty_validation_failure() -> Result<(), Report> {
     let difficulty_threshold = block.header.difficulty_threshold.to_expanded().unwrap();
 
     // Validate the block as if it is a mainnet block
-    let result =
-        check::difficulty_is_valid(&block.header, &Network::Mainnet, &height, &hash).unwrap_err();
+    let result = difficulty_is_valid(&block.header, &Network::Mainnet, &height, &hash).unwrap_err();
     let expected = BlockError::TargetDifficultyLimit(
         height,
         hash,
@@ -252,8 +254,8 @@ fn difficulty_validation_failure() -> Result<(), Report> {
     let difficulty_threshold = block.header.difficulty_threshold.to_expanded().unwrap();
 
     // Validate the block
-    let result = check::difficulty_is_valid(&block.header, &Network::Mainnet, &height, &bad_hash)
-        .unwrap_err();
+    let result =
+        difficulty_is_valid(&block.header, &Network::Mainnet, &height, &bad_hash).unwrap_err();
     let expected =
         BlockError::DifficultyFilter(height, bad_hash, difficulty_threshold, Network::Mainnet);
     assert_eq!(expected, result);
@@ -304,10 +306,10 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
 
         // TODO: first halving, second halving, third halving, and very large halvings
         if height >= canopy_activation_height {
-            let expected_block_subsidy =
-                subsidy::general::block_subsidy(height, &network).expect("valid block subsidy");
+            let expected_block_subsidy = subsidy::general::block_subsidy_pre_nsm(height, &network)
+                .expect("valid block subsidy");
 
-            check::subsidy_is_valid(&block, &network, expected_block_subsidy)
+            subsidy_is_valid(&block, &network, expected_block_subsidy)
                 .expect("subsidies should pass for this block");
         }
     }
@@ -327,7 +329,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .expect("block should deserialize");
     let mut block = Arc::try_unwrap(block).expect("block should unwrap");
 
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = subsidy::general::block_subsidy_pre_nsm(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -339,12 +341,12 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     block.transactions.remove(0);
 
     // Validate the block using coinbase_is_first
-    let result = check::coinbase_is_first(&block).unwrap_err();
-    let expected = BlockError::NoTransactions;
+    let result = coinbase_is_first(&block).unwrap_err();
+    let expected = CoinbaseTransactionError::Block(error::BlockError::NoTransactions);
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let expected = SubsidyError::NoCoinbase;
     assert_eq!(expected, result);
 
     // Get another funding stream block, and delete the coinbase transaction
@@ -353,7 +355,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .expect("block should deserialize");
     let mut block = Arc::try_unwrap(block).expect("block should unwrap");
 
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = subsidy::general::block_subsidy_pre_nsm(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -365,12 +367,12 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     block.transactions.remove(0);
 
     // Validate the block using coinbase_is_first
-    let result = check::coinbase_is_first(&block).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::CoinbasePosition);
+    let result = coinbase_is_first(&block).unwrap_err();
+    let expected = CoinbaseTransactionError::Position;
     assert_eq!(expected, result);
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::Subsidy(SubsidyError::NoCoinbase));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy).unwrap_err();
+    let expected = SubsidyError::NoCoinbase;
     assert_eq!(expected, result);
 
     // Get another funding stream, and duplicate the coinbase transaction
@@ -389,11 +391,11 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     );
 
     // Validate the block using coinbase_is_first
-    let result = check::coinbase_is_first(&block).unwrap_err();
-    let expected = BlockError::Transaction(TransactionError::CoinbaseAfterFirst);
+    let result = coinbase_is_first(&block).unwrap_err();
+    let expected = CoinbaseTransactionError::AfterFirst;
     assert_eq!(expected, result);
 
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = subsidy::general::block_subsidy_pre_nsm(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -401,7 +403,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     )
     .expect("valid block subsidy");
 
-    check::subsidy_is_valid(&block, &network, expected_block_subsidy)
+    subsidy_is_valid(&block, &network, expected_block_subsidy)
         .expect("subsidy does not check for extra coinbase transactions");
 
     Ok(())
@@ -429,11 +431,11 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
 
         if height >= canopy_activation_height {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
-            let expected_block_subsidy =
-                subsidy::general::block_subsidy(height, &network).expect("valid block subsidy");
+            let expected_block_subsidy = subsidy::general::block_subsidy_pre_nsm(height, &network)
+                .expect("valid block subsidy");
 
             // Validate
-            let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);
+            let result = subsidy_is_valid(&block, &network, expected_block_subsidy);
             assert!(result.is_ok());
         }
     }
@@ -477,7 +479,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = subsidy::general::block_subsidy_pre_nsm(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -485,10 +487,8 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     )
     .expect("valid block subsidy");
 
-    let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);
-    let expected = Err(BlockError::Transaction(TransactionError::Subsidy(
-        SubsidyError::FundingStreamNotFound,
-    )));
+    let result = subsidy_is_valid(&block, &network, expected_block_subsidy);
+    let expected = Err(SubsidyError::FundingStreamNotFound);
     assert_eq!(expected, result);
 
     Ok(())
@@ -510,11 +510,11 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
     for (&height, block) in block_iter {
         let height = Height(height);
         if height > network.slow_start_shift() {
-            let coinbase_tx = check::coinbase_is_first(
+            let coinbase_tx = coinbase_is_first(
                 &Block::zcash_deserialize(&block[..]).expect("block should deserialize"),
             )?;
 
-            let expected_block_subsidy = block_subsidy(height, &network)?;
+            let expected_block_subsidy = block_subsidy_pre_nsm(height, &network)?;
 
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
@@ -526,7 +526,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             .remove(&FundingStreamReceiver::Deferred)
             .unwrap_or_default();
 
-            assert!(check::miner_fees_are_valid(
+            assert!(transaction_miner_fees_are_valid(
                 &coinbase_tx,
                 height,
                 // Set the miner fees to a high-enough amount.
@@ -558,8 +558,8 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
             .unwrap_or_default();
 
     assert_eq!(
-        check::miner_fees_are_valid(
-            check::coinbase_is_first(&block)?.as_ref(),
+        transaction_miner_fees_are_valid(
+            coinbase_is_first(&block)?.as_ref(),
             height,
             // Set the miner fee to an invalid amount.
             Amount::zero(),
@@ -567,9 +567,91 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
             expected_deferred_amount,
             &network
         ),
-        Err(BlockError::Transaction(TransactionError::Subsidy(
-            SubsidyError::InvalidMinerFees,
-        )))
+        Err(SubsidyError::InvalidMinerFees)
+    );
+
+    Ok(())
+}
+
+#[cfg(zcash_unstable = "nsm")]
+#[test]
+fn miner_fees_validation_fails_when_burn_amount_is_zero() -> Result<(), Report> {
+    let transparent_value_balance = 100_001_000.try_into().unwrap();
+    let sapling_value_balance = Amount::zero();
+    let orchard_value_balance = Amount::zero();
+    let burn_amount = Amount::zero();
+    let expected_block_subsidy = 100_000_000.try_into().unwrap();
+    let block_miner_fees = 1000.try_into().unwrap();
+    let expected_deferred_amount = Amount::zero();
+
+    assert_eq!(
+        miner_fees_are_valid(
+            transparent_value_balance,
+            sapling_value_balance,
+            orchard_value_balance,
+            burn_amount,
+            expected_block_subsidy,
+            block_miner_fees,
+            expected_deferred_amount,
+            NetworkUpgrade::ZFuture
+        ),
+        Err(SubsidyError::InvalidBurnAmount)
+    );
+
+    Ok(())
+}
+
+#[cfg(zcash_unstable = "nsm")]
+#[test]
+fn miner_fees_validation_succeeds_when_burn_amount_is_correct() -> Result<(), Report> {
+    let transparent_value_balance = 100_001_000.try_into().unwrap();
+    let sapling_value_balance = Amount::zero();
+    let orchard_value_balance = Amount::zero();
+    let burn_amount = 600.try_into().unwrap();
+    let expected_block_subsidy = (100_000_600).try_into().unwrap();
+    let block_miner_fees = 1000.try_into().unwrap();
+    let expected_deferred_amount = Amount::zero();
+
+    assert_eq!(
+        miner_fees_are_valid(
+            transparent_value_balance,
+            sapling_value_balance,
+            orchard_value_balance,
+            burn_amount,
+            expected_block_subsidy,
+            block_miner_fees,
+            expected_deferred_amount,
+            NetworkUpgrade::ZFuture
+        ),
+        Ok(())
+    );
+
+    Ok(())
+}
+
+#[cfg(zcash_unstable = "nsm")]
+#[test]
+fn miner_fees_validation_fails_when_burn_amount_is_incorrect() -> Result<(), Report> {
+    let transparent_value_balance = 100_001_000.try_into().unwrap();
+    let sapling_value_balance = Amount::zero();
+    let orchard_value_balance = Amount::zero();
+    let burn_amount = 500.try_into().unwrap();
+    let expected_block_subsidy = (100_000_500).try_into().unwrap();
+    let block_miner_fees = 1000.try_into().unwrap();
+    let expected_deferred_amount = Amount::zero();
+
+    assert_eq!(
+        miner_fees_are_valid(
+            transparent_value_balance,
+            sapling_value_balance,
+            orchard_value_balance,
+            burn_amount,
+            expected_block_subsidy,
+            block_miner_fees,
+            expected_deferred_amount,
+            NetworkUpgrade::ZFuture
+        ),
+        Err(SubsidyError::InvalidBurnAmount)
     );
 
     Ok(())

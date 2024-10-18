@@ -12,6 +12,7 @@ use tower::{service_fn, ServiceExt};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
+    error::CoinbaseTransactionError,
     orchard::AuthorizedAction,
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
@@ -844,7 +845,9 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 
     assert_eq!(
         check::coinbase_tx_no_prevout_joinsplit_spend(&transaction),
-        Err(TransactionError::CoinbaseHasEnableSpendsOrchard)
+        Err(TransactionError::Coinbase(
+            CoinbaseTransactionError::HasEnableSpendsOrchard
+        ))
     );
 }
 
@@ -1705,11 +1708,13 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     assert_eq!(
         result,
-        Err(TransactionError::CoinbaseExpiryBlockHeight {
-            expiry_height: Some(new_expiry_height),
-            block_height,
-            transaction_hash: new_transaction.hash(),
-        })
+        Err(TransactionError::Coinbase(
+            CoinbaseTransactionError::ExpiryBlockHeight {
+                expiry_height: Some(new_expiry_height),
+                block_height,
+                transaction_hash: new_transaction.hash(),
+            }
+        ))
     );
 
     // Decrement the expiry height so that it becomes invalid.
@@ -1730,11 +1735,13 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     assert_eq!(
         result,
-        Err(TransactionError::CoinbaseExpiryBlockHeight {
-            expiry_height: Some(new_expiry_height),
-            block_height,
-            transaction_hash: new_transaction.hash(),
-        })
+        Err(TransactionError::Coinbase(
+            CoinbaseTransactionError::ExpiryBlockHeight {
+                expiry_height: Some(new_expiry_height),
+                block_height,
+                transaction_hash: new_transaction.hash(),
+            }
+        ))
     );
 
     // Test with matching heights again, but using a very high value
@@ -2925,7 +2932,9 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
                 &network,
                 NetworkUpgrade::Nu5.activation_height(&network).unwrap(),
             ),
-            Err(TransactionError::CoinbaseOutputsNotDecryptable)
+            Err(TransactionError::Coinbase(
+                CoinbaseTransactionError::OutputsNotDecryptable
+            ))
         );
     }
 }

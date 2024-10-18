@@ -925,7 +925,22 @@ pub fn transaction_to_fake_v5(
         },
         v5 @ V5 { .. } => v5.clone(),
         #[cfg(zcash_unstable = "nsm")]
-        ZFuture { .. } => todo!(),
+        ZFuture {
+            inputs,
+            outputs,
+            lock_time,
+            sapling_shielded_data,
+            orchard_shielded_data,
+            ..
+        } => V5 {
+            network_upgrade: block_nu,
+            inputs: inputs.to_vec(),
+            outputs: outputs.to_vec(),
+            lock_time: *lock_time,
+            expiry_height: height,
+            sapling_shielded_data: sapling_shielded_data.clone(),
+            orchard_shielded_data: orchard_shielded_data.clone(),
+        },
     }
 }
 

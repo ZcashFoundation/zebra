@@ -147,7 +147,7 @@ fn activates_network_upgrades_correctly() {
         // TODO: Remove this once the testnet parameters are being serialized (#8920).
         (Height(100), NetworkUpgrade::Nu5),
         #[cfg(zcash_unstable = "nsm")]
-        (Height(101), NetworkUpgrade::ZFuture),
+        (Height(201), NetworkUpgrade::ZFuture),
     ];
 
     for (network, expected_activation_heights) in [

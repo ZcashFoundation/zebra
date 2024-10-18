@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use zebra_chain::{
+use crate::{
     amount::{Amount, Error, NonNegative},
     block::Height,
     parameters::{subsidy::*, Network, NetworkUpgrade::*},

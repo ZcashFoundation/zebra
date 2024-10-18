@@ -1,9 +1,18 @@
 //! Tests for funding streams.
 
 use color_eyre::Report;
-use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 
-use crate::block::subsidy::general::block_subsidy;
+use crate::{
+    block::subsidy::general::block_subsidy_pre_nsm,
+    parameters::{
+        subsidy::FundingStreamReceiver,
+        testnet::{
+            self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+            ConfiguredFundingStreams,
+        },
+        NetworkKind,
+    },
+};
 
 use super::*;
 

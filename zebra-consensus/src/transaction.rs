@@ -18,7 +18,9 @@ use tracing::Instrument;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block, orchard,
+    block,
+    error::CoinbaseTransactionError,
+    orchard,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -309,7 +311,7 @@ where
 
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
-                return Err(TransactionError::CoinbaseInMempool);
+                return Err(TransactionError::Coinbase(CoinbaseTransactionError::InMempool));
             }
 
             if tx.is_coinbase() {

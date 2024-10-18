@@ -616,7 +616,7 @@ impl Parameters {
                 nu5: nu5_activation_height,
                 nu6: nu6_activation_height,
                 #[cfg(zcash_unstable = "nsm")]
-                zfuture: nu5_activation_height.map(|height| height + 1),
+                zfuture: nu5_activation_height.map(|height| height + 101),
                 ..Default::default()
             })
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);

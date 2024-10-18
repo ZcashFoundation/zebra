@@ -359,6 +359,7 @@ fn sanitize_transaction_version(
             Overwinter => 3,
             Sapling | Blossom | Heartwood | Canopy => 4,
             Nu5 | Nu6 => 5,
+            #[cfg(zcash_unstable = "nsm")]
             ZFuture => 0x00FF,
         }
     };
