@@ -29,8 +29,10 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
-    TransactionLocation, ValidateContextError,
+    request::{Spend, Treestate},
+    service::check,
+    ContextuallyVerifiedBlock, HashOrHeight, OutputLocation, TransactionLocation,
+    ValidateContextError,
 };
 
 use self::index::TransparentTransfers;
@@ -90,9 +92,9 @@ pub struct ChainInner {
     //
     // TODO: replace OutPoint with OutputLocation?
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    /// The [`transparent::OutPoint`]s spent by `blocks`,
-    /// including those created by earlier transactions or blocks in the chain.
-    pub(crate) spent_utxos: HashSet<transparent::OutPoint>,
+    /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
+    /// including spent outputs created by earlier transactions or blocks in the chain.
+    pub(crate) spent_utxos: HashMap<transparent::OutPoint, transaction::Hash>,
 
     // Note commitment trees
     //
@@ -177,11 +179,11 @@ pub struct ChainInner {
     // Nullifiers
     //
     /// The Sprout nullifiers revealed by `blocks`.
-    pub(crate) sprout_nullifiers: HashSet<sprout::Nullifier>,
+    pub(crate) sprout_nullifiers: HashMap<sprout::Nullifier, transaction::Hash>,
     /// The Sapling nullifiers revealed by `blocks`.
-    pub(crate) sapling_nullifiers: HashSet<sapling::Nullifier>,
+    pub(crate) sapling_nullifiers: HashMap<sapling::Nullifier, transaction::Hash>,
     /// The Orchard nullifiers revealed by `blocks`.
-    pub(crate) orchard_nullifiers: HashSet<orchard::Nullifier>,
+    pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, transaction::Hash>,
 
     // Transparent Transfers
     // TODO: move to the transparent section
@@ -1240,7 +1242,7 @@ impl Chain {
     /// and removed from the relevant chain(s).
     pub fn unspent_utxos(&self) -> HashMap<transparent::OutPoint, transparent::OrderedUtxo> {
         let mut unspent_utxos = self.created_utxos.clone();
-        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains(outpoint));
+        unspent_utxos.retain(|outpoint, _utxo| !self.spent_utxos.contains_key(outpoint));
 
         unspent_utxos
     }
@@ -1250,11 +1252,22 @@ impl Chain {
     ///
     /// UTXOs are returned regardless of whether they have been spent.
     pub fn created_utxo(&self, outpoint: &transparent::OutPoint) -> Option<transparent::Utxo> {
-        if let Some(utxo) = self.created_utxos.get(outpoint) {
-            return Some(utxo.utxo.clone());
-        }
+        self.created_utxos
+            .get(outpoint)
+            .map(|utxo| utxo.utxo.clone())
+    }
 
-        None
+    /// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
+    /// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
+    /// and is spent or revealed by this chain.
+    pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
+        match spend {
+            Spend::OutPoint(outpoint) => self.spent_utxos.get(outpoint),
+            Spend::Sprout(nullifier) => self.sprout_nullifiers.get(nullifier),
+            Spend::Sapling(nullifier) => self.sapling_nullifiers.get(nullifier),
+            Spend::Orchard(nullifier) => self.orchard_nullifiers.get(nullifier),
+        }
+        .cloned()
     }
 
     // Address index queries
@@ -1542,10 +1555,13 @@ impl Chain {
             self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
 
             // add the shielded data
-            self.update_chain_tip_with(joinsplit_data)?;
-            self.update_chain_tip_with(sapling_shielded_data_per_spend_anchor)?;
-            self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
-            self.update_chain_tip_with(orchard_shielded_data)?;
+            self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
+            self.update_chain_tip_with(&(
+                sapling_shielded_data_per_spend_anchor,
+                &transaction_hash,
+            ))?;
+            self.update_chain_tip_with(&(sapling_shielded_data_shared_anchor, &transaction_hash))?;
+            self.update_chain_tip_with(&(orchard_shielded_data, &transaction_hash))?;
         }
 
         // update the chain value pool balances
@@ -1700,10 +1716,17 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             );
 
             // remove the shielded data
-            self.revert_chain_with(joinsplit_data, position);
-            self.revert_chain_with(sapling_shielded_data_per_spend_anchor, position);
-            self.revert_chain_with(sapling_shielded_data_shared_anchor, position);
-            self.revert_chain_with(orchard_shielded_data, position);
+
+            self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
+            self.revert_chain_with(
+                &(sapling_shielded_data_per_spend_anchor, transaction_hash),
+                position,
+            );
+            self.revert_chain_with(
+                &(sapling_shielded_data_shared_anchor, transaction_hash),
+                position,
+            );
+            self.revert_chain_with(&(orchard_shielded_data, transaction_hash), position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
@@ -1845,9 +1868,12 @@ impl
             };
 
             // Index the spent outpoint in the chain
-            let first_spend = self.spent_utxos.insert(spent_outpoint);
+            let was_spend_newly_inserted = self
+                .spent_utxos
+                .insert(spent_outpoint, *spending_tx_hash)
+                .is_none();
             assert!(
-                first_spend,
+                was_spend_newly_inserted,
                 "unexpected duplicate spent output: should be checked earlier"
             );
 
@@ -1895,9 +1921,9 @@ impl
             };
 
             // Revert the spent outpoint in the chain
-            let spent_outpoint_was_removed = self.spent_utxos.remove(&spent_outpoint);
+            let was_spent_outpoint_removed = self.spent_utxos.remove(&spent_outpoint).is_some();
             assert!(
-                spent_outpoint_was_removed,
+                was_spent_outpoint_removed,
                 "spent_utxos must be present if block was added to chain"
             );
 
@@ -1932,11 +1958,19 @@ impl
     }
 }
 
-impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
+impl
+    UpdateWith<(
+        &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &transaction::Hash,
+    )> for Chain
+{
     #[instrument(skip(self, joinsplit_data))]
     fn update_chain_tip_with(
         &mut self,
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &(joinsplit_data, revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &transaction::Hash,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -1944,6 +1978,7 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sprout_nullifiers,
                 joinsplit_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -1957,7 +1992,10 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     #[instrument(skip(self, joinsplit_data))]
     fn revert_chain_with(
         &mut self,
-        joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
+        &(joinsplit_data, _revealing_tx_id): &(
+            &Option<transaction::JoinSplitData<Groth16Proof>>,
+            &transaction::Hash,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(joinsplit_data) = joinsplit_data {
@@ -1973,14 +2011,17 @@ impl UpdateWith<Option<transaction::JoinSplitData<Groth16Proof>>> for Chain {
     }
 }
 
-impl<AnchorV> UpdateWith<Option<sapling::ShieldedData<AnchorV>>> for Chain
+impl<AnchorV> UpdateWith<(&Option<sapling::ShieldedData<AnchorV>>, &transaction::Hash)> for Chain
 where
     AnchorV: sapling::AnchorVariant + Clone,
 {
     #[instrument(skip(self, sapling_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+        &(sapling_shielded_data, revealing_tx_id): &(
+            &Option<sapling::ShieldedData<AnchorV>>,
+            &transaction::Hash,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -1988,6 +2029,7 @@ where
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.sapling_nullifiers,
                 sapling_shielded_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -2001,7 +2043,10 @@ where
     #[instrument(skip(self, sapling_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        sapling_shielded_data: &Option<sapling::ShieldedData<AnchorV>>,
+        &(sapling_shielded_data, _revealing_tx_id): &(
+            &Option<sapling::ShieldedData<AnchorV>>,
+            &transaction::Hash,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
@@ -2017,11 +2062,14 @@ where
     }
 }
 
-impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
+impl UpdateWith<(&Option<orchard::ShieldedData>, &transaction::Hash)> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        &(orchard_shielded_data, revealing_tx_id): &(
+            &Option<orchard::ShieldedData>,
+            &transaction::Hash,
+        ),
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2029,6 +2077,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
             check::nullifier::add_to_non_finalized_chain_unique(
                 &mut self.orchard_nullifiers,
                 orchard_shielded_data.nullifiers(),
+                *revealing_tx_id,
             )?;
         }
         Ok(())
@@ -2042,7 +2091,10 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        (orchard_shielded_data, _revealing_tx_id): &(
+            &Option<orchard::ShieldedData>,
+            &transaction::Hash,
+        ),
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
