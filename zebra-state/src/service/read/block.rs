@@ -184,7 +184,8 @@ where
 
 /// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
 /// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
-/// and is spent or revealed in the non-finalized `chain` or finalized `db`.
+/// and is spent or revealed in the non-finalized `chain` or finalized `db` and its
+/// spending transaction hash has been indexed.
 pub fn spending_transaction_hash<C>(
     chain: Option<C>,
     db: &ZebraDb,

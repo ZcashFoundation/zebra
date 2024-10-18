@@ -314,7 +314,7 @@ impl IntoDisk for TransactionIndex {
 
 impl FromDisk for TransactionIndex {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let disk_bytes = disk_bytes.as_ref().try_into().unwrap_or_default();
+        let disk_bytes = disk_bytes.as_ref().try_into().unwrap();
 
         TransactionIndex::from_index(u16::from_be_bytes(disk_bytes))
     }
@@ -328,6 +328,16 @@ impl IntoDisk for TransactionLocation {
         let index_bytes = self.index.as_bytes().to_vec();
 
         [height_bytes, index_bytes].concat().try_into().unwrap()
+    }
+}
+
+impl FromDisk for Option<TransactionLocation> {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        if disk_bytes.as_ref().is_empty() {
+            Some(TransactionLocation::from_bytes(disk_bytes))
+        } else {
+            None
+        }
     }
 }
 

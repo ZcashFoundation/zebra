@@ -125,7 +125,8 @@ impl ZebraDb {
     }
 
     /// Returns the [`TransactionLocation`] of the transaction that spent the given
-    /// [`transparent::OutPoint`], if it is unspent in the finalized state.
+    /// [`transparent::OutPoint`], if it is unspent in the finalized state and its
+    /// spending transaction hash has been indexed.
     pub fn spending_tx_loc(&self, outpoint: &transparent::OutPoint) -> Option<TransactionLocation> {
         let output_location = self.output_location(outpoint)?;
         self.tx_location_by_spent_output_location(&output_location)

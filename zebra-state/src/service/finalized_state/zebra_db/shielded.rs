@@ -62,36 +62,39 @@ impl ZebraDb {
     }
 
     /// Returns the [`TransactionLocation`] of the transaction that revealed
-    /// the given [`sprout::Nullifier`], if it is revealed in the finalized state.
+    /// the given [`sprout::Nullifier`], if it is revealed in the finalized state and its
+    /// spending transaction hash has been indexed.
     #[allow(clippy::unwrap_in_result)]
     pub fn sprout_revealing_tx_loc(
         &self,
         sprout_nullifier: &sprout::Nullifier,
     ) -> Option<TransactionLocation> {
         let sprout_nullifiers = self.db.cf_handle("sprout_nullifiers").unwrap();
-        self.db.zs_get(&sprout_nullifiers, &sprout_nullifier)
+        self.db.zs_get(&sprout_nullifiers, &sprout_nullifier)?
     }
 
     /// Returns the [`TransactionLocation`] of the transaction that revealed
-    /// the given [`sapling::Nullifier`], if it is revealed in the finalized state.
+    /// the given [`sapling::Nullifier`], if it is revealed in the finalized state and its
+    /// spending transaction hash has been indexed.
     #[allow(clippy::unwrap_in_result)]
     pub fn sapling_revealing_tx_loc(
         &self,
         sapling_nullifier: &sapling::Nullifier,
     ) -> Option<TransactionLocation> {
         let sapling_nullifiers = self.db.cf_handle("sapling_nullifiers").unwrap();
-        self.db.zs_get(&sapling_nullifiers, &sapling_nullifier)
+        self.db.zs_get(&sapling_nullifiers, &sapling_nullifier)?
     }
 
     /// Returns the [`TransactionLocation`] of the transaction that revealed
-    /// the given [`orchard::Nullifier`], if it is revealed in the finalized state.
+    /// the given [`orchard::Nullifier`], if it is revealed in the finalized state and its
+    /// spending transaction hash has been indexed.
     #[allow(clippy::unwrap_in_result)]
     pub fn orchard_revealing_tx_loc(
         &self,
         orchard_nullifier: &orchard::Nullifier,
     ) -> Option<TransactionLocation> {
         let orchard_nullifiers = self.db.cf_handle("orchard_nullifiers").unwrap();
-        self.db.zs_get(&orchard_nullifiers, &orchard_nullifier)
+        self.db.zs_get(&orchard_nullifiers, &orchard_nullifier)?
     }
 
     /// Returns `true` if the finalized state contains `sprout_anchor`.
