@@ -65,18 +65,18 @@ pub enum FundingStreamReceiver {
 
     /// The Major Grants (Zcash Community Grants) funding stream.
     MajorGrants,
-    /// The deferred pool contribution.
-    // TODO: Add link to lockbox stream ZIP
+
+    /// The deferred pool contribution, see [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
     Deferred,
 }
 
 impl FundingStreamReceiver {
     /// Returns a human-readable name and a specification URL for the receiver, as described in
-    /// [ZIP-1014] and [`zcashd`] before NU6. After NU6, the specification is in the [ZIP-lockbox].
+    /// [ZIP-1014] and [`zcashd`] before NU6. After NU6, the specification is in the [ZIP-1015].
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
-    /// [ZIP-lockbox]: https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model
+    /// [ZIP-1015]: https://zips.z.cash/zip-1015
     pub fn info(&self, is_nu6: bool) -> (&'static str, &'static str) {
         if is_nu6 {
             (
@@ -112,10 +112,10 @@ pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 /// [ZIP-214]: https://zips.z.cash/zip-0214
 pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
 
-/// The specification for post-NU6 funding stream and lockbox receivers, a URL that links to [ZIP-lockbox].
+/// The specification for post-NU6 funding stream and lockbox receivers, a URL that links to [ZIP-1015].
 ///
-/// [ZIP-lockbox]: https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model
-pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model";
+/// [ZIP-1015]: https://zips.z.cash/zip-1015
+pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/zip-1015";
 
 /// Funding stream recipients and height ranges.
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -225,10 +225,8 @@ lazy_static! {
         .collect(),
     };
 
-    /// The post-NU6 funding streams for Mainnet
-    // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+    /// The post-NU6 funding streams for Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        // TODO: Adjust this height range and recipient list once a proposal is selected
         height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
         recipients: [
             (
@@ -266,11 +264,8 @@ lazy_static! {
         .collect(),
     };
 
-    /// The post-NU6 funding streams for Testnet
-    // TODO: Add a reference to lockbox stream ZIP, this is currently based on the number of blocks between the
-    //       start and end heights for Mainnet in https://zips.z.cash/draft-nuttycom-funding-allocation
+    /// The post-NU6 funding streams for Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        // TODO: Adjust this height range and recipient list once a proposal is selected
         height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
         recipients: [
             (
@@ -279,7 +274,6 @@ lazy_static! {
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                // TODO: Update these addresses
                 FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
             ),
         ]
@@ -288,15 +282,14 @@ lazy_static! {
     };
 }
 
-/// The start height of post-NU6 funding streams on Mainnet
-// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+/// The start height of post-NU6 funding streams on Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
 
-/// The start height of post-NU6 funding streams on Testnet
-// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+/// The start height of post-NU6 funding streams on Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
 
-/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet.
+/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
+/// in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
 
 /// The post-NU6 funding stream height range on Mainnet

@@ -43,6 +43,7 @@ pub fn funding_stream_values(
             }
         }
     }
+
     Ok(results)
 }
 
