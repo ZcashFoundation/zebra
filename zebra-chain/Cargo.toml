@@ -57,6 +57,7 @@ proptest-impl = [
     "rand_chacha",
     "tokio/tracing",
     "zebra-test",
+    "orchard/test-dependencies"
 ]
 
 bench = ["zebra-test"]
