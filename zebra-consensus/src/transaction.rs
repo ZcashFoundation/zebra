@@ -552,7 +552,12 @@ where
                         if !transaction.transaction.transaction.outputs().is_empty() {
                             tokio::spawn(async move {
                                 tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
-                                mempool.ready().await.expect("mempool poll_ready() method should not return an error");
+                                let _ = mempool
+                                    .ready()
+                                    .await
+                                    .expect("mempool poll_ready() method should not return an error")
+                                    .call(mempool::Request::CheckForVerifiedTransactions)
+                                    .await;
                             });
                         }
                     }
