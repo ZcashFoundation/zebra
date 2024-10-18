@@ -5,7 +5,7 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{path::PathBuf, time::Duration};
+use std::{env, path::PathBuf, time::Duration};
 
 use tempfile::TempDir;
 
@@ -326,10 +326,20 @@ pub fn check_sync_logs_until(
     Ok(zebrad)
 }
 
+/// Returns the cache directory for Zebra's state.
+///
+/// It checks the `ZEBRA_CACHED_STATE_DIR` environment variable and returns its value if set.
+/// Otherwise, it defaults to `"/zebrad-cache"`.
+fn get_zebra_cached_state_dir() -> PathBuf {
+    env::var("ZEBRA_CACHED_STATE_DIR")
+        .unwrap_or_else(|_| "/zebrad-cache".to_string())
+        .into()
+}
+
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.
 pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<ZebradConfig> {
     let mut config = persistent_test_config(network)?;
-    config.state.cache_dir = "/zebrad-cache".into();
+    config.state.cache_dir = get_zebra_cached_state_dir();
 
     // To get to the mandatory checkpoint, we need to sync lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
@@ -377,7 +387,7 @@ pub fn create_cached_database_height(
     config.state.debug_stop_at_height = Some(height.0);
     config.consensus.checkpoint_sync = checkpoint_sync;
 
-    let dir = PathBuf::from("/zebrad-cache");
+    let dir = get_zebra_cached_state_dir();
     let mut child = dir
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?

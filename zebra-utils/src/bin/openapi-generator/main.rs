@@ -543,6 +543,7 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         )?,
         // control
         "getinfo" => default_property(type_, items.clone(), GetInfo::default())?,
+        "stop" => default_property(type_, items.clone(), ())?,
         // transaction
         "sendrawtransaction" => {
             default_property(type_, items.clone(), SentTransactionHash::default())?

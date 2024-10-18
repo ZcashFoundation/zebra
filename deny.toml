@@ -84,19 +84,26 @@ skip-tree = [
     { name = "http-body", version = "=0.4.6" },
     { name = "hyper", version = "=0.14.30" },
 
-    # TODO: Remove this after we upgrade ECC dependencies to a crates.io version (#8749)
-    { name = "equihash", version = "=0.2.0" },
-    { name = "f4jumble", version = "=0.1.0" },
-    { name = "secp256k1", version = "=0.26.0" },
-    { name = "zcash_address", version = "=0.5.0" },
-    { name = "zcash_client_backend", version = "=0.13.0" },
-
-
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
 
     # wait for librocksdb-sys to update bindgen to one that uses newer itertools
-    { name = "itertools", version = "=0.12.1" }
+    { name = "itertools", version = "=0.12.1" },
+
+    # wait for halo2_gadgets and primitive-types to update uint
+    { name = "uint", version = "=0.9.5" },
+
+    # wait for dirs-sys to update windows-sys
+    { name = "windows-sys", version = "=0.48.0" },
+
+    # Remove after release candicate period is over and the ECC crates are not patched anymore
+    { name = "equihash", version = "=0.2.0" },
+    { name = "f4jumble", version = "=0.1.0" },
+    { name = "incrementalmerkletree", version = "=0.6.0" },
+    { name = "zcash_address", version = "=0.4.0" },
+    { name = "zcash_keys", version = "=0.3.0" },
+    { name = "zcash_primitives", version = "=0.16.0" },
+    { name = "zcash_protocol", version = "=0.2.0" }
 ]
 
 # This section is considered when running `cargo deny check sources`.
@@ -114,7 +121,10 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # List of URLs for allowed Git repositories
 allow-git = [
-    "https://github.com/zcash/librustzcash.git"
+    "https://github.com/zcash/librustzcash.git",
+    "https://github.com/zcash/incrementalmerkletree",
+    "https://github.com/zcash/orchard",
+    "https://github.com/zcash/sapling-crypto"
 ]
 
 [sources.allow-org]

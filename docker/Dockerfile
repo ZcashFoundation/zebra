@@ -1,12 +1,13 @@
+# syntax=docker/dockerfile:1
+# check=skip=UndefinedVar
+
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
-# We are using five stages:
-# - chef: installs cargo-chef
-# - planner: computes the recipe file
-# - deps: caches our dependencies and sets the needed variables
-# - tests: builds tests
-# - release: builds release binary
-# - runtime: is our runtime environment
+# We are using 4 stages:
+# - deps: install build dependencies and sets the needed variables
+# - tests: builds tests binaries
+# - release: builds release binaries
+# - runtime: runs the release binaries
 #
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
@@ -20,29 +21,18 @@ ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ARG EXPERIMENTAL_FEATURES=""
 
 ARG APP_HOME="/opt/zebrad"
-# This stage implements cargo-chef for docker layer caching
-FROM rust:bookworm as chef
-RUN cargo install cargo-chef --locked
-
-ARG APP_HOME
-ENV APP_HOME=${APP_HOME}
-WORKDIR ${APP_HOME}
-
-# Analyze the current project to determine the minimum subset of files
-# (Cargo.lock and Cargo.toml manifests) required to build it and cache dependencies
-#
-# The recipe.json is the equivalent of the Python requirements.txt file
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
+ARG RUST_VERSION=1.79.0
 # In this stage we download all system requirements to build the project
 #
 # It also captures all the build arguments to be used as environment variables.
 # We set defaults for the arguments, in case the build does not include this information.
-FROM chef AS deps
+FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
-COPY --from=planner ${APP_HOME}/recipe.json recipe.json
+
+# Set the default path for the zebrad binary
+ARG APP_HOME
+ENV APP_HOME=${APP_HOME}
+WORKDIR ${APP_HOME}
 
 # Install zebra build deps and Dockerfile deps
 RUN apt-get -qq update && \
@@ -52,27 +42,8 @@ RUN apt-get -qq update && \
     clang \
     ca-certificates \
     protobuf-compiler \
-    rsync \
     rocksdb-tools \
-    ; \
-    rm -rf /var/lib/apt/lists/* /tmp/*
-
-# Install google OS Config agent to be able to get information from the VMs being deployed
-# into GCP for integration testing purposes, and as Mainnet nodes
-# TODO: this shouldn't be a hardcoded requirement for everyone
-RUN if [ "$(uname -m)" != "aarch64" ]; then \
-      apt-get -qq update && \
-      apt-get -qq install -y --no-install-recommends \
-      curl \
-      lsb-release \
-      && \
-      echo "deb http://packages.cloud.google.com/apt google-compute-engine-$(lsb_release -cs)-stable main" > /etc/apt/sources.list.d/google-compute-engine.list && \
-      curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | apt-key add - && \
-      apt-get -qq update  && \
-      apt-get -qq install -y --no-install-recommends google-osconfig-agent; \
-    fi \
-    && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Build arguments and variables set for tracelog levels and debug information
 #
@@ -90,23 +61,20 @@ ARG COLORBT_SHOW_HIDDEN
 ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-1}
 
 ARG SHORT_SHA
-# If this is not set, it must be the empty string, so Zebra can try an alternative git commit source:
+# If this is not set, it must be an empty string, so Zebra can try an alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
 ENV SHORT_SHA=${SHORT_SHA:-}
 
 ENV CARGO_HOME="${APP_HOME}/.cargo/"
+
+# Copy the entrypoint script to be used on both images
+COPY ./docker/entrypoint.sh /etc/zebrad/entrypoint.sh
 
 # In this stage we build tests (without running then)
 #
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
-
-COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
-
-# cargo uses timestamps for its cache, so they need to be in this order:
-# unmodified source files < previous build cache < modified source files
-COPY . .
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
@@ -120,28 +88,41 @@ ARG EXPERIMENTAL_FEATURES
 # TODO: add empty $EXPERIMENTAL_FEATURES when we can avoid adding an extra space to the end of the string
 ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
 
-# Re-hydrate the minimum project skeleton identified by `cargo chef prepare` in the planner stage,
-# over the top of the original source files,
-# and build it to cache all possible sentry and test dependencies.
-#
-# This is the caching Docker layer for Rust tests!
-# It creates fake empty test binaries so dependencies are built, but Zebra is not fully built.
-#
-# TODO: add --locked when cargo-chef supports it
-RUN cargo chef cook --tests --release --features "${ENTRYPOINT_FEATURES}" --workspace --recipe-path recipe.json
-# Undo the source file changes made by cargo-chef.
-# rsync invalidates the cargo cache for the changed files only, by updating their timestamps.
-# This makes sure the fake empty binaries created by cargo-chef are rebuilt.
-COPY --from=planner ${APP_HOME} zebra-original
-RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
-RUN rm -r zebra-original
-
 # Build Zebra test binaries, but don't run them
-RUN cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run
-RUN cp ${APP_HOME}/target/release/zebrad /usr/local/bin
-RUN cp ${APP_HOME}/target/release/zebra-checkpoints /usr/local/bin
 
-COPY ./docker/entrypoint.sh /etc/zebrad/entrypoint.sh
+# Leverage a cache mount to /usr/local/cargo/registry/
+# for downloaded dependencies, a cache mount to /usr/local/cargo/git/db
+# for git repository dependencies, and a cache mount to ${APP_HOME}/target/ for
+# compiled dependencies which will speed up subsequent builds.
+# Leverage a bind mount to each crate directory to avoid having to copy the
+# source code into the container. Once built, copy the executable to an
+# output directory before the cache mounted ${APP_HOME}/target/ is unmounted.
+RUN --mount=type=bind,source=zebrad,target=zebrad \
+    --mount=type=bind,source=zebra-chain,target=zebra-chain \
+    --mount=type=bind,source=zebra-network,target=zebra-network \
+    --mount=type=bind,source=zebra-state,target=zebra-state \
+    --mount=type=bind,source=zebra-script,target=zebra-script \
+    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
+    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
+    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
+    --mount=type=bind,source=zebra-test,target=zebra-test \
+    --mount=type=bind,source=zebra-utils,target=zebra-utils \
+    --mount=type=bind,source=zebra-scan,target=zebra-scan \
+    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
+    --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
+    --mount=type=bind,source=tower-fallback,target=tower-fallback \
+    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
+    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
+    --mount=type=cache,target=${APP_HOME}/target/ \
+    --mount=type=cache,target=/usr/local/cargo/git/db \
+    --mount=type=cache,target=/usr/local/cargo/registry/ \
+cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run && \
+cp ${APP_HOME}/target/release/zebrad /usr/local/bin && \
+cp ${APP_HOME}/target/release/zebra-checkpoints /usr/local/bin
+
+# Copy the lightwalletd binary and source files to be able to run tests
+COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
+COPY ./ ./
 
 # Entrypoint environment variables
 ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
@@ -154,30 +135,34 @@ ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
-# This step also adds `cargo chef` as this stage is completely independent from the
+# This step also adds `cache mounts` as this stage is completely independent from the
 # `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
 # zebrad binary from this step.
 FROM deps AS release
 
-COPY . .
-
 ARG FEATURES
 
-# This is the caching layer for Rust zebrad builds.
-# It creates a fake empty zebrad binary, see above for details.
-#
-# TODO: add --locked when cargo-chef supports it
-RUN cargo chef cook --release --features "${FEATURES}" --package zebrad --bin zebrad --recipe-path recipe.json
-
-# Undo the source file changes made by cargo-chef, so the fake empty zebrad binary is rebuilt.
-COPY --from=planner ${APP_HOME} zebra-original
-RUN rsync --recursive --checksum --itemize-changes --verbose zebra-original/ .
-RUN rm -r zebra-original
-
-# Build zebrad
-RUN cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad
-
-COPY ./docker/entrypoint.sh ./
+RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
+    --mount=type=bind,source=tower-fallback,target=tower-fallback \
+    --mount=type=bind,source=zebra-chain,target=zebra-chain \
+    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
+    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
+    --mount=type=bind,source=zebra-network,target=zebra-network \
+    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
+    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
+    --mount=type=bind,source=zebra-scan,target=zebra-scan \
+    --mount=type=bind,source=zebra-script,target=zebra-script \
+    --mount=type=bind,source=zebra-state,target=zebra-state \
+    --mount=type=bind,source=zebra-test,target=zebra-test \
+    --mount=type=bind,source=zebra-utils,target=zebra-utils \
+    --mount=type=bind,source=zebrad,target=zebrad \
+    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
+    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
+    --mount=type=cache,target=${APP_HOME}/target/ \
+    --mount=type=cache,target=/usr/local/cargo/git/db \
+    --mount=type=cache,target=/usr/local/cargo/registry/ \
+cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
+cp ${APP_HOME}/target/release/zebrad /usr/local/bin
 
 # This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
 #
@@ -196,8 +181,7 @@ RUN apt-get update && \
     curl \
     rocksdb-tools \
     gosu \
-    && \
-    rm -rf /var/lib/apt/lists/* /tmp/*
+    && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Create a non-privileged user that the app will run under.
 # Running as root inside the container is running as root in the Docker host
@@ -215,6 +199,7 @@ RUN addgroup --system --gid ${GID} ${USER} \
     --system \
     --disabled-login \
     --shell /bin/bash \
+    --home ${APP_HOME} \
     --uid "${UID}" \
     --gid "${GID}" \
     ${USER}
@@ -224,14 +209,15 @@ ARG FEATURES
 ENV FEATURES=${FEATURES}
 
 # Path and name of the config file
+# These are set to a default value when not defined in the environment
 ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR:-/etc/zebrad}
 ENV ZEBRA_CONF_FILE=${ZEBRA_CONF_FILE:-zebrad.toml}
 
 RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${UID}:${UID} ${ZEBRA_CONF_DIR} \
     && chown ${UID}:${UID} ${APP_HOME}
 
-COPY --from=release ${APP_HOME}/target/release/zebrad /usr/local/bin
-COPY --from=release ${APP_HOME}/entrypoint.sh /etc/zebrad
+COPY --from=release /usr/local/bin/zebrad /usr/local/bin
+COPY --from=release /etc/zebrad/entrypoint.sh /etc/zebrad
 
 # Expose configured ports
 EXPOSE 8233 18233
