@@ -72,7 +72,7 @@ proptest! {
         for (transaction_to_accept, transaction_to_reject) in input_permutations {
             let id_to_accept = transaction_to_accept.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new()), Ok(id_to_accept));
 
             // Make unique IDs by converting the index to bytes, and writing it to each ID
             let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
@@ -96,7 +96,7 @@ proptest! {
             // - transaction_to_accept, or
             // - a rejection from rejections
             prop_assert_eq!(
-                storage.insert(transaction_to_reject),
+                storage.insert(transaction_to_reject, Vec::new()),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -147,13 +147,13 @@ proptest! {
             if i < transactions.len() - 1 {
                 // The initial transactions should be successful
                 prop_assert_eq!(
-                    storage.insert(transaction.clone()),
+                    storage.insert(transaction.clone(), Vec::new()),
                     Ok(tx_id)
                 );
             } else {
                 // The final transaction will cause a random eviction,
                 // which might return an error if this transaction is chosen
-                let result = storage.insert(transaction.clone());
+                let result = storage.insert(transaction.clone(), Vec::new());
 
                 if result.is_ok() {
                     prop_assert_eq!(
@@ -281,10 +281,10 @@ proptest! {
             let id_to_accept = transaction_to_accept.transaction.id;
             let id_to_reject = transaction_to_reject.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new()), Ok(id_to_accept));
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject),
+                storage.insert(transaction_to_reject, Vec::new()),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -332,19 +332,19 @@ proptest! {
             let id_to_reject = transaction_to_reject.transaction.id;
 
             prop_assert_eq!(
-                storage.insert(first_transaction_to_accept),
+                storage.insert(first_transaction_to_accept, Vec::new()),
                 Ok(first_id_to_accept)
             );
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject),
+                storage.insert(transaction_to_reject, Vec::new()),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
             prop_assert!(storage.contains_rejected(&id_to_reject));
 
             prop_assert_eq!(
-                storage.insert(second_transaction_to_accept),
+                storage.insert(second_transaction_to_accept, Vec::new()),
                 Ok(second_id_to_accept)
             );
 
@@ -371,13 +371,13 @@ proptest! {
             .filter_map(|transaction| {
                 let id = transaction.transaction.id;
 
-                storage.insert(transaction.clone()).ok().map(|_| id)
+                storage.insert(transaction.clone(), Vec::new()).ok().map(|_| id)
             })
             .collect();
 
         // Check that the inserted transactions are still there.
         for transaction_id in &inserted_transactions {
-            prop_assert!(storage.contains_transaction_exact(transaction_id));
+            prop_assert!(storage.contains_transaction_exact(&transaction_id.mined_id()));
         }
 
         // Remove some transactions.
@@ -399,14 +399,14 @@ proptest! {
         let removed_transactions = input.removed_transaction_ids();
 
         for removed_transaction_id in &removed_transactions {
-            prop_assert!(!storage.contains_transaction_exact(removed_transaction_id));
+            prop_assert!(!storage.contains_transaction_exact(&removed_transaction_id.mined_id()));
         }
 
         // Check that the remaining transactions are still in the storage.
         let remaining_transactions = inserted_transactions.difference(&removed_transactions);
 
         for remaining_transaction_id in remaining_transactions {
-            prop_assert!(storage.contains_transaction_exact(remaining_transaction_id));
+            prop_assert!(storage.contains_transaction_exact(&remaining_transaction_id.mined_id()));
         }
     }
 }
