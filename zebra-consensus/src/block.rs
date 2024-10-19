@@ -8,6 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
+    collections::HashSet,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,7 +26,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::FundingStreamReceiver, Network},
-    transparent,
+    transaction, transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -232,6 +233,10 @@ where
                 &block,
                 &transaction_hashes,
             ));
+
+            let known_outpoint_hashes: Arc<HashSet<transaction::Hash>> =
+                Arc::new(known_utxos.keys().map(|outpoint| outpoint.hash).collect());
+
             for transaction in &block.transactions {
                 let rsp = transaction_verifier
                     .ready()
@@ -239,6 +244,7 @@ where
                     .expect("transaction verifier is always ready")
                     .call(tx::Request::Block {
                         transaction: transaction.clone(),
+                        known_outpoint_hashes: known_outpoint_hashes.clone(),
                         known_utxos: known_utxos.clone(),
                         height,
                         time: block.header.time,

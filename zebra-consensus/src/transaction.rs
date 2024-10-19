@@ -148,6 +148,8 @@ pub enum Request {
     Block {
         /// The transaction itself.
         transaction: Arc<Transaction>,
+        /// Set of transaction hashes that create new transparent outputs.
+        known_outpoint_hashes: Arc<HashSet<transaction::Hash>>,
         /// Additional UTXOs which are known at the time of verification.
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
         /// The height of the block containing this transaction.
@@ -264,6 +266,17 @@ impl Request {
         match self {
             Request::Block { known_utxos, .. } => known_utxos.clone(),
             Request::Mempool { .. } => HashMap::new().into(),
+        }
+    }
+
+    /// The set of additional known [`transparent::OutPoint`]s of unspent transaction outputs that's in this request.
+    pub fn known_outpoint_hashes(&self) -> Arc<HashSet<transaction::Hash>> {
+        match self {
+            Request::Block {
+                known_outpoint_hashes,
+                ..
+            } => known_outpoint_hashes.clone(),
+            Request::Mempool { .. } => HashSet::new().into(),
         }
     }
 
@@ -635,14 +648,8 @@ where
             return None;
         }
 
-        // TODO: Do this transformation in the block verifier and include it in Request::Block instead?.
-        let known_outpoint_hashes: HashSet<transaction::Hash> = req
-            .known_utxos()
-            .keys()
-            .map(|outpoint| outpoint.hash)
-            .collect();
-
         let mut mempool = mempool?;
+        let known_outpoint_hashes = req.known_outpoint_hashes();
         let tx_id = req.transaction().hash();
 
         let mempool::Response::TransactionWithDeps {

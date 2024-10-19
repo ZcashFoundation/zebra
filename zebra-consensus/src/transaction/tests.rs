@@ -2,7 +2,10 @@
 //
 // TODO: split fixed test vectors into a `vectors` module?
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
@@ -984,6 +987,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: canopy
                     .activation_height(&network)
                     .expect("Canopy activation height is specified"),
@@ -1044,6 +1048,7 @@ fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network)
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: expiry_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -1099,6 +1104,7 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1143,6 +1149,7 @@ async fn v4_transaction_with_last_valid_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1188,6 +1195,7 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1235,6 +1243,7 @@ async fn v4_transaction_with_too_low_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1285,6 +1294,7 @@ async fn v4_transaction_with_exceeding_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1338,6 +1348,7 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1389,6 +1400,7 @@ async fn v4_coinbase_transaction_is_accepted() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1444,6 +1456,7 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1499,6 +1512,7 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1570,6 +1584,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -1646,6 +1661,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -1705,6 +1721,7 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1751,6 +1768,7 @@ async fn v5_transaction_with_last_valid_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1796,6 +1814,7 @@ async fn v5_coinbase_transaction_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1817,6 +1836,7 @@ async fn v5_coinbase_transaction_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1846,6 +1866,7 @@ async fn v5_coinbase_transaction_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1877,6 +1898,7 @@ async fn v5_coinbase_transaction_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: new_expiry_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1926,6 +1948,7 @@ async fn v5_transaction_with_too_low_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1977,6 +2000,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2031,6 +2055,7 @@ async fn v5_coinbase_transaction_is_accepted() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2088,6 +2113,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2145,6 +2171,7 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
         .oneshot(Request::Block {
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2189,6 +2216,7 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2278,6 +2306,7 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
             .oneshot(Request::Block {
                 transaction: transaction.clone(),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2324,6 +2353,7 @@ fn v4_with_sapling_spends() {
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2366,6 +2396,7 @@ fn v4_with_duplicate_sapling_spends() {
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2410,6 +2441,7 @@ fn v4_with_sapling_outputs_and_no_spends() {
             .oneshot(Request::Block {
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2458,6 +2490,7 @@ fn v5_with_sapling_spends() {
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2501,6 +2534,7 @@ fn v5_with_duplicate_sapling_spends() {
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2563,6 +2597,7 @@ fn v5_with_duplicate_orchard_action() {
             .oneshot(Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })

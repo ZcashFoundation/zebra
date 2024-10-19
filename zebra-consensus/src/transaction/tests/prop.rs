@@ -1,6 +1,9 @@
 //! Randomised property tests for transaction verification.
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use chrono::{DateTime, Duration, Utc};
 use proptest::{collection::vec, prelude::*};
@@ -459,6 +462,7 @@ fn validate(
             .oneshot(transaction::Request::Block {
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: block_time,
             })
