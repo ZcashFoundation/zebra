@@ -654,7 +654,7 @@ where
         req: &Request,
         mempool: Option<Timeout<Mempool>>,
     ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
-        if req.is_mempool() {
+        if req.is_mempool() || req.transaction().is_coinbase() {
             return None;
         }
 
