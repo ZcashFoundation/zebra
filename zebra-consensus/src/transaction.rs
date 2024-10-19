@@ -1,7 +1,7 @@
 //! Asynchronous verification of transactions.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -377,6 +377,18 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
+            if !req.is_mempool() {
+                if let Some(result) = Self::try_find_verified_unmined_tx(&req, mempool.clone()).await {
+                    let verified_tx = result?;
+
+                    return Ok(Response::Block {
+                        tx_id: verified_tx.transaction.id,
+                        miner_fee: Some(verified_tx.miner_fee),
+                        legacy_sigop_count: verified_tx.legacy_sigop_count
+                    });
+                }
+            }
+
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
@@ -606,6 +618,58 @@ where
         } else {
             unreachable!("Request::BestChainNextMedianTimePast always responds with BestChainNextMedianTimePast")
         }
+    }
+
+    /// Attempts to find a transaction in the mempool by its transaction hash and checks
+    /// that all of its dependencies are available in the block.
+    ///
+    /// Returns [`Some(Ok(VerifiedUnminedTx))`](VerifiedUnminedTx) if successful,
+    /// None if the transaction id was not found in the mempool,
+    /// or `Some(Err(TransparentInputNotFound))` if the transaction was found, but some of its
+    /// dependencies are missing in the block.
+    async fn try_find_verified_unmined_tx(
+        req: &Request,
+        mempool: Option<Timeout<Mempool>>,
+    ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
+        if req.is_mempool() {
+            return None;
+        }
+
+        // TODO: Do this transformation in the block verifier and include it in Request::Block instead?.
+        let known_outpoint_hashes: HashSet<transaction::Hash> = req
+            .known_utxos()
+            .keys()
+            .map(|outpoint| outpoint.hash)
+            .collect();
+
+        let mut mempool = mempool?;
+        let tx_id = req.transaction().hash();
+
+        let mempool::Response::TransactionWithDeps {
+            transaction,
+            dependencies,
+        } = mempool
+            .ready()
+            .await
+            .ok()?
+            .call(mempool::Request::TransactionWithDepsByMinedId(tx_id))
+            .await
+            .ok()?
+        else {
+            panic!("unexpected response to TransactionWithDepsByMinedId request");
+        };
+
+        let has_all_tx_deps = dependencies
+            .into_iter()
+            .all(|dependency_id| known_outpoint_hashes.contains(&dependency_id));
+
+        let result = if has_all_tx_deps {
+            Ok(transaction)
+        } else {
+            Err(TransactionError::TransparentInputNotFound)
+        };
+
+        Some(result)
     }
 
     /// Wait for the UTXOs that are being spent by the given transaction.
