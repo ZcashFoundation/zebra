@@ -237,12 +237,15 @@ where
             let known_outpoint_hashes: Arc<HashSet<transaction::Hash>> =
                 Arc::new(known_utxos.keys().map(|outpoint| outpoint.hash).collect());
 
-            for transaction in &block.transactions {
+            for (&transaction_hash, transaction) in
+                transaction_hashes.iter().zip(block.transactions.iter())
+            {
                 let rsp = transaction_verifier
                     .ready()
                     .await
                     .expect("transaction verifier is always ready")
                     .call(tx::Request::Block {
+                        transaction_hash,
                         transaction: transaction.clone(),
                         known_outpoint_hashes: known_outpoint_hashes.clone(),
                         known_utxos: known_utxos.clone(),

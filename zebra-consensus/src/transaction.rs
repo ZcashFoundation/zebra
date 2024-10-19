@@ -146,6 +146,8 @@ where
 pub enum Request {
     /// Verify the supplied transaction as part of a block.
     Block {
+        /// The transaction hash.
+        transaction_hash: transaction::Hash,
         /// The transaction itself.
         transaction: Arc<Transaction>,
         /// Set of transaction hashes that create new transparent outputs.
@@ -258,6 +260,16 @@ impl Request {
             // TODO: get the precalculated ID from the block verifier
             Request::Block { transaction, .. } => transaction.unmined_id(),
             Request::Mempool { transaction, .. } => transaction.id,
+        }
+    }
+
+    /// The mined transaction ID for the transaction in this request.
+    pub fn tx_mined_id(&self) -> transaction::Hash {
+        match self {
+            Request::Block {
+                transaction_hash, ..
+            } => *transaction_hash,
+            Request::Mempool { transaction, .. } => transaction.id.mined_id(),
         }
     }
 
@@ -390,16 +402,14 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            if !req.is_mempool() {
-                if let Some(result) = Self::try_find_verified_unmined_tx(&req, mempool.clone()).await {
-                    let verified_tx = result?;
+            if let Some(result) = Self::try_find_verified_unmined_tx(&req, mempool.clone()).await {
+                let verified_tx = result?;
 
-                    return Ok(Response::Block {
-                        tx_id: verified_tx.transaction.id,
-                        miner_fee: Some(verified_tx.miner_fee),
-                        legacy_sigop_count: verified_tx.legacy_sigop_count
-                    });
-                }
+                return Ok(Response::Block {
+                    tx_id: verified_tx.transaction.id,
+                    miner_fee: Some(verified_tx.miner_fee),
+                    legacy_sigop_count: verified_tx.legacy_sigop_count
+                });
             }
 
             // Do quick checks first
@@ -648,24 +658,23 @@ where
             return None;
         }
 
-        let mut mempool = mempool?;
+        let mempool = mempool?;
         let known_outpoint_hashes = req.known_outpoint_hashes();
-        let tx_id = req.transaction().hash();
+        let tx_id = req.tx_mined_id();
 
         let mempool::Response::TransactionWithDeps {
             transaction,
             dependencies,
         } = mempool
-            .ready()
-            .await
-            .ok()?
-            .call(mempool::Request::TransactionWithDepsByMinedId(tx_id))
+            .oneshot(mempool::Request::TransactionWithDepsByMinedId(tx_id))
             .await
             .ok()?
         else {
             panic!("unexpected response to TransactionWithDepsByMinedId request");
         };
 
+        // Note: This does not verify that the spends are in order, this should be
+        //       done during contextual validation in zebra-state.
         let has_all_tx_deps = dependencies
             .into_iter()
             .all(|dependency_id| known_outpoint_hashes.contains(&dependency_id));
