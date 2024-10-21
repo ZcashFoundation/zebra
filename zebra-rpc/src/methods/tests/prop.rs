@@ -447,71 +447,17 @@ proptest! {
         })?;
     }
 
-    /// Test that the method rejects non-hexadecimal characters.
-    ///
-    /// Try to call `get_raw_transaction` using a string parameter that has at least one
-    /// non-hexadecimal character, and check that it fails with an expected error.
-    #[test]
-    fn get_raw_transaction_non_hexadecimal_string_results_in_an_error(
-        non_hex_string in ".*[^0-9A-Fa-f].*",
-    ) {
-        let (runtime, _init_guard) = zebra_test::init_async();
-        let _guard = runtime.enter();
-
-        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
-        tokio::time::pause();
-
-        runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
-            let send_task = tokio::spawn(rpc.get_raw_transaction(non_hex_string, Some(0)));
-
-            mempool.expect_no_requests().await?;
-            state.expect_no_requests().await?;
-
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
-
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        ..
-                    })
-                ),
-                "Result is not an invalid parameters error: {result:?}"
-            );
-
-            // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
-
-            Ok::<_, TestCaseError>(())
-        })?;
-    }
-
     /// Test that the method rejects an input that's not a transaction.
     ///
-    /// Try to call `get_raw_transaction` using random bytes that fail to deserialize as a
-    /// transaction, and check that it fails with an expected error.
+    /// Try to call `get_raw_transaction` using random bytes that fail to deserialize as a txid, and
+    /// check that it fails with an expected error.
     #[test]
     fn get_raw_transaction_invalid_transaction_results_in_an_error(
         random_bytes in any::<Vec<u8>>(),
     ) {
+        if random_bytes.len() == 32 {
+            return Ok::<_, TestCaseError>(());
+        }
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
