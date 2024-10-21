@@ -11,6 +11,7 @@ use std::{collections::HashSet, fmt::Debug, sync::Arc};
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, FutureExt, StreamExt, TryFutureExt};
 use hex::{FromHex, ToHex};
+use hex_data::HexData;
 use indexmap::IndexMap;
 use jsonrpc_core::{self, BoxFuture, Error, ErrorCode, Result};
 use jsonrpc_derive::rpc;
@@ -257,7 +258,7 @@ pub trait Rpc {
     #[rpc(name = "getrawtransaction")]
     fn get_raw_transaction(
         &self,
-        txid_hex: String,
+        txid: HexData,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>>;
 
@@ -1005,64 +1006,53 @@ where
         .boxed()
     }
 
-    // TODO: use HexData or SentTransactionHash to handle the transaction ID
     fn get_raw_transaction(
         &self,
-        txid_hex: String,
+        HexData(txid): HexData,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>> {
         let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
-        let verbose = verbose.unwrap_or(0);
-        let verbose = verbose != 0;
+        let verbose = verbose.unwrap_or(0) != 0;
 
         async move {
-            let txid = transaction::Hash::from_hex(txid_hex).map_err(|_| {
-                Error::invalid_params("transaction ID is not specified as a hex string")
-            })?;
+            let txid = transaction::Hash::from_bytes_in_display_order(
+                &txid
+                    .try_into()
+                    .map_err(|_| Error::invalid_params("invalid TXID length"))?,
+            );
 
             // Check the mempool first.
-            //
-            // # Correctness
-            //
-            // Transactions are removed from the mempool after they are mined into blocks,
-            // so the transaction could be just in the mempool, just in the state, or in both.
-            // (And the mempool and state transactions could have different authorising data.)
-            // But it doesn't matter which transaction we choose, because the effects are the same.
-            let mut txid_set = HashSet::new();
-            txid_set.insert(txid);
-            let request = mempool::Request::TransactionsByMinedId(txid_set);
-
-            let response = mempool
+            match mempool
                 .ready()
-                .and_then(|service| service.call(request))
+                .and_then(|service| {
+                    service.call(mempool::Request::TransactionsByMinedId(HashSet::from([
+                        txid,
+                    ])))
+                })
                 .await
-                .map_server_error()?;
-
-            match response {
-                mempool::Response::Transactions(unmined_transactions) => {
-                    if !unmined_transactions.is_empty() {
-                        let tx = unmined_transactions[0].transaction.clone();
-                        return Ok(GetRawTransaction::from_transaction(tx, None, 0, verbose));
+                .map_server_error()?
+            {
+                mempool::Response::Transactions(txns) => {
+                    if let Some(tx) = txns.first() {
+                        return Ok(GetRawTransaction::Raw(tx.transaction.clone().into()));
                     }
                 }
-                _ => unreachable!("unmatched response to a transactionids request"),
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
             };
 
-            // Now check the state
-            let request = zebra_state::ReadRequest::Transaction(txid);
-            let response = state
+            // If the tx wasn't in the mempool, check the state.
+            match state
                 .ready()
-                .and_then(|service| service.call(request))
+                .and_then(|service| service.call(zebra_state::ReadRequest::Transaction(txid)))
                 .await
-                .map_server_error()?;
-
-            match response {
+                .map_server_error()?
+            {
                 zebra_state::ReadResponse::Transaction(Some(MinedTx {
                     tx,
                     height,
                     confirmations,
-                })) => Ok(GetRawTransaction::from_transaction(
+                })) => Ok(GetRawTransaction::from_mined_tx(
                     tx,
                     Some(height),
                     confirmations,
@@ -1798,7 +1788,7 @@ pub struct GetAddressTxIdsRequest {
 impl GetRawTransaction {
     /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
     #[allow(clippy::unwrap_in_result)]
-    fn from_transaction(
+    fn from_mined_tx(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
         confirmations: u32,
