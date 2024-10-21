@@ -28,6 +28,8 @@ use zebra_state::BoxError;
 
 use zebra_test::mock_service::MockService;
 
+use crate::methods::hex_data::HexData;
+
 use super::super::{
     AddressBalance, AddressStrings, NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash,
 };
@@ -481,7 +483,7 @@ proptest! {
                 NoChainTip,
             );
 
-            let send_task = tokio::spawn(rpc.get_raw_transaction(hex::encode(random_bytes), Some(0)));
+            let send_task = tokio::spawn(rpc.get_raw_transaction(HexData(random_bytes), Some(0)));
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;

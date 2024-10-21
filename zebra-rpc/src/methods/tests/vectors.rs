@@ -473,8 +473,9 @@ async fn rpc_getrawtransaction() {
                         conventional_fee: Amount::zero(),
                     }]));
                 });
-            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
-            let (response, _) = futures::join!(get_tx_req, mempool_req);
+            let txid = HexData(tx.hash().bytes_in_display_order().to_vec());
+            let (response, _) =
+                futures::join!(rpc.get_raw_transaction(txid, Some(0u8)), mempool_req);
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
@@ -503,12 +504,14 @@ async fn rpc_getrawtransaction() {
 
     let run_state_test_case = |block_idx: usize, block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
-        let tx_hash = tx.hash();
-        let get_tx_verbose_0_req = rpc.get_raw_transaction(tx_hash.encode_hex(), Some(0u8));
-        let get_tx_verbose_1_req = rpc.get_raw_transaction(tx_hash.encode_hex(), Some(1u8));
+        let txid = tx.hash();
+        let hex_txid = HexData(txid.bytes_in_display_order().to_vec());
+
+        let get_tx_verbose_0_req = rpc.get_raw_transaction(hex_txid.clone(), Some(0u8));
+        let get_tx_verbose_1_req = rpc.get_raw_transaction(hex_txid, Some(1u8));
 
         async move {
-            let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(tx_hash));
+            let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(txid));
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
@@ -516,7 +519,7 @@ async fn rpc_getrawtransaction() {
                 unreachable!("Should return a Raw enum")
             }
 
-            let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(tx_hash));
+            let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(txid));
             let GetRawTransaction::Object {
                 hex,
                 height,

@@ -229,12 +229,10 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     snapshot_rpc_getblockchaininfo("", get_blockchain_info, &settings);
 
     // get the first transaction of the first block which is not the genesis
-    let first_block_first_transaction = &blocks[1].transactions[0];
+    let first_block_first_tx = &blocks[1].transactions[0];
 
     // build addresses
-    let address = &first_block_first_transaction.outputs()[1]
-        .address(network)
-        .unwrap();
+    let address = &first_block_first_tx.outputs()[1].address(network).unwrap();
     let addresses = vec![address.to_string()];
 
     // `getaddressbalance`
@@ -388,10 +386,16 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             responder.respond(mempool::Response::Transactions(vec![]));
         });
 
+    let txid = HexData(
+        first_block_first_tx
+            .hash()
+            .bytes_in_display_order()
+            .to_vec(),
+    );
+
     // make the api call
-    let get_raw_transaction =
-        rpc.get_raw_transaction(first_block_first_transaction.hash().encode_hex(), Some(0u8));
-    let (response, _) = futures::join!(get_raw_transaction, mempool_req);
+    let get_raw_tx = rpc.get_raw_transaction(txid.clone(), Some(0u8));
+    let (response, _) = futures::join!(get_raw_tx, mempool_req);
     let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
 
     snapshot_rpc_getrawtransaction("verbosity_0", get_raw_transaction, &settings);
@@ -406,9 +410,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         });
 
     // make the api call
-    let get_raw_transaction =
-        rpc.get_raw_transaction(first_block_first_transaction.hash().encode_hex(), Some(1u8));
-    let (response, _) = futures::join!(get_raw_transaction, mempool_req);
+    let get_raw_tx = rpc.get_raw_transaction(txid, Some(1u8));
+    let (response, _) = futures::join!(get_raw_tx, mempool_req);
     let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
 
     snapshot_rpc_getrawtransaction("verbosity_1", get_raw_transaction, &settings);
