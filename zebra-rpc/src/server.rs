@@ -311,8 +311,12 @@ impl RpcServer {
         let wait_on_shutdown = move || {
             span.in_scope(|| {
                 if config.enable_cookie_auth {
-                    cookie::remove_from_disk(&config.cookie_dir)
-                        .expect("Zebra must be able to remove the auth cookie from the disk");
+                    if let Err(err) = cookie::remove_from_disk(&config.cookie_dir) {
+                        warn!(
+                            ?err,
+                            "unexpectedly could not remove the rpc auth cookie from the disk"
+                        )
+                    }
                 }
 
                 info!("Stopping RPC server");
