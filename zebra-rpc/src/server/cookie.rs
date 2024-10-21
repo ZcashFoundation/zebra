@@ -36,7 +36,7 @@ impl Default for Cookie {
 /// Writes the given cookie to the given dir.
 pub fn write_to_disk(cookie: &Cookie, dir: &Path) -> Result<()> {
     // Create the directory if needed.
-    std::fs::create_dir_all(&dir)?;
+    std::fs::create_dir_all(dir)?;
     File::create(dir.join(FILE))?.write_all(format!("__cookie__:{}", cookie.0).as_bytes())?;
 
     tracing::info!("RPC auth cookie written to disk");
