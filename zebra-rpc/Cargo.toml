@@ -58,15 +58,15 @@ chrono = { version = "0.4.38", default-features = false, features = [
     "clock",
     "std",
 ] }
-futures = "0.3.30"
+futures = "0.3.31"
 
 jsonrpc-core = "18.0.0"
 jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.128", features = ["preserve_order"] }
-indexmap = { version = "2.5.0", features = ["serde"] }
+serde_json = { version = "1.0.132", features = ["preserve_order"] }
+indexmap = { version = "2.6.0", features = ["serde"] }
 
 tokio = { version = "1.40.0", features = [
     "time",
@@ -74,7 +74,7 @@ tokio = { version = "1.40.0", features = [
     "macros",
     "tracing",
 ] }
-tower = "0.4.13"
+tower = "0.5.1"
 
 # indexer-rpcs dependencies
 tonic = { version = "0.12.3", optional = true }
