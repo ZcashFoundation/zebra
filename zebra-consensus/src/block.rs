@@ -284,7 +284,7 @@ where
                 })?;
             }
 
-            // TODO: Add link to lockbox stream ZIP
+            // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
                 height,
                 &network,
