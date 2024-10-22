@@ -1,16 +1,18 @@
 //! Tests for funding streams.
 
 use color_eyre::Report;
-use zebra_chain::parameters::{
-    subsidy::FundingStreamReceiver,
-    testnet::{
-        self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
-        ConfiguredFundingStreams,
-    },
-    NetworkKind,
-};
 
-use crate::block::subsidy::general::block_subsidy;
+use crate::{
+    block::subsidy::general::block_subsidy_pre_nsm,
+    parameters::{
+        subsidy::FundingStreamReceiver,
+        testnet::{
+            self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+            ConfiguredFundingStreams,
+        },
+        NetworkKind,
+    },
+};
 
 use super::*;
 
@@ -26,7 +28,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
     assert!(funding_stream_values(
         canopy_height_minus1,
         network,
-        block_subsidy(canopy_height_minus1, network)?
+        block_subsidy_pre_nsm(canopy_height_minus1, network)?
     )?
     .is_empty());
 
@@ -50,7 +52,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
         funding_stream_values(
             canopy_height,
             network,
-            block_subsidy(canopy_height, network)?
+            block_subsidy_pre_nsm(canopy_height, network)?
         )
         .unwrap(),
         hash_map
@@ -60,7 +62,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
         funding_stream_values(
             canopy_height_plus1,
             network,
-            block_subsidy(canopy_height_plus1, network)?
+            block_subsidy_pre_nsm(canopy_height_plus1, network)?
         )
         .unwrap(),
         hash_map
@@ -70,7 +72,7 @@ fn test_funding_stream_values() -> Result<(), Report> {
         funding_stream_values(
             canopy_height_plus2,
             network,
-            block_subsidy(canopy_height_plus2, network)?
+            block_subsidy_pre_nsm(canopy_height_plus2, network)?
         )
         .unwrap(),
         hash_map
@@ -82,11 +84,11 @@ fn test_funding_stream_values() -> Result<(), Report> {
     let last = (end - 1).unwrap();
 
     assert_eq!(
-        funding_stream_values(last, network, block_subsidy(last, network)?).unwrap(),
+        funding_stream_values(last, network, block_subsidy_pre_nsm(last, network)?).unwrap(),
         hash_map
     );
 
-    assert!(funding_stream_values(end, network, block_subsidy(end, network)?)?.is_empty());
+    assert!(funding_stream_values(end, network, block_subsidy_pre_nsm(end, network)?)?.is_empty());
 
     // TODO: Replace this with Mainnet once there's an NU6 activation height defined for Mainnet
     let network = testnet::Parameters::build()
@@ -137,7 +139,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
         Height(nu6_height.0 + 1),
     ] {
         assert_eq!(
-            funding_stream_values(height, &network, block_subsidy(height, &network)?).unwrap(),
+            funding_stream_values(height, &network, block_subsidy_pre_nsm(height, &network)?)
+                .unwrap(),
             hash_map
         );
     }
@@ -191,7 +194,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
         Height(nu6_height.0 + 1),
     ] {
         assert_eq!(
-            funding_stream_values(height, &network, block_subsidy(height, &network)?).unwrap(),
+            funding_stream_values(height, &network, block_subsidy_pre_nsm(height, &network)?)
+                .unwrap(),
             hash_map
         );
     }
