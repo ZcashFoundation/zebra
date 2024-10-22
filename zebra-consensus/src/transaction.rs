@@ -413,6 +413,18 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                #[cfg(zcash_unstable = "nsm")]
+                Transaction::ZFuture {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                     .. } => Self::verify_zfuture_transaction(
+                    &req,
+                    &network,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )?,
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -444,17 +456,21 @@ where
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
+            let burn_amount = match *tx {
+                #[cfg(zcash_unstable = "nsm")]
+                Transaction::ZFuture{ .. } => tx.burn_amount(),
+                _ => Amount::zero()
+            };
+
             // Calculate the fee only for non-coinbase transactions.
             let mut miner_fee = None;
             if !tx.is_coinbase() {
                 // TODO: deduplicate this code with remaining_transaction_value()?
-                miner_fee = match value_balance {
-                    Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(tx_rtv) => Some(tx_rtv),
-                        Err(_) => return Err(TransactionError::IncorrectFee),
-                    },
-                    Err(_) => return Err(TransactionError::IncorrectFee),
-                };
+                miner_fee = value_balance
+                    .map(|vb| vb.remaining_transaction_value())
+                    .map(|tx_rtv| tx_rtv - burn_amount)
+                    .or(Err(TransactionError::IncorrectFee))?
+                    .ok();
             }
 
             let legacy_sigop_count = cached_ffi_transaction.legacy_sigop_count()?;
@@ -687,6 +703,9 @@ where
                 transaction.version(),
                 network_upgrade,
             )),
+
+            #[cfg(zcash_unstable = "nsm")]
+            NetworkUpgrade::ZFuture => Ok(()),
         }
     }
 
@@ -767,6 +786,8 @@ where
             // Note: Here we verify the transaction version number of the above rule, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
             NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => Ok(()),
+            #[cfg(zcash_unstable = "nsm")]
+            NetworkUpgrade::ZFuture => Ok(()),
 
             // Does not support V5 transactions
             NetworkUpgrade::Genesis
@@ -780,6 +801,51 @@ where
                 network_upgrade,
             )),
         }
+    }
+
+    /// Verify a ZFUTURE transaction.
+    #[cfg(zcash_unstable = "nsm")]
+    fn verify_zfuture_transaction(
+        request: &Request,
+        network: &Network,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let transaction = request.transaction();
+        let upgrade = request.upgrade(network);
+
+        if upgrade != NetworkUpgrade::ZFuture {
+            return Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                upgrade,
+            ));
+        }
+
+        let shielded_sighash = transaction.sighash(
+            upgrade
+                .branch_id()
+                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
+            HashType::ALL,
+            cached_ffi_transaction.all_previous_outputs(),
+            None,
+        );
+
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            request,
+            network,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_shielded_data(
+            sapling_shielded_data,
+            &shielded_sighash,
+        )?)
+        .and(Self::verify_orchard_shielded_data(
+            orchard_shielded_data,
+            &shielded_sighash,
+        )?))
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided

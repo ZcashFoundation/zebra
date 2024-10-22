@@ -1524,6 +1524,21 @@ impl Chain {
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
+                #[cfg(zcash_unstable = "nsm")]
+                ZFuture {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )
             };
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
@@ -1684,6 +1699,21 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
+                ),
+                #[cfg(zcash_unstable = "nsm")]
+                ZFuture {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
                 ),
             };
 

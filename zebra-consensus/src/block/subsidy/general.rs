@@ -124,7 +124,7 @@ pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>>
 ///
 /// Assumes a constant funding stream amount per block.
 // TODO: Cache the lockbox value balance in zebra-state (will be required for tracking lockbox
-//       value balance after the Zcash Sustainability Fund ZIPs or after a ZIP for spending from the deferred pool)
+//       value balance after the Network Sustainability Mechanism ZIPs or after a ZIP for spending from the deferred pool)
 #[allow(dead_code)]
 fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative> {
     let Some(nu6_activation_height) = Nu6.activation_height(network) else {
