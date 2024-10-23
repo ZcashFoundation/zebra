@@ -337,7 +337,10 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_110);
+///
+/// This version of Zebra draws the current network protocol version from
+/// [ZIP-253](https://zips.z.cash/zip-0253).
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
 
 /// The default RTT estimate for peer responses.
 ///
