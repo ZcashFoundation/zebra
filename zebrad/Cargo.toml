@@ -181,7 +181,7 @@ futures = "0.3.31"
 rayon = "1.10.0"
 tokio = { version = "1.41.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tokio-stream = { version = "0.1.16", features = ["time"] }
-tower = { version = "0.5.1", features = ["hedge", "limit"] }
+tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.6"
 
 color-eyre = { version = "0.6.3", default-features = false, features = ["issue-url"] }
