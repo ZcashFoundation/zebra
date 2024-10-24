@@ -125,7 +125,7 @@
 //! Example of how to run the has_spending_transaction_ids test:
 //!
 //! ```console
-//! RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test has_spending_transaction_ids --release -- --ignored --nocapture
+//! RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test has_spending_transaction_ids --features "indexer" --release -- --ignored --nocapture
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
@@ -153,7 +153,6 @@ use std::{
     collections::HashSet,
     env, fs, panic,
     path::PathBuf,
-    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -172,9 +171,7 @@ use zebra_chain::{
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
-use zebra_state::{
-    constants::LOCK_FILE_ERROR, state_database_format_version_in_code, SemanticallyVerifiedBlock,
-};
+use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
 #[cfg(not(target_os = "windows"))]
 use zebra_network::constants::PORT_IN_USE_ERROR;
@@ -191,7 +188,6 @@ use zebra_test::net::random_known_port;
 mod common;
 
 use common::{
-    cached_state::future_blocks,
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
@@ -3553,10 +3549,16 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 /// spent outpoint and revealed nullifier in the last 100 blocks of a cached state.
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "indexer")]
 async fn has_spending_transaction_ids() -> Result<()> {
+    use std::sync::Arc;
     use tower::Service;
     use zebra_chain::{chain_tip::ChainTip, transparent::Input};
-    use zebra_state::{ReadRequest, ReadResponse, Request, Response, Spend};
+    use zebra_state::{
+        ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, Spend,
+    };
+
+    use common::cached_state::future_blocks;
 
     let _init_guard = zebra_test::init();
     let test_type = UpdateZebraCachedStateWithRpc;

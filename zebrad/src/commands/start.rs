@@ -260,7 +260,7 @@ impl StartCmd {
 
         // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
         //       any related unit tests sometimes crash with memory errors
-        #[cfg(feature = "indexer-rpcs")]
+        #[cfg(feature = "indexer")]
         let indexer_rpc_task_handle =
             if let Some(indexer_listen_addr) = config.rpc.indexer_listen_addr {
                 info!("spawning indexer RPC server");
@@ -278,7 +278,7 @@ impl StartCmd {
                 tokio::spawn(std::future::pending().in_current_span())
             };
 
-        #[cfg(not(feature = "indexer-rpcs"))]
+        #[cfg(not(feature = "indexer"))]
         // Spawn a dummy indexer rpc task which doesn't do anything and never finishes.
         let indexer_rpc_task_handle: tokio::task::JoinHandle<Result<(), tower::BoxError>> =
             tokio::spawn(std::future::pending().in_current_span());

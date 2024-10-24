@@ -29,11 +29,12 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::{Spend, Treestate},
-    service::check,
-    ContextuallyVerifiedBlock, HashOrHeight, OutputLocation, TransactionLocation,
-    ValidateContextError,
+    request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
+    TransactionLocation, ValidateContextError,
 };
+
+#[cfg(feature = "indexer")]
+use crate::request::Spend;
 
 use self::index::TransparentTransfers;
 
@@ -1260,6 +1261,7 @@ impl Chain {
     /// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
     /// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
     /// and is spent or revealed by this chain.
+    #[cfg(feature = "indexer")]
     pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
         match spend {
             Spend::OutPoint(outpoint) => self.spent_utxos.get(outpoint),

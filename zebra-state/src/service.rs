@@ -1383,6 +1383,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(spend) => {
                 let state = self.clone();
 

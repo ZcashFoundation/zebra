@@ -34,6 +34,7 @@ use crate::{
 /// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
 /// [`sapling::Nullifier`], and [`orchard::Nullifier`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg(feature = "indexer")]
 pub enum Spend {
     /// A spend identified by a [`transparent::OutPoint`].
     OutPoint(transparent::OutPoint),
@@ -45,24 +46,28 @@ pub enum Spend {
     Orchard(orchard::Nullifier),
 }
 
+#[cfg(feature = "indexer")]
 impl From<transparent::OutPoint> for Spend {
     fn from(outpoint: transparent::OutPoint) -> Self {
         Self::OutPoint(outpoint)
     }
 }
 
+#[cfg(feature = "indexer")]
 impl From<sprout::Nullifier> for Spend {
     fn from(sprout_nullifier: sprout::Nullifier) -> Self {
         Self::Sprout(sprout_nullifier)
     }
 }
 
+#[cfg(feature = "indexer")]
 impl From<sapling::Nullifier> for Spend {
     fn from(sapling_nullifier: sapling::Nullifier) -> Self {
         Self::Sapling(sapling_nullifier)
     }
 }
 
+#[cfg(feature = "indexer")]
 impl From<orchard::Nullifier> for Spend {
     fn from(orchard_nullifier: orchard::Nullifier) -> Self {
         Self::Orchard(orchard_nullifier)
@@ -1064,6 +1069,7 @@ pub enum ReadRequest {
     ///
     /// Returns [`ReadResponse::TransactionId`] with the hash of the transaction
     /// that spent the output at the provided [`transparent::OutPoint`].
+    #[cfg(feature = "indexer")]
     SpendingTransactionId(Spend),
 
     /// Looks up utxos for the provided addresses.
@@ -1146,13 +1152,14 @@ impl ReadRequest {
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
-            ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }
             ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
+            #[cfg(feature = "indexer")]
+            ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::ChainInfo => "chain_info",
             #[cfg(feature = "getblocktemplate-rpcs")]

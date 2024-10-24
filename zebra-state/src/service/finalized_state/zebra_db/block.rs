@@ -31,7 +31,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::{FinalizedBlock, Spend},
+    request::FinalizedBlock,
     service::finalized_state::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
@@ -42,6 +42,9 @@ use crate::{
     },
     BoxError, HashOrHeight,
 };
+
+#[cfg(feature = "indexer")]
+use crate::request::Spend;
 
 #[cfg(test)]
 mod tests;
@@ -263,6 +266,7 @@ impl ZebraDb {
 
     /// Returns the [`transaction::Hash`] of the transaction that spent or revealed the given
     /// [`transparent::OutPoint`] or nullifier, if it is spent or revealed in the finalized state.
+    #[cfg(feature = "indexer")]
     pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
         let tx_loc = match spend {
             Spend::OutPoint(outpoint) => self.spending_tx_loc(outpoint)?,
@@ -385,6 +389,9 @@ impl ZebraDb {
                 .iter()
                 .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
                 .collect();
+
+        // TODO: Add `OutputLocation`s to the values in `spent_utxos_by_outpoint` to avoid creating a second hashmap with the same keys
+        #[cfg(feature = "indexer")]
         let out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> = spent_utxos
             .iter()
             .map(|(outpoint, out_loc, _utxo)| (*outpoint, *out_loc))
@@ -426,6 +433,7 @@ impl ZebraDb {
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
+            #[cfg(feature = "indexer")]
             out_loc_by_outpoint,
             address_balances,
             self.finalized_value_pool(),
@@ -483,7 +491,10 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
-        out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
@@ -521,6 +532,7 @@ impl DiskWriteBatch {
                 &new_outputs_by_out_loc,
                 &spent_utxos_by_outpoint,
                 &spent_utxos_by_out_loc,
+                #[cfg(feature = "indexer")]
                 &out_loc_by_outpoint,
                 address_balances,
             )?;
