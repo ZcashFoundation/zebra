@@ -105,6 +105,19 @@ impl GetTreestate {
             orchard,
         }
     }
+
+    /// Returns the contents of ['GetTreeState'].
+    pub fn into_parts(self) -> (Hash, Height, u32, Option<Vec<u8>>, Option<Vec<u8>>) {
+        (
+            self.hash,
+            self.height,
+            self.time,
+            self.sapling
+                .map(|treestate| treestate.commitments.final_state),
+            self.orchard
+                .map(|treestate| treestate.commitments.final_state),
+        )
+    }
 }
 
 impl Default for GetTreestate {
@@ -123,10 +136,22 @@ impl Default for GetTreestate {
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-struct Treestate<Tree: AsRef<[u8]>> {
+pub struct Treestate<Tree: AsRef<[u8]>> {
     /// Contains an Orchard or Sapling serialized note commitment tree,
     /// hex-encoded.
     commitments: Commitments<Tree>,
+}
+
+impl<Tree: AsRef<[u8]>> Treestate<Tree> {
+    /// Returns a new instance of ['Treestate'].
+    pub fn new(commitments: Commitments<Tree>) -> Self {
+        Treestate { commitments }
+    }
+
+    /// Returns a reference to the commitments.
+    pub fn inner(&self) -> &Commitments<Tree> {
+        &self.commitments
+    }
 }
 
 /// A wrapper that contains either an Orchard or Sapling note commitment tree.
@@ -136,9 +161,21 @@ struct Treestate<Tree: AsRef<[u8]>> {
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-struct Commitments<Tree: AsRef<[u8]>> {
+pub struct Commitments<Tree: AsRef<[u8]>> {
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.
     #[serde(with = "hex")]
     #[serde(rename = "finalState")]
     final_state: Tree,
+}
+
+impl<Tree: AsRef<[u8]>> Commitments<Tree> {
+    /// Returns a new instance of ['Commitments'].
+    pub fn new(final_state: Tree) -> Self {
+        Commitments { final_state }
+    }
+
+    /// Returns a reference to the final_state.
+    pub fn inner(&self) -> &Tree {
+        &self.final_state
+    }
 }

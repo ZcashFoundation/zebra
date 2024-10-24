@@ -163,6 +163,12 @@ impl From<ConsensusBranchId> for u32 {
     }
 }
 
+impl From<u32> for ConsensusBranchId {
+    fn from(branch: u32) -> Self {
+        ConsensusBranchId(branch)
+    }
+}
+
 impl ToHex for &ConsensusBranchId {
     fn encode_hex<T: FromIterator<char>>(&self) -> T {
         self.bytes_in_display_order().encode_hex()
