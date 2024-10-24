@@ -3,11 +3,14 @@
 use std::{collections::HashMap, sync::Arc};
 
 use tracing::trace;
-use zebra_chain::transaction::{self, Transaction};
+use zebra_chain::transaction::Transaction;
 
 use crate::{
     error::DuplicateNullifierError,
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::ZebraDb,
+        non_finalized_state::{Chain, SpendingTransactionId},
+    },
     SemanticallyVerifiedBlock, ValidateContextError,
 };
 
@@ -159,9 +162,9 @@ pub(crate) fn tx_no_duplicates_in_chain(
 /// [5]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<'block, NullifierT>(
-    chain_nullifiers: &mut HashMap<NullifierT, transaction::Hash>,
+    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = &'block NullifierT>,
-    revealing_tx_id: transaction::Hash,
+    revealing_tx_id: SpendingTransactionId,
 ) -> Result<(), ValidateContextError>
 where
     NullifierT: DuplicateNullifierError + Copy + std::fmt::Debug + Eq + std::hash::Hash + 'block,
@@ -207,7 +210,7 @@ where
 /// [1]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn remove_from_non_finalized_chain<'block, NullifierT>(
-    chain_nullifiers: &mut HashMap<NullifierT, transaction::Hash>,
+    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = &'block NullifierT>,
 ) where
     NullifierT: std::fmt::Debug + Eq + std::hash::Hash + 'block,

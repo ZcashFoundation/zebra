@@ -476,6 +476,7 @@ impl DiskWriteBatch {
         zebra_db: &ZebraDb,
         finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
+        #[cfg(feature = "indexer")]
         let FinalizedBlock { block, height, .. } = finalized;
 
         // Index each transaction's shielded data
@@ -486,7 +487,7 @@ impl DiskWriteBatch {
         }
 
         #[cfg(not(feature = "indexer"))]
-        for transaction in &block.transactions {
+        for transaction in &finalized.block.transactions {
             self.prepare_nullifier_batch(zebra_db, transaction)?;
         }
 
