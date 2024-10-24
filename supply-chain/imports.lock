@@ -1,9 +1,57 @@
 
 # cargo-vet imports lock
 
+[[unpublished.tower-batch-control]]
+version = "0.2.41-beta.16"
+audited_as = "0.2.41-beta.15"
+
+[[unpublished.tower-fallback]]
+version = "0.2.41-beta.16"
+audited_as = "0.2.41-beta.15"
+
+[[unpublished.zebra-chain]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
+[[unpublished.zebra-consensus]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
+[[unpublished.zebra-grpc]]
+version = "0.1.0-alpha.7"
+audited_as = "0.1.0-alpha.6"
+
+[[unpublished.zebra-network]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
+[[unpublished.zebra-node-services]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
+[[unpublished.zebra-rpc]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
 [[unpublished.zebra-scan]]
-version = "0.1.0-alpha.8"
+version = "0.1.0-alpha.9"
 audited_as = "0.1.0-alpha.7"
+
+[[unpublished.zebra-script]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
+[[unpublished.zebra-state]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
+[[unpublished.zebra-utils]]
+version = "1.0.0-beta.40"
+audited_as = "1.0.0-beta.39"
+
+[[unpublished.zebrad]]
+version = "2.0.0-rc.0"
+audited_as = "1.9.0"
 
 [[publisher.cexpr]]
 version = "0.6.0"
@@ -13,15 +61,15 @@ user-login = "emilio"
 user-name = "Emilio Cobos Álvarez"
 
 [[publisher.clap]]
-version = "4.5.18"
-when = "2024-09-20"
+version = "4.5.20"
+when = "2024-10-08"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
 [[publisher.clap_builder]]
-version = "4.5.18"
-when = "2024-09-20"
+version = "4.5.20"
+when = "2024-10-08"
 user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
@@ -48,8 +96,8 @@ user-login = "hsivonen"
 user-name = "Henri Sivonen"
 
 [[publisher.serde_json]]
-version = "1.0.128"
-when = "2024-09-04"
+version = "1.0.132"
+when = "2024-10-19"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
@@ -62,15 +110,15 @@ user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.syn]]
-version = "2.0.79"
-when = "2024-09-27"
+version = "2.0.82"
+when = "2024-10-20"
 user-id = 3618
 user-login = "dtolnay"
 user-name = "David Tolnay"
 
 [[publisher.tokio]]
-version = "1.40.0"
-when = "2024-08-30"
+version = "1.41.0"
+when = "2024-10-22"
 user-id = 6741
 user-login = "Darksonn"
 user-name = "Alice Ryhl"
