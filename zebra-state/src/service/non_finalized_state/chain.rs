@@ -70,6 +70,14 @@ pub struct Chain {
     pub(super) last_fork_height: Option<Height>,
 }
 
+/// Spending transaction id type when the `indexer` feature is selected.
+#[cfg(feature = "indexer")]
+pub(crate) type SpendingTransactionId = transaction::Hash;
+
+/// Spending transaction id type when the `indexer` feature is not selected.
+#[cfg(not(feature = "indexer"))]
+pub(crate) type SpendingTransactionId = ();
+
 /// The internal state of [`Chain`].
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct ChainInner {
@@ -95,7 +103,9 @@ pub struct ChainInner {
     pub(crate) created_utxos: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     /// The spending transaction ids by [`transparent::OutPoint`]s spent by `blocks`,
     /// including spent outputs created by earlier transactions or blocks in the chain.
-    pub(crate) spent_utxos: HashMap<transparent::OutPoint, transaction::Hash>,
+    ///
+    /// Note: Spending transaction ids are only tracked when the `indexer` feature is selected.
+    pub(crate) spent_utxos: HashMap<transparent::OutPoint, SpendingTransactionId>,
 
     // Note commitment trees
     //
@@ -179,12 +189,15 @@ pub struct ChainInner {
 
     // Nullifiers
     //
-    /// The Sprout nullifiers revealed by `blocks`.
-    pub(crate) sprout_nullifiers: HashMap<sprout::Nullifier, transaction::Hash>,
-    /// The Sapling nullifiers revealed by `blocks`.
-    pub(crate) sapling_nullifiers: HashMap<sapling::Nullifier, transaction::Hash>,
-    /// The Orchard nullifiers revealed by `blocks`.
-    pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, transaction::Hash>,
+    /// The Sprout nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
+    /// the id of the transaction that revealed them.
+    pub(crate) sprout_nullifiers: HashMap<sprout::Nullifier, SpendingTransactionId>,
+    /// The Sapling nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
+    /// the id of the transaction that revealed them.
+    pub(crate) sapling_nullifiers: HashMap<sapling::Nullifier, SpendingTransactionId>,
+    /// The Orchard nullifiers revealed by `blocks` and, if the `indexer` feature is selected,
+    /// the id of the transaction that revealed them.
+    pub(crate) orchard_nullifiers: HashMap<orchard::Nullifier, SpendingTransactionId>,
 
     // Transparent Transfers
     // TODO: move to the transparent section
@@ -1557,6 +1570,10 @@ impl Chain {
             self.update_chain_tip_with(&(inputs, &transaction_hash, spent_outputs))?;
 
             // add the shielded data
+
+            #[cfg(not(feature = "indexer"))]
+            let transaction_hash = ();
+
             self.update_chain_tip_with(&(joinsplit_data, &transaction_hash))?;
             self.update_chain_tip_with(&(
                 sapling_shielded_data_per_spend_anchor,
@@ -1719,6 +1736,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 
             // remove the shielded data
 
+            #[cfg(not(feature = "indexer"))]
+            let transaction_hash = &();
+
             self.revert_chain_with(&(joinsplit_data, transaction_hash), position);
             self.revert_chain_with(
                 &(sapling_shielded_data_per_spend_anchor, transaction_hash),
@@ -1869,10 +1889,15 @@ impl
                 continue;
             };
 
+            #[cfg(feature = "indexer")]
+            let insert_value = *spending_tx_hash;
+            #[cfg(not(feature = "indexer"))]
+            let insert_value = ();
+
             // Index the spent outpoint in the chain
             let was_spend_newly_inserted = self
                 .spent_utxos
-                .insert(spent_outpoint, *spending_tx_hash)
+                .insert(spent_outpoint, insert_value)
                 .is_none();
             assert!(
                 was_spend_newly_inserted,
@@ -1963,7 +1988,7 @@ impl
 impl
     UpdateWith<(
         &Option<transaction::JoinSplitData<Groth16Proof>>,
-        &transaction::Hash,
+        &SpendingTransactionId,
     )> for Chain
 {
     #[instrument(skip(self, joinsplit_data))]
@@ -1971,7 +1996,7 @@ impl
         &mut self,
         &(joinsplit_data, revealing_tx_id): &(
             &Option<transaction::JoinSplitData<Groth16Proof>>,
-            &transaction::Hash,
+            &SpendingTransactionId,
         ),
     ) -> Result<(), ValidateContextError> {
         if let Some(joinsplit_data) = joinsplit_data {
@@ -1996,7 +2021,7 @@ impl
         &mut self,
         &(joinsplit_data, _revealing_tx_id): &(
             &Option<transaction::JoinSplitData<Groth16Proof>>,
-            &transaction::Hash,
+            &SpendingTransactionId,
         ),
         _position: RevertPosition,
     ) {
@@ -2013,7 +2038,11 @@ impl
     }
 }
 
-impl<AnchorV> UpdateWith<(&Option<sapling::ShieldedData<AnchorV>>, &transaction::Hash)> for Chain
+impl<AnchorV>
+    UpdateWith<(
+        &Option<sapling::ShieldedData<AnchorV>>,
+        &SpendingTransactionId,
+    )> for Chain
 where
     AnchorV: sapling::AnchorVariant + Clone,
 {
@@ -2022,7 +2051,7 @@ where
         &mut self,
         &(sapling_shielded_data, revealing_tx_id): &(
             &Option<sapling::ShieldedData<AnchorV>>,
-            &transaction::Hash,
+            &SpendingTransactionId,
         ),
     ) -> Result<(), ValidateContextError> {
         if let Some(sapling_shielded_data) = sapling_shielded_data {
@@ -2047,7 +2076,7 @@ where
         &mut self,
         &(sapling_shielded_data, _revealing_tx_id): &(
             &Option<sapling::ShieldedData<AnchorV>>,
-            &transaction::Hash,
+            &SpendingTransactionId,
         ),
         _position: RevertPosition,
     ) {
@@ -2064,13 +2093,13 @@ where
     }
 }
 
-impl UpdateWith<(&Option<orchard::ShieldedData>, &transaction::Hash)> for Chain {
+impl UpdateWith<(&Option<orchard::ShieldedData>, &SpendingTransactionId)> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
         &(orchard_shielded_data, revealing_tx_id): &(
             &Option<orchard::ShieldedData>,
-            &transaction::Hash,
+            &SpendingTransactionId,
         ),
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
@@ -2095,7 +2124,7 @@ impl UpdateWith<(&Option<orchard::ShieldedData>, &transaction::Hash)> for Chain 
         &mut self,
         (orchard_shielded_data, _revealing_tx_id): &(
             &Option<orchard::ShieldedData>,
-            &transaction::Hash,
+            &SpendingTransactionId,
         ),
         _position: RevertPosition,
     ) {

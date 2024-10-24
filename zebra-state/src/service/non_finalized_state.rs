@@ -26,7 +26,7 @@ mod chain;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use chain::Chain;
+pub(crate) use chain::{Chain, SpendingTransactionId};
 
 /// The state of the chains in memory, including queued blocks.
 ///
