@@ -28,6 +28,8 @@ use crate::{
 pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
+
+#[cfg(feature = "indexer")]
 pub(crate) mod track_tx_locs_by_spends;
 
 /// The kind of database format change or validity check we're performing.
@@ -348,9 +350,9 @@ impl DbFormatChange {
             // Indexing transaction locations by their spent outpoints and revealed nullifiers.
             let timer = CodeTimer::start();
 
-            warn!("started checking indexes for spending tx ids");
+            info!("started checking/adding indexes for spending tx ids");
             track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
-            warn!("finished checking indexes for spending tx ids");
+            info!("finished checking/adding indexes for spending tx ids");
 
             timer.finish(module_path!(), line!(), "indexing spending transaction ids");
         };

@@ -479,9 +479,15 @@ impl DiskWriteBatch {
         let FinalizedBlock { block, height, .. } = finalized;
 
         // Index each transaction's shielded data
+        #[cfg(feature = "indexer")]
         for (tx_index, transaction) in block.transactions.iter().enumerate() {
             let tx_loc = TransactionLocation::from_usize(*height, tx_index);
             self.prepare_nullifier_batch(zebra_db, transaction, tx_loc)?;
+        }
+
+        #[cfg(not(feature = "indexer"))]
+        for transaction in &block.transactions {
+            self.prepare_nullifier_batch(zebra_db, transaction)?;
         }
 
         Ok(())
@@ -498,22 +504,27 @@ impl DiskWriteBatch {
         &mut self,
         zebra_db: &ZebraDb,
         transaction: &Transaction,
-        transaction_location: TransactionLocation,
+        #[cfg(feature = "indexer")] transaction_location: TransactionLocation,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
         let sprout_nullifiers = db.cf_handle("sprout_nullifiers").unwrap();
         let sapling_nullifiers = db.cf_handle("sapling_nullifiers").unwrap();
         let orchard_nullifiers = db.cf_handle("orchard_nullifiers").unwrap();
 
+        #[cfg(feature = "indexer")]
+        let insert_value = transaction_location;
+        #[cfg(not(feature = "indexer"))]
+        let insert_value = ();
+
         // Mark sprout, sapling and orchard nullifiers as spent
         for sprout_nullifier in transaction.sprout_nullifiers() {
-            self.zs_insert(&sprout_nullifiers, sprout_nullifier, transaction_location);
+            self.zs_insert(&sprout_nullifiers, sprout_nullifier, insert_value);
         }
         for sapling_nullifier in transaction.sapling_nullifiers() {
-            self.zs_insert(&sapling_nullifiers, sapling_nullifier, transaction_location);
+            self.zs_insert(&sapling_nullifiers, sapling_nullifier, insert_value);
         }
         for orchard_nullifier in transaction.orchard_nullifiers() {
-            self.zs_insert(&orchard_nullifiers, orchard_nullifier, transaction_location);
+            self.zs_insert(&orchard_nullifiers, orchard_nullifier, insert_value);
         }
 
         Ok(())

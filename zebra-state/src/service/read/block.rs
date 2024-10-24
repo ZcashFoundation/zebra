@@ -21,7 +21,6 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::Spend,
     response::MinedTx,
     service::{
         finalized_state::ZebraDb,
@@ -30,6 +29,9 @@ use crate::{
     },
     HashOrHeight,
 };
+
+#[cfg(feature = "indexer")]
+use crate::request::Spend;
 
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
@@ -186,6 +188,7 @@ where
 /// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
 /// and is spent or revealed in the non-finalized `chain` or finalized `db` and its
 /// spending transaction hash has been indexed.
+#[cfg(feature = "indexer")]
 pub fn spending_transaction_hash<C>(
     chain: Option<C>,
     db: &ZebraDb,

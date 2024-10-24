@@ -390,7 +390,10 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
-        out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: &HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
@@ -420,6 +423,7 @@ impl DiskWriteBatch {
                 spending_tx_location,
                 transaction,
                 spent_utxos_by_outpoint,
+                #[cfg(feature = "indexer")]
                 out_loc_by_outpoint,
                 &address_balances,
             )?;
@@ -584,7 +588,10 @@ impl DiskWriteBatch {
         spending_tx_location: TransactionLocation,
         transaction: &Transaction,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        out_loc_by_outpoint: &HashMap<transparent::OutPoint, OutputLocation>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: &HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
         address_balances: &HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
@@ -617,14 +624,17 @@ impl DiskWriteBatch {
                 self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
             }
 
-            let spent_output_location = out_loc_by_outpoint
-                .get(&spent_outpoint)
-                .expect("spent outpoints must already have output locations");
+            #[cfg(feature = "indexer")]
+            {
+                let spent_output_location = out_loc_by_outpoint
+                    .get(&spent_outpoint)
+                    .expect("spent outpoints must already have output locations");
 
-            let _ = zebra_db
-                .tx_loc_by_spent_output_loc_cf()
-                .with_batch_for_writing(self)
-                .zs_insert(spent_output_location, &spending_tx_location);
+                let _ = zebra_db
+                    .tx_loc_by_spent_output_loc_cf()
+                    .with_batch_for_writing(self)
+                    .zs_insert(spent_output_location, &spending_tx_location);
+            }
         }
 
         Ok(())
