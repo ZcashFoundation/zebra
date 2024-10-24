@@ -71,14 +71,18 @@ impl LongPollInput {
         max_time: DateTime32,
         mempool_tx_ids: impl IntoIterator<Item = UnminedTxId>,
     ) -> Self {
-        let mempool_transaction_mined_ids =
+        let mut tx_mined_ids: Vec<transaction::Hash> =
             mempool_tx_ids.into_iter().map(|id| id.mined_id()).collect();
+
+        // The mempool returns unordered transactions, we need to sort them here so
+        // that the longpollid doesn't change unexpectedly.
+        tx_mined_ids.sort();
 
         LongPollInput {
             tip_height,
             tip_hash,
             max_time,
-            mempool_transaction_mined_ids,
+            mempool_transaction_mined_ids: tx_mined_ids.into(),
         }
     }
 
@@ -292,4 +296,29 @@ impl TryFrom<String> for LongPollId {
     fn try_from(s: String) -> Result<Self, Self::Error> {
         s.parse()
     }
+}
+
+/// Check that [`LongPollInput::new`] will sort mempool transaction ids.
+///
+/// The mempool does not currently guarantee the order in which it will return transactions and
+/// may return the same items in a different order, while the long poll id should be the same if
+/// its other components are equal and no transactions have been added or removed in the mempool.
+#[test]
+fn long_poll_input_mempool_tx_ids_are_sorted() {
+    let mempool_tx_ids = || {
+        (0..10)
+            .map(|i| transaction::Hash::from([i; 32]))
+            .map(UnminedTxId::Legacy)
+    };
+
+    assert_eq!(
+        LongPollInput::new(Height::MIN, Default::default(), 0.into(), mempool_tx_ids()),
+        LongPollInput::new(
+            Height::MIN,
+            Default::default(),
+            0.into(),
+            mempool_tx_ids().rev()
+        ),
+        "long poll input should sort mempool tx ids"
+    );
 }
