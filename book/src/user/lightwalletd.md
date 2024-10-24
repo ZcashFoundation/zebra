@@ -59,7 +59,7 @@ listen_addr = '127.0.0.1:8232'
 # automatically use multiple CPU threads
 parallel_cpu_threads = 0
 
-# diable cookie auth
+# disable cookie auth
 enable_cookie_auth = false
 ```
 
