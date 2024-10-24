@@ -27,6 +27,9 @@ getblocktemplate-rpcs = [
     "zebra-chain/getblocktemplate-rpcs",
 ]
 
+# Indexes spending transaction ids by spent outpoints and revealed nullifiers
+indexer = []
+
 # Test-only features
 proptest-impl = [
     "proptest",
@@ -66,6 +69,7 @@ semver = "1.0.23"
 serde = { version = "1.0.211", features = ["serde_derive"] }
 tempfile = "3.13.0"
 thiserror = "1.0.64"
+crossbeam-channel = "0.5.13"
 
 rayon = "1.10.0"
 tokio = { version = "1.41.0", features = ["rt-multi-thread", "sync", "tracing"] }

@@ -6328,6 +6328,7 @@ dependencies = [
  "bincode",
  "chrono",
  "color-eyre",
+ "crossbeam-channel",
  "dirs",
  "elasticsearch",
  "futures",

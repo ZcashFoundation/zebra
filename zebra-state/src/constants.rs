@@ -55,7 +55,7 @@ const DATABASE_FORMAT_VERSION: u64 = 26;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
@@ -66,11 +66,16 @@ const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 /// This is the version implemented by the Zebra code that's currently running,
 /// the minor and patch versions on disk can be different.
 pub fn state_database_format_version_in_code() -> Version {
-    Version::new(
-        DATABASE_FORMAT_VERSION,
-        DATABASE_FORMAT_MINOR_VERSION,
-        DATABASE_FORMAT_PATCH_VERSION,
-    )
+    Version {
+        major: DATABASE_FORMAT_VERSION,
+        minor: DATABASE_FORMAT_MINOR_VERSION,
+        patch: DATABASE_FORMAT_PATCH_VERSION,
+        pre: semver::Prerelease::EMPTY,
+        #[cfg(feature = "indexer")]
+        build: semver::BuildMetadata::new("indexer").expect("hard-coded value should be valid"),
+        #[cfg(not(feature = "indexer"))]
+        build: semver::BuildMetadata::EMPTY,
+    }
 }
 
 /// Returns the highest database version that modifies the subtree index format.

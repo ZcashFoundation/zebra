@@ -140,25 +140,17 @@ impl ZebraDb {
         let header = self.block_header(height.into())?;
 
         // Transactions
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-
-        // Manually fetch the entire block's transactions
-        let mut transactions = Vec::new();
 
         // TODO:
         // - split disk reads from deserialization, and run deserialization in parallel,
         //   this improves performance for blocks with multiple large shielded transactions
         // - is this loop more efficient if we store the number of transactions?
         // - is the difference large enough to matter?
-        for tx_index in 0..=Transaction::max_allocation() {
-            let tx_loc = TransactionLocation::from_u64(height, tx_index);
-
-            if let Some(tx) = self.db.zs_get(&tx_by_loc, &tx_loc) {
-                transactions.push(tx);
-            } else {
-                break;
-            }
-        }
+        let transactions = self
+            .transactions_by_height(height)
+            .map(|(_, tx)| tx)
+            .map(Arc::new)
+            .collect();
 
         Some(Arc::new(Block {
             header,
@@ -226,8 +218,20 @@ impl ZebraDb {
             .map(|tx| (tx, transaction_location.height))
     }
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
-    /// if a transaction with that hash exists in the finalized chain.
+    /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transactions_by_height(
+        &self,
+        height: Height,
+    ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_ {
+        self.transactions_by_location_range(
+            TransactionLocation::min_for_height(height)
+                ..=TransactionLocation::max_for_height(height),
+        )
+    }
+
+    /// Returns an iterator of all [`Transaction`]s in the provided range
+    /// of [`TransactionLocation`]s in finalized state.
     #[allow(clippy::unwrap_in_result)]
     pub fn transactions_by_location_range<R>(
         &self,
