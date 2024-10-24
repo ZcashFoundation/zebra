@@ -431,15 +431,7 @@ pub(crate) fn database_format_version_at_path(
 
     // The database has a version file on disk
     if let Some(version) = disk_version_file {
-        let (minor, patch) = version
-            .split_once('.')
-            .ok_or("invalid database format version file")?;
-
-        return Ok(Some(Version::new(
-            major_version,
-            minor.parse()?,
-            patch.parse()?,
-        )));
+        return Ok(Some(format!("{major_version}.{version}").parse()?));
     }
 
     // There's no version file on disk, so we need to guess the version

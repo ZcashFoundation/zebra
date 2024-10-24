@@ -333,7 +333,7 @@ impl IntoDisk for TransactionLocation {
 
 impl FromDisk for Option<TransactionLocation> {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        if disk_bytes.as_ref().is_empty() {
+        if disk_bytes.as_ref().len() == size_of::<TransactionLocation>() {
             Some(TransactionLocation::from_bytes(disk_bytes))
         } else {
             None
