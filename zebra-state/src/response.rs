@@ -305,7 +305,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
-            ReadResponse::BlockHeader { 
+            ReadResponse::BlockHeader {
                 header,
                 hash,
                 height,
