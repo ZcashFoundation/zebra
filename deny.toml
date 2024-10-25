@@ -96,6 +96,9 @@ skip-tree = [
     # wait for dirs-sys to update windows-sys
     { name = "windows-sys", version = "=0.48.0" },
 
+    # wait for zebra to update tower
+    { name = "hashbrown", version = "=0.12.3" },
+
     # Remove after release candicate period is over and the ECC crates are not patched anymore
     { name = "equihash", version = "=0.2.0" },
     { name = "f4jumble", version = "=0.1.0" },
