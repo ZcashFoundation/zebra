@@ -29,6 +29,9 @@ pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
 
+#[cfg(not(feature = "indexer"))]
+pub(crate) mod drop_tx_locs_by_spends;
+
 #[cfg(feature = "indexer")]
 pub(crate) mod track_tx_locs_by_spends;
 
@@ -350,11 +353,49 @@ impl DbFormatChange {
             // Indexing transaction locations by their spent outpoints and revealed nullifiers.
             let timer = CodeTimer::start();
 
+            // Add build metadata to on-disk version file just before starting to add indexes
+            let mut version = db
+                .format_version_on_disk()
+                .expect("unable to read database format version file")
+                .expect("should write database format version file above");
+            version.build = db.format_version_in_code().build;
+
+            db.update_format_version_on_disk(&version)
+                .expect("unable to write database format version file to disk");
+
             info!("started checking/adding indexes for spending tx ids");
             track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
             info!("finished checking/adding indexes for spending tx ids");
 
             timer.finish(module_path!(), line!(), "indexing spending transaction ids");
+        };
+
+        #[cfg(not(feature = "indexer"))]
+        if let (
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
+            Some(initial_tip_height),
+        ) = (self, initial_tip_height)
+        {
+            let mut version = db
+                .format_version_on_disk()
+                .expect("unable to read database format version file")
+                .expect("should write database format version file above");
+
+            if version.build.contains("indexer") {
+                // Indexing transaction locations by their spent outpoints and revealed nullifiers.
+                let timer = CodeTimer::start();
+
+                info!("started removing indexes for spending tx ids");
+                drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+                info!("finished removing indexes for spending tx ids");
+
+                // Remove build metadata to on-disk version file after indexes have been dropped.
+                version.build = db.format_version_in_code().build;
+                db.update_format_version_on_disk(&version)
+                    .expect("unable to write database format version file to disk");
+
+                timer.finish(module_path!(), line!(), "removing spending transaction ids");
+            }
         };
 
         // These checks should pass for all format changes:
