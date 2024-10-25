@@ -567,13 +567,11 @@ where
                 .await
                 .map_server_error()?;
 
-            let zebra_state::ReadResponse::BlockHeader(block_header) = response else {
+            let zebra_state::ReadResponse::BlockHeader { header, .. } = response else {
                 unreachable!("unmatched response to a BlockHeader request")
             };
 
-            let tip_block_time = block_header
-                .ok_or_server_error("unexpectedly could not read best chain tip block header")?
-                .time;
+            let tip_block_time = header.time;
 
             let now = Utc::now();
             let zebra_estimated_height =
@@ -811,10 +809,6 @@ where
                     }
                 };
 
-                // TODO:  look up the height if we only have a hash,
-                //        this needs a new state request for the height -> hash index
-                let height = hash_or_height.height();
-
                 // # Concurrency
                 //
                 // We look up by block hash so the hash, transaction IDs, and confirmations
@@ -892,21 +886,18 @@ where
                     _ => unreachable!("unmatched response to a depth request"),
                 };
 
-                let time = if should_read_block_header {
+                let (time, height) = if should_read_block_header {
                     let block_header_response =
                         futs.next().await.expect("`futs` should not be empty");
 
                     match block_header_response.map_server_error()? {
-                        zebra_state::ReadResponse::BlockHeader(header) => Some(
-                            header
-                                .ok_or_server_error("Block not found")?
-                                .time
-                                .timestamp(),
-                        ),
+                        zebra_state::ReadResponse::BlockHeader { header, height, .. } => {
+                            (Some(header.time.timestamp()), Some(height))
+                        }
                         _ => unreachable!("unmatched response to a BlockHeader request"),
                     }
                 } else {
-                    None
+                    (None, hash_or_height.height())
                 };
 
                 let sapling = SaplingTrees {
@@ -948,7 +939,12 @@ where
 
         async move {
             let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
-            let zebra_state::ReadResponse::BlockHeader(block_header) = state
+            let zebra_state::ReadResponse::BlockHeader {
+                header,
+                hash,
+                height,
+                next_block_hash,
+            } = state
                 .clone()
                 .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
                 .await
@@ -957,22 +953,13 @@ where
                 panic!("unexpected response to BlockHeader request")
             };
 
-            let block_header = block_header
-                .ok_or_server_error("could not find block with the provided hash or height")?;
-
             let response = if !verbose {
-                GetBlockHeader::Raw(HexData(
-                    block_header.zcash_serialize_to_vec().map_server_error()?,
-                ))
+                GetBlockHeader::Raw(HexData(header.zcash_serialize_to_vec().map_server_error()?))
             } else {
                 // TODO:
                 // - Return block hash and height in BlockHeader response
                 //   - Add the block height to the `getblock` response as well
                 //   - Add a parameter to the BlockHeader request to indicate that the caller is interested in the next block hash?
-
-                // TODO: Get block hash and height from BlockHeader response instead.
-                let hash = hash_or_height.hash().unwrap();
-                let height = hash_or_height.height().unwrap();
 
                 let zebra_state::ReadResponse::SaplingTree(sapling_tree) = state
                     .clone()
@@ -1005,35 +992,24 @@ where
                     .map(|depth| i64::from(depth) + 1)
                     .unwrap_or(NOT_IN_BEST_CHAIN_CONFIRMATIONS);
 
-                let block::Header {
-                    version,
-                    previous_block_hash,
-                    merkle_root,
-                    commitment_bytes: _,
-                    time,
-                    difficulty_threshold,
-                    nonce,
-                    solution: _,
-                } = *block_header;
-
                 let block_header = GetBlockHeaderObject {
                     hash: GetBlockHash(hash),
                     confirmations,
                     height,
-                    version,
-                    merkle_root,
+                    version: header.version,
+                    merkle_root: header.merkle_root,
                     final_sapling_root: sapling_tree,
-                    time: time.timestamp(),
-                    nonce: *nonce,
-                    bits: difficulty_threshold,
-                    difficulty: difficulty_threshold.to_expanded().ok_or_server_error(
-                        "could not convert compact difficulty to expanded difficulty",
-                    )?,
-                    previous_block_hash: GetBlockHash(previous_block_hash),
-
-                    // TODO: Add the next block hash to the BlockHeader response too, we can just check the next block height in the same chain, if any.
-                    //       This should be an optional field in case the requested block is a chain tip block.
-                    next_block_hash: GetBlockHash(previous_block_hash),
+                    time: header.time.timestamp(),
+                    nonce: *header.nonce,
+                    bits: header.difficulty_threshold,
+                    difficulty: header
+                        .difficulty_threshold
+                        .to_expanded()
+                        .ok_or_server_error(
+                            "could not convert compact difficulty to expanded difficulty",
+                        )?,
+                    previous_block_hash: GetBlockHash(header.previous_block_hash),
+                    next_block_hash: next_block_hash.map(GetBlockHash),
                 };
 
                 GetBlockHeader::Object(Box::new(block_header))
@@ -1805,7 +1781,7 @@ pub struct GetBlockHeaderObject {
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash")]
-    pub next_block_hash: GetBlockHash,
+    pub next_block_hash: Option<GetBlockHash>,
 }
 
 impl Default for GetBlockHeader {

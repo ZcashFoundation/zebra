@@ -209,7 +209,7 @@ async fn rpc_getblock() {
             GetBlock::Object {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: None,
+                height: Some(Height(0)),
                 time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
