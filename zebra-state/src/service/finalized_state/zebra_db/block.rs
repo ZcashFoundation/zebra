@@ -11,6 +11,7 @@
 
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    ops::RangeBounds,
     sync::Arc,
 };
 
@@ -41,6 +42,9 @@ use crate::{
     },
     BoxError, HashOrHeight,
 };
+
+#[cfg(feature = "indexer")]
+use crate::request::Spend;
 
 #[cfg(test)]
 mod tests;
@@ -139,25 +143,17 @@ impl ZebraDb {
         let header = self.block_header(height.into())?;
 
         // Transactions
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
-
-        // Manually fetch the entire block's transactions
-        let mut transactions = Vec::new();
 
         // TODO:
         // - split disk reads from deserialization, and run deserialization in parallel,
         //   this improves performance for blocks with multiple large shielded transactions
         // - is this loop more efficient if we store the number of transactions?
         // - is the difference large enough to matter?
-        for tx_index in 0..=Transaction::max_allocation() {
-            let tx_loc = TransactionLocation::from_u64(height, tx_index);
-
-            if let Some(tx) = self.db.zs_get(&tx_by_loc, &tx_loc) {
-                transactions.push(tx);
-            } else {
-                break;
-            }
-        }
+        let transactions = self
+            .transactions_by_height(height)
+            .map(|(_, tx)| tx)
+            .map(Arc::new)
+            .collect();
 
         Some(Arc::new(Block {
             header,
@@ -212,6 +208,45 @@ impl ZebraDb {
 
     // Read transaction methods
 
+    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
+    /// if a transaction with that hash exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+
+        let transaction_location = self.transaction_location(hash)?;
+
+        self.db
+            .zs_get(&tx_by_loc, &transaction_location)
+            .map(|tx| (tx, transaction_location.height))
+    }
+
+    /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transactions_by_height(
+        &self,
+        height: Height,
+    ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_ {
+        self.transactions_by_location_range(
+            TransactionLocation::min_for_height(height)
+                ..=TransactionLocation::max_for_height(height),
+        )
+    }
+
+    /// Returns an iterator of all [`Transaction`]s in the provided range
+    /// of [`TransactionLocation`]s in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn transactions_by_location_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_
+    where
+        R: RangeBounds<TransactionLocation>,
+    {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        self.db.zs_forward_range_iter(tx_by_loc, range)
+    }
+
     /// Returns the [`TransactionLocation`] for [`transaction::Hash`],
     /// if it exists in the finalized chain.
     #[allow(clippy::unwrap_in_result)]
@@ -229,19 +264,18 @@ impl ZebraDb {
         self.db.zs_get(&hash_by_tx_loc, &location)
     }
 
-    /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
-    /// if a transaction with that hash exists in the finalized chain.
-    //
-    // TODO: move this method to the start of the section
-    #[allow(clippy::unwrap_in_result)]
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
-        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+    /// Returns the [`transaction::Hash`] of the transaction that spent or revealed the given
+    /// [`transparent::OutPoint`] or nullifier, if it is spent or revealed in the finalized state.
+    #[cfg(feature = "indexer")]
+    pub fn spending_transaction_hash(&self, spend: &Spend) -> Option<transaction::Hash> {
+        let tx_loc = match spend {
+            Spend::OutPoint(outpoint) => self.spending_tx_loc(outpoint)?,
+            Spend::Sprout(nullifier) => self.sprout_revealing_tx_loc(nullifier)?,
+            Spend::Sapling(nullifier) => self.sapling_revealing_tx_loc(nullifier)?,
+            Spend::Orchard(nullifier) => self.orchard_revealing_tx_loc(nullifier)?,
+        };
 
-        let transaction_location = self.transaction_location(hash)?;
-
-        self.db
-            .zs_get(&tx_by_loc, &transaction_location)
-            .map(|tx| (tx, transaction_location.height))
+        self.transaction_hash(tx_loc)
     }
 
     /// Returns the [`transaction::Hash`]es in the block with `hash_or_height`,
@@ -355,6 +389,13 @@ impl ZebraDb {
                 .iter()
                 .map(|(outpoint, _output_loc, utxo)| (*outpoint, utxo.clone()))
                 .collect();
+
+        // TODO: Add `OutputLocation`s to the values in `spent_utxos_by_outpoint` to avoid creating a second hashmap with the same keys
+        #[cfg(feature = "indexer")]
+        let out_loc_by_outpoint: HashMap<transparent::OutPoint, OutputLocation> = spent_utxos
+            .iter()
+            .map(|(outpoint, out_loc, _utxo)| (*outpoint, *out_loc))
+            .collect();
         let spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo> = spent_utxos
             .into_iter()
             .map(|(_outpoint, out_loc, utxo)| (out_loc, utxo))
@@ -392,6 +433,8 @@ impl ZebraDb {
             new_outputs_by_out_loc,
             spent_utxos_by_outpoint,
             spent_utxos_by_out_loc,
+            #[cfg(feature = "indexer")]
+            out_loc_by_outpoint,
             address_balances,
             self.finalized_value_pool(),
             prev_note_commitment_trees,
@@ -448,6 +491,10 @@ impl DiskWriteBatch {
         new_outputs_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: BTreeMap<OutputLocation, transparent::Utxo>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
@@ -463,7 +510,7 @@ impl DiskWriteBatch {
         // which is already present from height 1 to the first shielded transaction.
         //
         // In Zebra we include the nullifiers and note commitments in the genesis block because it simplifies our code.
-        self.prepare_shielded_transaction_batch(db, finalized)?;
+        self.prepare_shielded_transaction_batch(zebra_db, finalized)?;
         self.prepare_trees_batch(zebra_db, finalized, prev_note_commitment_trees)?;
 
         // # Consensus
@@ -479,12 +526,14 @@ impl DiskWriteBatch {
         if !finalized.height.is_min() {
             // Commit transaction indexes
             self.prepare_transparent_transaction_batch(
-                db,
+                zebra_db,
                 network,
                 finalized,
                 &new_outputs_by_out_loc,
                 &spent_utxos_by_outpoint,
                 &spent_utxos_by_out_loc,
+                #[cfg(feature = "indexer")]
+                &out_loc_by_outpoint,
                 address_balances,
             )?;
 

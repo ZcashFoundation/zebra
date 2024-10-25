@@ -33,6 +33,10 @@ pub use address::{
 pub use block::{
     any_utxo, block, block_header, mined_transaction, transaction_hashes_for_block, unspent_utxo,
 };
+
+#[cfg(feature = "indexer")]
+pub use block::spending_transaction_hash;
+
 pub use find::{
     best_tip, block_locator, depth, finalized_state_contains_block_hash, find_chain_hashes,
     find_chain_headers, hash_by_height, height_by_hash, next_median_time_past,
