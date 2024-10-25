@@ -32,9 +32,6 @@ use crate::{
     Config,
 };
 
-#[cfg(not(feature = "indexer"))]
-use crate::constants::STATE_DATABASE_KIND;
-
 // Doc-only imports
 #[allow(unused_imports)]
 use super::{TypedColumnFamily, WriteTypedBatch};

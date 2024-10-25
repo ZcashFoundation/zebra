@@ -42,7 +42,12 @@ pub fn run(
             let height = Height(height);
             let mut batch = DiskWriteBatch::new();
 
-            for (_tx_loc, tx) in zebra_db.transactions_by_height(height) {
+            let transactions = zebra_db.transactions_by_location_range(
+                crate::TransactionLocation::from_index(height, 1)
+                    ..=crate::TransactionLocation::max_for_height(height),
+            );
+
+            for (_tx_loc, tx) in transactions {
                 if tx.is_coinbase() {
                     continue;
                 }
