@@ -20,7 +20,7 @@
 
 ## About
 
-[Zebra](https://zebra.zfnd.org/) is Zcash node written in Rust.
+[Zebra](https://zebra.zfnd.org/) is a Zcash full-node written in Rust.
 
 Zebra implements all the features required to reach Zcash network consensus, and
 the network stack is interoperable with `zcashd`.
