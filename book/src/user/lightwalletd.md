@@ -46,7 +46,7 @@ for Zebra is:
 - `8232` for Mainnet, and
 - `18232` for Testnet.
 
-Starting with Zebra v2.0.0, a cookie authentication method like the one used by the `zcashd` node is enabled by default. However, lightwalletd currently [does not support cookie authentication](https://github.com/zcash/lightwalletd/blob/master/docs/docker-compose-setup.md#edit-the-two-zcashconf-files), so we need to disable this authentication method to use Zebra as a backend for lightwalletd.
+Starting with Zebra v2.0.0, a cookie authentication method like the one used by the `zcashd` node is enabled by default for the RPC server. However, lightwalletd currently [does not support cookie authentication](https://github.com/zcash/lightwalletd/blob/master/docs/docker-compose-setup.md#edit-the-two-zcashconf-files), so we need to disable this authentication method to use Zebra as a backend for lightwalletd.
 
 For example, to use Zebra as a `lightwalletd` backend on Mainnet, give it this
 `~/.config/zebrad.toml`:
