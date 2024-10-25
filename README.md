@@ -20,14 +20,12 @@
 
 ## About
 
-[Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
-consensus-compatible implementation of a Zcash node.
+[Zebra](https://zebra.zfnd.org/) is Zcash node written in Rust.
 
-Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
-the features required to reach Zcash network consensus, including the validation
-of all the consensus rules for the NU5 network upgrade.
-[Here](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-advantages) are some
-benefits of Zebra.
+Zebra implements all the features required to reach Zcash network consensus, and
+the network stack is interoperable with `zcashd`.
+[Here](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-advantages) are
+some benefits of Zebra.
 
 Zebra validates blocks and transactions, but needs extra software to generate
 them:
