@@ -1,0 +1,18 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: block
+---
+{
+  "hash": "0007bc227e1c57a4a70e237cad00e7b7ce565155ab49166bc57397a26d339283",
+  "confirmations": 10,
+  "height": 1,
+  "version": 4,
+  "merkleroot": "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609",
+  "finalsaplingroot": "fbc2f4300c01f0b7820d00e3347c8da4ee614674376cbc45359daa54f9b5493e",
+  "time": 1477671596,
+  "nonce": "9057977ea6d4ae867decc96359fcf2db8cdebcbfb3bd549de4f21f16cfe83475",
+  "bits": "1f07ffff",
+  "difficulty": "0007ffff00000000000000000000000000000000000000000000000000000000",
+  "previousblockhash": "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08",
+  "nextblockhash": "0002a26c902619fc964443264feb16f1e3e2d71322fc53dcb81cc5d797e273ed"
+}

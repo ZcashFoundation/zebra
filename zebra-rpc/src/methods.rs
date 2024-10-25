@@ -935,7 +935,7 @@ where
         verbose: Option<bool>,
     ) -> BoxFuture<Result<GetBlockHeader>> {
         let state = self.state.clone();
-        let verbose = verbose.unwrap_or_default();
+        let verbose = verbose.unwrap_or(true);
 
         async move {
             let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
@@ -992,6 +992,9 @@ where
                     .map(|depth| i64::from(depth) + 1)
                     .unwrap_or(NOT_IN_BEST_CHAIN_CONFIRMATIONS);
 
+                let mut nonce = *header.nonce;
+                nonce.reverse();
+
                 let block_header = GetBlockHeaderObject {
                     hash: GetBlockHash(hash),
                     confirmations,
@@ -1000,7 +1003,7 @@ where
                     merkle_root: header.merkle_root,
                     final_sapling_root: sapling_tree.root(),
                     time: header.time.timestamp(),
-                    nonce: *header.nonce,
+                    nonce,
                     bits: header.difficulty_threshold,
                     difficulty: header
                         .difficulty_threshold
@@ -1756,11 +1759,11 @@ pub struct GetBlockHeaderObject {
     pub version: u32,
 
     /// The merkle root of the requesteed block.
-    #[serde(with = "hex")]
+    #[serde(with = "hex", rename = "merkleroot")]
     pub merkle_root: block::merkle::Root,
 
     /// The root of the Sapling commitment tree after applying this block.
-    #[serde(with = "hex")]
+    #[serde(with = "hex", rename = "finalsaplingroot")]
     pub final_sapling_root: zebra_chain::sapling::tree::Root,
 
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.

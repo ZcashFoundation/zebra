@@ -340,14 +340,14 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getblockheader(hash, verbose = false)`
     let get_block_header = rpc
-        .get_block_header(block_hash.to_string(), None)
+        .get_block_header(block_hash.to_string(), Some(false))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblockheader("hash", get_block_header, &settings);
 
     // `getblockheader(height, verbose = false)`
     let get_block_header = rpc
-        .get_block_header(BLOCK_HEIGHT.to_string(), None)
+        .get_block_header(BLOCK_HEIGHT.to_string(), Some(false))
         .await
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblockheader("height", get_block_header, &settings);
@@ -357,14 +357,14 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .get_block_header(block_hash.to_string(), Some(true))
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblockheader("hash", get_block_header, &settings);
+    snapshot_rpc_getblockheader("hash_verbose", get_block_header, &settings);
 
-    // `getblockheader(height, verbose = true)`
+    // `getblockheader(height, verbose = true)` where verbose is the default value.
     let get_block_header = rpc
-        .get_block_header(BLOCK_HEIGHT.to_string(), Some(true))
+        .get_block_header(BLOCK_HEIGHT.to_string(), None)
         .await
         .expect("We should have a GetBlock struct");
-    snapshot_rpc_getblockheader("height", get_block_header, &settings);
+    snapshot_rpc_getblockheader("height_verbose", get_block_header, &settings);
 
     // `getbestblockhash`
     let get_best_block_hash = rpc
