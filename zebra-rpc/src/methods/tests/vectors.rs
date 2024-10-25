@@ -416,7 +416,7 @@ async fn rpc_getblockheader() {
 
         for hash_or_height in [HashOrHeight::from(height), hash.into()] {
             let get_block_header = rpc
-                .get_block_header(hash_or_height.to_string(), None)
+                .get_block_header(hash_or_height.to_string(), Some(false))
                 .await
                 .expect("we should have a GetBlockHeader struct");
             assert_eq!(get_block_header, expected_result);
@@ -431,6 +431,8 @@ async fn rpc_getblockheader() {
             panic!("unexpected response to SaplingTree request")
         };
 
+        let mut expected_nonce = *block.header.nonce;
+        expected_nonce.reverse();
         let expected_result = GetBlockHeader::Object(Box::new(GetBlockHeaderObject {
             hash: GetBlockHash(hash),
             confirmations: 11 - i as i64,
@@ -441,7 +443,7 @@ async fn rpc_getblockheader() {
                 .expect("should always have sapling root")
                 .root(),
             time: block.header.time.timestamp(),
-            nonce: *block.header.nonce,
+            nonce: expected_nonce,
             bits: block.header.difficulty_threshold,
             difficulty: block
                 .header
