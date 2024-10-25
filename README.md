@@ -2,13 +2,17 @@
 
 ---
 
-[![Integration Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/sub-ci-integration-tests-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/sub-ci-integration-tests-gcp.yml) [![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml) [![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml) [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra) [![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
+[![Integration Tests](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml)
+[![CI OSes](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-os.yml)
+[![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml)
+[![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
+[![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
 ![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
 
 - [About](#about)
 - [Getting Started](#getting-started)
   - [Docker](#docker)
-  - [Building Zebra](#building-zebra)
+  - [Manual Build](#manual-build)
 - [Documentation](#documentation)
 - [User support](#user-support)
 - [Security](#security)
@@ -16,14 +20,12 @@
 
 ## About
 
-[Zebra](https://zebra.zfnd.org/) is the Zcash Foundation's independent,
-consensus-compatible implementation of a Zcash node.
+[Zebra](https://zebra.zfnd.org/) is a Zcash full-node written in Rust.
 
-Zebra's network stack is interoperable with `zcashd`, and Zebra implements all
-the features required to reach Zcash network consensus, including the validation
-of all the consensus rules for the NU5 network upgrade.
-[Here](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-advantages) are some
-benefits of Zebra.
+Zebra implements all the features required to reach Zcash network consensus, and
+the network stack is interoperable with `zcashd`.
+[Here](https://docs.rs/zebrad/latest/zebrad/index.html#zebra-advantages) are
+some benefits of Zebra.
 
 Zebra validates blocks and transactions, but needs extra software to generate
 them:
@@ -53,7 +55,7 @@ docker run zfnd/zebra:latest
 
 For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
 
-### Building Zebra
+### Manual Build
 
 Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and a C++
