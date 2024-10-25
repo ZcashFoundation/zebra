@@ -866,18 +866,6 @@ impl DiskDb {
             DB::open_cf_descriptors(&db_options, &path, column_families)
         };
 
-        #[cfg(not(feature = "indexer"))]
-        let db_result = match db_result {
-            Ok(mut db) if db_kind == STATE_DATABASE_KIND => {
-                if let Err(err) = db.drop_cf(super::zebra_db::transparent::TX_LOC_BY_SPENT_OUT_LOC)
-                {
-                    warn!(?err, "failed to drop unused column family");
-                }
-                Ok(db)
-            }
-            other => other,
-        };
-
         match db_result {
             Ok(db) => {
                 info!("Opened Zebra state cache at {}", path.display());

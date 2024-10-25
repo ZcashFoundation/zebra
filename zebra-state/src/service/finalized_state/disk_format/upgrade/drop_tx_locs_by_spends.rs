@@ -23,8 +23,18 @@ pub fn run(
         return Err(CancelFormatChange);
     }
 
-    // The `TX_LOC_BY_SPENT_OUT_LOC` column family should be dropped
-    // when opening the database without the `indexer` feature.
+    let _ = zebra_db
+        .tx_loc_by_spent_output_loc_cf()
+        .new_batch_for_writing()
+        .zs_delete_range(
+            &crate::OutputLocation::from_output_index(crate::TransactionLocation::MIN, 0),
+            &crate::OutputLocation::from_output_index(crate::TransactionLocation::MAX, u32::MAX),
+        )
+        .write_batch();
+
+    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+        return Err(CancelFormatChange);
+    }
 
     (0..=initial_tip_height.0)
         .into_par_iter()
