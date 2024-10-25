@@ -500,7 +500,11 @@ pub(crate) mod hidden {
     ) -> Result<(), BoxError> {
         let version_path = config.version_file_path(db_kind, changed_version.major, network);
 
-        let version = format!("{}.{}", changed_version.minor, changed_version.patch);
+        let mut version = format!("{}.{}", changed_version.minor, changed_version.patch);
+
+        if !changed_version.build.is_empty() {
+            version.push_str(&format!("+{}", changed_version.build));
+        }
 
         // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
         // crashes.
