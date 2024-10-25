@@ -7,13 +7,12 @@ use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 use zebra_chain::block::Height;
 
-use crate::service::finalized_state::ZebraDb;
-use crate::service::non_finalized_state::Chain;
-use crate::service::read;
-use crate::Spend;
+use crate::{
+    service::{finalized_state::ZebraDb, non_finalized_state::Chain, read},
+    Spend,
+};
 
-use super::super::super::DiskWriteBatch;
-use super::CancelFormatChange;
+use super::{super::super::DiskWriteBatch, CancelFormatChange};
 
 /// Runs disk format upgrade for tracking transaction locations by their inputs and revealed nullifiers.
 ///
