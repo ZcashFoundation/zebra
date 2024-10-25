@@ -998,7 +998,7 @@ where
                     height,
                     version: header.version,
                     merkle_root: header.merkle_root,
-                    final_sapling_root: sapling_tree,
+                    final_sapling_root: sapling_tree.root(),
                     time: header.time.timestamp(),
                     nonce: *header.nonce,
                     bits: header.difficulty_threshold,
@@ -1756,15 +1756,18 @@ pub struct GetBlockHeaderObject {
     pub version: u32,
 
     /// The merkle root of the requesteed block.
+    #[serde(with = "hex")]
     pub merkle_root: block::merkle::Root,
 
     /// The root of the Sapling commitment tree after applying this block.
-    pub final_sapling_root: Arc<zebra_chain::sapling::tree::NoteCommitmentTree>,
+    #[serde(with = "hex")]
+    pub final_sapling_root: zebra_chain::sapling::tree::Root,
 
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.
     pub time: i64,
 
     /// The nonce of the requested block header
+    #[serde(with = "hex")]
     pub nonce: [u8; 32],
 
     /// The difficulty threshold of the requested block header displayed in compact form.
