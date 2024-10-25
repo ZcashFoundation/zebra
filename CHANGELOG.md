@@ -21,7 +21,7 @@ This release brings full support for NU6.
 
 ### Changed
 
--  Set the activation height of NU6 for Mainnet and the network protocol version ([#8960](https://github.com/ZcashFoundation/zebra/pull/8960))
+-  Set the activation height of NU6 for Mainnet and bumped Zebra's current network protocol version ([#8960](https://github.com/ZcashFoundation/zebra/pull/8960))
 
 ### Contributors
 
