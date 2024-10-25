@@ -537,7 +537,7 @@ impl DiskDb {
             let total_sst_files_size = db
                 .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
                 .unwrap_or(Some(0));
-            let cf_disk_size = live_data_size.unwrap_or(0) + total_sst_files_size.unwrap_or(0);
+            let cf_disk_size = total_sst_files_size.unwrap_or(0);
             total_size_on_disk += cf_disk_size;
             total_live_size_on_disk += live_data_size.unwrap_or(0);
             let mem_table_size = db

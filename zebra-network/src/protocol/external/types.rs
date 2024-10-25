@@ -72,12 +72,23 @@ impl Version {
 
     /// Returns the minimum specified network protocol version for `network` and
     /// `network_upgrade`.
+    ///
+    /// ## ZIP-253
+    ///
+    /// > Nodes compatible with a network upgrade activation MUST advertise a network protocol
+    /// > version that is greater than or equal to the MIN_NETWORK_PROTOCOL_VERSION for that
+    /// > activation.
+    ///
+    /// <https://zips.z.cash/zip-0253>
+    ///
+    /// ### Notes
+    ///
+    /// - The citation above is a generalization of a statement in ZIP-253 since that ZIP is
+    ///   concerned only with NU6 on Mainnet and Testnet.
     pub(crate) fn min_specified_for_upgrade(
         network: &Network,
         network_upgrade: NetworkUpgrade,
     ) -> Version {
-        // TODO: Should we reject earlier protocol versions during our initial
-        //       sync? zcashd accepts 170_002 or later during its initial sync.
         Version(match (network, network_upgrade) {
             (_, Genesis) | (_, BeforeOverwinter) => 170_002,
             (Testnet(params), Overwinter) if params.is_default_testnet() => 170_003,
