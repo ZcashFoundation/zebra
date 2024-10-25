@@ -12,7 +12,7 @@
 - [About](#about)
 - [Getting Started](#getting-started)
   - [Docker](#docker)
-  - [Building Zebra](#building-zebra)
+  - [Manual Build](#manual-build)
 - [Documentation](#documentation)
 - [User support](#user-support)
 - [Security](#security)
@@ -55,7 +55,7 @@ docker run zfnd/zebra:latest
 
 For more information, read our [Docker documentation](https://zebra.zfnd.org/user/docker.html).
 
-### Building Zebra
+### Manual Build
 
 Building Zebra requires [Rust](https://www.rust-lang.org/tools/install),
 [libclang](https://clang.llvm.org/doxygen/group__CINDEX.html), and a C++
