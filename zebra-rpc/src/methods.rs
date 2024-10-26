@@ -1518,7 +1518,7 @@ impl ConsensusBranchIdHex {
         ConsensusBranchIdHex(consensus_branch_id.into())
     }
 
-    /// Returns a reference to the ['ConsensusBranchId'].
+    /// Returns the value of the ['ConsensusBranchId'].
     pub fn inner(&self) -> u32 {
         self.0.into()
     }
