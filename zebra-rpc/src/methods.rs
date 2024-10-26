@@ -995,13 +995,16 @@ where
                 let mut nonce = *header.nonce;
                 nonce.reverse();
 
+                let mut final_sapling_root: [u8; 32] = sapling_tree.root().into();
+                final_sapling_root.reverse();
+
                 let block_header = GetBlockHeaderObject {
                     hash: GetBlockHash(hash),
                     confirmations,
                     height,
                     version: header.version,
                     merkle_root: header.merkle_root,
-                    final_sapling_root: sapling_tree.root(),
+                    final_sapling_root,
                     time: header.time.timestamp(),
                     nonce,
                     bits: header.difficulty_threshold,
@@ -1764,7 +1767,7 @@ pub struct GetBlockHeaderObject {
 
     /// The root of the Sapling commitment tree after applying this block.
     #[serde(with = "hex", rename = "finalsaplingroot")]
-    pub final_sapling_root: zebra_chain::sapling::tree::Root,
+    pub final_sapling_root: [u8; 32],
 
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.
     pub time: i64,

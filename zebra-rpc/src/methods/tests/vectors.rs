@@ -209,7 +209,7 @@ async fn rpc_getblock() {
             GetBlock::Object {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: Some(Height(0)),
+                height: Some(Height(i as u32)),
                 time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
@@ -433,15 +433,18 @@ async fn rpc_getblockheader() {
 
         let mut expected_nonce = *block.header.nonce;
         expected_nonce.reverse();
+        let mut expected_final_sapling_root: [u8; 32] = sapling_tree
+            .expect("should always have sapling root")
+            .root()
+            .into();
+        expected_final_sapling_root.reverse();
         let expected_result = GetBlockHeader::Object(Box::new(GetBlockHeaderObject {
             hash: GetBlockHash(hash),
             confirmations: 11 - i as i64,
             height,
             version: 4,
             merkle_root: block.header.merkle_root,
-            final_sapling_root: sapling_tree
-                .expect("should always have sapling root")
-                .root(),
+            final_sapling_root: expected_final_sapling_root,
             time: block.header.time.timestamp(),
             nonce: expected_nonce,
             bits: block.header.difficulty_threshold,
