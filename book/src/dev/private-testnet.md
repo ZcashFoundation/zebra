@@ -1,16 +1,17 @@
 # Private Testnet Test
 
-The objective of a private testnet test is to test testnet activation in an
-isolated fashion, before the actual testnet activation. It is usually
-done using the current state of the existing testnet. For NU6, it was done
+The objective of a private Testnet test is to test Testnet activation of an upcoming
+network upgrade in an isolated fashion, before the actual Testnet activation. 
+It is usually done using the current state of the existing Testnet. For NU6, it was done
 by ZF and ECC engineers over a call.
 
 ## Steps
 
 ### Make Backup
 
-Make a backup of your current testnet state. Rename/copy the `testnet` folder to
-`unknowntest` (because that is the name used by Zebra for custom testnets).
+Make a backup of your current Testnet state. Rename/copy the `testnet` folder in
+Zebra's state cache directory to the lowercase version of the configured network name,
+or the default `unknowntestnet` if no network name is explicitly configured.
 
 ### Set Protocol Version
 
@@ -19,7 +20,7 @@ Double check that Zebra has bumped its protocol version.
 ### Set Up Lightwalletd Server
 
 It's a good idea to set up a lightwalletd server connected to your node, and
-have a (testnet) wallet connected to your lightwalletd server.
+have a (Testnet) wallet connected to your lightwalletd server.
 
 ### Connect to Peers
 
@@ -36,7 +37,7 @@ like 30 minutes in the future?
 
 ### Ensure the Activation Height is Set in Code
 
-While Zebra allows creating a private testnet in the config file, the height is
+While Zebra allows creating a private Testnet in the config file, the height is
 also set in some librustzcash crates. For this reason, someone will need to
 **create a branch of librustzcash** with the chosen height set and you will need
 to **change Zebra to use that**. However, double check if that's still
@@ -119,7 +120,7 @@ tx_cost_limit = 80000000
 [mining]
 debug_like_zcashd = true
 miner_address = "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
-# if you want to enable mining
+# if you want to enable mining, which also requires selecting the `internal-miner` compilation feature
 internal_miner = true
 
 [network]
