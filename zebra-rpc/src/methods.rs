@@ -28,7 +28,10 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
-    work::difficulty::ExpandedDifficulty,
+    work::{
+        difficulty::{CompactDifficulty, ExpandedDifficulty},
+        equihash::Solution,
+    },
 };
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
@@ -936,6 +939,7 @@ where
     ) -> BoxFuture<Result<GetBlockHeader>> {
         let state = self.state.clone();
         let verbose = verbose.unwrap_or(true);
+        let network = self.network.clone();
 
         async move {
             let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
@@ -956,11 +960,6 @@ where
             let response = if !verbose {
                 GetBlockHeader::Raw(HexData(header.zcash_serialize_to_vec().map_server_error()?))
             } else {
-                // TODO:
-                // - Return block hash and height in BlockHeader response
-                //   - Add the block height to the `getblock` response as well
-                //   - Add a parameter to the BlockHeader request to indicate that the caller is interested in the next block hash?
-
                 let zebra_state::ReadResponse::SaplingTree(sapling_tree) = state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::SaplingTree(hash_or_height))
@@ -970,8 +969,9 @@ where
                     panic!("unexpected response to SaplingTree request")
                 };
 
-                // TODO: Double-check that there's an empty Sapling root at Genesis.
-                let sapling_tree = sapling_tree.expect("should always have a sapling root");
+                // This could be `None` if there's a chain reorg between state queries.
+                let sapling_tree =
+                    sapling_tree.ok_or_server_error("missing sapling tree for block")?;
 
                 let zebra_state::ReadResponse::Depth(depth) = state
                     .clone()
@@ -995,8 +995,15 @@ where
                 let mut nonce = *header.nonce;
                 nonce.reverse();
 
-                let mut final_sapling_root: [u8; 32] = sapling_tree.root().into();
-                final_sapling_root.reverse();
+                let final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
+                    let mut root: [u8; 32] = sapling_tree.root().into();
+                    root.reverse();
+                    root
+                } else {
+                    [0; 32]
+                };
+
+                let difficulty = header.difficulty_threshold.relative_to_network(&network);
 
                 let block_header = GetBlockHeaderObject {
                     hash: GetBlockHash(hash),
@@ -1007,13 +1014,9 @@ where
                     final_sapling_root,
                     time: header.time.timestamp(),
                     nonce,
+                    solution: header.solution,
                     bits: header.difficulty_threshold,
-                    difficulty: header
-                        .difficulty_threshold
-                        .to_expanded()
-                        .ok_or_server_error(
-                            "could not convert compact difficulty to expanded difficulty",
-                        )?,
+                    difficulty,
                     previous_block_hash: GetBlockHash(header.previous_block_hash),
                     next_block_hash: next_block_hash.map(GetBlockHash),
                 };
@@ -1733,7 +1736,7 @@ impl Default for GetBlock {
 /// Response to a `getblockheader` RPC request.
 ///
 /// See the notes for the [`Rpc::get_block_header`] method.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetBlockHeader {
     /// The request block, hex-encoded.
@@ -1743,7 +1746,7 @@ pub enum GetBlockHeader {
     Object(Box<GetBlockHeaderObject>),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 /// Verbose response to a `getblockheader` RPC request.
 ///
 /// See the notes for the [`Rpc::get_block_header`] method.
@@ -1772,24 +1775,28 @@ pub struct GetBlockHeaderObject {
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.
     pub time: i64,
 
-    /// The nonce of the requested block header
+    /// The nonce of the requested block header.
     #[serde(with = "hex")]
     pub nonce: [u8; 32],
 
+    /// The Equihash solution in the requested block header.
+    #[serde(with = "hex")]
+    solution: Solution,
+
     /// The difficulty threshold of the requested block header displayed in compact form.
     #[serde(with = "hex")]
-    pub bits: zebra_chain::work::difficulty::CompactDifficulty,
+    pub bits: CompactDifficulty,
 
-    /// The difficulty threshold of the requested block header displayed in expanded form.
-    #[serde(with = "hex")]
-    pub difficulty: zebra_chain::work::difficulty::ExpandedDifficulty,
+    /// Floating point number that represents the difficulty limit for this block as a multiple
+    /// of the minimum difficulty for the network.
+    pub difficulty: f64,
 
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash")]
     pub previous_block_hash: GetBlockHash,
 
     /// The next block hash after the requested block header.
-    #[serde(rename = "nextblockhash")]
+    #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
     pub next_block_hash: Option<GetBlockHash>,
 }
 
@@ -1812,8 +1819,9 @@ impl Default for GetBlockHeaderObject {
             final_sapling_root: Default::default(),
             time: 0,
             nonce: [0; 32],
+            solution: Solution::for_proposal(),
             bits: difficulty.to_compact(),
-            difficulty,
+            difficulty: 1.0,
             previous_block_hash: Default::default(),
             next_block_hash: Default::default(),
         }

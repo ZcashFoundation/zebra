@@ -433,11 +433,15 @@ async fn rpc_getblockheader() {
 
         let mut expected_nonce = *block.header.nonce;
         expected_nonce.reverse();
-        let mut expected_final_sapling_root: [u8; 32] = sapling_tree
-            .expect("should always have sapling root")
-            .root()
-            .into();
-        expected_final_sapling_root.reverse();
+        let sapling_tree = sapling_tree.expect("should always have sapling root");
+        let expected_final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
+            let mut root: [u8; 32] = sapling_tree.root().into();
+            root.reverse();
+            root
+        } else {
+            [0; 32]
+        };
+
         let expected_result = GetBlockHeader::Object(Box::new(GetBlockHeaderObject {
             hash: GetBlockHash(hash),
             confirmations: 11 - i as i64,
@@ -447,12 +451,12 @@ async fn rpc_getblockheader() {
             final_sapling_root: expected_final_sapling_root,
             time: block.header.time.timestamp(),
             nonce: expected_nonce,
+            solution: block.header.solution,
             bits: block.header.difficulty_threshold,
             difficulty: block
                 .header
                 .difficulty_threshold
-                .to_expanded()
-                .expect("should have valid difficulty"),
+                .relative_to_network(&Mainnet),
             previous_block_hash: GetBlockHash(block.header.previous_block_hash),
             next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
         }));

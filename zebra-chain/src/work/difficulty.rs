@@ -290,6 +290,28 @@ impl CompactDifficulty {
 
         Ok(difficulty)
     }
+
+    /// Returns a floating-point number representing a difficulty as a multiple
+    /// of the minimum difficulty for the provided network.
+    pub fn relative_to_network(&self, network: &Network) -> f64 {
+        let network_difficulty = network.target_difficulty_limit().to_compact();
+
+        let [mut n_shift, ..] = self.0.to_be_bytes();
+        let [n_shift_amount, ..] = network_difficulty.0.to_be_bytes();
+        let mut d_diff = f64::from(network_difficulty.0 << 8) / f64::from(self.0 << 8);
+
+        while n_shift < n_shift_amount {
+            d_diff *= 256.0;
+            n_shift += 1;
+        }
+
+        while n_shift > n_shift_amount {
+            d_diff /= 256.0;
+            n_shift -= 1;
+        }
+
+        d_diff
+    }
 }
 
 impl fmt::Debug for CompactDifficulty {
