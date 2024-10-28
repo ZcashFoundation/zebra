@@ -9,6 +9,8 @@
 
 use std::{fmt, panic, thread::available_parallelism};
 
+use cookie::Cookie;
+use http_request_compatibility::With;
 use jsonrpc_core::{Compatibility, MetaIoHandler};
 use jsonrpc_http_server::{CloseHandle, ServerBuilder};
 use tokio::task::JoinHandle;
@@ -25,7 +27,7 @@ use crate::{
     config::Config,
     methods::{Rpc, RpcImpl},
     server::{
-        http_request_compatibility::FixHttpRequestMiddleware,
+        http_request_compatibility::HttpRequestMiddleware,
         rpc_call_compatibility::FixRpcResponseMiddleware,
     },
 };
@@ -33,6 +35,7 @@ use crate::{
 #[cfg(feature = "getblocktemplate-rpcs")]
 use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
+pub mod cookie;
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
 
@@ -199,13 +202,22 @@ impl RpcServer {
             let span = Span::current();
             let start_server = move || {
                 span.in_scope(|| {
+                    let middleware = if config.enable_cookie_auth {
+                        let cookie = Cookie::default();
+                        cookie::write_to_disk(&cookie, &config.cookie_dir)
+                            .expect("Zebra must be able to write the auth cookie to the disk");
+                        HttpRequestMiddleware::default().with(cookie)
+                    } else {
+                        HttpRequestMiddleware::default()
+                    };
+
                     // Use a different tokio executor from the rest of Zebra,
                     // so that large RPCs and any task handling bugs don't impact Zebra.
                     let server_instance = ServerBuilder::new(io)
                         .threads(parallel_cpu_threads)
                         // TODO: disable this security check if we see errors from lightwalletd
                         //.allowed_hosts(DomainsValidation::Disabled)
-                        .request_middleware(FixHttpRequestMiddleware)
+                        .request_middleware(middleware)
                         .start_http(&listen_addr)
                         .expect("Unable to start RPC server");
 
@@ -274,29 +286,39 @@ impl RpcServer {
     /// This method can be called from within a tokio executor without panicking.
     /// But it is blocking, so `shutdown()` should be used instead.
     pub fn shutdown_blocking(&self) {
-        Self::shutdown_blocking_inner(self.close_handle.clone())
+        Self::shutdown_blocking_inner(self.close_handle.clone(), self.config.clone())
     }
 
     /// Shut down this RPC server asynchronously.
     /// Returns a task that completes when the server is shut down.
     pub fn shutdown(&self) -> JoinHandle<()> {
         let close_handle = self.close_handle.clone();
-
+        let config = self.config.clone();
         let span = Span::current();
+
         tokio::task::spawn_blocking(move || {
-            span.in_scope(|| Self::shutdown_blocking_inner(close_handle))
+            span.in_scope(|| Self::shutdown_blocking_inner(close_handle, config))
         })
     }
 
     /// Shuts down this RPC server using its `close_handle`.
     ///
     /// See `shutdown_blocking()` for details.
-    fn shutdown_blocking_inner(close_handle: CloseHandle) {
+    fn shutdown_blocking_inner(close_handle: CloseHandle, config: Config) {
         // The server is a blocking task, so it can't run inside a tokio thread.
         // See the note at wait_on_server.
         let span = Span::current();
         let wait_on_shutdown = move || {
             span.in_scope(|| {
+                if config.enable_cookie_auth {
+                    if let Err(err) = cookie::remove_from_disk(&config.cookie_dir) {
+                        warn!(
+                            ?err,
+                            "unexpectedly could not remove the rpc auth cookie from the disk"
+                        )
+                    }
+                }
+
                 info!("Stopping RPC server");
                 close_handle.clone().close();
                 debug!("Stopped RPC server");
