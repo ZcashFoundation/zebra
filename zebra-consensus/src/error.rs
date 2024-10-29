@@ -345,6 +345,9 @@ pub enum BlockError {
         hash: zebra_chain::block::Hash,
         source: amount::Error,
     },
+
+    #[error("unexpected error occurred: {0}")]
+    Other(String),
 }
 
 impl From<SubsidyError> for BlockError {

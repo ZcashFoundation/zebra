@@ -166,6 +166,7 @@ pub fn rpc_port_config(
         // Default config, users who want to detect port conflicts configure this
         config.rpc.parallel_cpu_threads = 1;
     }
+    config.rpc.enable_cookie_auth = false;
 
     Ok(config)
 }
