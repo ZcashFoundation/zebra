@@ -49,9 +49,11 @@ use crate::error::TransactionError;
 ///
 /// > the nTime field MUST represent a time strictly greater than the median of the
 /// > timestamps of the past PoWMedianBlockSpan blocks.
+///
 /// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
 ///
 /// > The transaction can be added to any block whose block time is greater than the locktime.
+///
 /// <https://developer.bitcoin.org/devguide/transactions.html#locktime-and-sequence-number>
 ///
 /// If the transaction's lock time is less than the median-time-past,

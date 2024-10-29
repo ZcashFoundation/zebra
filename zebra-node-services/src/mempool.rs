@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 
+use tokio::sync::oneshot;
 use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
 
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -114,13 +115,11 @@ pub enum Response {
     /// Returns matching cached rejected [`UnminedTxId`]s from the mempool,
     RejectedTransactionIds(HashSet<UnminedTxId>),
 
-    /// Returns a list of queue results.
-    ///
-    /// These are the results of the initial queue checks.
-    /// The transaction may also fail download or verification later.
+    /// Returns a list of initial queue checks results and a oneshot receiver
+    /// for awaiting download and/or verification results.
     ///
     /// Each result matches the request at the corresponding vector index.
-    Queued(Vec<Result<(), BoxError>>),
+    Queued(Vec<Result<oneshot::Receiver<Result<(), BoxError>>, BoxError>>),
 
     /// Confirms that the mempool has checked for recently verified transactions.
     CheckedForVerifiedTransactions,

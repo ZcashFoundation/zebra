@@ -2,8 +2,10 @@
 
 use jsonrpc_core::ErrorCode;
 
-use zebra_chain::block;
-use zebra_consensus::FundingStreamReceiver::{self, *};
+use zebra_chain::{
+    block,
+    parameters::subsidy::FundingStreamReceiver::{self, *},
+};
 
 /// When long polling, the amount of time we wait between mempool queries.
 /// (And sync status queries, which we do right before mempool queries.)

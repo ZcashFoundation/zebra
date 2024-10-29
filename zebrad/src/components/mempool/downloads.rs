@@ -51,7 +51,7 @@ use zebra_chain::{
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
 use zebra_node_services::mempool::Gossip;
-use zebra_state as zs;
+use zebra_state::{self as zs, CloneError};
 
 use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
 
@@ -105,17 +105,17 @@ pub const MAX_INBOUND_CONCURRENCY: usize = 25;
 struct CancelDownloadAndVerify;
 
 /// Errors that can occur while downloading and verifying a transaction.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 #[allow(dead_code)]
 pub enum TransactionDownloadVerifyError {
     #[error("transaction is already in state")]
     InState,
 
     #[error("error in state service")]
-    StateError(#[source] BoxError),
+    StateError(#[source] CloneError),
 
     #[error("error downloading transaction")]
-    DownloadFailed(#[source] BoxError),
+    DownloadFailed(#[source] CloneError),
 
     #[error("transaction download / verification was cancelled")]
     Cancelled,
@@ -240,9 +240,11 @@ where
     ///
     /// Returns the action taken in response to the queue request.
     #[instrument(skip(self, gossiped_tx), fields(txid = %gossiped_tx.id()))]
+    #[allow(clippy::unwrap_in_result)]
     pub fn download_if_needed_and_verify(
         &mut self,
         gossiped_tx: Gossip,
+        rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
 
@@ -295,7 +297,7 @@ where
                     Ok((Some(height), next_height))
                 }
                 Ok(_) => unreachable!("wrong response"),
-                Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
+                Err(e) => Err(TransactionDownloadVerifyError::StateError(e.into())),
             }?;
 
             trace!(?txid, ?next_height, "got next height");
@@ -307,11 +309,12 @@ where
                     let tx = match network
                         .oneshot(req)
                         .await
+                        .map_err(CloneError::from)
                         .map_err(TransactionDownloadVerifyError::DownloadFailed)?
                     {
                         zn::Response::Transactions(mut txs) => txs.pop().ok_or_else(|| {
                             TransactionDownloadVerifyError::DownloadFailed(
-                                "no transactions returned".into(),
+                                BoxError::from("no transactions returned").into(),
                             )
                         })?,
                         _ => unreachable!("wrong response to transaction request"),
@@ -373,7 +376,7 @@ where
 
         let task = tokio::spawn(async move {
             // Prefer the cancel handle if both are ready.
-            tokio::select! {
+            let result = tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
@@ -381,7 +384,19 @@ where
                     Err((TransactionDownloadVerifyError::Cancelled, txid))
                 }
                 verification = fut => verification,
+            };
+
+            // Send the result to responder channel if one was provided.
+            if let Some(rsp_tx) = rsp_tx {
+                let _ = rsp_tx.send(
+                    result
+                        .as_ref()
+                        .map(|_| ())
+                        .map_err(|(err, _)| err.clone().into()),
+                );
             }
+
+            result
         });
 
         self.pending.push(task);
@@ -458,6 +473,7 @@ where
         match state
             .ready()
             .await
+            .map_err(CloneError::from)
             .map_err(TransactionDownloadVerifyError::StateError)?
             .call(zs::Request::Transaction(txid.mined_id()))
             .await
@@ -465,7 +481,7 @@ where
             Ok(zs::Response::Transaction(None)) => Ok(()),
             Ok(zs::Response::Transaction(Some(_))) => Err(TransactionDownloadVerifyError::InState),
             Ok(_) => unreachable!("wrong response"),
-            Err(e) => Err(TransactionDownloadVerifyError::StateError(e)),
+            Err(e) => Err(TransactionDownloadVerifyError::StateError(e.into())),
         }?;
 
         Ok(())

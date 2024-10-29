@@ -39,13 +39,13 @@ use crate::methods::{
     get_block_template_rpcs::types::{
         get_block_template::{self, GetBlockTemplateRequestMode},
         get_mining_info,
-        hex_data::HexData,
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
         submit_block,
         subsidy::BlockSubsidy,
         unified_address, validate_address, z_validate_address,
     },
+    hex_data::HexData,
     tests::{snapshot::EXCESSIVE_BLOCK_HEIGHT, utils::fake_history_tree},
     GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
 };
@@ -147,6 +147,18 @@ pub async fn test_responses<State, ReadState>(
         mock_sync_status.clone(),
         mock_address_book,
     );
+
+    if network.is_a_test_network() && !network.is_default_testnet() {
+        let fake_future_nu6_block_height =
+            NetworkUpgrade::Nu6.activation_height(network).unwrap().0 + 100_000;
+        let get_block_subsidy = get_block_template_rpc
+            .get_block_subsidy(Some(fake_future_nu6_block_height))
+            .await
+            .expect("We should have a success response");
+        snapshot_rpc_getblocksubsidy("future_nu6_height", get_block_subsidy, &settings);
+        // We only want a snapshot of the `getblocksubsidy` method for the non-default Testnet (with an NU6 activation height).
+        return;
+    }
 
     // `getblockcount`
     let get_block_count = get_block_template_rpc

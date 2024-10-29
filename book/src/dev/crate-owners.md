@@ -9,7 +9,7 @@ The Zebra repository can be used to publish the crates in this list that match t
 - starts with `zebra` (including `zebrad` and the `zebra` placeholder)
 - starts with `tower`
 
-We also depend on these separate ZF crates: 
+We also depend on these separate ZF crates:
 - `zcash_script`
 - `ed25519-zebra`
 
@@ -47,7 +47,7 @@ cargo new new-crate-name
 cd new-crate-name
 cargo release publish --verbose --package new-crate-name --execute
 cargo owner --add oxarbitrage
-cargo owner --add teor2345
+cargo owner --add conradoplg
 cargo owner --add github:zcashfoundation:owners
 ```
 

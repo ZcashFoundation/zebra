@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 30
     runs-on: ubuntu-latest-m
     steps:
-      - uses: actions/checkout@v4.1.6
+      - uses: actions/checkout@v4.2.1
         with:
           persist-credentials: false
 

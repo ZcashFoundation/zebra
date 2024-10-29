@@ -53,17 +53,18 @@ pub struct Chain {
     //
     /// The last height this chain forked at. Diagnostics only.
     ///
-    /// This field is only used for metrics, it is not consensus-critical, and it is not checked
-    /// for equality.
+    /// This field is only used for metrics. It is not consensus-critical, and it is not checked for
+    /// equality.
     ///
-    /// We keep the same last fork height in both sides of a clone, because every new block clones
-    /// a chain, even if it's just growing that chain.
+    /// We keep the same last fork height in both sides of a clone, because every new block clones a
+    /// chain, even if it's just growing that chain.
+    ///
+    /// # Note
+    ///
+    /// Most diagnostics are implemented on the `NonFinalizedState`, rather than each chain. Some
+    /// diagnostics only use the best chain, and others need to modify the Chain state, but that's
+    /// difficult with `Arc<Chain>`s.
     pub(super) last_fork_height: Option<Height>,
-    // # Note
-    //
-    // Most diagnostics are implemented on the NonFinalizedState, rather than each chain.
-    // Some diagnostics only use the best chain, and others need to modify the Chain state,
-    // but that's difficult with `Arc<Chain>`s.
 }
 
 /// The internal state of [`Chain`].
@@ -199,12 +200,11 @@ pub struct ChainInner {
 
     // Chain Pools
     //
-    /// The chain value pool balances of the tip of this [`Chain`],
-    /// including the block value pool changes from all finalized blocks,
-    /// and the non-finalized blocks in this chain.
+    /// The chain value pool balances of the tip of this [`Chain`], including the block value pool
+    /// changes from all finalized blocks, and the non-finalized blocks in this chain.
     ///
-    /// When a new chain is created from the finalized tip,
-    /// it is initialized with the finalized tip chain value pool balances.
+    /// When a new chain is created from the finalized tip, it is initialized with the finalized tip
+    /// chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
 }
 
@@ -479,6 +479,17 @@ impl Chain {
         (
             self.non_finalized_tip_height(),
             self.non_finalized_tip_hash(),
+        )
+    }
+
+    /// Returns the non-finalized tip block height, hash, and total pool value balances.
+    pub fn non_finalized_tip_with_value_balance(
+        &self,
+    ) -> (Height, block::Hash, ValueBalance<NonNegative>) {
+        (
+            self.non_finalized_tip_height(),
+            self.non_finalized_tip_hash(),
+            self.chain_value_pools,
         )
     }
 

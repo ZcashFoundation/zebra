@@ -42,7 +42,7 @@ configs:
   zebra_config:
     # Change the following line to point to a zebrad.toml on your host machine
     # to allow for easy configuration changes without rebuilding the image
-    file: ../zebrad/tests/common/configs/v1.0.0-rc.2.toml/
+    file: ../zebrad/tests/common/configs/v1.0.0-rc.2.toml
 
 volumes:
   zebrad-cache:

@@ -5,6 +5,95 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 2.0.0-rc.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0-rc.0) - 2024-10-11
+
+This version is a release candidate for the Zcash NU6 network upgrade on the Mainnet. While this version does not yet include the NU6 Mainnet activation height or current protocol version, all required functionality and tests are in place.
+
+Please note that support for this release candidate is expected to conclude prior to the NU6 activation heights.
+
+### Security
+
+- Added Docker Scout vulnerabilities scanning ([#8871](https://github.com/ZcashFoundation/zebra/pull/8871))
+
+### Added
+
+- Added Regtest-only `generate` and `stop` RPC methods ([#8849](https://github.com/ZcashFoundation/zebra/pull/8849), [#8839](https://github.com/ZcashFoundation/zebra/pull/8839), [#8863](https://github.com/ZcashFoundation/zebra/pull/8863))
+- Added fields to `getmininginfo` RPC method response ([#8860](https://github.com/ZcashFoundation/zebra/pull/8860))
+- Copied the Python RPC test framework from zcashd into Zebra ([#8866](https://github.com/ZcashFoundation/zebra/pull/8866))
+
+### Changed
+
+- Regtest halving interval to match zcashd and added a configurable halving interval for custom testnets ([#8888](https://github.com/ZcashFoundation/zebra/pull/8888), [#8928](https://github.com/ZcashFoundation/zebra/pull/8928))
+- Updates post-NU6 Major Grants funding stream address on Mainnet ([#8914](https://github.com/ZcashFoundation/zebra/pull/8914))
+
+### Fixed
+
+- Remove debugging output by default in Docker image ([#8870](https://github.com/ZcashFoundation/zebra/pull/8870))
+- Fixes a typo in configuration file path of the docker-compose file ([#8893](https://github.com/ZcashFoundation/zebra/pull/8893))
+- Return verification errors from `sendrawtransaction` RPC method ([#8788](https://github.com/ZcashFoundation/zebra/pull/8788))
+- Respond to getheaders requests with a maximum of 160 block headers ([#8913](https://github.com/ZcashFoundation/zebra/pull/8913))
+- Avoids panicking during contextual validation when a parent block is missing ([#8883](https://github.com/ZcashFoundation/zebra/pull/8883))
+- Write database format version to disk atomically to avoid a rare panic ([#8795](https://github.com/ZcashFoundation/zebra/pull/8795))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @dismad, @gustavovalverde, @oxarbitrage, @skyl and @upbqdn
+
+
+## [Zebra 1.9.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.9.0) - 2024-08-02
+
+This release includes deployment of NU6 on Testnet, configurable funding streams on custom Testnets, and updates Zebra's end-of-support (EoS)
+from 16 weeks to 10 weeks so that it will panic before the expected activation height of NU6 on Mainnet.
+
+It also replaces the `shielded-scan` compilation feature with a new `zebra-scanner` binary, adds a `TrustedChainSync` module
+for replicating Zebra's best chain state, and a gRPC server in `zebra-rpc` as steps towards zcashd deprecation.
+
+#### Recovering after finalizing a block from a chain fork
+
+Zebra doesn't enforce an end-of-support height on Testnet, and previous versions of Zebra could mine or follow a chain fork that does not
+activate NU6 on Testnet at height 2976000. Once a block from a fork is finalized in Zebra's state cache, updating to a version of Zebra that
+does expect NU6 activation at that height will result in Zebra getting stuck, as it cannot rollback its finalized state. This can be resolved
+by syncing Zebra from scratch, or by using the `copy-state` command to create a new state cache up to height 2975999. To use the `copy-state`
+command, first make a copy Zebra's Testnet configuration with a different cache directory path, for example, if Zebra's configuration is at the
+default path, by running `cp ~/.config/zebrad.toml ./zebrad-copy-target.toml`, then opening the new configuration file and editing the
+`cache_dir` path in the `state` section. Once there's a copy of Zebra's configuration with the new state cache directory path, run:
+`zebrad copy-state --target-config-path "./zebrad-copy-target.toml" --max-source-height "2975999"`, and then update the original 
+Zebra configuration to use the new state cache directory.
+
+### Added
+
+- A `zebra-scanner` binary replacing the `shielded-scan` compilation feature in `zebrad` ([#8608](https://github.com/ZcashFoundation/zebra/pull/8608))
+- Adds a `TrustedChainSync` module for keeping up with Zebra's non-finalized best chain from a separate process ([#8596](https://github.com/ZcashFoundation/zebra/pull/8596))
+- Add a tonic server in zebra-rpc with a `chain_tip_change()` method that notifies clients when Zebra's best chain tip changes ([#8674](https://github.com/ZcashFoundation/zebra/pull/8674))
+- NU6 network upgrade variant, minimum protocol version, and Testnet activation height ([#8693](https://github.com/ZcashFoundation/zebra/pull/8693), [8733](https://github.com/ZcashFoundation/zebra/pull/8733), [#8804](https://github.com/ZcashFoundation/zebra/pull/8804))
+- Configurable NU6 activation height on Regtest ([#8700](https://github.com/ZcashFoundation/zebra/pull/8700))
+- Configurable Testnet funding streams ([#8718](https://github.com/ZcashFoundation/zebra/pull/8718))
+- Post-NU6 funding streams, including a lockbox funding stream ([#8694](https://github.com/ZcashFoundation/zebra/pull/8694))
+- Add value pool balances to `getblockchaininfo` RPC method response ([#8769](https://github.com/ZcashFoundation/zebra/pull/8769))
+- Add NU6 lockbox funding stream information to `getblocksubsidy` RPC method response ([#8742](https://github.com/ZcashFoundation/zebra/pull/8742))
+
+### Changed
+
+- Reduce the end-of-support halt time from 16 weeks to 10 weeks ([#8734](https://github.com/ZcashFoundation/zebra/pull/8734))
+- Bump the current protocol version from 170100 to 170110 ([#8804](https://github.com/ZcashFoundation/zebra/pull/8804))
+- Track the balance of the deferred chain value pool ([#8732](https://github.com/ZcashFoundation/zebra/pull/8732), [#8729](https://github.com/ZcashFoundation/zebra/pull/8729))
+- Require that coinbase transactions balance exactly after NU6 activation ([#8727](https://github.com/ZcashFoundation/zebra/pull/8727))
+- Support in-place disk format upgrades for major database version bumps ([#8748](https://github.com/ZcashFoundation/zebra/pull/8748))
+
+### Fixed
+
+- Return full network upgrade activation list in `getblockchaininfo` method ([#8699](https://github.com/ZcashFoundation/zebra/pull/8699))
+- Update documentation for the new `zebra-scanner` binary ([#8675](https://github.com/ZcashFoundation/zebra/pull/8675))
+- Update documentation for using Zebra with lightwalletd ([#8714](https://github.com/ZcashFoundation/zebra/pull/8714))
+- Reduce debug output for Network on Regtest and default Testnet ([#8760](https://github.com/ZcashFoundation/zebra/pull/8760))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @dependabot[bot], @oxarbitrage, @therealyingtong and @upbqdn
+
+
 ## [Zebra 1.8.0](https://github.com/ZcashFoundation/zebra/releases/tag/v1.8.0) - 2024-07-02
 
 - Zebra now uses a default unpaid actions limit of 0, dropping transactions with

@@ -126,6 +126,7 @@ pub const PEER_GOSSIP_DELAY: Duration = Duration::from_secs(7);
 /// This timeout makes sure that the syncer doesn't hang when:
 ///   - the lookahead queue is full, and
 ///   - we are waiting for a request that is stuck.
+///
 /// See [`BLOCK_VERIFY_TIMEOUT`] for details.
 ///
 /// ## Correctness
@@ -149,6 +150,7 @@ pub(super) const BLOCK_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(20);
 ///    - are for blocks a long way ahead of the current tip, or
 ///    - are for invalid blocks which will never verify, because they depend on
 ///      missing blocks or transactions.
+///
 /// These conditions can happen during normal operation - they are not bugs.
 ///
 /// This timeout also mitigates or hides the following kinds of bugs:

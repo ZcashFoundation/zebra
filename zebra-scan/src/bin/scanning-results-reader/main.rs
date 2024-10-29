@@ -40,6 +40,7 @@ use zebra_scan::{storage::Storage, Config};
 #[allow(clippy::print_stdout)]
 pub fn main() {
     let network = zebra_chain::parameters::Network::Mainnet;
+    let zp_network = zebra_scan::scan::zp_network(&network);
     let storage = Storage::new(&Config::default(), &network, true);
     // If the first memo is empty, it doesn't get printed. But we never print empty memos anyway.
     let mut prev_memo = "".to_owned();
@@ -55,13 +56,15 @@ pub fn main() {
 
             for txid in txids.iter() {
                 let tx = Transaction::read(
-                    &hex::decode(&fetch_tx_via_rpc(txid.encode_hex()))
+                    &hex::decode(fetch_tx_via_rpc(txid.encode_hex()))
                         .expect("RPC response should be decodable from hex string to bytes")[..],
-                    BranchId::for_height(&network, height),
+                    BranchId::for_height(&zp_network, height),
                 )
                 .expect("TX fetched via RPC should be deserializable from raw bytes");
 
-                for output in decrypt_transaction(&network, height, &tx, &ufvks).sapling_outputs() {
+                for output in
+                    decrypt_transaction(&zp_network, height, &tx, &ufvks).sapling_outputs()
+                {
                     let memo = memo_bytes_to_string(output.memo().as_array());
 
                     if !memo.is_empty()

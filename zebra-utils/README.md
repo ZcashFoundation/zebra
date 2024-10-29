@@ -112,7 +112,7 @@ This program is commonly used as part of `zebrad-log-filter` where hashes will b
 
 The program is designed to filter the output from the zebra terminal or log file. Each time a hash is seen the script will capture it and get the additional information using `zebrad-hash-lookup`.
 
-Assuming `zebrad`, `zclash-cli`, `zebrad-hash-lookup` and `zebrad-log-filter` are in your path the program can used as:
+Assuming `zebrad`, `zcash-cli`, `zebrad-hash-lookup` and `zebrad-log-filter` are in your path the program can used as:
 
 ```sh
 $ zebrad -v start | zebrad-log-filter

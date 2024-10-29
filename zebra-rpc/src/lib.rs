@@ -9,6 +9,10 @@ pub mod constants;
 pub mod methods;
 pub mod queue;
 pub mod server;
+pub mod sync;
+
+#[cfg(feature = "indexer-rpcs")]
+pub mod indexer;
 
 #[cfg(test)]
 mod tests;

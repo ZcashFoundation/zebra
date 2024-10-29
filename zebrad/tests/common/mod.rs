@@ -26,6 +26,3 @@ pub mod get_block_template_rpcs;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod regtest;
-
-#[cfg(feature = "shielded-scan")]
-pub mod shielded_scan;

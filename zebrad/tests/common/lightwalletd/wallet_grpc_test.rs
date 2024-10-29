@@ -31,8 +31,7 @@
 //!
 //! - `GetLightdInfo`: Covered.
 //!
-//! - `Ping`: Not covered and it will never be. `Ping` is only used for testing
-//! purposes.
+//! - `Ping`: Not covered and it will never be. `Ping` is only used for testing purposes.
 
 use color_eyre::eyre::Result;
 use hex_literal::hex;
@@ -209,7 +208,6 @@ pub async fn run() -> Result<()> {
     assert_eq!(
         get_block_response
             .chain_metadata
-            .clone()
             .unwrap()
             .sapling_commitment_tree_size,
         1170439

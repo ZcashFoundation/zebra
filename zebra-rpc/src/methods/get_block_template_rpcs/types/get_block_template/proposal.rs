@@ -59,6 +59,11 @@ impl ProposalResponse {
 
         ProposalResponse::Rejected(final_error.to_string())
     }
+
+    /// Returns true if self is [`ProposalResponse::Valid`]
+    pub fn is_valid(&self) -> bool {
+        matches!(self, Self::Valid)
+    }
 }
 
 impl From<ProposalResponse> for Response {
@@ -212,7 +217,9 @@ pub fn proposal_block_from_template(
         | NetworkUpgrade::Blossom
         | NetworkUpgrade::Heartwood => panic!("pre-Canopy block templates not supported"),
         NetworkUpgrade::Canopy => chain_history_root.bytes_in_serialized_order().into(),
-        NetworkUpgrade::Nu5 => block_commitments_hash.bytes_in_serialized_order().into(),
+        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => {
+            block_commitments_hash.bytes_in_serialized_order().into()
+        }
     };
 
     Ok(Block {

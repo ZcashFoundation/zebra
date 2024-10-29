@@ -46,7 +46,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 25;
+const DATABASE_FORMAT_VERSION: u64 = 26;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -55,7 +55,7 @@ const DATABASE_FORMAT_VERSION: u64 = 25;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 3;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.
@@ -107,20 +107,10 @@ pub const MAX_NON_FINALIZED_CHAIN_FORKS: usize = 10;
 pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 
 /// The maximum number of block headers allowed in `getheaders` responses in the Zcash network protocol.
-const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL: u32 = 160;
+pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 
-/// The maximum number of block headers sent by Zebra in `getheaders` responses.
-///
-/// Older versions of Zcashd will blindly request more block headers as long as it
-/// got 160 block headers in response to a previous query,
-/// _even if those headers are already known_.
-///
-/// To avoid this behavior, return slightly fewer than the maximum,
-/// so `zcashd` thinks it has reached our chain tip.
-///
-/// <https://github.com/bitcoin/bitcoin/pull/4468/files#r17026905>
-pub const MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA: u32 =
-    MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_PROTOCOL - 2;
+/// These database versions can be recreated from their directly preceding versions.
+pub const RESTORABLE_DB_VERSIONS: [u64; 1] = [26];
 
 lazy_static! {
     /// Regex that matches the RocksDB error when its lock file is already open.

@@ -12,7 +12,7 @@ use tokio::{
     sync::{mpsc::Sender, watch},
     task::JoinHandle,
 };
-use tower::{buffer::Buffer, util::BoxService, Service, ServiceExt};
+use tower::{Service, ServiceExt};
 
 use tracing::Instrument;
 use zcash_address::unified::{Encoding, Fvk, Ufvk};
@@ -27,7 +27,7 @@ use zcash_client_backend::{
 };
 use zcash_primitives::zip32::{AccountId, Scope};
 
-use sapling::zip32::DiversifiableFullViewingKey;
+use sapling_crypto::zip32::DiversifiableFullViewingKey;
 
 use zebra_chain::{
     block::{Block, Height},
@@ -38,7 +38,7 @@ use zebra_chain::{
     transaction::Transaction,
 };
 use zebra_node_services::scan_service::response::ScanResult;
-use zebra_state::{ChainTipChange, SaplingScannedResult, TransactionIndex};
+use zebra_state::{ChainTipChange, ReadStateService, SaplingScannedResult, TransactionIndex};
 
 use crate::{
     service::{ScanTask, ScanTaskCommand},
@@ -51,11 +51,8 @@ mod scan_range;
 
 pub use scan_range::ScanRangeTaskBuilder;
 
-/// The generic state type used by the scanner.
-pub type State = Buffer<
-    BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>,
-    zebra_state::Request,
->;
+/// The read state type used by the scanner.
+pub type State = ReadStateService;
 
 /// Wait a few seconds at startup for some blocks to get verified.
 ///
@@ -262,13 +259,13 @@ pub async fn scan_height_and_store_results(
         .ready()
         .await
         .map_err(|e| eyre!(e))?
-        .call(zebra_state::Request::Block(height.into()))
+        .call(zebra_state::ReadRequest::Block(height.into()))
         .await
         .map_err(|e| eyre!(e))?;
 
     let block = match block {
-        zebra_state::Response::Block(Some(block)) => block,
-        zebra_state::Response::Block(None) => return Ok(None),
+        zebra_state::ReadResponse::Block(Some(block)) => block,
+        zebra_state::ReadResponse::Block(None) => return Ok(None),
         _ => unreachable!("unmatched response to a state::Block request"),
     };
 
@@ -380,7 +377,7 @@ pub fn scan_block(
     };
 
     zcash_client_backend::scanning::scan_block(
-        network,
+        &zp_network(network),
         block_to_compact(block, chain_metadata),
         scanning_key,
         // Ignore whether notes are change from a viewer's own spends for now.
@@ -515,13 +512,13 @@ async fn tip_height(mut state: State) -> Result<Height, Report> {
         .ready()
         .await
         .map_err(|e| eyre!(e))?
-        .call(zebra_state::Request::Tip)
+        .call(zebra_state::ReadRequest::Tip)
         .await
         .map_err(|e| eyre!(e))?;
 
     match tip {
-        zebra_state::Response::Tip(Some((height, _hash))) => Ok(height),
-        zebra_state::Response::Tip(None) => Ok(Height(0)),
+        zebra_state::ReadResponse::Tip(Some((height, _hash))) => Ok(height),
+        zebra_state::ReadResponse::Tip(None) => Ok(Height(0)),
         _ => unreachable!("unmatched response to a state::Tip request"),
     }
 }
@@ -557,4 +554,12 @@ pub fn dfvk_to_ufvk(dfvk: &DiversifiableFullViewingKey) -> Result<UnifiedFullVie
         &dfvk.to_bytes()[..],
     ))?])?)
     .map_err(|e| eyre!(e))
+}
+
+/// Returns the [`zcash_primitives::consensus::Network`] for this network.
+pub fn zp_network(network: &Network) -> zcash_primitives::consensus::Network {
+    match network {
+        Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
+        Network::Testnet(_) => zcash_primitives::consensus::Network::TestNetwork,
+    }
 }

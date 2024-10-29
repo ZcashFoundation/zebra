@@ -10,6 +10,7 @@ use crate::{
 };
 
 pub mod magic;
+pub mod subsidy;
 pub mod testnet;
 
 #[cfg(test)]
@@ -40,7 +41,7 @@ impl From<Network> for NetworkKind {
 }
 
 /// An enum describing the possible network choices.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize)]
 #[serde(into = "NetworkKind")]
 pub enum Network {
     /// The production mainnet.
@@ -120,6 +121,22 @@ impl fmt::Display for Network {
     }
 }
 
+impl std::fmt::Debug for Network {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Mainnet => write!(f, "{self}"),
+            Self::Testnet(params) if params.is_regtest() => f
+                .debug_struct("Regtest")
+                .field("activation_heights", params.activation_heights())
+                .finish(),
+            Self::Testnet(params) if params.is_default_testnet() => {
+                write!(f, "{self}")
+            }
+            Self::Testnet(params) => f.debug_tuple("ConfiguredTestnet").field(params).finish(),
+        }
+    }
+}
+
 impl Network {
     /// Creates a new [`Network::Testnet`] with the default Testnet [`testnet::Parameters`].
     pub fn new_default_testnet() -> Self {
@@ -132,8 +149,14 @@ impl Network {
     }
 
     /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
-    pub fn new_regtest(nu5_activation_height: Option<u32>) -> Self {
-        Self::new_configured_testnet(testnet::Parameters::new_regtest(nu5_activation_height))
+    pub fn new_regtest(
+        nu5_activation_height: Option<u32>,
+        nu6_activation_height: Option<u32>,
+    ) -> Self {
+        Self::new_configured_testnet(testnet::Parameters::new_regtest(
+            nu5_activation_height,
+            nu6_activation_height,
+        ))
     }
 
     /// Returns true if the network is the default Testnet, or false otherwise.

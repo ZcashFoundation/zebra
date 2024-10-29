@@ -1,17 +1,18 @@
 //! Randomised property tests for RPC methods.
 
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
 use hex::ToHex;
 use jsonrpc_core::{Error, ErrorCode};
 use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
+use tokio::sync::oneshot;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{Block, Height},
+    block::{self, Block, Height},
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::{
         Network::{self, *},
@@ -20,6 +21,7 @@ use zebra_chain::{
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
+    value_balance::ValueBalance,
 };
 use zebra_node_services::mempool;
 use zebra_state::BoxError;
@@ -60,7 +62,9 @@ proptest! {
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
-            let response = mempool::Response::Queued(vec![Ok(())]);
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Ok(()));
+            let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);
 
             mempool
                 .expect_request(expected_request)
@@ -110,10 +114,10 @@ proptest! {
                 .expect("Transaction serializes successfully");
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex.clone()));
 
             let unmined_transaction = UnminedTx::from(transaction);
-            let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
+            let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
             mempool
                 .expect_request(expected_request)
@@ -121,6 +125,32 @@ proptest! {
                 .respond(Err(DummyError));
 
             state.expect_no_requests().await?;
+
+            let result = send_task
+                .await
+                .expect("Sending raw transactions should not panic");
+
+            prop_assert!(
+                matches!(
+                    result,
+                    Err(Error {
+                        code: ErrorCode::ServerError(_),
+                        ..
+                    })
+                ),
+                "Result is not a server error: {result:?}"
+            );
+
+            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+
+            let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
+
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Err("any verification error".into()));
+            mempool
+                .expect_request(expected_request)
+                .await?
+                .respond(Ok::<_, BoxError>(mempool::Response::Queued(vec![Ok(rsp_rx)])));
 
             let result = send_task
                 .await
@@ -553,19 +583,34 @@ proptest! {
             NoChainTip,
         );
 
-        let response = rpc.get_blockchain_info();
-        prop_assert_eq!(
-            &response.err().unwrap().message,
-            "No Chain tip available yet"
-        );
-
-        // The queue task should continue without errors or panics
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(rpc_tx_queue_task_result.is_none());
 
         runtime.block_on(async move {
+            let response_fut = rpc.get_blockchain_info();
+            let mock_state_handler = {
+                let mut state = state.clone();
+                async move {
+                    state
+                        .expect_request(zebra_state::ReadRequest::TipPoolValues)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(Err(BoxError::from("no chain tip available yet")));
+                }
+            };
+
+            let (response, _) = tokio::join!(response_fut, mock_state_handler);
+
+            prop_assert_eq!(
+                &response.err().unwrap().message,
+                "no chain tip available yet"
+            );
+
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(rpc_tx_queue_task_result.is_none());
+
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
+
             Ok::<_, TestCaseError>(())
         })?;
     }
@@ -581,16 +626,10 @@ proptest! {
         let mut mempool = MockService::build().for_prop_tests();
         let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
 
-        // get block data
+        // get arbitrary chain tip data
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
         let block_time = block.header.time;
-
-        // create a mocked `ChainTip`
-        let (chain_tip, mock_chain_tip_sender) = MockChainTip::new();
-        mock_chain_tip_sender.send_best_tip_height(block_height);
-        mock_chain_tip_sender.send_best_tip_hash(block_hash);
-        mock_chain_tip_sender.send_best_tip_block_time(block_time);
 
         // Start RPC with the mocked `ChainTip`
         let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
@@ -601,50 +640,82 @@ proptest! {
             true,
             mempool.clone(),
             Buffer::new(state.clone(), 1),
-            chain_tip,
+            NoChainTip,
         );
-        let response = rpc.get_blockchain_info();
-
-        // Check response
-        match response {
-            Ok(info) => {
-                prop_assert_eq!(info.chain, network.bip70_network_name());
-                prop_assert_eq!(info.blocks, block_height);
-                prop_assert_eq!(info.best_block_hash, block_hash);
-                prop_assert!(info.estimated_height < Height::MAX);
-
-                prop_assert_eq!(
-                    info.consensus.chain_tip.0,
-                    NetworkUpgrade::current(&network, block_height)
-                        .branch_id()
-                        .unwrap()
-                );
-                prop_assert_eq!(
-                    info.consensus.next_block.0,
-                    NetworkUpgrade::current(&network, (block_height + 1).unwrap())
-                        .branch_id()
-                        .unwrap()
-                );
-
-                for u in info.upgrades {
-                    let mut status = NetworkUpgradeStatus::Active;
-                    if block_height < u.1.activation_height {
-                        status = NetworkUpgradeStatus::Pending;
-                    }
-                    prop_assert_eq!(u.1.status, status);
-                }
-            }
-            Err(_) => {
-                unreachable!("Test should never error with the data we are feeding it")
-            }
-        };
-
-        // The queue task should continue without errors or panics
-        let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-        prop_assert!(rpc_tx_queue_task_result.is_none());
 
         // check no requests were made during this test
         runtime.block_on(async move {
+            let response_fut = rpc.get_blockchain_info();
+            let mock_state_handler = {
+                let mut state = state.clone();
+                async move {
+                    state
+                        .expect_request(zebra_state::ReadRequest::TipPoolValues)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::TipPoolValues {
+                            tip_height: block_height,
+                            tip_hash: block_hash,
+                            value_balance: ValueBalance::default(),
+                        });
+
+                    state
+                        .expect_request(zebra_state::ReadRequest::BlockHeader(block_hash.into()))
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::BlockHeader(Some(Arc::new(block::Header {
+                            time: block_time,
+                            version: Default::default(),
+                            previous_block_hash: Default::default(),
+                            merkle_root: Default::default(),
+                            commitment_bytes: Default::default(),
+                            difficulty_threshold: Default::default(),
+                            nonce: Default::default(),
+                            solution: Default::default()
+                        }))));
+                }
+            };
+
+            let (response, _) = tokio::join!(response_fut, mock_state_handler);
+
+            // Check response
+            match response {
+                Ok(info) => {
+                    prop_assert_eq!(info.chain, network.bip70_network_name());
+                    prop_assert_eq!(info.blocks, block_height);
+                    prop_assert_eq!(info.best_block_hash, block_hash);
+                    prop_assert!(info.estimated_height < Height::MAX);
+
+                    prop_assert_eq!(
+                        info.consensus.chain_tip.0,
+                        NetworkUpgrade::current(&network, block_height)
+                            .branch_id()
+                            .unwrap()
+                    );
+                    prop_assert_eq!(
+                        info.consensus.next_block.0,
+                        NetworkUpgrade::current(&network, (block_height + 1).unwrap())
+                            .branch_id()
+                            .unwrap()
+                    );
+
+                    for u in info.upgrades {
+                        let mut status = NetworkUpgradeStatus::Active;
+                        if block_height < u.1.activation_height {
+                            status = NetworkUpgradeStatus::Pending;
+                        }
+                        prop_assert_eq!(u.1.status, status);
+                    }
+                }
+                Err(_) => {
+                    unreachable!("Test should never error with the data we are feeding it")
+                }
+            };
+
+            // The queue task should continue without errors or panics
+            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+            prop_assert!(rpc_tx_queue_task_result.is_none());
+
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
@@ -855,7 +926,9 @@ proptest! {
             // now a retry will be sent to the mempool
             let expected_request =
                 mempool::Request::Queue(vec![mempool::Gossip::Tx(tx_unmined.clone())]);
-            let response = mempool::Response::Queued(vec![Ok(())]);
+            let (rsp_tx, rsp_rx) = oneshot::channel();
+            let _ = rsp_tx.send(Ok(()));
+            let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);
 
             mempool
                 .expect_request(expected_request)
@@ -955,7 +1028,9 @@ proptest! {
             for tx in txs.clone() {
                 let expected_request =
                     mempool::Request::Queue(vec![mempool::Gossip::Tx(UnminedTx::from(tx))]);
-                let response = mempool::Response::Queued(vec![Ok(())]);
+                let (rsp_tx, rsp_rx) = oneshot::channel();
+                let _ = rsp_tx.send(Ok(()));
+                let response = mempool::Response::Queued(vec![Ok(rsp_rx)]);
 
                 mempool
                     .expect_request(expected_request)

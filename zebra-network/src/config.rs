@@ -2,7 +2,6 @@
 
 use std::{
     collections::HashSet,
-    ffi::OsString,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
     time::Duration,
@@ -10,13 +9,13 @@ use std::{
 
 use indexmap::IndexSet;
 use serde::{de, Deserialize, Deserializer};
-use tempfile::NamedTempFile;
-use tokio::{fs, io::AsyncWriteExt};
-use tracing::Span;
+use tokio::fs;
 
+use tracing::Span;
 use zebra_chain::{
+    common::atomic_write,
     parameters::{
-        testnet::{self, ConfiguredActivationHeights},
+        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
         Magic, Network, NetworkKind,
     },
     work::difficulty::U256,
@@ -503,90 +502,36 @@ impl Config {
         // Make a newline-separated list
         let peer_data = peer_list.join("\n");
 
-        // Write to a temporary file, so the cache is not corrupted if Zebra shuts down or crashes
-        // at the same time.
-        //
-        // # Concurrency
-        //
-        // We want to use async code to avoid blocking the tokio executor on filesystem operations,
-        // but `tempfile` is implemented using non-asyc methods. So we wrap its filesystem
-        // operations in `tokio::spawn_blocking()`.
-        //
-        // TODO: split this out into an atomic_write_to_tmp_file() method if we need to re-use it
-
-        // Create the peer cache directory if needed
-        let peer_cache_dir = peer_cache_file
-            .parent()
-            .expect("cache path always has a network directory")
-            .to_owned();
-        tokio::fs::create_dir_all(&peer_cache_dir).await?;
-
-        // Give the temporary file a similar name to the permanent cache file,
-        // but hide it in directory listings.
-        let mut tmp_peer_cache_prefix: OsString = ".tmp.".into();
-        tmp_peer_cache_prefix.push(
-            peer_cache_file
-                .file_name()
-                .expect("cache file always has a file name"),
-        );
-
-        // Create the temporary file.
-        // Do blocking filesystem operations on a dedicated thread.
+        // Write the peer cache file atomically so the cache is not corrupted if Zebra shuts down
+        // or crashes.
         let span = Span::current();
-        let tmp_peer_cache_file = tokio::task::spawn_blocking(move || {
-            span.in_scope(move || {
-                // Put the temporary file in the same directory as the permanent file,
-                // so atomic filesystem operations are possible.
-                tempfile::Builder::new()
-                    .prefix(&tmp_peer_cache_prefix)
-                    .tempfile_in(peer_cache_dir)
-            })
+        let write_result = tokio::task::spawn_blocking(move || {
+            span.in_scope(move || atomic_write(peer_cache_file, peer_data.as_bytes()))
         })
         .await
-        .expect("unexpected panic creating temporary peer cache file")?;
+        .expect("could not write the peer cache file")?;
 
-        // Write the list to the file asynchronously, by extracting the inner file, using it,
-        // then combining it back into a type that will correctly drop the file on error.
-        let (tmp_peer_cache_file, tmp_peer_cache_path) = tmp_peer_cache_file.into_parts();
-        let mut tmp_peer_cache_file = tokio::fs::File::from_std(tmp_peer_cache_file);
-        tmp_peer_cache_file.write_all(peer_data.as_bytes()).await?;
+        match write_result {
+            Ok(peer_cache_file) => {
+                info!(
+                    cached_ip_count = ?peer_list.len(),
+                    ?peer_cache_file,
+                    "updated cached peer IP addresses"
+                );
 
-        let tmp_peer_cache_file =
-            NamedTempFile::from_parts(tmp_peer_cache_file, tmp_peer_cache_path);
-
-        // Atomically replace the current cache with the temporary cache.
-        // Do blocking filesystem operations on a dedicated thread.
-        let span = Span::current();
-        tokio::task::spawn_blocking(move || {
-            span.in_scope(move || {
-                let result = tmp_peer_cache_file.persist(&peer_cache_file);
-
-                // Drops the temp file if needed
-                match result {
-                    Ok(_temp_file) => {
-                        info!(
-                            cached_ip_count = ?peer_list.len(),
-                            ?peer_cache_file,
-                            "updated cached peer IP addresses"
-                        );
-
-                        for ip in &peer_list {
-                            metrics::counter!(
-                                "zcash.net.peers.cache",
-                                "cache" => peer_cache_file.display().to_string(),
-                                "remote_ip" => ip.to_string()
-                            )
-                            .increment(1);
-                        }
-
-                        Ok(())
-                    }
-                    Err(error) => Err(error.error),
+                for ip in &peer_list {
+                    metrics::counter!(
+                        "zcash.net.peers.cache",
+                        "cache" => peer_cache_file.display().to_string(),
+                        "remote_ip" => ip.to_string()
+                    )
+                    .increment(1);
                 }
-            })
-        })
-        .await
-        .expect("unexpected panic making temporary peer cache file permanent")
+
+                Ok(())
+            }
+            Err(error) => Err(error.error),
+        }
     }
 }
 
@@ -641,6 +586,7 @@ impl<'de> Deserialize<'de> for Config {
         D: Deserializer<'de>,
     {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct DTestnetParameters {
             network_name: Option<String>,
             network_magic: Option<[u8; 4]>,
@@ -649,6 +595,9 @@ impl<'de> Deserialize<'de> for Config {
             disable_pow: Option<bool>,
             genesis_hash: Option<String>,
             activation_heights: Option<ConfiguredActivationHeights>,
+            pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+            post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+            pre_blossom_halving_interval: Option<u32>,
         }
 
         #[derive(Deserialize)]
@@ -719,11 +668,12 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let nu5_activation_height = testnet_parameters
+                let (nu5_activation_height, nu6_activation_height) = testnet_parameters
                     .and_then(|params| params.activation_heights)
-                    .and_then(|activation_height| activation_height.nu5);
+                    .map(|ConfiguredActivationHeights { nu5, nu6, .. }| (nu5, nu6))
+                    .unwrap_or_default();
 
-                Network::new_regtest(nu5_activation_height)
+                Network::new_regtest(nu5_activation_height, nu6_activation_height)
             }
             (
                 NetworkKind::Testnet,
@@ -735,6 +685,9 @@ impl<'de> Deserialize<'de> for Config {
                     disable_pow,
                     genesis_hash,
                     activation_heights,
+                    pre_nu6_funding_streams,
+                    post_nu6_funding_streams,
+                    pre_blossom_halving_interval,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
@@ -772,6 +725,20 @@ impl<'de> Deserialize<'de> for Config {
                 // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
                 if let Some(activation_heights) = activation_heights.clone() {
                     params_builder = params_builder.with_activation_heights(activation_heights)
+                }
+
+                if let Some(halving_interval) = pre_blossom_halving_interval {
+                    params_builder = params_builder.with_halving_interval(halving_interval.into())
+                }
+
+                // Set configured funding streams after setting any parameters that affect the funding stream address period.
+
+                if let Some(funding_streams) = pre_nu6_funding_streams {
+                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
+                }
+
+                if let Some(funding_streams) = post_nu6_funding_streams {
+                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
                 }
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet

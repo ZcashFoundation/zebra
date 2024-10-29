@@ -10,21 +10,23 @@ use tower::{Service, ServiceExt};
 use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
-    amount::Amount,
+    amount::{self, Amount, NonNegative},
     block::{self, Block, Height, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{Network, NetworkKind, POW_AVERAGING_WINDOW},
+    parameters::{
+        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
+    },
     primitives,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     transparent::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
     work::difficulty::{ParameterDifficulty as _, U256},
 };
 use zebra_consensus::{
-    funding_stream_address, funding_stream_values, miner_subsidy, ParameterSubsidy as _,
-    RouterError,
+    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
 };
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
@@ -32,6 +34,7 @@ use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
+    errors::MapServerError,
     get_block_template_rpcs::{
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
@@ -44,9 +47,10 @@ use crate::methods::{
         // TODO: move the types/* modules directly under get_block_template_rpcs,
         //       and combine any modules with the same names.
         types::{
-            get_block_template::GetBlockTemplate,
+            get_block_template::{
+                proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+            },
             get_mining_info,
-            hex_data::HexData,
             long_poll::LongPollInput,
             peer_info::PeerInfo,
             submit_block,
@@ -54,7 +58,9 @@ use crate::methods::{
             unified_address, validate_address, z_validate_address,
         },
     },
-    height_from_signed_int, GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+    height_from_signed_int,
+    hex_data::HexData,
+    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
 };
 
 pub mod constants;
@@ -279,6 +285,22 @@ pub trait GetBlockTemplateRpc {
         &self,
         address: String,
     ) -> BoxFuture<Result<unified_address::Response>>;
+
+    #[rpc(name = "generate")]
+    /// Mine blocks immediately. Returns the block hashes of the generated blocks.
+    ///
+    /// # Parameters
+    ///
+    /// - `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.
+    ///
+    /// # Notes
+    ///
+    /// Only works if the network of the running zebrad process is `Regtest`.
+    ///
+    /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
+    /// method: post
+    /// tags: generating
+    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>>;
 }
 
 /// RPC method implementations.
@@ -547,7 +569,6 @@ where
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_block_hash(&self, index: i32) -> BoxFuture<Result<GetBlockHash>> {
         let mut state = self.state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
@@ -563,11 +584,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
+                .map_server_error()?;
 
             match response {
                 zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHash(hash)),
@@ -582,7 +599,6 @@ where
         .boxed()
     }
 
-    // TODO: use a generic error constructor (#5548)
     fn get_block_template(
         &self,
         parameters: Option<get_block_template::JsonParameters>,
@@ -638,12 +654,7 @@ where
                 //
                 // Optional TODO:
                 // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-                // TODO:
-                // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
-                // - Check the field in `sync_status` so it applies to the mempool as well.
-                if !network.disable_pow() {
-                    check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
-                }
+                check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
                 // TODO: return an error if we have no peers, like `zcashd` does,
                 //       and add a developer config that mines regardless of how many peers we have.
                 // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
@@ -831,11 +842,7 @@ where
                                     Is Zebra shutting down?"
                                 );
 
-                                return Err(Error {
-                                    code: ErrorCode::ServerError(0),
-                                    message: recv_error.to_string(),
-                                    data: None,
-                                });
+                                return Err(recv_error).map_server_error();
                             }
                         }
                     }
@@ -1005,9 +1012,39 @@ where
 
     fn get_mining_info(&self) -> BoxFuture<Result<get_mining_info::Response>> {
         let network = self.network.clone();
+        let mut state = self.state.clone();
+
+        let chain_tip = self.latest_chain_tip.clone();
+        let tip_height = chain_tip.best_tip_height().unwrap_or(Height(0)).0;
+
+        let mut current_block_tx = None;
+        if tip_height > 0 {
+            let mined_tx_ids = chain_tip.best_tip_mined_transaction_ids();
+            current_block_tx =
+                (!mined_tx_ids.is_empty()).then(|| mined_tx_ids.len().saturating_sub(1));
+        }
+
         let solution_rate_fut = self.get_network_sol_ps(None, None);
         async move {
+            // Get the current block size.
+            let mut current_block_size = None;
+            if tip_height > 0 {
+                let request = zebra_state::ReadRequest::TipBlockSize;
+                let response: zebra_state::ReadResponse = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_server_error()?;
+                current_block_size = match response {
+                    zebra_state::ReadResponse::TipBlockSize(Some(block_size)) => Some(block_size),
+                    _ => None,
+                };
+            }
+
             Ok(get_mining_info::Response::new(
+                tip_height,
+                current_block_size,
+                current_block_tx,
                 network,
                 solution_rate_fut.await?,
             ))
@@ -1183,27 +1220,27 @@ where
                 });
             }
 
-            let miner = miner_subsidy(height, &network).map_err(|error| Error {
-                code: ErrorCode::ServerError(0),
-                message: error.to_string(),
-                data: None,
-            })?;
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let funding_streams =
-                funding_stream_values(height, &network).map_err(|error| Error {
-                    code: ErrorCode::ServerError(0),
-                    message: error.to_string(),
-                    data: None,
-                })?;
-            let mut funding_streams: Vec<_> = funding_streams
-                .iter()
-                .map(|(receiver, value)| {
-                    let address = funding_stream_address(height, &network, *receiver);
-                    (*receiver, FundingStream::new(*receiver, *value, address))
-                })
-                .collect();
+            let total_block_subsidy = block_subsidy(height, &network).map_server_error()?;
+            let miner_subsidy =
+                miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
+
+            let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
+                funding_stream_values(height, &network, total_block_subsidy)
+                    .map_server_error()?
+                    .into_iter()
+                    // Separate the funding streams into deferred and non-deferred streams
+                    .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
+
+            let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
+
+            let [lockbox_total, funding_streams_total]: [std::result::Result<
+                Amount<NonNegative>,
+                amount::Error,
+            >; 2] = [&lockbox_streams, &funding_streams]
+                .map(|streams| streams.iter().map(|&(_, amount)| amount).sum());
 
             // Use the same funding stream order as zcashd
             funding_streams.sort_by_key(|(receiver, _funding_stream)| {
@@ -1212,12 +1249,26 @@ where
                     .position(|zcashd_receiver| zcashd_receiver == receiver)
             });
 
-            let (_receivers, funding_streams): (Vec<_>, _) = funding_streams.into_iter().unzip();
+            // Format the funding streams and lockbox streams
+            let [funding_streams, lockbox_streams]: [Vec<_>; 2] =
+                [funding_streams, lockbox_streams].map(|streams| {
+                    streams
+                        .into_iter()
+                        .map(|(receiver, value)| {
+                            let address = funding_stream_address(height, &network, receiver);
+                            FundingStream::new(is_nu6, receiver, value, address)
+                        })
+                        .collect()
+                });
 
             Ok(BlockSubsidy {
-                miner: miner.into(),
+                miner: miner_subsidy.into(),
                 founders: founders.into(),
                 funding_streams,
+                lockbox_streams,
+                funding_streams_total: funding_streams_total.map_server_error()?.into(),
+                lockbox_total: lockbox_total.map_server_error()?.into(),
+                total_block_subsidy: total_block_subsidy.into(),
             })
         }
         .boxed()
@@ -1351,6 +1402,61 @@ where
             Ok(unified_address::Response::new(
                 orchard, sapling, p2pkh, p2sh,
             ))
+        }
+        .boxed()
+    }
+
+    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>> {
+        let rpc: GetBlockTemplateRpcImpl<
+            Mempool,
+            State,
+            Tip,
+            BlockVerifierRouter,
+            SyncStatus,
+            AddressBook,
+        > = self.clone();
+        let network = self.network.clone();
+
+        async move {
+            if !network.is_regtest() {
+                return Err(Error {
+                    code: ErrorCode::ServerError(0),
+                    message: "generate is only supported on regtest".to_string(),
+                    data: None,
+                });
+            }
+
+            let mut block_hashes = Vec::new();
+            for _ in 0..num_blocks {
+                let block_template = rpc.get_block_template(None).await.map_server_error()?;
+
+                let get_block_template::Response::TemplateMode(block_template) = block_template
+                else {
+                    return Err(Error {
+                        code: ErrorCode::ServerError(0),
+                        message: "error generating block template".to_string(),
+                        data: None,
+                    });
+                };
+
+                let proposal_block = proposal_block_from_template(
+                    &block_template,
+                    TimeSource::CurTime,
+                    NetworkUpgrade::current(&network, Height(block_template.height)),
+                )
+                .map_server_error()?;
+                let hex_proposal_block =
+                    HexData(proposal_block.zcash_serialize_to_vec().map_server_error()?);
+
+                let _submit = rpc
+                    .submit_block(hex_proposal_block, None)
+                    .await
+                    .map_server_error()?;
+
+                block_hashes.push(GetBlockHash(proposal_block.hash()));
+            }
+
+            Ok(block_hashes)
         }
         .boxed()
     }

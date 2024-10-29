@@ -43,6 +43,7 @@ fn rpc_server_spawn(parallel_cpu_threads: bool) {
 
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()),
+        indexer_listen_addr: None,
         parallel_cpu_threads: if parallel_cpu_threads { 2 } else { 1 },
         debug_force_finished_sync: false,
     };
@@ -130,6 +131,7 @@ fn rpc_server_spawn_unallocated_port(parallel_cpu_threads: bool, do_shutdown: bo
     #[allow(clippy::bool_to_int_with_if)]
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
+        indexer_listen_addr: None,
         parallel_cpu_threads: if parallel_cpu_threads { 0 } else { 1 },
         debug_force_finished_sync: false,
     };
@@ -210,6 +212,7 @@ fn rpc_server_spawn_port_conflict() {
     let port = zebra_test::net::random_known_port();
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
+        indexer_listen_addr: None,
         parallel_cpu_threads: 1,
         debug_force_finished_sync: false,
     };
@@ -320,6 +323,7 @@ fn rpc_server_spawn_port_conflict_parallel_auto() {
     let port = zebra_test::net::random_known_port();
     let config = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
+        indexer_listen_addr: None,
         parallel_cpu_threads: 2,
         debug_force_finished_sync: false,
     };

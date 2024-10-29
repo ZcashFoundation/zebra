@@ -677,7 +677,8 @@ where
             | NetworkUpgrade::Blossom
             | NetworkUpgrade::Heartwood
             | NetworkUpgrade::Canopy
-            | NetworkUpgrade::Nu5 => Ok(()),
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6 => Ok(()),
 
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
@@ -765,7 +766,7 @@ where
             //
             // Note: Here we verify the transaction version number of the above rule, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
-            NetworkUpgrade::Nu5 => Ok(()),
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => Ok(()),
 
             // Does not support V5 transactions
             NetworkUpgrade::Genesis

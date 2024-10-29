@@ -275,11 +275,11 @@ fn sapling_onwards_strategy() -> impl Strategy<Value = (Network, block::Height)>
 /// # Panics
 ///
 /// - if `transaction_version` is not `4` or `5` (the only transaction versions that are currently
-/// supported by the transaction verifier)
+///   supported by the transaction verifier)
 /// - if `relative_source_heights` has more than `u32::MAX` items (see
-/// [`mock_transparent_transfers`] for details)
+///   [`mock_transparent_transfers`] for details)
 /// - if any item of `relative_source_heights` is not in the range `0.0..1.0` (see
-/// [`scale_block_height`] for details)
+///   [`scale_block_height`] for details)
 fn mock_transparent_transaction(
     network: &Network,
     block_height: block::Height,
@@ -344,7 +344,7 @@ fn sanitize_transaction_version(
             BeforeOverwinter => 2,
             Overwinter => 3,
             Sapling | Blossom | Heartwood | Canopy => 4,
-            Nu5 => 5,
+            Nu5 | Nu6 => 5,
         }
     };
 

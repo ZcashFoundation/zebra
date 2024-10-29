@@ -27,11 +27,12 @@
 //! Some of them require environment variables or directories to be present:
 //!
 //! - `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
-//! will allow this test to run or give up. Value for the Mainnet full sync tests.
+//!   will allow this test to run or give up. Value for the Mainnet full sync tests.
 //! - `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
-//! will allow this test to run or give up. Value for the Testnet ful  sync tests.
-//! - `/zebrad-cache` directory: For some sync tests, this needs to be created in
-//! the file system, the created directory should have write permissions.
+//!   will allow this test to run or give up. Value for the Testnet full sync tests.
+//! - `ZEBRA_CACHED_STATE_DIR` env variable: The path to a Zebra cached state directory.
+//!   If not set, it defaults to `/zebrad-cache`. For some sync tests, this directory needs to be
+//!   created in the file system with write permissions.
 //!
 //! Here are some examples on how to run each of the tests:
 //!
@@ -40,13 +41,15 @@
 //!
 //! $ cargo test sync_large_checkpoints_mempool_mainnet -- --ignored --nocapture
 //!
-//! $ sudo mkdir /zebrad-cache
-//! $ sudo chmod 777 /zebrad-cache
+//! $ export ZEBRA_CACHED_STATE_DIR="/zebrad-cache"
+//! $ sudo mkdir -p "$ZEBRA_CACHED_STATE_DIR"
+//! $ sudo chmod 777 "$ZEBRA_CACHED_STATE_DIR"
 //! $ export FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600
 //! $ cargo test full_sync_mainnet -- --ignored --nocapture
 //!
-//! $ sudo mkdir /zebrad-cache
-//! $ sudo chmod 777 /zebrad-cache
+//! $ export ZEBRA_CACHED_STATE_DIR="/zebrad-cache"
+//! $ sudo mkdir -p "$ZEBRA_CACHED_STATE_DIR"
+//! $ sudo chmod 777 "$ZEBRA_CACHED_STATE_DIR"
 //! $ export FULL_SYNC_TESTNET_TIMEOUT_MINUTES=600
 //! $ cargo test full_sync_testnet -- --ignored --nocapture
 //! ```
@@ -67,9 +70,10 @@
 //! at least the `ZEBRA_TEST_LIGHTWALLETD` environment variable is present:
 //!
 //! - `ZEBRA_TEST_LIGHTWALLETD` env variable: Needs to be present to run any of the lightwalletd tests.
-//! - `ZEBRA_CACHED_STATE_DIR` env var: The path to a zebra blockchain database.
-//! - `LIGHTWALLETD_DATA_DIR` env variable. The path to a lightwalletd database.
-//! - `--features lightwalletd-grpc-tests` cargo flag. The flag given to cargo to build the source code of the running test.
+//! - `ZEBRA_CACHED_STATE_DIR` env variable: The path to a Zebra cached state directory.
+//!   If not set, it defaults to `/zebrad-cache`.
+//! - `LIGHTWALLETD_DATA_DIR` env variable: The path to a lightwalletd database.
+//! - `--features lightwalletd-grpc-tests` cargo flag: The flag given to cargo to build the source code of the running test.
 //!
 //! Here are some examples of running each test:
 //!
@@ -120,14 +124,6 @@
 //!
 //! Please refer to the documentation of each test for more information.
 //!
-//! ## Shielded scanning tests
-//!
-//! Example of how to run the scan_task_commands test:
-//!
-//! ```console
-//! ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_task_commands --features shielded-scan --release -- --ignored --nocapture
-//! ```
-//!
 //! ## Checkpoint Generation Tests
 //!
 //! Generate checkpoints on mainnet and testnet using a cached state:
@@ -167,17 +163,21 @@ use zebra_chain::{
     parameters::Network::{self, *},
 };
 use zebra_consensus::ParameterCheckpoint;
-use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
+#[cfg(not(target_os = "windows"))]
+use zebra_network::constants::PORT_IN_USE_ERROR;
+
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
-    net::random_known_port,
     prelude::*,
 };
+
+#[cfg(not(target_os = "windows"))]
+use zebra_test::net::random_known_port;
 
 mod common;
 
@@ -819,28 +819,13 @@ fn last_config_is_stored() -> Result<()> {
          \n\
          Take the missing config file logged above, \n\
          and commit it to Zebra's git repository as:\n\
-         zebrad/tests/common/configs/{}<next-release-tag>.toml \n\
+         zebrad/tests/common/configs/<next-release-tag>.toml \n\
          \n\
          Or run: \n\
-         cargo build {}--bin zebrad && \n\
+         cargo build --bin zebrad && \n\
          zebrad generate | \n\
          sed 's/cache_dir = \".*\"/cache_dir = \"cache_dir\"/' > \n\
-         zebrad/tests/common/configs/{}<next-release-tag>.toml",
-        if cfg!(feature = "shielded-scan") {
-            SHIELDED_SCAN_CONFIG_PREFIX
-        } else {
-            ""
-        },
-        if cfg!(feature = "shielded-scan") {
-            "--features=shielded-scan "
-        } else {
-            ""
-        },
-        if cfg!(feature = "shielded-scan") {
-            SHIELDED_SCAN_CONFIG_PREFIX
-        } else {
-            ""
-        },
+         zebrad/tests/common/configs/<next-release-tag>.toml",
     ))
 }
 
@@ -971,7 +956,6 @@ fn stored_configs_parsed_correctly() -> Result<()> {
 
         // ignore files starting with shieldedscan prefix
         // if we were not built with the shielded-scan feature.
-        #[cfg(not(feature = "shielded-scan"))]
         if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
             tracing::info!(?config_file_path, "skipping shielded-scan config file path");
             continue;
@@ -1026,14 +1010,6 @@ fn stored_configs_work() -> Result<()> {
                 ?config_file_path,
                 "skipping getblocktemplate-rpcs config file path"
             );
-            continue;
-        }
-
-        // ignore files starting with shieldedscan prefix
-        // if we were not built with the shielded-scan feature.
-        #[cfg(not(feature = "shielded-scan"))]
-        if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
-            tracing::info!(?config_file_path, "skipping shielded-scan config file path");
             continue;
         }
 
@@ -1399,7 +1375,11 @@ fn full_sync_testnet() -> Result<()> {
 #[cfg(all(feature = "prometheus", not(target_os = "windows")))]
 #[tokio::test]
 async fn metrics_endpoint() -> Result<()> {
-    use hyper::Client;
+    use bytes::Bytes;
+    use http_body_util::BodyExt;
+    use http_body_util::Full;
+    use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+    use std::io::Write;
 
     let _init_guard = zebra_test::init();
 
@@ -1420,14 +1400,22 @@ async fn metrics_endpoint() -> Result<()> {
     tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Create an http client
-    let client = Client::new();
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
 
     // Test metrics endpoint
     let res = client.get(url.try_into().expect("url is valid")).await;
+
     let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
-    let body = hyper::body::to_bytes(res).await;
-    let (body, mut child) = child.kill_on_error(body)?;
+
+    // Get the body of the response
+    let mut body = Vec::new();
+    let mut body_stream = res.into_body();
+    while let Some(next) = body_stream.frame().await {
+        body.write_all(next?.data_ref().unwrap())?;
+    }
+
+    let (body, mut child) = child.kill_on_error::<Vec<u8>, hyper::Error>(Ok(body))?;
     child.kill(false)?;
 
     let output = child.wait_with_output()?;
@@ -1455,7 +1443,11 @@ async fn metrics_endpoint() -> Result<()> {
 #[cfg(all(feature = "filter-reload", not(target_os = "windows")))]
 #[tokio::test]
 async fn tracing_endpoint() -> Result<()> {
-    use hyper::{Body, Client, Request};
+    use bytes::Bytes;
+    use http_body_util::BodyExt;
+    use http_body_util::Full;
+    use hyper_util::{client::legacy::Client, rt::TokioExecutor};
+    use std::io::Write;
 
     let _init_guard = zebra_test::init();
 
@@ -1477,7 +1469,7 @@ async fn tracing_endpoint() -> Result<()> {
     tokio::time::sleep(LAUNCH_DELAY).await;
 
     // Create an http client
-    let client = Client::new();
+    let client: Client<_, Full<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
 
     // Test tracing endpoint
     let res = client
@@ -1485,23 +1477,40 @@ async fn tracing_endpoint() -> Result<()> {
         .await;
     let (res, child) = child.kill_on_error(res)?;
     assert!(res.status().is_success());
-    let body = hyper::body::to_bytes(res).await;
-    let (body, child) = child.kill_on_error(body)?;
+
+    // Get the body of the response
+    let mut body = Vec::new();
+    let mut body_stream = res.into_body();
+    while let Some(next) = body_stream.frame().await {
+        body.write_all(next?.data_ref().unwrap())?;
+    }
+
+    let (body, child) = child.kill_on_error::<Vec<u8>, hyper::Error>(Ok(body))?;
 
     // Set a filter and make sure it was changed
-    let request = Request::post(url_filter.clone())
-        .body(Body::from("zebrad=debug"))
+    let request = hyper::Request::post(url_filter.clone())
+        .body("zebrad=debug".to_string().into())
         .unwrap();
+
     let post = client.request(request).await;
     let (_post, child) = child.kill_on_error(post)?;
 
     let tracing_res = client
         .get(url_filter.try_into().expect("url_filter is valid"))
         .await;
+
     let (tracing_res, child) = child.kill_on_error(tracing_res)?;
     assert!(tracing_res.status().is_success());
-    let tracing_body = hyper::body::to_bytes(tracing_res).await;
-    let (tracing_body, mut child) = child.kill_on_error(tracing_body)?;
+
+    // Get the body of the response
+    let mut tracing_body = Vec::new();
+    let mut body_stream = tracing_res.into_body();
+    while let Some(next) = body_stream.frame().await {
+        tracing_body.write_all(next?.data_ref().unwrap())?;
+    }
+
+    let (tracing_body, mut child) =
+        child.kill_on_error::<Vec<u8>, hyper::Error>(Ok(tracing_body.clone()))?;
 
     child.kill(false)?;
 
@@ -1515,6 +1524,7 @@ async fn tracing_endpoint() -> Result<()> {
     // Make sure the endpoint header is correct
     // The header is split over two lines. But we don't want to require line
     // breaks at a specific word, so we run two checks for different substrings.
+
     output.any_output_line_contains(
         "HTTP endpoint allows dynamic control of the filter",
         &body,
@@ -1527,7 +1537,8 @@ async fn tracing_endpoint() -> Result<()> {
         "tracing filter endpoint response",
         "the tracing response header",
     )?;
-    std::str::from_utf8(&body).expect("unexpected invalid UTF-8 in tracing filter response");
+    std::str::from_utf8(&tracing_body)
+        .expect("unexpected invalid UTF-8 in tracing filter response");
 
     // Make sure endpoint requests change the filter
     output.any_output_line_contains(
@@ -1711,12 +1722,9 @@ fn non_blocking_logger() -> Result<()> {
     let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
         let _init_guard = zebra_test::init();
 
-        // Write a configuration that has RPC listen_addr set
-        // [Note on port conflict](#Note on port conflict)
-        let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+        let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
         config.tracing.filter = Some("trace".to_string());
         config.tracing.buffer_limit = 100;
-        let zebra_rpc_address = config.rpc.listen_addr.unwrap();
 
         let dir = testdir()?.with_config(&mut config)?;
         let mut child = dir
@@ -1724,12 +1732,10 @@ fn non_blocking_logger() -> Result<()> {
             .with_timeout(TINY_CHECKPOINT_TIMEOUT);
 
         // Wait until port is open.
-        child.expect_stdout_line_matches(
-            format!("Opened RPC endpoint at {}", config.rpc.listen_addr.unwrap()).as_str(),
-        )?;
+        let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
         // Create an http client
-        let client = RpcRequestClient::new(zebra_rpc_address);
+        let client = RpcRequestClient::new(rpc_address);
 
         // Most of Zebra's lines are 100-200 characters long, so 500 requests should print enough to fill the unix pipe,
         // fill the channel that tracing logs are queued onto, and drop logs rather than block execution.
@@ -2896,219 +2902,12 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
     Ok(())
 }
 
-// TODO: Move this test once we have the new scanner binary.
-// /// Test that the scanner task gets started when the node starts.
-// #[test]
-// #[cfg(feature = "shielded-scan")]
-// fn scan_task_starts() -> Result<()> {
-//     use indexmap::IndexMap;
-//     use zebra_scan::tests::ZECPAGES_SAPLING_VIEWING_KEY;
-
-//     let _init_guard = zebra_test::init();
-
-//     let test_type = TestType::LaunchWithEmptyState {
-//         launches_lightwalletd: false,
-//     };
-//     let mut config = default_test_config(&Mainnet)?;
-//     let mut keys = IndexMap::new();
-//     keys.insert(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), 1);
-//     config.shielded_scan.sapling_keys_to_scan = keys;
-
-//     // Start zebra with the config.
-//     let mut zebrad = testdir()?
-//         .with_exact_config(&config)?
-//         .spawn_child(args!["start"])?
-//         .with_timeout(test_type.zebrad_timeout());
-
-//     // Check scanner was started.
-//     zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
-
-//     // Look for 2 scanner notices indicating we are below sapling activation.
-//     zebrad.expect_stdout_line_matches("scanner is waiting for Sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
-//     zebrad.expect_stdout_line_matches("scanner is waiting for Sapling activation. Current tip: [0-9]{1,4}, Sapling activation: 419200")?;
-
-//     // Kill the node.
-//     zebrad.kill(false)?;
-
-//     // Check that scan task started and the first scanning is done.
-//     let output = zebrad.wait_with_output()?;
-
-//     // Make sure the command was killed
-//     output.assert_was_killed()?;
-//     output.assert_failure()?;
-
-//     Ok(())
-// }
-
-// TODO: Move this test once we have the new scanner binary.
-// /// Test that the scanner gRPC server starts when the node starts.
-// #[tokio::test]
-// #[cfg(all(feature = "shielded-scan", not(target_os = "windows")))]
-// async fn scan_rpc_server_starts() -> Result<()> {
-//     use zebra_grpc::scanner::{scanner_client::ScannerClient, Empty};
-
-//     let _init_guard = zebra_test::init();
-
-//     let test_type = TestType::LaunchWithEmptyState {
-//         launches_lightwalletd: false,
-//     };
-
-//     let port = random_known_port();
-//     let listen_addr = format!("127.0.0.1:{port}");
-//     let mut config = default_test_config(&Mainnet)?;
-//     config.shielded_scan.listen_addr = Some(listen_addr.parse()?);
-
-//     // Start zebra with the config.
-//     let mut zebrad = testdir()?
-//         .with_exact_config(&config)?
-//         .spawn_child(args!["start"])?
-//         .with_timeout(test_type.zebrad_timeout());
-
-//     // Wait until gRPC server is starting.
-//     tokio::time::sleep(LAUNCH_DELAY).await;
-//     zebrad.expect_stdout_line_matches("starting scan gRPC server")?;
-//     tokio::time::sleep(Duration::from_secs(1)).await;
-
-//     let mut client = ScannerClient::connect(format!("http://{listen_addr}")).await?;
-
-//     let request = tonic::Request::new(Empty {});
-
-//     client.get_info(request).await?;
-
-//     // Kill the node.
-//     zebrad.kill(false)?;
-
-//     // Check that scan task started and the first scanning is done.
-//     let output = zebrad.wait_with_output()?;
-
-//     // Make sure the command was killed
-//     output.assert_was_killed()?;
-//     output.assert_failure()?;
-
-//     Ok(())
-// }
-
-// TODO: Move this test once we have the new scanner binary.
-// /// Test that the scanner can continue scanning where it was left when zebrad restarts.
-// ///
-// /// Needs a cache state close to the tip. A possible way to run it locally is:
-// ///
-// /// export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
-// /// cargo test scan_start_where_left --features="shielded-scan" -- --ignored --nocapture
-// ///
-// /// The test will run zebrad with a key to scan, scan the first few blocks after sapling and then stops.
-// /// Then it will restart zebrad and check that it resumes scanning where it was left.
-// ///
-// /// Note: This test will remove all the contents you may have in the ZEBRA_CACHED_STATE_DIR/private-scan directory
-// /// so it can start with an empty scanning state.
-// #[ignore]
-// #[test]
-// #[cfg(feature = "shielded-scan")]
-// fn scan_start_where_left() -> Result<()> {
-//     use indexmap::IndexMap;
-//     use zebra_scan::{storage::db::SCANNER_DATABASE_KIND, tests::ZECPAGES_SAPLING_VIEWING_KEY};
-
-//     let _init_guard = zebra_test::init();
-
-//     // use `UpdateZebraCachedStateNoRpc` as the test type to make sure a zebrad cache state is available.
-//     let test_type = TestType::UpdateZebraCachedStateNoRpc;
-//     if let Some(cache_dir) = test_type.zebrad_state_path("scan test") {
-//         // Add a key to the config
-//         let mut config = default_test_config(&Mainnet)?;
-//         let mut keys = IndexMap::new();
-//         keys.insert(ZECPAGES_SAPLING_VIEWING_KEY.to_string(), 1);
-//         config.shielded_scan.sapling_keys_to_scan = keys;
-
-//         // Add the cache dir to shielded scan, make it the same as the zebrad cache state.
-//         config
-//             .shielded_scan
-//             .db_config_mut()
-//             .cache_dir
-//             .clone_from(&cache_dir);
-//         config.shielded_scan.db_config_mut().ephemeral = false;
-
-//         // Add the cache dir to state.
-//         config.state.cache_dir.clone_from(&cache_dir);
-//         config.state.ephemeral = false;
-
-//         // Remove the scan directory before starting.
-//         let scan_db_path = cache_dir.join(SCANNER_DATABASE_KIND);
-//         fs::remove_dir_all(std::path::Path::new(&scan_db_path)).ok();
-
-//         // Start zebra with the config.
-//         let mut zebrad = testdir()?
-//             .with_exact_config(&config)?
-//             .spawn_child(args!["start"])?
-//             .with_timeout(test_type.zebrad_timeout());
-
-//         // Check scanner was started.
-//         zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
-
-//         // The first time
-//         zebrad.expect_stdout_line_matches(
-//             r"Scanning the blockchain for key 0, started at block 419200, now at block 420000",
-//         )?;
-
-//         // Make sure scanner scans a few blocks.
-//         zebrad.expect_stdout_line_matches(
-//             r"Scanning the blockchain for key 0, started at block 419200, now at block 430000",
-//         )?;
-//         zebrad.expect_stdout_line_matches(
-//             r"Scanning the blockchain for key 0, started at block 419200, now at block 440000",
-//         )?;
-
-//         // Kill the node.
-//         zebrad.kill(false)?;
-//         let output = zebrad.wait_with_output()?;
-
-//         // Make sure the command was killed
-//         output.assert_was_killed()?;
-//         output.assert_failure()?;
-
-//         // Start the node again.
-//         let mut zebrad = testdir()?
-//             .with_exact_config(&config)?
-//             .spawn_child(args!["start"])?
-//             .with_timeout(test_type.zebrad_timeout());
-
-//         // Resuming message.
-//         zebrad.expect_stdout_line_matches(
-//             "Last scanned height for key number 0 is 439000, resuming at 439001",
-//         )?;
-//         zebrad.expect_stdout_line_matches("loaded Zebra scanner cache")?;
-
-//         // Start scanning where it was left.
-//         zebrad.expect_stdout_line_matches(
-//             r"Scanning the blockchain for key 0, started at block 439001, now at block 440000",
-//         )?;
-//         zebrad.expect_stdout_line_matches(
-//             r"Scanning the blockchain for key 0, started at block 439001, now at block 450000",
-//         )?;
-//     }
-
-//     Ok(())
-// }
-
-// TODO: Add this test to CI (#8236)
-/// Tests successful:
-/// - Registration of a new key,
-/// - Subscription to scan results of new key, and
-/// - Deletion of keys
-/// in the scan task
-/// See [`common::shielded_scan::scan_task_commands`] for more information.
-#[tokio::test]
-#[ignore]
-#[cfg(feature = "shielded-scan")]
-async fn scan_task_commands() -> Result<()> {
-    common::shielded_scan::scan_task_commands::run().await
-}
-
 /// Checks that the Regtest genesis block can be validated.
 #[tokio::test]
 async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(None);
+    let network = Network::new_regtest(None, None);
     let state = zebra_state::init_test(&network);
     let (
         block_verifier_router,
@@ -3162,7 +2961,574 @@ fn external_address() -> Result<()> {
 // TODO: Test this with an NU5 activation height too once config can be serialized.
 #[tokio::test]
 #[cfg(feature = "getblocktemplate-rpcs")]
-async fn regtest_submit_blocks() -> Result<()> {
+async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     common::regtest::submit_blocks_test().await?;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
+    use std::sync::Arc;
+
+    use common::regtest::MiningRpcMethods;
+    use eyre::Error;
+    use tokio::time::timeout;
+    use zebra_chain::{
+        chain_tip::ChainTip, parameters::NetworkUpgrade,
+        primitives::byte_array::increment_big_endian,
+    };
+    use zebra_rpc::methods::GetBlockHash;
+    use zebra_state::{ReadResponse, Response};
+
+    let _init_guard = zebra_test::init();
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
+    config.state.ephemeral = false;
+    let network = config.network.network.clone();
+
+    let test_dir = testdir()?.with_config(&mut config)?;
+
+    let mut child = test_dir.spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tracing::info!("waiting for Zebra state cache to be opened");
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    tracing::info!("starting read state with syncer");
+    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
+    let (read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            config.state,
+            &config.network.network,
+            rpc_address,
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
+
+    tracing::info!("waiting for first chain tip change");
+
+    // Wait for Zebrad to start up
+    let tip_action = timeout(LAUNCH_DELAY, chain_tip_change.wait_for_tip_change()).await??;
+    assert!(
+        tip_action.is_reset(),
+        "first tip action should be a reset for the genesis block"
+    );
+
+    tracing::info!("got genesis chain tip change, submitting more blocks ..");
+
+    let rpc_client = RpcRequestClient::new(rpc_address);
+    let mut blocks = Vec::new();
+    for _ in 0..10 {
+        let (block, height) = rpc_client.submit_block_from_template().await?;
+        blocks.push(block);
+        let tip_action = timeout(
+            Duration::from_secs(1),
+            chain_tip_change.wait_for_tip_change(),
+        )
+        .await??;
+
+        assert_eq!(
+            tip_action.best_tip_height(),
+            height,
+            "tip action height should match block submission"
+        );
+    }
+
+    tracing::info!("checking that read state has the new non-finalized best chain blocks");
+    for expected_block in blocks.clone() {
+        let height = expected_block.coinbase_height().unwrap();
+        let zebra_block = rpc_client
+            .get_block(height.0 as i32)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("Zebra test child should have the expected block");
+
+        assert_eq!(
+            zebra_block,
+            Arc::new(expected_block),
+            "Zebra should have the same block"
+        );
+
+        let ReadResponse::Block(read_state_block) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("unexpected read response to a block request")
+        };
+
+        assert_eq!(
+            zebra_block,
+            read_state_block.expect("read state should have the block"),
+            "read state should have the same block"
+        );
+    }
+
+    tracing::info!("getting next block template");
+    let (block_11, _) = rpc_client.block_from_template(Height(100)).await?;
+    let next_blocks: Vec<_> = blocks
+        .split_off(5)
+        .into_iter()
+        .chain(std::iter::once(block_11))
+        .collect();
+
+    tracing::info!("creating populated state");
+    let genesis_block = regtest_genesis_block();
+    let (state2, read_state2, latest_chain_tip2, _chain_tip_change2) =
+        zebra_state::populated_state(
+            std::iter::once(genesis_block).chain(blocks.iter().cloned().map(Arc::new)),
+            &network,
+        )
+        .await;
+
+    tracing::info!("attempting to trigger a best chain change");
+    for mut block in next_blocks {
+        let is_chain_history_activation_height = NetworkUpgrade::Heartwood
+            .activation_height(&network)
+            == Some(block.coinbase_height().unwrap());
+        let header = Arc::make_mut(&mut block.header);
+        increment_big_endian(header.nonce.as_mut());
+        let ReadResponse::ChainInfo(chain_info) = read_state2
+            .clone()
+            .oneshot(zebra_state::ReadRequest::ChainInfo)
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("wrong response variant");
+        };
+
+        header.previous_block_hash = chain_info.tip_hash;
+        header.commitment_bytes = chain_info
+            .history_tree
+            .hash()
+            .or(is_chain_history_activation_height.then_some([0; 32].into()))
+            .expect("history tree can't be empty")
+            .bytes_in_serialized_order()
+            .into();
+
+        let Response::Committed(block_hash) = state2
+            .clone()
+            .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
+                Arc::new(block.clone()).into(),
+            ))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("wrong response variant");
+        };
+
+        assert!(
+            chain_tip_change.last_tip_change().is_none(),
+            "there should be no tip change until the last block is submitted"
+        );
+
+        rpc_client.submit_block(block.clone()).await?;
+        blocks.push(block);
+        let GetBlockHash(best_block_hash) = rpc_client
+            .json_result_from_call("getbestblockhash", "[]")
+            .await
+            .map_err(|err| eyre!(err))?;
+
+        if block_hash == best_block_hash {
+            break;
+        }
+    }
+
+    tracing::info!("newly submitted blocks are in the best chain, checking for reset");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let tip_action = timeout(
+        Duration::from_secs(1),
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await??;
+    let (expected_height, expected_hash) = latest_chain_tip2
+        .best_tip_height_and_hash()
+        .expect("should have a chain tip");
+    assert!(tip_action.is_reset(), "tip action should be reset");
+    assert_eq!(
+        tip_action.best_tip_hash_and_height(),
+        (expected_hash, expected_height),
+        "tip action hashes and heights should match"
+    );
+
+    tracing::info!("checking that read state has the new non-finalized best chain blocks");
+    for expected_block in blocks {
+        let height = expected_block.coinbase_height().unwrap();
+        let zebra_block = rpc_client
+            .get_block(height.0 as i32)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("Zebra test child should have the expected block");
+
+        assert_eq!(
+            zebra_block,
+            Arc::new(expected_block),
+            "Zebra should have the same block"
+        );
+
+        let ReadResponse::Block(read_state_block) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("unexpected read response to a block request")
+        };
+
+        assert_eq!(
+            zebra_block,
+            read_state_block.expect("read state should have the block"),
+            "read state should have the same block"
+        );
+    }
+
+    tracing::info!("restarting Zebra on Mainnet");
+
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    output.assert_failure()?;
+
+    let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
+    config.state.ephemeral = false;
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    let test_dir = testdir()?.with_config(&mut config)?;
+
+    let _child = test_dir.spawn_child(args!["start"])?;
+
+    tracing::info!("waiting for Zebra state cache to be opened");
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    tracing::info!("starting read state with syncer");
+    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
+    let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            config.state,
+            &config.network.network,
+            rpc_address,
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
+
+    tracing::info!("waiting for finalized chain tip changes");
+
+    timeout(
+        Duration::from_secs(100),
+        tokio::spawn(async move {
+            for _ in 0..2 {
+                chain_tip_change
+                    .wait_for_tip_change()
+                    .await
+                    .map_err(|err| eyre!(err))?;
+            }
+
+            Ok::<(), Error>(())
+        }),
+    )
+    .await???;
+
+    Ok(())
+}
+
+/// Test successful block template submission as a block proposal or submission on a custom Testnet.
+///
+/// This test can be run locally with:
+/// `cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
+    use zebra_chain::{
+        chain_sync_status::MockSyncStatus,
+        parameters::{
+            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
+            testnet::{
+                self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
+                ConfiguredFundingStreams,
+            },
+            NetworkUpgrade,
+        },
+        serialization::ZcashSerialize,
+        work::difficulty::U256,
+    };
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_node_services::mempool;
+    use zebra_rpc::methods::{
+        get_block_template_rpcs::{
+            get_block_template::{
+                fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+                proposal_block_from_template, GetBlockTemplate, GetBlockTemplateRequestMode,
+            },
+            types::get_block_template,
+            types::submit_block,
+        },
+        hex_data::HexData,
+        GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+    };
+    use zebra_test::mock_service::MockService;
+    let _init_guard = zebra_test::init();
+
+    tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
+
+    let base_network_params = testnet::Parameters::build()
+        // Regtest genesis hash
+        .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .with_disable_pow(true)
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu6: Some(1),
+            ..Default::default()
+        });
+
+    let network = base_network_params
+        .clone()
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            // Start checking funding streams from block height 1
+            height_range: Some(Height(1)..Height(100)),
+            // Use default post-NU6 recipients
+            recipients: None,
+        })
+        .to_network();
+
+    tracing::info!("built configured Testnet, starting state service and block verifier");
+
+    let default_test_config = default_test_config(&network)?;
+    let mining_config = default_test_config.mining;
+    let miner_address = mining_config
+        .miner_address
+        .clone()
+        .expect("hard-coded config should have a miner address");
+
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(&network);
+
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state.clone())
+        .await;
+
+    tracing::info!("started state service and block verifier, committing Regtest genesis block");
+
+    let genesis_hash = block_verifier_router
+        .clone()
+        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .await
+        .expect("should validate Regtest genesis block");
+
+    let mut mempool = MockService::build()
+        .with_max_request_delay(Duration::from_secs(5))
+        .for_unit_tests();
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
+        &network,
+        mining_config,
+        mempool.clone(),
+        read_state.clone(),
+        latest_chain_tip,
+        block_verifier_router,
+        mock_sync_status,
+        MockAddressBookPeers::default(),
+    );
+
+    let make_mock_mempool_request_handler = || async move {
+        mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await
+            .respond(mempool::Response::FullTransactions {
+                transactions: vec![],
+                // tip hash needs to match chain info for long poll requests
+                last_seen_tip_hash: genesis_hash,
+            });
+    };
+
+    let block_template_fut = get_block_template_rpc_impl.get_block_template(None);
+    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
+    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let get_block_template::Response::TemplateMode(block_template) =
+        block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
+
+    // Check that the block template is a valid block proposal
+    let get_block_template::Response::ProposalMode(block_proposal_result) =
+        get_block_template_rpc_impl
+            .get_block_template(Some(get_block_template::JsonParameters {
+                mode: GetBlockTemplateRequestMode::Proposal,
+                data: Some(hex_proposal_block),
+                ..Default::default()
+            }))
+            .await?
+    else {
+        panic!(
+            "this getblocktemplate call should return the `ProposalMode` variant of the response"
+        )
+    };
+
+    assert!(
+        block_proposal_result.is_valid(),
+        "block proposal should succeed"
+    );
+
+    // Submit the same block
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::Accepted,
+        "valid block should be accepted"
+    );
+
+    // Use an invalid coinbase transaction (with an output value greater than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
+
+    let make_configured_recipients_with_lockbox_numerator = |numerator| {
+        Some(vec![
+            ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::Deferred,
+                numerator,
+                addresses: None,
+            },
+            ConfiguredFundingStreamRecipient {
+                receiver: FundingStreamReceiver::MajorGrants,
+                numerator: 8,
+                addresses: Some(
+                    FUNDING_STREAM_MG_ADDRESSES_TESTNET
+                        .map(ToString::to_string)
+                        .to_vec(),
+                ),
+            },
+        ])
+    };
+
+    // Gets the next block template
+    let block_template_fut = get_block_template_rpc_impl.get_block_template(None);
+    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
+    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let get_block_template::Response::TemplateMode(block_template) =
+        block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
+
+    let valid_original_block_template = block_template.clone();
+
+    let zebra_state::GetBlockTemplateChainInfo { history_tree, .. } =
+        fetch_state_tip_and_local_time(read_state.clone()).await?;
+
+    let network = base_network_params
+        .clone()
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(100)),
+            recipients: make_configured_recipients_with_lockbox_numerator(0),
+        })
+        .to_network();
+
+    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+        &network,
+        Height(block_template.height),
+        &miner_address,
+        &[],
+        history_tree.clone(),
+        true,
+        vec![],
+    );
+
+    let block_template = GetBlockTemplate {
+        coinbase_txn,
+        block_commitments_hash: default_roots.block_commitments_hash,
+        light_client_root_hash: default_roots.block_commitments_hash,
+        final_sapling_root_hash: default_roots.block_commitments_hash,
+        default_roots,
+        ..(*block_template)
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+
+    // Submit the invalid block with an excessive coinbase output value
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    tracing::info!(?submit_block_response, "submitted invalid block");
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        "invalid block with excessive coinbase output value should be rejected"
+    );
+
+    // Use an invalid coinbase transaction (with an output value less than than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
+    let network = base_network_params
+        .clone()
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            height_range: Some(Height(1)..Height(100)),
+            recipients: make_configured_recipients_with_lockbox_numerator(20),
+        })
+        .to_network();
+
+    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+        &network,
+        Height(block_template.height),
+        &miner_address,
+        &[],
+        history_tree.clone(),
+        true,
+        vec![],
+    );
+
+    let block_template = GetBlockTemplate {
+        coinbase_txn,
+        block_commitments_hash: default_roots.block_commitments_hash,
+        light_client_root_hash: default_roots.block_commitments_hash,
+        final_sapling_root_hash: default_roots.block_commitments_hash,
+        default_roots,
+        ..block_template
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+
+    // Submit the invalid block with an excessive coinbase input value
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    tracing::info!(?submit_block_response, "submitted invalid block");
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        "invalid block with insufficient coinbase output value should be rejected"
+    );
+
+    // Check that the original block template can be submitted successfully
+    let proposal_block =
+        proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::Accepted,
+        "valid block should be accepted"
+    );
+
     Ok(())
 }

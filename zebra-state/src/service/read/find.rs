@@ -19,8 +19,10 @@ use std::{
 
 use chrono::{DateTime, Utc};
 use zebra_chain::{
+    amount::NonNegative,
     block::{self, Block, Height},
     serialization::DateTime32,
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -80,6 +82,40 @@ where
     C: AsRef<Chain>,
 {
     tip(chain, db).map(|(_height, hash)| hash)
+}
+
+/// Returns the tip of `chain` with its [`ValueBalance`].
+/// If there is no chain, returns the tip of `db`.
+pub fn tip_with_value_balance<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+) -> Result<Option<(Height, block::Hash, ValueBalance<NonNegative>)>, BoxError>
+where
+    C: AsRef<Chain>,
+{
+    match chain.map(|chain| chain.as_ref().non_finalized_tip_with_value_balance()) {
+        tip_with_value_balance @ Some(_) => Ok(tip_with_value_balance),
+        None => {
+            // Retry the finalized state query if it was interrupted by a finalizing block.
+            //
+            // TODO: refactor this into a generic retry(finalized_closure, process_and_check_closure) fn
+            for _ in 0..=FINALIZED_STATE_QUERY_RETRIES {
+                let tip @ Some((tip_height, tip_hash)) = db.tip() else {
+                    return Ok(None);
+                };
+
+                let value_balance = db.finalized_value_pool();
+
+                if tip == db.tip() {
+                    return Ok(Some((tip_height, tip_hash, value_balance)));
+                }
+            }
+
+            Err("Zebra is committing too many blocks to the state, \
+                    wait until it syncs to the chain tip"
+                .into())
+        }
+    }
 }
 
 /// Return the depth of block `hash` from the chain tip.

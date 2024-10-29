@@ -39,10 +39,12 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
 };
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_chain::{block::Height, serialization::ZcashSerialize};
+
 use crate::{
     constants::{
-        MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
-        MAX_LEGACY_CHAIN_BLOCKS,
+        MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
     service::{
         block_iter::any_ancestor_blocks,
@@ -1192,6 +1194,38 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            // Used by `getblockchaininfo` RPC method.
+            ReadRequest::TipPoolValues => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let tip_with_value_balance = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
+                                read::tip_with_value_balance(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                )
+                            });
+
+                        // The work is done in the future.
+                        // TODO: Do this in the Drop impl with the variant name?
+                        timer.finish(module_path!(), line!(), "ReadRequest::TipPoolValues");
+
+                        let (tip_height, tip_hash, value_balance) = tip_with_value_balance?
+                            .ok_or(BoxError::from("no chain tip available yet"))?;
+
+                        Ok(ReadResponse::TipPoolValues {
+                            tip_height,
+                            tip_hash,
+                            value_balance,
+                        })
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the StateService.
             ReadRequest::Depth(hash) => {
                 let state = self.clone();
@@ -1441,7 +1475,7 @@ impl Service<ReadRequest> for ReadStateService {
                                     &state.db,
                                     known_blocks,
                                     stop,
-                                    MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA,
+                                    MAX_FIND_BLOCK_HEADERS_RESULTS,
                                 )
                             },
                         );
@@ -1869,6 +1903,46 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         Ok(ReadResponse::ValidBlockProposal)
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            ReadRequest::TipBlockSize => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        // Get the best chain tip height.
+                        let tip_height = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
+                                read::tip_height(non_finalized_state.best_chain(), &state.db)
+                            })
+                            .unwrap_or(Height(0));
+
+                        // Get the block at the best chain tip height.
+                        let block = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    tip_height.into(),
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::TipBlockSize");
+
+                        // Respond with the length of the obtained block if any.
+                        match block {
+                            Some(b) => Ok(ReadResponse::TipBlockSize(Some(
+                                b.zcash_serialize_to_vec()?.len(),
+                            ))),
+                            None => Ok(ReadResponse::TipBlockSize(None)),
+                        }
                     })
                 })
                 .wait_for_panics()

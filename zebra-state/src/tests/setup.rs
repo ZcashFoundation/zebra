@@ -28,9 +28,9 @@ use crate::{
 /// - `transaction_has_valid_network_upgrade`: See `LedgerState::height_strategy` for details.
 ///    Note: `false` allows zero or more invalid network upgrades.
 /// - `blocks_after_nu_activation`: The number of blocks the strategy will generate
-/// after the provided `network_upgrade`.
+///   after the provided `network_upgrade`.
 /// - `network_upgrade` - The network upgrade that we are using to simulate from where the
-/// legacy chain checks should start to apply.
+///   legacy chain checks should start to apply.
 ///
 /// Returns:
 /// A generated arbitrary strategy for the provided arguments.
