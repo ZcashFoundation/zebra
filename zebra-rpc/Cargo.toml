@@ -80,7 +80,7 @@ tokio = { version = "1.41.0", features = [
     "macros",
     "tracing",
 ] }
-tower = "0.4.13"
+tower = "0.5.1"
 
 # indexer-rpcs dependencies
 tonic = { version = "0.12.3", optional = true }
@@ -91,7 +91,7 @@ tokio-stream = { version = "0.1.16", optional = true }
 tracing = "0.1.39"
 
 hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.211", features = ["serde_derive"] }
+serde = { version = "1.0.214", features = ["serde_derive"] }
 
 # For the `stop` RPC method.
 nix = { version = "0.29.0", features = ["signal"] }
@@ -119,7 +119,7 @@ zebra-state = { path = "../zebra-state", version = "1.0.0-beta.41" }
 tonic-build = { version = "0.12.3", optional = true }
 
 [dev-dependencies]
-insta = { version = "1.40.0", features = ["redactions", "json", "ron"] }
+insta = { version = "1.41.0", features = ["redactions", "json", "ron"] }
 
 proptest = "1.4.0"
 
