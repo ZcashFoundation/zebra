@@ -7,6 +7,7 @@ network = "Regtest"
 
 [rpc]
 listen_addr = "127.0.0.1:0"
+enable_cookie_auth = false
 
 [state]
 cache_dir = ""
