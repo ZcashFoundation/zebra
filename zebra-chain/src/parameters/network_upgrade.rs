@@ -93,8 +93,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
     (block::Height(1_687_104), Nu5),
-    // TODO: Add NU6
-    // (block::Height(2_726_400), Nu6),
+    (block::Height(2_726_400), Nu6),
     // FIXME: TODO: Add NU7 with a correct value
     // (block::Height(2_726_401), Nu7),
 ];

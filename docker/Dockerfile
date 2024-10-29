@@ -21,7 +21,7 @@ ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
 ARG EXPERIMENTAL_FEATURES=""
 
 ARG APP_HOME="/opt/zebrad"
-ARG RUST_VERSION=1.79.0
+ARG RUST_VERSION=1.82.0
 # In this stage we download all system requirements to build the project
 #
 # It also captures all the build arguments to be used as environment variables.

@@ -337,7 +337,10 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_110);
+///
+/// This version of Zebra draws the current network protocol version from
+/// [ZIP-253](https://zips.z.cash/zip-0253).
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
 
 /// The default RTT estimate for peer responses.
 ///
@@ -393,6 +396,7 @@ lazy_static! {
     ///
     /// The minimum network protocol version typically changes after Mainnet and
     /// Testnet network upgrades.
+    // TODO: Change `Nu5` to `Nu6` after NU6 activation.
     // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<NetworkKind, Version> = {
         let mut hash_map = HashMap::new();
