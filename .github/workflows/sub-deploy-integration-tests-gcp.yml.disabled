@@ -654,6 +654,7 @@ jobs:
       # (This is unlikely, because each image created by a workflow has a different name.)
       #
       # The image name must also be 63 characters or less.
+      # More info: https://cloud.google.com/compute/docs/naming-resources#resource-name-format
       #
       # Force the image creation (--force) as the disk is still attached even though is not being
       # used by the container.
