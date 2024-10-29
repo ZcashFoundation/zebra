@@ -182,7 +182,7 @@ struct SkipTestReturnedErrPanicMessages;
 impl PanicMessage for SkipTestReturnedErrPanicMessages {
     fn display(
         &self,
-        pi: &std::panic::PanicInfo<'_>,
+        pi: &std::panic::PanicHookInfo<'_>,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
         let payload = pi

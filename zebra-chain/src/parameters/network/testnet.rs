@@ -751,6 +751,12 @@ impl Network {
     }
 
     /// Returns pre-NU6 funding streams for this network
+    ///
+    /// Commonly referred to as the "Dev Fund".
+    ///
+    /// Defined in [Zcash Protocol Specification §7.10.1][7.10.1]
+    ///
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub fn pre_nu6_funding_streams(&self) -> &FundingStreams {
         if let Self::Testnet(params) = self {
             params.pre_nu6_funding_streams()
@@ -760,6 +766,10 @@ impl Network {
     }
 
     /// Returns post-NU6 funding streams for this network
+    ///
+    /// Defined in [Zcash Protocol Specification §7.10.1][7.10.1]
+    ///
+    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub fn post_nu6_funding_streams(&self) -> &FundingStreams {
         if let Self::Testnet(params) = self {
             params.post_nu6_funding_streams()

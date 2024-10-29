@@ -80,8 +80,16 @@ Wait until zebra is in sync, you will see the sync at 100% when this happens:
 
 The easiest way to check your setup is to call the `getblocktemplate` RPC method and check the result.
 
+Starting with Zebra v2.0.0, a cookie authentication method similar to the one used by the `zcashd` node is enabled by default. The cookie is stored in the default cache directory when the RPC endpoint starts and is deleted at shutdown. By default, the cookie is located in the cache directory; for example, on Linux, it may be found at `/home/user/.cache/zebra/.cookie`. You can change the cookie's location using the `rpc.cookie_dir` option in the configuration, or disable cookie authentication altogether by setting `rpc.enable_cookie_auth` to false. The contents of the cookie file look like this:
+
+```
+__cookie__:YwDDua GzvtEmWG6KWnhgd9gilo5mKdi6m38v__we3Ko=
+```
+
+The password is an encoded, randomly generated string. You can use it in your call as follows:
+
 ```console
-$ curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "getblocktemplate", "params": [] }' -H 'Content-type: application/json' http://127.0.0.1:8232/ | jq
+$ curl --silent --data-binary '{"jsonrpc": "1.0", "id":"curltest", "method": "getblocktemplate", "params": [] }' -H 'Content-type: application/json' http://__cookie__:YwDDuaGzvtEmWG6KWnhgd9gilo5mKdi6m38v__we3Ko=@127.0.0.1:8232/ | jq
 ```
 
 If you can see something similar to the following then you are good to go.
