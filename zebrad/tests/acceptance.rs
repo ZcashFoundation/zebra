@@ -3459,6 +3459,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         chain_history_root,
         true,
         vec![],
+        #[cfg(zcash_unstable = "nsm")]
+        None,
     );
 
     let block_template = GetBlockTemplate {
@@ -3502,6 +3504,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         chain_history_root,
         true,
         vec![],
+        #[cfg(zcash_unstable = "nsm")]
+        None,
     );
 
     let block_template = GetBlockTemplate {

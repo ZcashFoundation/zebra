@@ -4,7 +4,7 @@
 use std::fmt;
 
 use zebra_chain::{
-    amount,
+    amount::{self, Amount, NonNegative},
     block::{ChainHistoryBlockTxAuthCommitmentHash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     parameters::Network,
     serialization::DateTime32,
@@ -237,6 +237,7 @@ impl GetBlockTemplate {
         submit_old: Option<bool>,
         like_zcashd: bool,
         extra_coinbase_data: Vec<u8>,
+        #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
     ) -> Self {
         // Calculate the next block height.
         let next_block_height =
@@ -294,6 +295,8 @@ impl GetBlockTemplate {
             chain_tip_and_local_time.chain_history_root,
             like_zcashd,
             extra_coinbase_data,
+            #[cfg(zcash_unstable = "nsm")]
+            burn_amount,
         );
 
         // Convert difficulty
