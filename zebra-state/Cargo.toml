@@ -69,12 +69,12 @@ thiserror = "1.0.64"
 
 rayon = "1.10.0"
 tokio = { version = "1.41.0", features = ["rt-multi-thread", "sync", "tracing"] }
-tower = { version = "0.4.13", features = ["buffer", "util"] }
+tower = { version = "0.5.1", features = ["buffer", "util"] }
 tracing = "0.1.39"
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
-elasticsearch = { version = "8.5.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
+elasticsearch = { version = "8.15.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
 serde_json = { version = "1.0.132", package = "serde_json", optional = true }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.42", features = ["async-error"] }

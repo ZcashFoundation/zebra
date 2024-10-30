@@ -66,7 +66,7 @@ itertools = "0.13.0"
 semver = "1.0.23"
 serde = { version = "1.0.211", features = ["serde_derive"] }
 tokio = { version = "1.41.0", features = ["time"] }
-tower = "0.4.13"
+tower = "0.5.1"
 tracing = "0.1.39"
 futures = "0.3.31"
 
