@@ -367,6 +367,7 @@ pub fn generate_coinbase_transaction(
                     outputs,
                     extra_coinbase_data,
                     like_zcashd,
+                    miner_fee,
                     burn_amount,
                 )
                 .into()
@@ -388,6 +389,7 @@ pub fn generate_coinbase_transaction(
                     outputs,
                     extra_coinbase_data,
                     like_zcashd,
+                    miner_fee,
                     burn_amount,
                 )
                 .into()

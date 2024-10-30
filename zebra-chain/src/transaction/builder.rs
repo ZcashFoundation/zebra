@@ -18,6 +18,7 @@ impl Transaction {
         outputs: impl IntoIterator<Item = (Amount<NonNegative>, transparent::Script)>,
         extra_coinbase_data: Vec<u8>,
         like_zcashd: bool,
+        miner_fee: Amount<NonNegative>,
         burn_amount: Option<Amount<NonNegative>>,
     ) -> Transaction {
         let mut extra_data = None;
@@ -117,8 +118,8 @@ impl Transaction {
             sapling_shielded_data: None,
             orchard_shielded_data: None,
 
-            // > The NSM burn_amount field [ZIP-233] must be set. It can be set to 0.
-            burn_amount: burn_amount.unwrap_or(Amount::zero()),
+            // > The NSM burn_amount field [ZIP-233] must be set at minimum to 60% of miner fees [ZIP-235].
+            burn_amount: burn_amount.unwrap_or_else(|| ((miner_fee * 6).unwrap() / 10).unwrap()),
         }
     }
 
