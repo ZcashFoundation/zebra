@@ -104,19 +104,15 @@ panic = "abort"
 lto = "thin"
 
 [patch.crates-io]
-#halo2_proofs = { version = "0.3.0", git = "https://github.com/QED-it/halo2", rev = "1195c9af90205829ba20662bdfaf20dcc878807d" }
-#halo2_gadgets = { version = "0.3.0", git = "https://github.com/QED-it/halo2", rev = "1195c9af90205829ba20662bdfaf20dcc878807d" }
 halo2_proofs = { version = "0.3.0", git = "https://github.com/QED-it/halo2", branch = "zsa1" }
 halo2_gadgets = { version = "0.3.0", git = "https://github.com/QED-it/halo2", branch = "zsa1" }
 zcash_note_encryption = { version = "0.4.0", git = "https://github.com/QED-it/zcash_note_encryption", branch = "zsa1" }
 sapling-crypto = { version = "0.1.3", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
 orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", branch = "zsa1" }
-zcash_primitives = { version = "0.15.0", git = "https://github.com/QED-it/librustzcash", branch = "zebra-compat-enable-backend" }
-zcash_protocol = { version = "0.1.1", git = "https://github.com/QED-it/librustzcash", branch = "zebra-compat-enable-backend" }
-zcash_address = { version = "0.3.2", git = "https://github.com/QED-it/librustzcash", branch = "zebra-compat-enable-backend" }
-zcash_encoding = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", branch = "zebra-compat-enable-backend" }
-zcash_history = { version = "0.4.0", git = "https://github.com/QED-it/librustzcash", branch = "zebra-compat-enable-backend" }
-zcash_client_backend = { version = "0.12.1", git = "https://github.com/QED-it/librustzcash", branch = "zebra-compat-enable-backend" }
-zcash_keys = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", branch = "zebra-compat-enable-backend" }
-#incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
-#shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
+zcash_primitives = { version = "0.15.0", git = "https://github.com/QED-it/librustzcash", branch = "zsa1" }
+zcash_protocol = { version = "0.1.1", git = "https://github.com/QED-it/librustzcash", branch = "zsa1" }
+zcash_address = { version = "0.3.2", git = "https://github.com/QED-it/librustzcash", branch = "zsa1" }
+zcash_encoding = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", branch = "zsa1" }
+zcash_history = { version = "0.4.0", git = "https://github.com/QED-it/librustzcash", branch = "zsa1" }
+zcash_client_backend = { version = "0.12.1", git = "https://github.com/QED-it/librustzcash", branch = "zsa1" }
+zcash_keys = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", branch = "zsa1" }
