@@ -69,4 +69,9 @@ impl ValuePoolBalance {
             Self::deferred(value_balance.deferred_amount()),
         ]
     }
+
+    /// Returns the pool's name, ZEC balance, and zatoshi balance.
+    pub fn data(&self) -> (&str, Zec<NonNegative>, Amount<NonNegative>) {
+        (&self.id, self.chain_value, self.chain_value_zat)
+    }
 }

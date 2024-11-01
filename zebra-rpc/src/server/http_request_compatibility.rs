@@ -9,7 +9,11 @@ use jsonrpc_http_server::{
     RequestMiddleware, RequestMiddlewareAction,
 };
 
-use super::cookie::Cookie;
+use crate::server::{
+    cookie::Cookie,
+    jsonrpc::{JsonRpcError, JsonRpcRequest, JsonRpcResponse},
+    Empty, EndpointClient, Request as TonicRequest,
+};
 
 /// HTTP [`RequestMiddleware`] with compatibility workarounds.
 ///
@@ -57,6 +61,138 @@ impl With<Cookie> for HttpRequestMiddleware {
     fn with(mut self, cookie: Cookie) -> Self {
         self.cookie = Some(cookie);
         self
+    }
+}
+
+impl HttpRequestMiddleware {
+    /// Check if the number of parameters matches the expected length.
+    pub fn check_parameters_length(
+        request: JsonRpcRequest,
+        expeted_len: usize,
+    ) -> Option<JsonRpcResponse> {
+        if request.params().len() != expeted_len {
+            return Some(JsonRpcResponse::new(
+                serde_json::to_value("invalid number of parameters")
+                    .expect("string to serde_json::Value conversion"),
+                request.id().to_string(),
+            ));
+        }
+        None
+    }
+
+    /// Handle incoming JSON-RPC requests
+    pub async fn handle_request(
+        &self,
+        request: JsonRpcRequest,
+        headers: warp::http::HeaderMap,
+        mut grpc_client: EndpointClient<tonic::transport::Channel>,
+    ) -> Result<impl warp::Reply, warp::Rejection> {
+        tracing::trace!(?request, "original HTTP request");
+
+        // Check if the request is authenticated
+        if !self.check_credentials(&headers) {
+            let error = JsonRpcError {
+                code: 401,
+                message: "unauthenticated method".to_string(),
+            };
+
+            let response = JsonRpcResponse::new(
+                serde_json::to_value(error).unwrap(),
+                request.id().to_string(),
+            );
+
+            return Ok(warp::reply::json(&response));
+        }
+
+        // Match the JSON-RPC `method` field to call the appropriate gRPC method
+        match request.method() {
+            "getinfo" => {
+                // Check for exactly zero parameter
+                if let Some(response) = Self::check_parameters_length(request.clone(), 0) {
+                    return Ok(warp::reply::json(&response));
+                }
+
+                let grpc_request = TonicRequest::new(Empty {});
+                let grpc_response = grpc_client
+                    .get_info(grpc_request)
+                    .await
+                    .map(|grpc_response| serde_json::to_value(grpc_response.into_inner()))
+                    .unwrap_or_else(|e| serde_json::to_value(e.to_string()))
+                    .map_err(|_| warp::reject::reject())?;
+                let json_response = JsonRpcResponse::new(grpc_response, request.id().to_string());
+
+                Ok(warp::reply::json(&json_response))
+            }
+            "getblockchaininfo" => {
+                // Check for exactly zero parameter
+                if let Some(response) = Self::check_parameters_length(request.clone(), 0) {
+                    return Ok(warp::reply::json(&response));
+                }
+
+                let grpc_request = TonicRequest::new(Empty {});
+                let grpc_response = grpc_client
+                    .get_blockchain_info(grpc_request)
+                    .await
+                    .map(|grpc_response| serde_json::to_value(grpc_response.into_inner()))
+                    .unwrap_or_else(|e| serde_json::to_value(e.to_string()))
+                    .map_err(|_| warp::reject::reject())?;
+                let json_response = JsonRpcResponse::new(grpc_response, request.id().to_string());
+
+                Ok(warp::reply::json(&json_response))
+            }
+            "getaddressbalance" => {
+                // Check for exactly one parameter
+                if let Some(response) = Self::check_parameters_length(request.clone(), 1) {
+                    return Ok(warp::reply::json(&response));
+                }
+
+                let address_params: crate::server::AddressStrings =
+                    serde_json::from_value(request.params().get(0).cloned().unwrap_or_default())
+                        .map_err(|_| warp::reject::reject())?;
+
+                let grpc_response = grpc_client
+                    .get_address_balance(address_params)
+                    .await
+                    .map(|grpc_response| serde_json::to_value(grpc_response.into_inner()))
+                    .unwrap_or_else(|e| serde_json::to_value(e.to_string()))
+                    .map_err(|_| warp::reject::reject())?;
+
+                let json_response = JsonRpcResponse::new(grpc_response, request.id().to_string());
+
+                Ok(warp::reply::json(&json_response))
+            }
+            "sendrawtransaction" => {
+                // Check for exactly one parameter
+                if let Some(response) = Self::check_parameters_length(request.clone(), 1) {
+                    return Ok(warp::reply::json(&response));
+                }
+
+                let hex_param = request.params()[0].as_str().ok_or_else(|| warp::reject())?;
+                let grpc_request = TonicRequest::new(crate::server::RawTransactionHex {
+                    hex: hex_param.to_string(),
+                });
+
+                let grpc_response = grpc_client
+                    .send_raw_transaction(grpc_request)
+                    .await
+                    .map(|grpc_response| serde_json::to_value(grpc_response.into_inner()))
+                    .unwrap_or_else(|e| serde_json::to_value(e.to_string()))
+                    .map_err(|_| warp::reject::reject())?;
+
+                let json_response = JsonRpcResponse::new(grpc_response, request.id().to_string());
+
+                Ok(warp::reply::json(&json_response))
+            }
+            _ => {
+                let json_response = JsonRpcResponse::new(
+                    serde_json::to_value("unsupported method")
+                        .expect("string to serde_json::Value conversion"),
+                    request.id().to_string(),
+                );
+
+                Ok(warp::reply::json(&json_response))
+            }
+        }
     }
 }
 

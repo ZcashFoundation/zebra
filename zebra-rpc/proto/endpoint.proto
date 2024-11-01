@@ -1,0 +1,99 @@
+syntax = "proto3";
+package zebra.endpoint.rpc;
+
+// Used by methods that take no arguments.
+message Empty {};
+
+service Endpoint {
+  // 
+  rpc get_info(Empty) returns (GetInfo);
+
+  // 
+  rpc get_blockchain_info(Empty) returns (GetBlockChainInfo);
+
+  // 
+  rpc get_address_balance(AddressStrings) returns (AddressBalance);
+
+  //
+  rpc send_raw_transaction(RawTransactionHex) returns (SentTransactionHash);
+}
+
+// A response to a GetInfo call.
+message GetInfo {
+    // The node version build number
+    string build = 1;
+    // The server sub-version identifier, used as the network protocol user-agent
+    string subversion = 2; 
+}
+
+// Define a GetBlockChainInfo message for the response
+message GetBlockChainInfo {
+    // Current network name as defined in BIP70 (main, test, regtest)
+    string chain = 1;
+
+    // The current number of blocks processed in the server, numeric
+    uint32 blocks = 2;
+
+    // The hash of the currently best block, in big-endian order, hex-encoded
+    string best_block_hash = 3;
+
+    // If syncing, the estimated height of the chain, else the current best height, numeric.
+    //
+    // In Zebra, this is always the height estimate, so it might be a little inaccurate.
+    uint32 estimated_height = 4;
+
+    // Value pool balances
+    repeated ValuePoolBalance value_pools = 5;
+
+    // Status of network upgrades
+    repeated UpgradeEntry upgrades = 6;
+
+    // Branch IDs of the current and upcoming consensus rules
+    TipConsensusBranch consensus = 7;
+}
+
+// Define a ValuePoolBalance message, replacing your array with repeated fields if needed
+message ValuePoolBalance {
+    string id = 1;
+    double chain_value = 2;
+    uint64 chain_value_zat = 3;
+}
+
+//
+message UpgradeEntry {
+    string key = 1;
+    NetworkUpgradeInfo value = 2;
+}
+
+// Define a NetworkUpgradeInfo message to represent upgrade statuses
+message NetworkUpgradeInfo {
+    string name = 1;
+    uint32 activation_height = 2;
+    string status = 3;
+}
+
+// Define the TipConsensusBranch message to represent consensus branches
+message TipConsensusBranch {
+    string chain_tip = 1;
+    string next_block = 2;
+}
+
+//
+message AddressStrings {
+    repeated string addresses = 1;
+}
+
+//
+message AddressBalance {
+    uint64 balance = 1;
+}
+
+//
+message RawTransactionHex {
+    string hex = 1;
+}
+
+//
+message SentTransactionHash {
+    string hash = 1;
+}

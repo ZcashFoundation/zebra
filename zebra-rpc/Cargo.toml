@@ -22,10 +22,6 @@ categories = [
 [features]
 
 indexer-rpcs = [
-    "tonic-build",
-    "tonic",
-    "tonic-reflection",
-    "prost",
     "tokio-stream",
 ]
 
@@ -82,11 +78,12 @@ tokio = { version = "1.40.0", features = [
 ] }
 tower = "0.4.13"
 
-# indexer-rpcs dependencies
-tonic = { version = "0.12.3", optional = true }
-tonic-reflection = { version = "0.12.3", optional = true }
-prost = { version = "0.13.3", optional = true }
+# indexer-rpcs and endpoint-rpcs dependencies
+tonic = "0.12.3"
+tonic-reflection = "0.12.3"
+prost = "0.13.3"
 tokio-stream = { version = "0.1.16", optional = true }
+warp = "0.3.7"
 
 tracing = "0.1.39"
 
@@ -116,7 +113,7 @@ zebra-script = { path = "../zebra-script", version = "1.0.0-beta.40" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.40" }
 
 [build-dependencies]
-tonic-build = { version = "0.12.3", optional = true }
+tonic-build = "0.12.3"
 
 [dev-dependencies]
 insta = { version = "1.40.0", features = ["redactions", "json", "ron"] }
