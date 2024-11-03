@@ -6,7 +6,8 @@ pub(crate) mod arbitrary;
 
 mod common;
 
-pub mod burn;
-pub mod issuance;
+mod burn;
+mod issuance;
 
-pub use burn::BurnItem;
+pub(crate) use burn::{Burn, NoBurn};
+pub(crate) use issuance::IssueData;

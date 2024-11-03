@@ -40,7 +40,7 @@ pub use unmined::{
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
-    block, orchard,
+    block, orchard, orchard_zsa,
     parameters::{ConsensusBranchId, NetworkUpgrade},
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
@@ -245,7 +245,7 @@ pub enum Transaction {
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardZSA>>,
         /// The ZSA issuance data for this transaction, if any.
         #[cfg(feature = "tx-v6")]
-        orchard_zsa_issue_data: Option<orchard::IssueData>,
+        orchard_zsa_issue_data: Option<orchard_zsa::IssueData>,
     },
 }
 

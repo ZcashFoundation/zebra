@@ -12,7 +12,7 @@ use orchard::{note_encryption::OrchardDomainCommon, orchard_flavor};
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 #[cfg(feature = "tx-v6")]
-use crate::orchard_zsa::burn::{Burn, NoBurn};
+use crate::orchard_zsa::{Burn, NoBurn};
 
 use super::note;
 

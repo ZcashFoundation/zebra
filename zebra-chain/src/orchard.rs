@@ -30,6 +30,3 @@ pub(crate) use shielded_data::ActionCommon;
 
 #[cfg(feature = "tx-v6")]
 pub use orchard_flavor_ext::OrchardZSA;
-
-#[cfg(feature = "tx-v6")]
-pub(crate) use crate::orchard_zsa::issuance::IssueData;

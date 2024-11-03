@@ -21,7 +21,7 @@ use crate::{
 };
 
 #[cfg(feature = "tx-v6")]
-use crate::orchard_zsa::issuance::IssueData;
+use crate::orchard_zsa::IssueData;
 
 use itertools::Itertools;
 
