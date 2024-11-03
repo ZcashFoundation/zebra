@@ -1046,8 +1046,32 @@ impl Transaction {
 
     /// Access the note commitments in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_note_commitments(&self) -> Box<dyn Iterator<Item = &pallas::Base> + '_> {
-        orchard_shielded_data_iter!(self, orchard::ShieldedData::note_commitments)
+    pub fn orchard_note_commitments(&self) -> Box<dyn Iterator<Item = pallas::Base> + '_> {
+        match_orchard_shielded_data!(
+            self,
+            Box::new(std::iter::empty()),
+            { orchard_shielded_data },
+            Box::new(
+                orchard_shielded_data
+                    .iter()
+                    .flat_map(orchard::ShieldedData::note_commitments)
+                    .cloned()
+            ),
+            { orchard_shielded_data, orchard_zsa_issue_data },
+            {
+                Box::new(
+                    orchard_shielded_data
+                        .iter()
+                        .flat_map(orchard::ShieldedData::note_commitments)
+                        .cloned()
+                        .chain(
+                            orchard_zsa_issue_data
+                              .iter()
+                              .flat_map(orchard_zsa::IssueData::note_commitments)
+                        )
+                )
+            }
+        )
     }
 
     /// Access the [`orchard::Flags`] in this transaction, if there is any,

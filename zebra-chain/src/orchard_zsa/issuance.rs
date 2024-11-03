@@ -2,14 +2,6 @@
 
 use std::{fmt::Debug, io};
 
-use crate::{
-    block::MAX_BLOCK_BYTES,
-    serialization::{
-        zcash_serialize_bytes, zcash_serialize_empty_list, ReadZcashExt, SerializationError,
-        TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
-    },
-};
-
 use nonempty::NonEmpty;
 
 // FIXME: needed for "as_bool" only - consider to implement as_bool locally
@@ -17,13 +9,26 @@ use bitvec::macros::internal::funty::Fundamental;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 
+use halo2::pasta::pallas;
+
+// For pallas::Base::from_repr only
+use group::ff::PrimeField;
+
 use orchard::{
     issuance::{IssueAction, IssueBundle, Signed},
     keys::IssuanceValidatingKey,
-    note::{RandomSeed, Rho},
+    note::{ExtractedNoteCommitment, RandomSeed, Rho},
     primitives::redpallas::{SigType, Signature, SpendAuth},
     value::NoteValue,
     Address, Note,
+};
+
+use crate::{
+    block::MAX_BLOCK_BYTES,
+    serialization::{
+        zcash_serialize_bytes, zcash_serialize_empty_list, ReadZcashExt, SerializationError,
+        TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
+    },
 };
 
 use super::common::ASSET_BASE_SIZE;
@@ -36,6 +41,21 @@ pub struct IssueData(IssueBundle<Signed>);
 impl From<IssueBundle<Signed>> for IssueData {
     fn from(inner: IssueBundle<Signed>) -> Self {
         Self(inner)
+    }
+}
+
+impl IssueData {
+    pub(crate) fn note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
+        self.0.actions().iter().flat_map(|action| {
+            action.notes().iter().map(|note| {
+                // FIXME: Make `ExtractedNoteCommitment::inner` public in `orchard` (this would
+                // eliminate the need for the workaround of converting `pallas::Base` from bytes
+                // here), or introduce a new public method in `orchard::issuance::IssueBundle` to
+                // retrieve note commitments directly from `orchard`.
+                pallas::Base::from_repr(ExtractedNoteCommitment::from(note.commitment()).to_bytes())
+                    .unwrap()
+            })
+        })
     }
 }
 
