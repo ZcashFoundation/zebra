@@ -58,13 +58,13 @@ rayon = "1.10.0"
 regex = "1.11.0"
 serde = { version = "1.0.211", features = ["serde_derive"] }
 tempfile = "3.13.0"
-thiserror = "1.0.64"
+thiserror = "1.0.67"
 
 futures = "0.3.31"
 tokio = { version = "1.41.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.16", features = ["sync", "time"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
-tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower = { version = "0.5.1", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.24.0"
 tracing-futures = "0.2.5"
