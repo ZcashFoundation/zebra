@@ -43,3 +43,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
+
+  get-disk-name:
+    name: Get disk name
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "Skipping job on fork"'
