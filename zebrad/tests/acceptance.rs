@@ -3538,3 +3538,15 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     Ok(())
 }
+
+/// Check that Zebra does not depend on any crates from git sources.
+#[test]
+#[ignore]
+fn check_no_git_refs_in_cargo_lock() {
+    let cargo_lock_contents =
+        fs::read_to_string("../Cargo.lock").expect("should have Cargo.lock file in root dir");
+
+    if cargo_lock_contents.contains(r#"source = "git+"#) {
+        panic!("Cargo.lock includes git sources")
+    }
+}
