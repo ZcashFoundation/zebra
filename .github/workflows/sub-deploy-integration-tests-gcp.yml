@@ -503,18 +503,19 @@ jobs:
           )
 
           if [[ -z "$INITIAL_DISK_DB_VERSION" ]]; then
+          # Check for new database creation
+          if echo "$DOCKER_LOGS" | grep -q "creating.new.database"; then
+              INITIAL_DISK_DB_VERSION="new"
+          else
               echo "Checked logs:"
               echo ""
               echo "$DOCKER_LOGS"
               echo ""
-              echo "Missing initial disk database version in logs: $INITIAL_DISK_DB_VERSION"
+              echo "Missing initial disk database version in logs"
               # Fail the tests, because Zebra didn't log the initial disk database version,
               # or the regex in this step is wrong.
-              false
+              exit 1
           fi
-
-          if [[ "$INITIAL_DISK_DB_VERSION" = "creating.new.database" ]]; then
-              INITIAL_DISK_DB_VERSION="new"
           else
               INITIAL_DISK_DB_VERSION="v${INITIAL_DISK_DB_VERSION//./-}"
           fi
@@ -538,7 +539,7 @@ jobs:
               echo "Missing running database version in logs: $RUNNING_DB_VERSION"
               # Fail the tests, because Zebra didn't log the running database version,
               # or the regex in this step is wrong.
-              false
+              exit 1
           fi
 
           RUNNING_DB_VERSION="v${RUNNING_DB_VERSION//./-}"
