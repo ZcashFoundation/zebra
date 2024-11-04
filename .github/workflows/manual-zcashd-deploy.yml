@@ -64,8 +64,8 @@ jobs:
       - name: Create instance template
         run: |
           gcloud compute instance-templates create-with-container zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --boot-disk-size 10GB \
-          --boot-disk-type=pd-ssd \
+          --boot-disk-size=10GB \
+          --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --container-stdin \
