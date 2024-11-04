@@ -3247,6 +3247,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
+        amount::MAX_MONEY,
+        block::subsidy::general,
         chain_sync_status::MockSyncStatus,
         parameters::{
             subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
@@ -3287,7 +3289,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
             #[cfg(zcash_unstable = "nsm")]
-            zfuture: Some(10),
+            zfuture: Some(2),
             ..Default::default()
         });
 
@@ -3444,14 +3446,25 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         })
         .to_network();
 
+    let block_height = Height(block_template.height);
+    #[cfg(zcash_unstable = "nsm")]
+    let expected_block_subsidy = general::block_subsidy(
+        block_height,
+        &network,
+        MAX_MONEY.try_into().expect("MAX_MONEY is a valid amount"),
+    )?;
+    #[cfg(not(zcash_unstable = "nsm"))]
+    let expected_block_subsidy = general::block_subsidy_pre_nsm(block_height, &network)?;
+
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
-        Height(block_template.height),
+        block_height,
         &miner_address,
         &[],
         history_tree.clone(),
         true,
         vec![],
+        expected_block_subsidy,
         #[cfg(zcash_unstable = "nsm")]
         None,
     );
@@ -3497,6 +3510,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         history_tree.clone(),
         true,
         vec![],
+        expected_block_subsidy,
         #[cfg(zcash_unstable = "nsm")]
         None,
     );
