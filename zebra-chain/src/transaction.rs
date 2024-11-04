@@ -1037,31 +1037,38 @@ impl Transaction {
     /// Access the note commitments in this transaction, if there are any,
     /// regardless of version.
     pub fn orchard_note_commitments(&self) -> Box<dyn Iterator<Item = pallas::Base> + '_> {
-        match_orchard_shielded_data!(
-            self,
-            Box::new(std::iter::empty()),
-            { orchard_shielded_data },
-            Box::new(
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => Box::new(std::iter::empty()),
+
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(
+                orchard_shielded_data
+                    .iter()
+                    .flat_map(orchard::ShieldedData::note_commitments)
+                    .cloned(),
+            ),
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data,
+                orchard_zsa_issue_data,
+                ..
+            } => Box::new(
                 orchard_shielded_data
                     .iter()
                     .flat_map(orchard::ShieldedData::note_commitments)
                     .cloned()
+                    .chain(
+                        orchard_zsa_issue_data
+                            .iter()
+                            .flat_map(orchard_zsa::IssueData::note_commitments),
+                    ),
             ),
-            { orchard_shielded_data, orchard_zsa_issue_data },
-            {
-                Box::new(
-                    orchard_shielded_data
-                        .iter()
-                        .flat_map(orchard::ShieldedData::note_commitments)
-                        .cloned()
-                        .chain(
-                            orchard_zsa_issue_data
-                              .iter()
-                              .flat_map(orchard_zsa::IssueData::note_commitments)
-                        )
-                )
-            }
-        )
+        }
     }
 
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
