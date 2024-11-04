@@ -53,67 +53,58 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-/// Applies expression to different versions of `Transaction` to handle Orchard shielded data.
-macro_rules! match_orchard_shielded_data {
-    // Separate field sets and expressions for V5 and V6
-    ($self:expr, $pre_v5_expr:expr, { $( $v5_field:ident ),+ }, $v5_expr:expr, { $( $v6_field:ident ),+ }, $v6_expr:expr) => {
+// FIXME: doc this
+// Move down
+macro_rules! orchard_shielded_data_iter {
+    ($self:expr, $mapper:expr) => {
         match $self {
+            // No Orchard shielded data
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => $pre_v5_expr,
+            | Transaction::V4 { .. } => Box::new(std::iter::empty()),
 
-            Transaction::V5 { $( $v5_field ),+, .. } => $v5_expr,
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(orchard_shielded_data.into_iter().flat_map($mapper)),
 
             #[cfg(feature = "tx-v6")]
-            Transaction::V6 { $( $v6_field ),+, .. } => $v6_expr,
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(orchard_shielded_data.into_iter().flat_map($mapper)),
         }
     };
-
-    // Single field set and expression used for both V5 and V6
-    ($self:expr, $pre_v5_expr:expr, { $( $v5_v6_field:ident ),+ }, $v5_v6_expr:expr) => {
-        match_orchard_shielded_data!(
-            $self,
-            $pre_v5_expr,
-            { $( $v5_v6_field ),+ },
-            $v5_v6_expr,
-            { $( $v5_v6_field ),+ },
-            $v5_v6_expr
-        )
-    };
 }
 
-/// Creates an iterator over Orchard shielded data.
-///
-/// - `$self`: The `Transaction` instance.
-/// - `$mapper`: Function to apply to each data item.
-macro_rules! orchard_shielded_data_iter {
-    ($self:expr, $mapper:expr) => {
-        match_orchard_shielded_data!(
-            $self,
-            Box::new(std::iter::empty()),
-            { orchard_shielded_data },
-            Box::new(orchard_shielded_data.into_iter().flat_map($mapper))
-        )
-    };
-}
-
-/// Retrieves a specific field from Orchard shielded data.
-///
-/// - `$self`: The `Transaction` instance.
-/// - `$field`: The field to access
+// FIXME: doc this
+// Move down
 macro_rules! orchard_shielded_data_field {
     ($self:expr, $field:ident) => {
-        match_orchard_shielded_data!(
-            $self,
-            None,
-            { orchard_shielded_data },
-            orchard_shielded_data.as_ref().map(|d| d.$field)
-        )
+        match $self {
+            // No Orchard shielded data
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+        }
     };
 }
 
-/// Generates match patterns for `Transaction::V5` and `Transaction::V6`
+// FIXME:
+// Define the macro for including the V6 pattern
 #[cfg(feature = "tx-v6")]
 macro_rules! tx_v5_and_v6 {
     { $($fields:tt)* } => {
@@ -121,7 +112,6 @@ macro_rules! tx_v5_and_v6 {
     };
 }
 
-/// Generates a match pattern for `Transaction::V5` only
 #[cfg(not(feature = "tx-v6"))]
 macro_rules! tx_v5_and_v6 {
     { $($fields:tt)* } => {
@@ -1475,14 +1465,33 @@ impl Transaction {
     /// See `orchard_value_balance` for details.
     #[cfg(any(test, feature = "proptest-impl"))]
     pub fn orchard_value_balance_mut(&mut self) -> Option<&mut Amount<NegativeAllowed>> {
-        match_orchard_shielded_data!(
-            self,
-            None,
-            { orchard_shielded_data },
-            orchard_shielded_data
-                .as_mut()
-                .map(|shielded_data| &mut shielded_data.value_balance)
-        )
+        match self {
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.value_balance),
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => Some(&mut orchard_shielded_data.value_balance),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 {
+                orchard_shielded_data: None,
+                ..
+            } => None,
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data: None,
+                ..
+            } => None,
+        }
     }
 
     /// Returns the value balances for this transaction using the provided transparent outputs.
