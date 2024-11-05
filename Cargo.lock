@@ -566,7 +566,7 @@ version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cef977c7f8e75aa81fc589064c121ab8d32448b7939d34d58df479aa93e65ea5"
 dependencies = [
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
 ]
 
 [[package]]
@@ -1346,7 +1346,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -1381,7 +1381,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "blake2b_simd",
 ]
@@ -2150,15 +2150,6 @@ dependencies = [
 
 [[package]]
 name = "incrementalmerkletree"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75346da3bd8e3d8891d02508245ed2df34447ca6637e343829f8d08986e9cde2"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "incrementalmerkletree"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d45063fbc4b0a37837f6bfe0445f269d13d730ad0aa3b5a7f74aa7bf27a0f4df"
@@ -2868,37 +2859,6 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orchard"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4dc7bde644aeb980be296cd908c6650894dc8541deb56f9f5294c52ed7ca568f"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "ff",
- "fpe",
- "group",
- "halo2_gadgets",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree 0.6.0",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand 0.8.5",
- "reddsa",
- "serde",
- "subtle",
- "tracing",
- "visibility",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
-name = "orchard"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f18e997fa121de5c73e95cdc7e8512ae43b7de38904aeea5e5713cc48f3c0ba"
@@ -2912,7 +2872,7 @@ dependencies = [
  "halo2_gadgets",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -4031,38 +3991,6 @@ dependencies = [
 
 [[package]]
 name = "sapling-crypto"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "15e379398fffad84e49f9a45a05635fc004f66086e65942dbf4eb95332c26d2a"
-dependencies = [
- "aes",
- "bellman",
- "bitvec",
- "blake2b_simd",
- "blake2s_simd",
- "bls12_381",
- "byteorder",
- "document-features",
- "ff",
- "fpe",
- "group",
- "hex",
- "incrementalmerkletree 0.6.0",
- "jubjub",
- "lazy_static",
- "memuse",
- "rand 0.8.5",
- "rand_core 0.6.4",
- "redjubjub",
- "subtle",
- "tracing",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
-name = "sapling-crypto"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfff8cfce16aeb38da50b8e2ed33c9018f30552beff2210c266662a021b17f38"
@@ -4079,7 +4007,7 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -4400,13 +4328,13 @@ dependencies = [
 
 [[package]]
 name = "shardtree"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78222845cd8bbe5eb95687407648ff17693a35de5e8abaa39a4681fb21e033f9"
+checksum = "b5f2390975ebfe8838f9e861f7a588123d49a7a7a0a08568ea831d8ad53fc9b4"
 dependencies = [
  "bitflags 2.6.0",
  "either",
- "incrementalmerkletree 0.6.0",
+ "incrementalmerkletree",
  "tracing",
 ]
 
@@ -5629,14 +5557,14 @@ dependencies = [
 
 [[package]]
 name = "which"
-version = "4.4.2"
+version = "6.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "87ba24419a2078cd2b0f2ede2691b6c66d8e47836da3b6db8265ebad47afbfc7"
+checksum = "b4ee928febd44d98f2f459a4a79bd4d928591333a494a10a868418ac1b39cf1f"
 dependencies = [
  "either",
  "home",
- "once_cell",
  "rustix",
+ "winsafe",
 ]
 
 [[package]]
@@ -5887,6 +5815,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "winsafe"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d135d17ab770252ad95e9a872d365cf3090e3be864a34ab46f48555993efc904"
+
+[[package]]
 name = "wyz"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5915,8 +5849,8 @@ checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
 
 [[package]]
 name = "zcash_address"
-version = "0.5.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+version = "0.6.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "bech32",
  "bs58",
@@ -5927,8 +5861,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.13.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+version = "0.14.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -5938,7 +5872,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "memuse",
  "nom",
  "nonempty",
@@ -5946,7 +5880,7 @@ dependencies = [
  "prost",
  "rand_core 0.6.4",
  "rayon",
- "sapling-crypto 0.2.0",
+ "sapling-crypto",
  "secrecy",
  "shardtree",
  "subtle",
@@ -5967,7 +5901,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.2.1"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -5976,7 +5910,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -5985,8 +5919,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.3.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+version = "0.4.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -5997,7 +5931,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "rand_core 0.6.4",
- "sapling-crypto 0.2.0",
+ "sapling-crypto",
  "secrecy",
  "subtle",
  "tracing",
@@ -6023,8 +5957,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.17.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+version = "0.19.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "aes",
  "bip32",
@@ -6037,16 +5971,16 @@ dependencies = [
  "fpe",
  "group",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "jubjub",
  "memuse",
  "nonempty",
- "orchard 0.9.0",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
  "ripemd",
- "sapling-crypto 0.2.0",
+ "sapling-crypto",
  "secp256k1",
  "sha2",
  "subtle",
@@ -6061,8 +5995,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_proofs"
-version = "0.17.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+version = "0.19.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6075,7 +6009,7 @@ dependencies = [
  "lazy_static",
  "rand_core 0.6.4",
  "redjubjub",
- "sapling-crypto 0.2.0",
+ "sapling-crypto",
  "tracing",
  "xdg",
  "zcash_primitives",
@@ -6083,8 +6017,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.3.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+version = "0.4.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "document-features",
  "memuse",
@@ -6132,12 +6066,12 @@ dependencies = [
  "halo2_proofs",
  "hex",
  "humantime",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "itertools 0.13.0",
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard 0.10.0",
+ "orchard",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -6148,7 +6082,7 @@ dependencies = [
  "reddsa",
  "redjubjub",
  "ripemd",
- "sapling-crypto 0.3.0",
+ "sapling-crypto",
  "secp256k1",
  "serde",
  "serde-big-array",
@@ -6193,12 +6127,12 @@ dependencies = [
  "metrics",
  "num-integer",
  "once_cell",
- "orchard 0.10.0",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
- "sapling-crypto 0.3.0",
+ "sapling-crypto",
  "serde",
  "spandoc",
  "thiserror",
@@ -6355,7 +6289,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
- "sapling-crypto 0.3.0",
+ "sapling-crypto",
  "semver 1.0.23",
  "serde",
  "serde_json",
@@ -6624,8 +6558,8 @@ dependencies = [
 
 [[package]]
 name = "zip321"
-version = "0.1.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+version = "0.2.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "base64 0.22.1",
  "nom",
