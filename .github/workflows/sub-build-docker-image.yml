@@ -80,7 +80,7 @@ jobs:
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -126,7 +126,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
@@ -193,7 +193,7 @@ jobs:
         # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@v1.14.0
+        uses: docker/scout-action@v1.15.0
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
