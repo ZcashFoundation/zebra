@@ -533,7 +533,7 @@ pub fn subsidy_is_valid(
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
     // Validate funding streams
-    let Some(halving_div) = subsidy::general::halving_divisor(height, network) else {
+    let Some(halving_div) = general::halving_divisor(height, network) else {
         // Far future halving, with no founders reward or funding streams
         return Ok(());
     };
@@ -560,13 +560,10 @@ pub fn subsidy_is_valid(
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         // funding stream amount values
-        let funding_streams = subsidy::funding_streams::funding_stream_values(
-            height,
-            network,
-            expected_block_subsidy,
-        )
-        // we always expect a funding stream hashmap response even if empty
-        .map_err(|err| BlockError::Other(err.to_string()))?;
+        let funding_streams =
+            funding_streams::funding_stream_values(height, network, expected_block_subsidy)
+                // we always expect a funding stream hashmap response even if empty
+                .map_err(|err| SubsidyError::Other(err.to_string()))?;
 
         // # Consensus
         //
@@ -583,20 +580,18 @@ pub fn subsidy_is_valid(
                 continue;
             }
 
-            let address =
-                subsidy::funding_streams::funding_stream_address(height, network, receiver)
-                    // funding stream receivers other than the deferred pool must have an address
-                    .ok_or_else(|| {
-                        BlockError::Other(format!(
-                            "missing funding stream address at height {height:?}"
-                        ))
-                    })?;
+            let address = funding_streams::funding_stream_address(height, network, receiver)
+                // funding stream receivers other than the deferred pool must have an address
+                .ok_or_else(|| {
+                    SubsidyError::Other(format!(
+                        "missing funding stream address at height {height:?}"
+                    ))
+                })?;
 
-            let has_expected_output =
-                subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
-                    .iter()
-                    .map(zebra_chain::transparent::Output::value)
-                    .any(|value| value == expected_amount);
+            let has_expected_output = funding_streams::filter_outputs_by_address(coinbase, address)
+                .iter()
+                .map(zebra_chain::transparent::Output::value)
+                .any(|value| value == expected_amount);
 
             if !has_expected_output {
                 Err(SubsidyError::FundingStreamNotFound)?;

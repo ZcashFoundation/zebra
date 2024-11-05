@@ -549,7 +549,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     let block = Block::zcash_deserialize(&zebra_test::vectors::BLOCK_MAINNET_347499_BYTES[..])
         .expect("block should deserialize");
     let height = block.coinbase_height().expect("valid coinbase height");
-    let expected_block_subsidy = block_subsidy(height, &network)?;
+    let expected_block_subsidy = block_subsidy_pre_nsm(height, &network)?;
     // See [ZIP-1015](https://zips.z.cash/zip-1015).
     let expected_deferred_amount: Amount<zebra_chain::amount::NonNegative> =
         subsidy::funding_streams::funding_stream_values(height, &network, expected_block_subsidy)

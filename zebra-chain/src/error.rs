@@ -80,6 +80,9 @@ pub enum SubsidyError {
 
     #[error("invalid burn amount")]
     InvalidBurnAmount,
+
+    #[error("unexpected error occurred: {0}")]
+    Other(String),
 }
 
 impl From<amount::Error> for SubsidyError {

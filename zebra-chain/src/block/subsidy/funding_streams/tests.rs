@@ -4,14 +4,7 @@ use color_eyre::Report;
 
 use crate::{
     block::subsidy::general::block_subsidy_pre_nsm,
-    parameters::{
-        subsidy::FundingStreamReceiver,
-        testnet::{
-            self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
-            ConfiguredFundingStreams,
-        },
-        NetworkKind,
-    },
+    parameters::{subsidy::FundingStreamReceiver, NetworkKind},
 };
 
 use super::*;
@@ -79,7 +72,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
         nu6_fund_height_range.end,
         nu6_fund_height_range.end.next().unwrap(),
     ] {
-        let fsv = funding_stream_values(height, network, block_subsidy(height, network)?).unwrap();
+        let fsv = funding_stream_values(height, network, block_subsidy_pre_nsm(height, network)?)
+            .unwrap();
 
         if height < canopy_activation_height {
             assert!(fsv.is_empty());
