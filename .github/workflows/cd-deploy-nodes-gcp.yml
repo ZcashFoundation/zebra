@@ -242,7 +242,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
@@ -265,18 +265,18 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       - name: Create instance template for ${{ matrix.network }}
         run: |
           DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
-          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
+          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
@@ -287,8 +287,8 @@ jobs:
           fi
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --boot-disk-size 50GB \
-          --boot-disk-type=pd-ssd \
+          --boot-disk-size=10GB \
+          --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
@@ -353,7 +353,7 @@ jobs:
     if: ${{ !failure() && github.event_name == 'workflow_dispatch' }}
 
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
@@ -376,19 +376,19 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Create instance template from container image
       - name: Manual deploy of a single ${{ inputs.network }} instance running zebrad
         run: |
           DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
-          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
+          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
@@ -399,8 +399,8 @@ jobs:
           fi
           gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --boot-disk-size 50GB \
-          --boot-disk-type=pd-ssd \
+          --boot-disk-size=10GB \
+          --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \

@@ -140,7 +140,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -172,13 +172,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME env as the source image to populate the disk cached state
@@ -188,18 +188,18 @@ jobs:
         shell: /usr/bin/bash -x {0}
         run: |
           NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
-          DISK_PARAMS="size=400GB,type=pd-ssd,name=${NAME},device-name=${NAME}"
+          DISK_PARAMS="size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           fi
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 50GB \
-          --boot-disk-type pd-ssd \
+          --boot-disk-size=50GB \
+          --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk="${DISK_PARAMS}" \
           --container-image=gcr.io/google-containers/busybox \
-          --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
+          --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
@@ -390,7 +390,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -434,13 +434,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
@@ -503,18 +503,19 @@ jobs:
           )
 
           if [[ -z "$INITIAL_DISK_DB_VERSION" ]]; then
+          # Check for new database creation
+          if echo "$DOCKER_LOGS" | grep -q "creating.new.database"; then
+              INITIAL_DISK_DB_VERSION="new"
+          else
               echo "Checked logs:"
               echo ""
               echo "$DOCKER_LOGS"
               echo ""
-              echo "Missing initial disk database version in logs: $INITIAL_DISK_DB_VERSION"
+              echo "Missing initial disk database version in logs"
               # Fail the tests, because Zebra didn't log the initial disk database version,
               # or the regex in this step is wrong.
-              false
+              exit 1
           fi
-
-          if [[ "$INITIAL_DISK_DB_VERSION" = "creating.new.database" ]]; then
-              INITIAL_DISK_DB_VERSION="new"
           else
               INITIAL_DISK_DB_VERSION="v${INITIAL_DISK_DB_VERSION//./-}"
           fi
@@ -538,7 +539,7 @@ jobs:
               echo "Missing running database version in logs: $RUNNING_DB_VERSION"
               # Fail the tests, because Zebra didn't log the running database version,
               # or the regex in this step is wrong.
-              false
+              exit 1
           fi
 
           RUNNING_DB_VERSION="v${RUNNING_DB_VERSION//./-}"
@@ -687,7 +688,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -701,13 +702,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.

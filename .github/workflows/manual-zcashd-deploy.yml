@@ -29,7 +29,7 @@ jobs:
       id-token: 'write'
 
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
@@ -52,20 +52,20 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Create instance template from container image
       - name: Create instance template
         run: |
           gcloud compute instance-templates create-with-container zcashd-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --boot-disk-size 10GB \
-          --boot-disk-type=pd-ssd \
+          --boot-disk-size=10GB \
+          --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --container-stdin \
