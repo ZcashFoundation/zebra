@@ -12,7 +12,7 @@ There are a few bugs in Zebra that we're still working on fixing:
 
 - Block download and verification sometimes times out during Zebra's initial sync [#5709](https://github.com/ZcashFoundation/zebra/issues/5709). The full sync still finishes reasonably quickly.
 
-- Experimental Tor support is disabled until Zebra upgrades to the latest `arti-client`. This happened due to a Rust dependency conflict ([#5492](https://github.com/ZcashFoundation/zebra/issues/5492)) and is still an issue due to [another dependency conflict](https://github.com/ZcashFoundation/zebra/issues/8328#issuecomment-1969989648).
+- Experimental Tor support is disabled until Zebra upgrades to the latest `arti-client`. [#8328](https://github.com/ZcashFoundation/zebra/issues/8328#issuecomment-1969989648)
 
 ## Memory Issues
 

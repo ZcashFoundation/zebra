@@ -2,7 +2,7 @@
 set -ex
 
 # Check if necessary tools are installed
-if ! command -v git &> /dev/null || ! command -v cargo &> /dev/null; then
+if ! command -v git &>/dev/null || ! command -v cargo &>/dev/null; then
     echo "ERROR: Required tools (git, cargo) are not installed."
     exit 1
 fi
@@ -11,7 +11,7 @@ git config --global user.email "release-tests-no-reply@zfnd.org"
 git config --global user.name "Automated Release Test"
 
 # Ensure cargo-release is installed
-if ! cargo release --version &> /dev/null; then
+if ! cargo release --version &>/dev/null; then
     echo "ERROR: cargo release must be installed."
     exit 1
 fi
@@ -23,12 +23,11 @@ fi
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc patch
 
 # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-scan 0.1.0-alpha.9
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-grpc 0.1.0-alpha.7
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-scan 0.1.0-alpha.11
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-grpc 0.1.0-alpha.9
 
 # Update zebrad:
-# TODO: Revert `2.0.0-rc.0` to `patch` in the next release candidate.
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad 2.0.0-rc.0
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch
 # Continue with the release process:
 cargo release replace --verbose --execute --no-confirm --allow-branch '*' --package zebrad
 cargo release commit --verbose --execute --no-confirm --allow-branch '*'
