@@ -1510,11 +1510,23 @@ pub struct AddressBalance {
 
 /// A hex-encoded [`ConsensusBranchId`] string.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
-struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
+pub struct ConsensusBranchIdHex(#[serde(with = "hex")] ConsensusBranchId);
+
+impl ConsensusBranchIdHex {
+    /// Returns a new instance of ['ConsensusBranchIdHex'].
+    pub fn new(consensus_branch_id: u32) -> Self {
+        ConsensusBranchIdHex(consensus_branch_id.into())
+    }
+
+    /// Returns the value of the ['ConsensusBranchId'].
+    pub fn inner(&self) -> u32 {
+        self.0.into()
+    }
+}
 
 /// Information about [`NetworkUpgrade`] activation.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-struct NetworkUpgradeInfo {
+pub struct NetworkUpgradeInfo {
     /// Name of upgrade, string.
     ///
     /// Ignored by lightwalletd, but useful for debugging.
@@ -1528,9 +1540,29 @@ struct NetworkUpgradeInfo {
     status: NetworkUpgradeStatus,
 }
 
+impl NetworkUpgradeInfo {
+    /// Constructs [`NetworkUpgradeInfo`] from its constituent parts.
+    pub fn from_parts(
+        name: NetworkUpgrade,
+        activation_height: Height,
+        status: NetworkUpgradeStatus,
+    ) -> Self {
+        Self {
+            name,
+            activation_height,
+            status,
+        }
+    }
+
+    /// Returns the contents of ['NetworkUpgradeInfo'].
+    pub fn into_parts(self) -> (NetworkUpgrade, Height, NetworkUpgradeStatus) {
+        (self.name, self.activation_height, self.status)
+    }
+}
+
 /// The activation status of a [`NetworkUpgrade`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-enum NetworkUpgradeStatus {
+pub enum NetworkUpgradeStatus {
     /// The network upgrade is currently active.
     ///
     /// Includes all network upgrades that have previously activated,
@@ -1551,7 +1583,7 @@ enum NetworkUpgradeStatus {
 ///
 /// These branch IDs are different when the next block is a network upgrade activation block.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-struct TipConsensusBranch {
+pub struct TipConsensusBranch {
     /// Branch ID used to validate the current chain tip, big-endian, hex-encoded.
     #[serde(rename = "chaintip")]
     chain_tip: ConsensusBranchIdHex,
@@ -1559,6 +1591,21 @@ struct TipConsensusBranch {
     /// Branch ID used to validate the next block, big-endian, hex-encoded.
     #[serde(rename = "nextblock")]
     next_block: ConsensusBranchIdHex,
+}
+
+impl TipConsensusBranch {
+    /// Constructs [`TipConsensusBranch`] from its constituent parts.
+    pub fn from_parts(chain_tip: u32, next_block: u32) -> Self {
+        Self {
+            chain_tip: ConsensusBranchIdHex::new(chain_tip),
+            next_block: ConsensusBranchIdHex::new(next_block),
+        }
+    }
+
+    /// Returns the contents of ['TipConsensusBranch'].
+    pub fn into_parts(self) -> (u32, u32) {
+        (self.chain_tip.inner(), self.next_block.inner())
+    }
 }
 
 /// Response to a `sendrawtransaction` RPC request.
@@ -1790,6 +1837,26 @@ impl Default for GetBlockTrees {
             sapling: SaplingTrees { size: 0 },
             orchard: OrchardTrees { size: 0 },
         }
+    }
+}
+
+impl GetBlockTrees {
+    /// Constructs a new instance of ['GetBlockTrees'].
+    pub fn new(sapling: u64, orchard: u64) -> Self {
+        GetBlockTrees {
+            sapling: SaplingTrees { size: sapling },
+            orchard: OrchardTrees { size: orchard },
+        }
+    }
+
+    /// Returns sapling data held by ['GetBlockTrees'].
+    pub fn sapling(self) -> u64 {
+        self.sapling.size
+    }
+
+    /// Returns orchard data held by ['GetBlockTrees'].
+    pub fn orchard(self) -> u64 {
+        self.orchard.size
     }
 }
 
