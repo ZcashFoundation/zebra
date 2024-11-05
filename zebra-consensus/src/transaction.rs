@@ -608,10 +608,14 @@ where
         }
     }
 
-    /// Wait for the UTXOs that are being spent by the given transaction.
+    /// Waits for the UTXOs that are being spent by the given transaction to arrive in
+    /// the state for [`Block`](Request::Block) requests.
     ///
     /// `known_utxos` are additional UTXOs known at the time of validation (i.e.
     /// from previous transactions in the block).
+    ///
+    /// Looks up UTXOs that are being spent by the given transaction in the state or waits
+    /// for them to be added to the mempool for [`Mempool`](Request::Mempool) requests.
     ///
     /// Returns a tuple with a OutPoint -> Utxo map, and a vector of Outputs
     /// in the same order as the matching inputs in the transaction.
