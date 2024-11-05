@@ -5,6 +5,34 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 2.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.1) - 2024-10-30
+
+- Zebra now supports NU6 on Mainnet. This patch release updates dependencies
+  required for NU6.
+
+### Breaking Changes
+
+- The JSON RPC endpoint has cookie-based authentication enabled by default.
+
+### Added
+
+- NU6-related documentation
+  ([#8949](https://github.com/ZcashFoundation/zebra/pull/8949))
+- A cookie-based authentication system for the JSON RPC endpoint
+  ([#8900](https://github.com/ZcashFoundation/zebra/pull/8900),
+  [#8965](https://github.com/ZcashFoundation/zebra/pull/8965))
+
+### Changed
+
+-  Set the activation height of NU6 for Mainnet and bump Zebra's current network
+   protocol version
+   ([#8960](https://github.com/ZcashFoundation/zebra/pull/8960))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @gustavovalverde, @oxarbitrage and @upbqdn.
+
 ## [Zebra 2.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0) - 2024-10-25
 
 This release brings full support for NU6.
