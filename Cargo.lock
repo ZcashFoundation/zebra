@@ -1333,7 +1333,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -1368,7 +1368,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "blake2b_simd",
 ]
@@ -2976,7 +2976,7 @@ dependencies = [
  "halo2_poseidon",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -4093,7 +4093,7 @@ dependencies = [
  "getset",
  "group",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -4395,7 +4395,7 @@ checksum = "637e95dcd06bc1bb3f86ed9db1e1832a70125f32daae071ef37dcb7701b7d4fe"
 dependencies = [
  "bitflags 2.9.0",
  "either",
- "incrementalmerkletree 0.6.0",
+ "incrementalmerkletree",
  "tracing",
 ]
 
@@ -6050,7 +6050,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "memuse",
  "nom",
  "nonempty",
@@ -6058,7 +6058,7 @@ dependencies = [
  "prost",
  "rand_core 0.6.4",
  "rayon",
- "sapling-crypto 0.2.0",
+ "sapling-crypto",
  "secrecy",
  "shardtree",
  "subtle",
@@ -6090,7 +6090,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#1b4f984a61cc88029c0b78e9d13225aad76c6903"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6113,7 +6113,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "rand_core 0.6.4",
- "sapling-crypto 0.2.0",
+ "sapling-crypto",
  "secrecy",
  "subtle",
  "tracing",
@@ -6154,11 +6154,11 @@ dependencies = [
  "getset",
  "group",
  "hex",
- "incrementalmerkletree 0.7.0",
+ "incrementalmerkletree",
  "jubjub",
  "memuse",
  "nonempty",
- "orchard 0.9.0",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
@@ -6194,7 +6194,7 @@ dependencies = [
  "lazy_static",
  "rand_core 0.6.4",
  "redjubjub",
- "sapling-crypto 0.2.0",
+ "sapling-crypto",
  "tracing",
  "xdg",
  "zcash_primitives",
@@ -6282,7 +6282,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard 0.10.0",
+ "orchard",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -6340,12 +6340,12 @@ dependencies = [
  "metrics",
  "num-integer",
  "once_cell",
- "orchard 0.10.0",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
- "sapling-crypto 0.3.0",
+ "sapling-crypto",
  "serde",
  "spandoc",
  "thiserror 2.0.12",
