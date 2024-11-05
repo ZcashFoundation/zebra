@@ -293,6 +293,7 @@ impl CompactDifficulty {
 
     /// Returns a floating-point number representing a difficulty as a multiple
     /// of the minimum difficulty for the provided network.
+    // Copied from <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L34-L74>
     pub fn relative_to_network(&self, network: &Network) -> f64 {
         let network_difficulty = network.target_difficulty_limit().to_compact();
 
