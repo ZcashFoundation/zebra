@@ -615,7 +615,7 @@ where
     /// for them to be added to the mempool for [`Mempool`](Request::Mempool) requests.
     ///
     /// Returns a triple containing:
-    /// - `OutPoint` -> `Utxo` map, 
+    /// - `OutPoint` -> `Utxo` map,
     /// - vec of `Output`s in the same order as the matching inputs in the `tx`,
     /// - vec of `Outpoint`s spent by a mempool `tx` that were not found in the best chain's utxo set.
     async fn spent_utxos(

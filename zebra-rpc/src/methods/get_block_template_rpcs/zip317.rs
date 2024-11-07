@@ -198,9 +198,9 @@ fn has_direct_dependencies(
         return true;
     };
 
-if selected_txs.len() < deps.len() {
-    return false;
-}
+    if selected_txs.len() < deps.len() {
+        return false;
+    }
 
     let mut num_available_deps = 0;
     for tx in selected_txs {
