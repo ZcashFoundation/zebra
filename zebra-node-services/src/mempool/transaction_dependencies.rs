@@ -7,7 +7,7 @@ use zebra_chain::{transaction, transparent};
 /// Representation of mempool transactions' dependencies on other transactions in the mempool.
 #[derive(Default, Debug, Clone)]
 pub struct TransactionDependencies {
-    /// Lists of mempool transactions that create UTXOs spent by
+    /// Lists of mempool transaction ids that create UTXOs spent by
     /// a mempool transaction. Used during block template construction
     /// to exclude transactions from block templates unless all of the
     /// transactions they depend on have been included.

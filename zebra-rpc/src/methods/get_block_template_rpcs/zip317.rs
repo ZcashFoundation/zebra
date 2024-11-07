@@ -198,6 +198,10 @@ fn has_direct_dependencies(
         return true;
     };
 
+if selected_txs.len() < deps.len() {
+    return false;
+}
+
     let mut num_available_deps = 0;
     for tx in selected_txs {
         #[cfg(test)]
@@ -291,6 +295,12 @@ fn checked_add_transaction_weighted_random(
         let mut next_level_dependents = HashSet::new();
 
         for dependent_tx_id in &current_level_dependents {
+            // ## Note
+            //
+            // A necessary condition for adding the dependent tx is that it spends unmined outputs coming only from
+            // the selected txs, which come from the mempool. If the tx also spends in-chain outputs, it won't
+            // be added. This behavior is not specified by consensus rules and can be changed at any time,
+            // meaning that such txs could be added.
             if has_direct_dependencies(tx_dependencies.get(dependent_tx_id), selected_txs) {
                 let Some(candidate_tx) = dependent_txs.remove(dependent_tx_id) else {
                     continue;
