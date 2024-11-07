@@ -10,6 +10,10 @@ name: Check if cached state disks exist
 on:
   workflow_call:
     inputs:
+      environment:
+        required: false
+        default: dev
+        type: string
       network:
         description: 'The Zcash network used to look up the disks'
         required: true
