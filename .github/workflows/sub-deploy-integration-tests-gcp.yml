@@ -185,7 +185,6 @@ jobs:
       # if the test needs it.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
-        shell: /usr/bin/bash -x {0}
         run: |
           NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
           DISK_PARAMS="size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
@@ -256,7 +255,6 @@ jobs:
       # are only used to match those variables paths.
       - name: Launch ${{ inputs.test_id }} test
         id: launch-test
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -288,7 +286,6 @@ jobs:
       # Show debug logs if previous job failed
       - name: Show debug logs if previous job failed
         if: ${{ failure() }}
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -315,7 +312,6 @@ jobs:
       #
       # Errors in the tests are caught by the final test status job.
       - name: Check startup logs for ${{ inputs.test_id }}
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -344,7 +340,6 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -477,7 +472,6 @@ jobs:
       # Passes the versions to subsequent steps using the $INITIAL_DISK_DB_VERSION,
       # $RUNNING_DB_VERSION, and $DB_VERSION_SUMMARY env variables.
       - name: Get database versions from logs
-        shell: /usr/bin/bash -x {0}
         run: |
           INITIAL_DISK_DB_VERSION=""
           RUNNING_DB_VERSION=""
@@ -568,7 +562,6 @@ jobs:
       #
       # Passes the sync height to subsequent steps using the $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
-        shell: /usr/bin/bash -x {0}
         run: |
           SYNC_HEIGHT=""
 
