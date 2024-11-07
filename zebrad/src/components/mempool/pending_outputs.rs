@@ -9,6 +9,8 @@ use zebra_chain::transparent;
 
 use zebra_node_services::mempool::Response;
 
+/// Pending [`transparent::Output`] tracker for handling the mempool's
+/// [`AwaitOutput` requests](zebra_node_services::mempool::Request::AwaitOutput).
 #[derive(Debug, Default)]
 pub struct PendingOutputs(HashMap<transparent::OutPoint, broadcast::Sender<transparent::Output>>);
 
