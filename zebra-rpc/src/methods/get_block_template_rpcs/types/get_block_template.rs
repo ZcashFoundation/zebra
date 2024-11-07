@@ -232,7 +232,8 @@ impl GetBlockTemplate {
         miner_address: &transparent::Address,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
-        mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
+        #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
+        #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
         like_zcashd: bool,
         extra_coinbase_data: Vec<u8>,
@@ -242,14 +243,9 @@ impl GetBlockTemplate {
             (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
 
         // Convert transactions into TransactionTemplates
-        let mut mempool_txs_with_templates: Vec<(
-            InBlockTxDependenciesDepth,
-            TransactionTemplate<amount::NonNegative>,
-            VerifiedUnminedTx,
-        )> = mempool_txs
-            .into_iter()
-            .map(|(min_tx_index, tx)| (min_tx_index, (&tx).into(), tx))
-            .collect();
+        #[cfg(not(test))]
+        let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) =
+            mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
 
         // Transaction selection returns transactions in an arbitrary order,
         // but Zebra's snapshot tests expect the same order every time.
@@ -258,23 +254,34 @@ impl GetBlockTemplate {
         //
         // Transactions that spend outputs created in the same block must appear
         // after the transactions that create those outputs.
-        if like_zcashd {
-            // Sort in serialized data order, excluding the length byte.
-            // `zcashd` sometimes seems to do this, but other times the order is arbitrary.
-            mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
-                (*min_tx_index, tx_template.data.clone())
-            });
-        } else {
-            // Sort by hash, this is faster.
-            mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
-                (*min_tx_index, tx_template.hash.bytes_in_display_order())
-            });
-        }
-
-        let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) = mempool_txs_with_templates
-            .into_iter()
-            .map(|(_, template, tx)| (template, tx))
-            .unzip();
+        #[cfg(test)]
+        let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) = {
+            let mut mempool_txs_with_templates: Vec<(
+                InBlockTxDependenciesDepth,
+                TransactionTemplate<amount::NonNegative>,
+                VerifiedUnminedTx,
+            )> = mempool_txs
+                .into_iter()
+                .map(|(min_tx_index, tx)| (min_tx_index, (&tx).into(), tx))
+                .collect();
+            #[cfg(test)]
+            if like_zcashd {
+                // Sort in serialized data order, excluding the length byte.
+                // `zcashd` sometimes seems to do this, but other times the order is arbitrary.
+                mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
+                    (*min_tx_index, tx_template.data.clone())
+                });
+            } else {
+                // Sort by hash, this is faster.
+                mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
+                    (*min_tx_index, tx_template.hash.bytes_in_display_order())
+                });
+            }
+            mempool_txs_with_templates
+                .into_iter()
+                .map(|(_, template, tx)| (template, tx))
+                .unzip()
+        };
 
         // Generate the coinbase transaction and default roots
         //
