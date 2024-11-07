@@ -3,6 +3,10 @@ name: Deploy Tests to GCP
 on:
   workflow_call:
     inputs:
+      environment:
+        required: false
+        default: dev
+        type: string
       # Status and logging
       test_id:
         required: true
