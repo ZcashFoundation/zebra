@@ -15,22 +15,26 @@ use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
     history_tree::HistoryTree,
-    orchard,
+    orchard::{self, AssetBase},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
     sapling, sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::Transaction::*,
-    transaction::{self, Transaction},
+    transaction::{
+        self,
+        Transaction::{self, *},
+    },
     transparent,
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
 };
 
 use crate::{
-    request::Treestate, service::check, ContextuallyVerifiedBlock, HashOrHeight, OutputLocation,
-    TransactionLocation, ValidateContextError,
+    request::Treestate,
+    service::{check, finalized_state::AssetState},
+    ContextuallyVerifiedBlock, HashOrHeight, OutputLocation, TransactionLocation,
+    ValidateContextError,
 };
 
 use self::index::TransparentTransfers;
@@ -174,6 +178,10 @@ pub struct ChainInner {
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
+    /// A map of `issued_assets`,
+    // TODO: Add reference to ZIP
+    pub(crate) orchard_issued_assets: HashMap<AssetBase, AssetState>,
+
     // Nullifiers
     //
     /// The Sprout nullifiers revealed by `blocks`.
@@ -220,30 +228,8 @@ impl Chain {
         finalized_tip_chain_value_pools: ValueBalance<NonNegative>,
     ) -> Self {
         let inner = ChainInner {
-            blocks: Default::default(),
-            height_by_hash: Default::default(),
-            tx_loc_by_hash: Default::default(),
-            created_utxos: Default::default(),
-            spent_utxos: Default::default(),
-            sprout_anchors: MultiSet::new(),
-            sprout_anchors_by_height: Default::default(),
-            sprout_trees_by_anchor: Default::default(),
-            sprout_trees_by_height: Default::default(),
-            sapling_anchors: MultiSet::new(),
-            sapling_anchors_by_height: Default::default(),
-            sapling_trees_by_height: Default::default(),
-            sapling_subtrees: Default::default(),
-            orchard_anchors: MultiSet::new(),
-            orchard_anchors_by_height: Default::default(),
-            orchard_trees_by_height: Default::default(),
-            orchard_subtrees: Default::default(),
-            sprout_nullifiers: Default::default(),
-            sapling_nullifiers: Default::default(),
-            orchard_nullifiers: Default::default(),
-            partial_transparent_transfers: Default::default(),
-            partial_cumulative_work: Default::default(),
-            history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
+            ..ChainInner::default()
         };
 
         let mut chain = Self {
@@ -1507,7 +1493,7 @@ impl Chain {
                     &None,
                     &None,
                     #[cfg(feature ="tx-v6")]
-                    &None
+                    &None,
                     ),
                 V5 {
                     inputs,
@@ -1588,7 +1574,10 @@ impl Chain {
             self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
             self.update_chain_tip_with(orchard_shielded_data_vanilla)?;
             #[cfg(feature = "tx-v6")]
-            self.update_chain_tip_with(orchard_shielded_data_zsa)?;
+            {
+                self.update_chain_tip_with(orchard_shielded_data_zsa)?;
+                self.update_chain_tip_with(transaction)?;
+            }
         }
 
         // update the chain value pool balances
@@ -1763,6 +1752,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             self.revert_chain_with(sapling_shielded_data_per_spend_anchor, position);
             self.revert_chain_with(sapling_shielded_data_shared_anchor, position);
             self.revert_chain_with(orchard_shielded_data, position);
+
+            #[cfg(feature = "tx-v6")]
+            self.revert_chain_with(transaction, position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
@@ -2114,6 +2106,25 @@ impl<V: orchard::OrchardFlavorExt> UpdateWith<Option<orchard::ShieldedData<V>>> 
                 orchard_shielded_data.nullifiers(),
             );
         }
+    }
+}
+
+#[cfg(feature = "tx-v6")]
+impl UpdateWith<Arc<Transaction>> for Chain {
+    #[instrument(skip(self, transaction))]
+    fn update_chain_tip_with(
+        &mut self,
+        transaction: &Arc<Transaction>,
+    ) -> Result<(), ValidateContextError> {
+        check::issuance::add_to_non_finalized_chain(&mut self.orchard_issued_assets, transaction)
+    }
+
+    #[instrument(skip(self, transaction))]
+    fn revert_chain_with(&mut self, transaction: &Arc<Transaction>, _position: RevertPosition) {
+        check::issuance::remove_from_non_finalized_chain(
+            &mut self.orchard_issued_assets,
+            transaction,
+        );
     }
 }
 

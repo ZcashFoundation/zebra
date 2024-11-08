@@ -1286,8 +1286,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         miner_address,
         extra_coinbase_data: None,
         debug_like_zcashd: true,
+        #[cfg(feature = "internal-miner")]
+        internal_miner: false,
         // TODO: Use default field values when optional features are enabled in tests #8183
-        ..Default::default()
+        // ..Default::default()
     };
 
     // nu5 block height
@@ -1735,8 +1737,10 @@ async fn rpc_getdifficulty() {
         miner_address: None,
         extra_coinbase_data: None,
         debug_like_zcashd: true,
+        #[cfg(feature = "internal-miner")]
+        internal_miner: false,
         // TODO: Use default field values when optional features are enabled in tests #8183
-        ..Default::default()
+        // ..Default::default()
     };
 
     // nu5 block height

@@ -100,8 +100,10 @@ pub async fn test_responses<State, ReadState>(
         )),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
+        #[cfg(feature = "internal-miner")]
+        internal_miner: false,
         // TODO: Use default field values when optional features are enabled in tests #8183
-        ..Default::default()
+        // ..Default::default()
     };
 
     // nu5 block height

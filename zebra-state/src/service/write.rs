@@ -141,6 +141,7 @@ pub fn write_blocks_from_channels(
 ) {
     let mut last_zebra_mined_log_height = None;
     let mut prev_finalized_note_commitment_trees = None;
+    // TODO: Add a `prev_issued_assets` here.
 
     // Write all the finalized blocks sent by the state,
     // until the state closes the finalized block channel's sender.

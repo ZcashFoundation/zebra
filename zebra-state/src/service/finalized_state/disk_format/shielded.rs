@@ -5,6 +5,8 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
+use std::sync::Arc;
+
 use bincode::Options;
 
 use zebra_chain::{
@@ -13,6 +15,7 @@ use zebra_chain::{
     orchard_zsa::{self, BurnItem},
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
+    transaction::Transaction,
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
@@ -37,6 +40,17 @@ impl AssetState {
                 .total_supply
                 .checked_add(change.total_supply)
                 .expect("asset supply sum should not exceed u64 size"),
+        }
+    }
+
+    /// Adds partial asset states
+    pub fn with_revert(&self, change: Self) -> Self {
+        Self {
+            is_finalized: self.is_finalized && !change.is_finalized,
+            total_supply: self
+                .total_supply
+                .checked_sub(change.total_supply)
+                .expect("change should be less than total supply"),
         }
     }
 
@@ -71,6 +85,15 @@ impl AssetState {
 
     pub fn from_burns(burns: Vec<BurnItem>) -> impl Iterator<Item = (AssetBase, Self)> {
         burns.into_iter().map(Self::from_burn)
+    }
+
+    pub fn from_transaction(
+        transaction: &Arc<Transaction>,
+    ) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
+        transaction
+            .issue_actions()
+            .flat_map(|action| AssetState::from_notes(action.is_finalized(), action.notes()))
+            .chain(AssetState::from_burns(transaction.burns()))
     }
 }
 

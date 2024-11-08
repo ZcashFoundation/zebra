@@ -518,28 +518,18 @@ impl DiskWriteBatch {
 
         let updated_issued_assets = transaction
             .iter()
-            .map(|tx| (tx.issue_actions(), tx.burns()))
+            .flat_map(AssetState::from_transaction)
             .fold(
                 HashMap::new(),
-                |mut issued_assets: HashMap<orchard::AssetBase, AssetState>, (actions, burns)| {
-                    for (asset_base, asset_state_change) in actions
-                        .flat_map(|action| {
-                            AssetState::from_notes(action.is_finalized(), action.notes())
-                        })
-                        .chain(AssetState::from_burns(burns))
-                    {
-                        if let Some(asset_state) = issued_assets.get_mut(&asset_base) {
-                            assert!(!asset_state.is_finalized);
-                            *asset_state = asset_state.with_change(asset_state_change);
-                        } else {
-                            let prev_state = issued_assets_cf.zs_get(&asset_base);
-                            let new_state = prev_state.map_or(asset_state_change, |prev| {
-                                prev.with_change(asset_state_change)
-                            });
-                            issued_assets.insert(asset_base, new_state);
-                        };
-                    }
-
+                |mut issued_assets: HashMap<orchard::AssetBase, AssetState>,
+                 (asset_base, asset_state_change)| {
+                    let new_state = issued_assets
+                        .get(&asset_base)
+                        .copied()
+                        .or_else(|| issued_assets_cf.zs_get(&asset_base))
+                        .map(|prev| prev.with_change(asset_state_change))
+                        .unwrap_or(asset_state_change);
+                    issued_assets.insert(asset_base, new_state);
                     issued_assets
                 },
             );
