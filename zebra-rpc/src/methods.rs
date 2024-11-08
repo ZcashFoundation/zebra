@@ -1739,10 +1739,10 @@ impl Default for GetBlock {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetBlockHeader {
-    /// The request block, hex-encoded.
+    /// The request block header, hex-encoded.
     Raw(hex_data::HexData),
 
-    /// The block object.
+    /// The block header object.
     Object(Box<GetBlockHeaderObject>),
 }
 
