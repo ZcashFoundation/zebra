@@ -10,6 +10,9 @@ concurrency:
   cancel-in-progress: true
 
 on:
+  merge_group:
+    types: [checks_requested]
+
   schedule:
     # Run this job every Friday at mid-day UTC
     # This is limited to the Zebra and lightwalletd Full Sync jobs
@@ -119,7 +122,7 @@ jobs:
   # testnet when running the image.
   build:
     name: Build images
-    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:

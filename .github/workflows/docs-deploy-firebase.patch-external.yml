@@ -1,7 +1,7 @@
 # Workflow patches for skipping Google Cloud docs updates on PRs from external repositories.
 name: Docs
 
-# Run on PRs from external repositories, let them pass, and then Mergify will check them.
+# Run on PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them.
 # GitHub doesn't support filtering workflows by source branch names, so we have to do it for each
 # job.
 on:
