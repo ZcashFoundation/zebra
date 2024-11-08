@@ -47,6 +47,13 @@ pub struct Amount<C = NegativeAllowed>(
     PhantomData<C>,
 );
 
+impl Amount {
+    /// TODO: Use a u64 for burn amounts instead of an Amount and remove this method
+    pub fn as_i128(&self) -> i128 {
+        self.0.into()
+    }
+}
+
 impl<C> fmt::Display for Amount<C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let zats = self.zatoshis();

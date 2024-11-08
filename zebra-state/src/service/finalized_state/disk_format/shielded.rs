@@ -9,13 +9,111 @@ use bincode::Options;
 
 use zebra_chain::{
     block::Height,
-    orchard, sapling, sprout,
+    orchard::{self, AssetBase},
+    orchard_zsa::{self, BurnItem},
+    sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
 use crate::service::finalized_state::disk_format::{FromDisk, IntoDisk};
 
 use super::block::HEIGHT_DISK_BYTES;
+
+/// The circulating supply and whether that supply has been finalized.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct AssetState {
+    /// Indicates whether the asset is finalized such that no more of it can be issued.
+    pub is_finalized: bool,
+    /// The circulating supply that has been issued for an asset.
+    pub total_supply: i128,
+}
+
+impl AssetState {
+    /// Adds partial asset states
+    pub fn with_change(&self, change: Self) -> Self {
+        Self {
+            is_finalized: self.is_finalized || change.is_finalized,
+            total_supply: self
+                .total_supply
+                .checked_add(change.total_supply)
+                .expect("asset supply sum should not exceed u64 size"),
+        }
+    }
+
+    pub fn from_note(is_finalized: bool, note: orchard_zsa::Note) -> (AssetBase, Self) {
+        (
+            note.asset(),
+            Self {
+                is_finalized,
+                total_supply: note.value().inner().into(),
+            },
+        )
+    }
+
+    pub fn from_notes(
+        is_finalized: bool,
+        notes: &[orchard_zsa::Note],
+    ) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
+        notes
+            .iter()
+            .map(move |note| Self::from_note(is_finalized, *note))
+    }
+
+    pub fn from_burn(burn: BurnItem) -> (AssetBase, Self) {
+        (
+            burn.asset(),
+            Self {
+                is_finalized: false,
+                total_supply: -burn.amount().as_i128(),
+            },
+        )
+    }
+
+    pub fn from_burns(burns: Vec<BurnItem>) -> impl Iterator<Item = (AssetBase, Self)> {
+        burns.into_iter().map(Self::from_burn)
+    }
+}
+
+impl IntoDisk for AssetState {
+    type Bytes = [u8; 9];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        [
+            vec![self.is_finalized as u8],
+            self.total_supply.to_be_bytes().to_vec(),
+        ]
+        .concat()
+        .try_into()
+        .unwrap()
+    }
+}
+
+impl FromDisk for AssetState {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let (&is_finalized_byte, bytes) = bytes.as_ref().split_first().unwrap();
+        let (&total_supply_bytes, _bytes) = bytes.split_first_chunk().unwrap();
+
+        Self {
+            is_finalized: is_finalized_byte != 0,
+            total_supply: u64::from_be_bytes(total_supply_bytes).into(),
+        }
+    }
+}
+
+impl IntoDisk for orchard::AssetBase {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+impl FromDisk for orchard::AssetBase {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let (asset_base_bytes, _) = bytes.as_ref().split_first_chunk().unwrap();
+        Self::from_bytes(asset_base_bytes).unwrap()
+    }
+}
 
 impl IntoDisk for sprout::Nullifier {
     type Bytes = [u8; 32];

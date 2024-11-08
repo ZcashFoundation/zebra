@@ -46,7 +46,7 @@ pub use column_family::{TypedColumnFamily, WriteTypedBatch};
 pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
 #[allow(unused_imports)]
 pub use disk_format::{
-    FromDisk, IntoDisk, OutputIndex, OutputLocation, RawBytes, TransactionIndex,
+    AssetState, FromDisk, IntoDisk, OutputIndex, OutputLocation, RawBytes, TransactionIndex,
     TransactionLocation, MAX_ON_DISK_HEIGHT,
 };
 pub use zebra_db::ZebraDb;
@@ -91,6 +91,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "orchard_anchors",
     "orchard_note_commitment_tree",
     "orchard_note_commitment_subtree",
+    "orchard_issued_assets",
     // Chain
     "history_tree",
     "tip_chain_value_pool",

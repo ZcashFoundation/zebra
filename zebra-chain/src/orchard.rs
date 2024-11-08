@@ -30,3 +30,5 @@ pub(crate) use shielded_data::ActionCommon;
 
 #[cfg(feature = "tx-v6")]
 pub use orchard_flavor_ext::OrchardZSA;
+
+pub use orchard::note::AssetBase;

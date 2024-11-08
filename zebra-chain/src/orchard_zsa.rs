@@ -9,5 +9,5 @@ mod common;
 mod burn;
 mod issuance;
 
-pub(crate) use burn::{Burn, NoBurn};
-pub(crate) use issuance::IssueData;
+pub use burn::{Burn, BurnItem, NoBurn};
+pub use issuance::{IssueData, Note};

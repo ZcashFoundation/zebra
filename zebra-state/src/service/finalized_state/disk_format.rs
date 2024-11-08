@@ -20,6 +20,7 @@ pub mod scan;
 mod tests;
 
 pub use block::{TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT};
+pub use shielded::AssetState;
 pub use transparent::{OutputIndex, OutputLocation};
 
 #[cfg(feature = "shielded-scan")]

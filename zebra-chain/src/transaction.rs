@@ -1071,6 +1071,56 @@ impl Transaction {
         }
     }
 
+    /// Access the issuance actions in this transaction, if there are any,
+    /// regardless of version.
+    pub fn issue_actions(&self) -> impl Iterator<Item = &::orchard::issuance::IssueAction> {
+        let orchard_zsa_issue_data = match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => &None,
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_zsa_issue_data,
+                ..
+            } => orchard_zsa_issue_data,
+        };
+
+        orchard_zsa_issue_data
+            .iter()
+            .flat_map(orchard_zsa::IssueData::actions)
+    }
+
+    /// Access the asset burns in this transaction, if there are any,
+    /// regardless of version.
+    #[cfg(feature = "tx-v6")]
+    pub fn burns(&self) -> Vec<orchard_zsa::BurnItem> {
+        match self {
+            #[cfg(feature = "tx-v6")]
+            Transaction::V5 {
+                orchard_shielded_data: Some(orchard_shielded_data),
+                ..
+            } => orchard_shielded_data.burn.as_ref().to_vec(),
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data
+                .iter()
+                .flat_map(|data| data.burn.as_ref())
+                .copied()
+                .collect(),
+
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => Vec::new(),
+        }
+    }
+
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
     /// regardless of version.
     pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {

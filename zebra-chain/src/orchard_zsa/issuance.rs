@@ -20,7 +20,7 @@ use orchard::{
     note::{ExtractedNoteCommitment, RandomSeed, Rho},
     primitives::redpallas::{SigType, Signature, SpendAuth},
     value::NoteValue,
-    Address, Note,
+    Address,
 };
 
 use crate::{
@@ -32,6 +32,8 @@ use crate::{
 };
 
 use super::common::ASSET_BASE_SIZE;
+
+pub use orchard::Note;
 
 /// Wrapper for `IssueBundle` used in the context of Transaction V6. This allows the implementation of
 /// a Serde serializer for unit tests within this crate.
@@ -56,6 +58,11 @@ impl IssueData {
                     .unwrap()
             })
         })
+    }
+
+    /// Returns issue actions
+    pub fn actions(&self) -> &NonEmpty<IssueAction> {
+        self.0.actions()
     }
 }
 

@@ -19,8 +19,20 @@ const AMOUNT_SIZE: u64 = 8;
 const BURN_ITEM_SIZE: u64 = ASSET_BASE_SIZE + AMOUNT_SIZE;
 
 /// Orchard ZSA burn item.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, Amount);
+
+impl BurnItem {
+    /// Returns [`AssetBase`] being burned.
+    pub fn asset(&self) -> AssetBase {
+        self.0
+    }
+
+    /// Returns [`Amount`] being burned.
+    pub fn amount(&self) -> Amount {
+        self.1
+    }
+}
 
 // Convert from burn item type used in `orchard` crate
 impl TryFrom<(AssetBase, NoteValue)> for BurnItem {
@@ -105,9 +117,21 @@ impl ZcashDeserialize for NoBurn {
     }
 }
 
+impl AsRef<[BurnItem]> for NoBurn {
+    fn as_ref(&self) -> &[BurnItem] {
+        &[]
+    }
+}
+
 /// Orchard ZSA burn items (assets intended for burning)
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Burn(Vec<BurnItem>);
+
+impl AsRef<[BurnItem]> for Burn {
+    fn as_ref(&self) -> &[BurnItem] {
+        &self.0
+    }
+}
 
 impl From<Vec<BurnItem>> for Burn {
     fn from(inner: Vec<BurnItem>) -> Self {
