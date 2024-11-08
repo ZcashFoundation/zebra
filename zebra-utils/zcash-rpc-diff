@@ -22,6 +22,9 @@ JQ="${JQ:-jq}"
 # - Use `-rpccookiefile=your/cookie/file` for a cookie file.
 # - Use `-rpcpassword=your-password` for a password.
 ZCASHD_EXTRA_ARGS="${ZCASHD_EXTRA_ARGS:-}"
+# Zebrad authentication modes:
+# - Use `-rpccookiefile=your/cookie/file` for a cookie file.
+ZEBRAD_EXTRA_ARGS="${ZEBRAD_EXTRA_ARGS:-}"
 # We show this many lines of data, removing excess lines from the middle or end of the output.
 OUTPUT_DATA_LINE_LIMIT="${OUTPUT_DATA_LINE_LIMIT:-40}"
 # When checking different mempools, we show this many different transactions.
@@ -49,7 +52,7 @@ ZEBRAD_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/first-node-check-getinfo.json"
 ZCASHD_RELEASE_INFO="$ZCASH_RPC_TMP_DIR/second-node-check-getinfo.json"
 
 echo "Checking first node release info..."
-$ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getinfo > "$ZEBRAD_RELEASE_INFO"
+$ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" getinfo > "$ZEBRAD_RELEASE_INFO"
 
 ZEBRAD_NAME=$(cat "$ZEBRAD_RELEASE_INFO" | grep '"subversion"' | cut -d: -f2 | cut -d/ -f2 | \
              tr 'A-Z' 'a-z' | sed 's/magicbean/zcashd/ ; s/zebra$/zebrad/')
@@ -74,7 +77,7 @@ ZEBRAD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-check-getblockchaininfo.
 ZCASHD_BLOCKCHAIN_INFO="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-check-getblockchaininfo.json"
 
 echo "Checking $ZEBRAD network and tip height..."
-$ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getblockchaininfo > "$ZEBRAD_BLOCKCHAIN_INFO"
+$ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" getblockchaininfo > "$ZEBRAD_BLOCKCHAIN_INFO"
 
 ZEBRAD_NET=$(cat "$ZEBRAD_BLOCKCHAIN_INFO" | grep '"chain"' | cut -d: -f2 | tr -d ' ,"')
 ZEBRAD_HEIGHT=$(cat "$ZEBRAD_BLOCKCHAIN_INFO" | grep '"blocks"' | cut -d: -f2 | tr -d ' ,"')
@@ -109,7 +112,7 @@ echo "$@"
 echo
 
 echo "Querying $ZEBRAD $ZEBRAD_NET chain at height >=$ZEBRAD_HEIGHT..."
-time $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" "$@" > "$ZEBRAD_RESPONSE"
+time $ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" "$@" > "$ZEBRAD_RESPONSE"
 echo
 
 echo "Querying $ZCASHD $ZCASHD_NET chain at height >=$ZCASHD_HEIGHT..."
@@ -166,7 +169,7 @@ echo "$@"
 echo
 
 echo "Querying $ZEBRAD $ZEBRAD_NET chain at height >=$ZEBRAD_HEIGHT..."
-$ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" "$@" > "$ZEBRAD_CHECK_RESPONSE"
+$ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" "$@" > "$ZEBRAD_CHECK_RESPONSE"
 
 echo "Querying $ZCASHD $ZCASHD_NET chain at height >=$ZCASHD_HEIGHT..."
 $ZCASH_CLI $ZCASHD_EXTRA_ARGS "$@" > "$ZCASHD_CHECK_RESPONSE"
@@ -257,7 +260,7 @@ if [ "$1" == "getrawmempool" ] && [ $CHECK_EXIT_STATUS != 0 ]; then
     for TRANSACTION_ID in $ZEBRAD_TRANSACTION_IDS; do
         TRANSACTION_HEX_FILE="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-$ZEBRAD_NET-$ZEBRAD_HEIGHT-$TRANSACTION_ID.json"
 
-        $ZCASH_CLI -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
+        $ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" getrawtransaction $TRANSACTION_ID 0 > $TRANSACTION_HEX_FILE
 
         echo "## Displaying transaction $TRANSACTION_ID from zebrad (limited to ${OUTPUT_DATA_LINE_LIMIT} lines)"
         echo
