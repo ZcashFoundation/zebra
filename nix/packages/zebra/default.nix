@@ -47,10 +47,6 @@ craneLib.buildPackage (
     ##       be removed.
     ZEBRA_SKIP_NETWORK_TESTS = true;
 
-    ## Tests against localhost aren’t disabled by `ZEBRA_SKIP_NETWORK_TESTS`, so this allows them to
-    ## pass on darwin.
-    __darwinAllowLocalNetworking = true;
-
     cargoTestExtraArgs =
       lib.escapeShellArgs
       (["--"]
