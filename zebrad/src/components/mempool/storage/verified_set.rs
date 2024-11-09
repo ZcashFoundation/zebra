@@ -178,7 +178,8 @@ impl VerifiedSet {
         Ok(())
     }
 
-    /// Evict one transaction from the set, returns the victim transaction.
+    /// Evict one transaction and any transactions that directly or indirectly depend on
+    /// its outputs from the set, returns the victim transaction and any dependent transactions.
     ///
     /// Removes a transaction with probability in direct proportion to the
     /// eviction weight, as per [ZIP-401].
@@ -196,30 +197,31 @@ impl VerifiedSet {
     /// to 20,000 (mempooltxcostlimit/min(cost)), so the actual cost shouldn't
     /// be too bad.
     ///
+    /// This function is equivalent to `EvictTransaction` in [ZIP-401].
+    ///
     /// [ZIP-401]: https://zips.z.cash/zip-0401
     #[allow(clippy::unwrap_in_result)]
-    pub fn evict_one(&mut self) -> Vec<VerifiedUnminedTx> {
-        if self.transactions.is_empty() {
-            Vec::new()
-        } else {
-            use rand::distributions::{Distribution, WeightedIndex};
-            use rand::prelude::thread_rng;
+    pub fn evict_one(&mut self) -> Option<VerifiedUnminedTx> {
+        use rand::distributions::{Distribution, WeightedIndex};
+        use rand::prelude::thread_rng;
 
-            let (keys, weights): (Vec<transaction::Hash>, Vec<u64>) = self
-                .transactions
-                .iter()
-                .map(|(&tx_id, tx)| (tx_id, tx.eviction_weight()))
-                .unzip();
+        let (keys, weights): (Vec<transaction::Hash>, Vec<u64>) = self
+            .transactions
+            .iter()
+            .map(|(&tx_id, tx)| (tx_id, tx.eviction_weight()))
+            .unzip();
 
-            let dist = WeightedIndex::new(weights)
-                .expect("there is at least one weight, all weights are non-negative, and the total is positive");
+        let dist = WeightedIndex::new(weights).expect(
+            "there is at least one weight, all weights are non-negative, and the total is positive",
+        );
 
-            let key_to_remove = keys
-                .get(dist.sample(&mut thread_rng()))
-                .expect("should have a key at every index in the distribution");
+        let key_to_remove = keys
+            .get(dist.sample(&mut thread_rng()))
+            .expect("should have a key at every index in the distribution");
 
-            self.remove(key_to_remove)
-        }
+        // Removes the randomly selected transaction and all of its dependents from the set,
+        // then returns just the randomly selected transaction
+        self.remove(key_to_remove).pop()
     }
 
     /// Clears a list of mined transaction ids from the lists of dependencies for
@@ -248,14 +250,21 @@ impl VerifiedSet {
         removed_count
     }
 
-    /// Removes a transaction from the set.
+    /// Accepts a transaction id for a transaction to remove from the verified set.
     ///
-    /// Also removes its outputs from the internal caches.
+    /// Removes the transaction and any transactions that directly or indirectly
+    /// depend on it from the set.
+    ///
+    /// Returns a list of transactions that have been removed with the target transaction
+    /// as the last item.
+    ///
+    /// Also removes the outputs of any removed transactions from the internal caches.
     fn remove(&mut self, key_to_remove: &transaction::Hash) -> Vec<VerifiedUnminedTx> {
         let removed_transactions: Vec<_> = self
             .transaction_dependencies
             .remove_all(key_to_remove)
             .iter()
+            .chain(std::iter::once(key_to_remove))
             .map(|key_to_remove| {
                 let removed_tx = self
                     .transactions

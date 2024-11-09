@@ -75,11 +75,11 @@ impl TransactionDependencies {
     /// that are tracked as being directly or indirectly dependent on that transaction from
     /// this [`TransactionDependencies`].
     ///
-    /// Returns a list of transaction hashes that have been removed if they were previously
-    /// in this [`TransactionDependencies`].
+    /// Returns a list of transaction hashes that were being tracked as dependents of the
+    /// provided transaction hash.
     pub fn remove_all(&mut self, &tx_hash: &transaction::Hash) -> HashSet<transaction::Hash> {
+        let mut all_dependents = HashSet::new();
         let mut current_level_dependents: HashSet<_> = [tx_hash].into();
-        let mut all_dependents = current_level_dependents.clone();
 
         while !current_level_dependents.is_empty() {
             current_level_dependents = current_level_dependents

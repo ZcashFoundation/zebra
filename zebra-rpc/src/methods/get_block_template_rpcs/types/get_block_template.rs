@@ -264,7 +264,7 @@ impl GetBlockTemplate {
                 .into_iter()
                 .map(|(min_tx_index, tx)| (min_tx_index, (&tx).into(), tx))
                 .collect();
-            #[cfg(test)]
+
             if like_zcashd {
                 // Sort in serialized data order, excluding the length byte.
                 // `zcashd` sometimes seems to do this, but other times the order is arbitrary.

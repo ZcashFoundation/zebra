@@ -270,25 +270,21 @@ impl Storage {
             // > EvictTransaction MUST do the following:
             // > Select a random transaction to evict, with probability in direct proportion to
             // > eviction weight. (...) Remove it from the mempool.
-            let victim_txs = self.verified.evict_one();
+            let victim_tx = self
+                .verified
+                .evict_one()
+                .expect("mempool is empty, but was expected to be full");
 
-            assert!(
-                !victim_txs.is_empty(),
-                "mempool is empty, but was expected to be full"
+            // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
+            // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
+            self.reject(
+                victim_tx.transaction.id,
+                SameEffectsChainRejectionError::RandomlyEvicted.into(),
             );
 
-            for victim_tx in victim_txs {
-                // > Add the txid and the current time to RecentlyEvicted, dropping the oldest entry in
-                // > RecentlyEvicted if necessary to keep it to at most `eviction_memory_entries entries`.
-                self.reject(
-                    victim_tx.transaction.id,
-                    SameEffectsChainRejectionError::RandomlyEvicted.into(),
-                );
-
-                // If this transaction gets evicted, set its result to the same error
-                if victim_tx.transaction.id == unmined_tx_id {
-                    result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
-                }
+            // If this transaction gets evicted, set its result to the same error
+            if victim_tx.transaction.id == unmined_tx_id {
+                result = Err(SameEffectsChainRejectionError::RandomlyEvicted.into());
             }
         }
 
