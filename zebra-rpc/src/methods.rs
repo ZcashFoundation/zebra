@@ -780,20 +780,37 @@ where
                     }),
                     _ => unreachable!("unmatched response to a block request"),
                 }
-            } else if verbosity == 1 || verbosity == 2 {
-                let r: Result<GetBlockHeader> = self_clone
+            } else if matches!(verbosity, 1 | 2) {
+                let get_block_header_result: Result<GetBlockHeader> = self_clone
                     .get_block_header(original_hash_or_height, Some(true))
                     .await;
 
-                let GetBlockHeader::Object(h) = r? else {
+                let GetBlockHeader::Object(block_header) = get_block_header_result? else {
                     panic!("must return Object")
                 };
-                let hash = h.hash.0;
+
+                let GetBlockHeaderObject {
+                    hash,
+                    confirmations,
+                    height,
+                    version,
+                    merkle_root,
+                    final_sapling_root,
+                    sapling_tree_size,
+                    time,
+                    nonce,
+                    solution,
+                    bits,
+                    difficulty,
+                    previous_block_hash,
+                    next_block_hash,
+                } = *block_header;
 
                 // # Concurrency
                 //
                 // We look up by block hash so the hash, transaction IDs, and confirmations
                 // are consistent.
+                let hash_or_height = hash.0.into();
                 let requests = vec![
                     // Get transaction IDs from the transaction index by block hash
                     //
@@ -802,11 +819,9 @@ where
                     // A block's transaction IDs are never modified, so all possible responses are
                     // valid. Clients that query block heights must be able to handle chain forks,
                     // including getting transaction IDs from any chain fork.
-                    zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
-                    // Sapling trees
-                    zebra_state::ReadRequest::SaplingTree(hash.into()),
+                    zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
                     // Orchard trees
-                    zebra_state::ReadRequest::OrchardTree(hash.into()),
+                    zebra_state::ReadRequest::OrchardTree(hash_or_height),
                 ];
 
                 let mut futs = FuturesOrdered::new();
@@ -825,220 +840,56 @@ where
                     _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
                 };
 
-                let sapling_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let sapling_note_commitment_tree_count =
-                    match sapling_tree_response.map_server_error()? {
-                        zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::SaplingTree(None) => 0,
-                        _ => unreachable!("unmatched response to a SaplingTree request"),
-                    };
-
                 let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let orchard_note_commitment_tree_count =
-                    match orchard_tree_response.map_server_error()? {
-                        zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::OrchardTree(None) => 0,
-                        _ => unreachable!("unmatched response to a OrchardTree request"),
-                    };
-
-                let sapling = SaplingTrees {
-                    size: sapling_note_commitment_tree_count,
+                let zebra_state::ReadResponse::OrchardTree(orchard_tree) =
+                    orchard_tree_response.map_server_error()?
+                else {
+                    unreachable!("unmatched response to a OrchardTree request");
                 };
 
-                let orchard = OrchardTrees {
-                    size: orchard_note_commitment_tree_count,
-                };
+                // This could be `None` if there's a chain reorg between state queries.
+                let orchard_tree =
+                    orchard_tree.ok_or_server_error("missing sapling tree for block")?;
 
-                let trees = GetBlockTrees { sapling, orchard };
-
-                Ok(GetBlock::Object {
-                    hash: h.hash,
-                    confirmations: h.confirmations,
-                    height: Some(h.height),
-                    version: Some(h.version),
-                    merkle_root: Some(h.merkle_root),
-                    time: Some(h.time),
-                    nonce: Some(h.nonce),
-                    solution: Some(h.solution),
-                    bits: Some(h.bits),
-                    difficulty: Some(h.difficulty),
-                    // TODO
-                    tx,
-                    trees,
-                    // TODO
-                    size: None,
-                    final_sapling_root: Some(h.final_sapling_root),
-                    // TODO
-                    final_orchard_root: None,
-                    previous_block_hash: Some(h.previous_block_hash),
-                    next_block_hash: h.next_block_hash,
-                })
-            } else if verbosity == 3 {
-                // # Performance
-                //
-                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                // so it needs to load all its fields very efficiently.
-                //
-                // Currently, we get the block hash and transaction IDs from indexes,
-                // which is much more efficient than loading all the block data,
-                // then hashing the block header and all the transactions.
-
-                // Get the block hash from the height -> hash index, if needed
-                //
-                // # Concurrency
-                //
-                // For consistency, this lookup must be performed first, then all the other
-                // lookups must be based on the hash.
-                //
-                // All possible responses are valid, even if the best chain changes. Clients
-                // must be able to handle chain forks, including a hash for a block that is
-                // later discovered to be on a side chain.
-
-                let should_read_block_header = verbosity == 2;
-
-                let hash = match hash_or_height {
-                    HashOrHeight::Hash(hash) => hash,
-                    HashOrHeight::Height(height) => {
-                        let request = zebra_state::ReadRequest::BestChainBlockHash(height);
-                        let response = state
-                            .ready()
-                            .and_then(|service| service.call(request))
-                            .await
-                            .map_server_error()?;
-
-                        match response {
-                            zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
-                            zebra_state::ReadResponse::BlockHash(None) => {
-                                return Err(Error {
-                                    code: MISSING_BLOCK_ERROR_CODE,
-                                    message: "block height not in best chain".to_string(),
-                                    data: None,
-                                })
-                            }
-                            _ => unreachable!("unmatched response to a block hash request"),
-                        }
-                    }
-                };
-
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                let mut requests = vec![
-                    // Get transaction IDs from the transaction index by block hash
-                    //
-                    // # Concurrency
-                    //
-                    // A block's transaction IDs are never modified, so all possible responses are
-                    // valid. Clients that query block heights must be able to handle chain forks,
-                    // including getting transaction IDs from any chain fork.
-                    zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
-                    // Sapling trees
-                    zebra_state::ReadRequest::SaplingTree(hash.into()),
-                    // Orchard trees
-                    zebra_state::ReadRequest::OrchardTree(hash.into()),
-                    // Get block confirmations from the block height index
-                    //
-                    // # Concurrency
-                    //
-                    // All possible responses are valid, even if a block is added to the chain, or
-                    // the best chain changes. Clients must be able to handle chain forks, including
-                    // different confirmation values before or after added blocks, and switching
-                    // between -1 and multiple different confirmation values.
-                    zebra_state::ReadRequest::Depth(hash),
-                ];
-
-                if should_read_block_header {
-                    // Block header
-                    requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
-                }
-
-                let mut futs = FuturesOrdered::new();
-
-                for request in requests {
-                    futs.push_back(state.clone().oneshot(request));
-                }
-
-                let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-                let tx = match tx_ids_response.map_server_error()? {
-                    zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
-                        .ok_or_server_error("Block not found")?
-                        .iter()
-                        .map(|tx_id| tx_id.encode_hex())
-                        .collect(),
-                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
-                };
-
-                let sapling_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let sapling_note_commitment_tree_count =
-                    match sapling_tree_response.map_server_error()? {
-                        zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::SaplingTree(None) => 0,
-                        _ => unreachable!("unmatched response to a SaplingTree request"),
-                    };
-
-                let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let orchard_note_commitment_tree_count =
-                    match orchard_tree_response.map_server_error()? {
-                        zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::OrchardTree(None) => 0,
-                        _ => unreachable!("unmatched response to a OrchardTree request"),
-                    };
-
-                // From <https://zcash.github.io/rpc/getblock.html>
-                const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
-
-                let depth_response = futs.next().await.expect("`futs` should not be empty");
-                let confirmations = match depth_response.map_server_error()? {
-                    // Confirmations are one more than the depth.
-                    // Depth is limited by height, so it will never overflow an i64.
-                    zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
-                    zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
-                    _ => unreachable!("unmatched response to a depth request"),
-                };
-
-                let (time, height) = if should_read_block_header {
-                    let block_header_response =
-                        futs.next().await.expect("`futs` should not be empty");
-
-                    match block_header_response.map_server_error()? {
-                        zebra_state::ReadResponse::BlockHeader { header, height, .. } => {
-                            (Some(header.time.timestamp()), Some(height))
-                        }
-                        _ => unreachable!("unmatched response to a BlockHeader request"),
-                    }
+                let orchard_tree_size = orchard_tree.count();
+                let final_orchard_root: [u8; 32] = if orchard_tree_size != 0 {
+                    let mut root: [u8; 32] = orchard_tree.root().into();
+                    root.reverse();
+                    root
                 } else {
-                    (None, hash_or_height.height())
+                    [0; 32]
                 };
 
                 let sapling = SaplingTrees {
-                    size: sapling_note_commitment_tree_count,
+                    size: sapling_tree_size,
                 };
 
                 let orchard = OrchardTrees {
-                    size: orchard_note_commitment_tree_count,
+                    size: orchard_tree_size,
                 };
 
                 let trees = GetBlockTrees { sapling, orchard };
 
                 Ok(GetBlock::Object {
-                    hash: GetBlockHash(hash),
+                    hash,
                     confirmations,
-                    height,
-                    time,
+                    height: Some(height),
+                    version: Some(version),
+                    merkle_root: Some(merkle_root),
+                    time: Some(time),
+                    nonce: Some(nonce),
+                    solution: Some(solution),
+                    bits: Some(bits),
+                    difficulty: Some(difficulty),
+                    // TODO
                     tx,
                     trees,
+                    // TODO
                     size: None,
-                    version: None,
-                    merkle_root: None,
-                    final_sapling_root: None,
-                    final_orchard_root: None,
-                    nonce: None,
-                    bits: None,
-                    difficulty: None,
-                    previous_block_hash: None,
-                    next_block_hash: None,
-                    solution: None,
+                    final_sapling_root: Some(final_sapling_root),
+                    final_orchard_root: Some(final_orchard_root),
+                    previous_block_hash: Some(previous_block_hash),
+                    next_block_hash,
                 })
             } else {
                 Err(Error {
@@ -1125,7 +976,8 @@ where
                 let mut nonce = *header.nonce;
                 nonce.reverse();
 
-                let final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
+                let sapling_tree_size = sapling_tree.count();
+                let final_sapling_root: [u8; 32] = if sapling_tree_size != 0 {
                     let mut root: [u8; 32] = sapling_tree.root().into();
                     root.reverse();
                     root
@@ -1142,6 +994,7 @@ where
                     version: header.version,
                     merkle_root: header.merkle_root,
                     final_sapling_root,
+                    sapling_tree_size,
                     time: header.time.timestamp(),
                     nonce,
                     solution: header.solution,
@@ -1977,6 +1830,11 @@ pub struct GetBlockHeaderObject {
     #[serde(with = "hex", rename = "finalsaplingroot")]
     pub final_sapling_root: [u8; 32],
 
+    /// The number of Sapling notes in the Sapling note commitment tree
+    /// after applying this block. Used by the `getblock` RPC method.
+    #[serde(skip)]
+    pub sapling_tree_size: u64,
+
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.
     pub time: i64,
 
@@ -2022,6 +1880,7 @@ impl Default for GetBlockHeaderObject {
             version: 4,
             merkle_root: block::merkle::Root([0; 32]),
             final_sapling_root: Default::default(),
+            sapling_tree_size: Default::default(),
             time: 0,
             nonce: [0; 32],
             solution: Solution::for_proposal(),
