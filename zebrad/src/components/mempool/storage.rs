@@ -646,29 +646,30 @@ impl Storage {
         tip_height: zebra_chain::block::Height,
     ) -> HashSet<transaction::Hash> {
         let mut tx_ids = HashSet::new();
-        // we need a separate set, since reject() takes the original unmined ID,
-        // then extracts the mined ID out of it
-        let mut mined_tx_ids = HashSet::new();
 
-        for (tx_id, tx) in self.transactions() {
+        for (&tx_id, tx) in self.transactions() {
             if let Some(expiry_height) = tx.transaction.transaction.expiry_height() {
                 if tip_height >= expiry_height {
-                    tx_ids.insert(tx.transaction.id);
-                    mined_tx_ids.insert(*tx_id);
+                    tx_ids.insert(tx_id);
                 }
             }
         }
 
         // expiry height is effecting data, so we match by non-malleable TXID
         self.verified
-            .remove_all_that(|tx| tx_ids.contains(&tx.transaction.id));
+            .remove_all_that(|tx| tx_ids.contains(&tx.transaction.id.mined_id()));
 
         // also reject it
         for &id in &tx_ids {
-            self.reject(id, SameEffectsChainRejectionError::Expired.into());
+            self.reject(
+                // It's okay to omit the auth digest here as we know that `reject()` will always
+                // use mined ids for `SameEffectsChainRejectionError`s.
+                UnminedTxId::Legacy(id),
+                SameEffectsChainRejectionError::Expired.into(),
+            );
         }
 
-        mined_tx_ids
+        tx_ids
     }
 
     /// Check if transaction should be downloaded and/or verified.

@@ -8,7 +8,7 @@ use std::{
 
 use zebra_chain::{
     orchard, sapling, sprout,
-    transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
+    transaction::{self, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
 use zebra_node_services::mempool::TransactionDependencies;
@@ -41,10 +41,9 @@ pub struct VerifiedSet {
     /// spend or create outputs of other transactions in the mempool.
     transaction_dependencies: TransactionDependencies,
 
-    /// The [`transparent::Utxo`]s created by verified transactions in the mempool
+    /// The [`transparent::Output`]s created by verified transactions in the mempool.
     ///
-    /// Note that these UTXOs may not be unspent.
-    /// Outputs can be spent by later transactions or blocks in the chain.
+    /// These outputs may be spent by other transactions in the mempool.
     created_outputs: HashMap<transparent::OutPoint, transparent::Output>,
 
     /// The total size of the transactions in the mempool if they were
@@ -163,11 +162,17 @@ impl VerifiedSet {
         self.transaction_dependencies
             .add(tx_id, spent_mempool_outpoints);
 
-        self.cache_outputs_and_respond_to_pending_output_requests_from(
-            tx_id,
-            &transaction.transaction.transaction,
-            pending_outputs,
-        );
+        let tx = &transaction.transaction.transaction;
+        for (index, output) in tx.outputs().iter().cloned().enumerate() {
+            let outpoint = transparent::OutPoint::from_usize(tx_id, index);
+            self.created_outputs.insert(outpoint, output.clone());
+            pending_outputs.respond(&outpoint, output)
+        }
+
+        self.spent_outpoints.extend(tx.spent_outpoints());
+        self.sprout_nullifiers.extend(tx.sprout_nullifiers());
+        self.sapling_nullifiers.extend(tx.sapling_nullifiers());
+        self.orchard_nullifiers.extend(tx.orchard_nullifiers());
 
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
@@ -295,25 +300,6 @@ impl VerifiedSet {
             || Self::has_conflicts(&self.sprout_nullifiers, tx.sprout_nullifiers().copied())
             || Self::has_conflicts(&self.sapling_nullifiers, tx.sapling_nullifiers().copied())
             || Self::has_conflicts(&self.orchard_nullifiers, tx.orchard_nullifiers().copied())
-    }
-
-    /// Inserts the transaction's outputs into the internal caches and responds to pending output requests.
-    fn cache_outputs_and_respond_to_pending_output_requests_from(
-        &mut self,
-        tx_hash: transaction::Hash,
-        tx: &Transaction,
-        pending_outputs: &mut PendingOutputs,
-    ) {
-        for (index, output) in tx.outputs().iter().cloned().enumerate() {
-            let outpoint = transparent::OutPoint::from_usize(tx_hash, index);
-            self.created_outputs.insert(outpoint, output.clone());
-            pending_outputs.respond(&outpoint, output)
-        }
-
-        self.spent_outpoints.extend(tx.spent_outpoints());
-        self.sprout_nullifiers.extend(tx.sprout_nullifiers());
-        self.sapling_nullifiers.extend(tx.sapling_nullifiers());
-        self.orchard_nullifiers.extend(tx.orchard_nullifiers());
     }
 
     /// Removes the tracked transaction outputs from the mempool.
