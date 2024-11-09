@@ -162,13 +162,13 @@ impl VerifiedSet {
         self.transaction_dependencies
             .add(tx_id, spent_mempool_outpoints);
 
+        // Inserts the transaction's outputs into the internal caches and responds to pending output requests.
         let tx = &transaction.transaction.transaction;
         for (index, output) in tx.outputs().iter().cloned().enumerate() {
             let outpoint = transparent::OutPoint::from_usize(tx_id, index);
             self.created_outputs.insert(outpoint, output.clone());
             pending_outputs.respond(&outpoint, output)
         }
-
         self.spent_outpoints.extend(tx.spent_outpoints());
         self.sprout_nullifiers.extend(tx.sprout_nullifiers());
         self.sapling_nullifiers.extend(tx.sapling_nullifiers());
