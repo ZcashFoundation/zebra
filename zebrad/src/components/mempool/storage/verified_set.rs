@@ -27,7 +27,7 @@ use zebra_chain::transaction::MEMPOOL_TRANSACTION_COST_THRESHOLD;
 /// outputs include:
 ///
 /// - the dependencies of transactions that spent the outputs of other transactions in the mempool
-/// - the UTXOs of transactions in the mempool
+/// - the outputs of transactions in the mempool
 /// - the transparent outpoints spent by transactions in the mempool
 /// - the Sprout nullifiers revealed by transactions in the mempool
 /// - the Sapling nullifiers revealed by transactions in the mempool
