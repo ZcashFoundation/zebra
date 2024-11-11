@@ -5,12 +5,28 @@ use std::io;
 use crate::{
     amount::Amount,
     block::MAX_BLOCK_BYTES,
-    serialization::{SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize},
+    serialization::{
+        ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
+    },
 };
 
 use orchard::{note::AssetBase, value::NoteValue};
 
-use super::common::ASSET_BASE_SIZE;
+// The size of the serialized AssetBase in bytes (used for TrustedPreallocate impls)
+pub(super) const ASSET_BASE_SIZE: u64 = 32;
+
+impl ZcashSerialize for AssetBase {
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        writer.write_all(&self.to_bytes())
+    }
+}
+
+impl ZcashDeserialize for AssetBase {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Option::from(AssetBase::from_bytes(&reader.read_32_bytes()?))
+            .ok_or_else(|| SerializationError::Parse("Invalid orchard_zsa AssetBase!"))
+    }
+}
 
 // Sizes of the serialized values for types in bytes (used for TrustedPreallocate impls)
 const AMOUNT_SIZE: u64 = 8;
