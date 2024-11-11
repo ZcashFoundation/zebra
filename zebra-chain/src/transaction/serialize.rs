@@ -376,12 +376,12 @@ impl<V: OrchardFlavorExt> ZcashSerialize for orchard::ShieldedData<V> {
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
         zcash_serialize_external_count(&sigs, &mut writer)?;
 
-        // Denoted as `bindingSigOrchard` in the spec.
-        self.binding_sig.zcash_serialize(&mut writer)?;
-
         #[cfg(feature = "tx-v6")]
         // Denoted as `vAssetBurn` in the spec (ZIP 230).
         self.burn.zcash_serialize(&mut writer)?;
+
+        // Denoted as `bindingSigOrchard` in the spec.
+        self.binding_sig.zcash_serialize(&mut writer)?;
 
         Ok(())
     }
@@ -434,6 +434,10 @@ impl<V: OrchardFlavorExt> ZcashDeserialize for Option<orchard::ShieldedData<V>> 
         let sigs: Vec<Signature<SpendAuth>> =
             zcash_deserialize_external_count(actions.len(), &mut reader)?;
 
+        // TODO: FIXME: add a proper comment
+        #[cfg(feature = "tx-v6")]
+        let burn = (&mut reader).zcash_deserialize_into()?;
+
         // Denoted as `bindingSigOrchard` in the spec.
         let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
 
@@ -447,10 +451,6 @@ impl<V: OrchardFlavorExt> ZcashDeserialize for Option<orchard::ShieldedData<V>> 
             .collect();
 
         let actions: AtLeastOne<orchard::AuthorizedAction<V>> = authorized_actions.try_into()?;
-
-        // TODO: FIXME: add a proper comment
-        #[cfg(feature = "tx-v6")]
-        let burn = (&mut reader).zcash_deserialize_into()?;
 
         Ok(Some(orchard::ShieldedData::<V> {
             flags,
