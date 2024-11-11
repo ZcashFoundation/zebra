@@ -27,6 +27,13 @@ use super::burn::ASSET_BASE_SIZE;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct IssueData(IssueBundle<Signed>);
 
+impl IssueData {
+    /// Returns a reference to the inner `IssueBundle<Signed>`.
+    pub fn inner(&self) -> &IssueBundle<Signed> {
+        &self.0
+    }
+}
+
 impl From<IssueBundle<Signed>> for IssueData {
     fn from(inner: IssueBundle<Signed>) -> Self {
         Self(inner)
