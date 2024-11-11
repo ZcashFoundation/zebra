@@ -14,11 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Breaking Changes
 
 - The JSON RPC endpoint has cookie-based authentication enabled by default.
-  **If you rely on Zebra RPC, wou will need to adjust your config.** The
+  **If you rely on Zebra RPC, you will need to adjust your config.** The
   simplest change is to disable authentication by adding `enable_cookie_auth =
   false` to the `[rpc]` section of the Zebra config file; [refer to the
-  docs](https://zebra.zfnd.org/user/lightwalletd.html#json-rpc). (This was added
-  in 2.0.0 but we include here again for clarity)
+  docs for more information](https://zebra.zfnd.org/user/lightwalletd.html#json-rpc) (this was added
+  in v2.0.0, but is being mentioned again here for clarity).
 
 ### Changed
 
@@ -33,13 +33,13 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 ## [Zebra 2.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0) - 2024-10-25 - [YANKED]
 
 This release was intended to support NU6 but was pointing to the wrong version
-of dependencies which would make Zebra panic at NU6 activation. Use 2.0.1 instead.
+of dependencies which would make Zebra panic at NU6 activation. Use v2.0.1 instead.
 
 ### Breaking Changes
 
 - Zebra now supports NU6 on Mainnet.
 - The JSON RPC endpoint has a cookie-based authentication enabled by default.
-  **If you rely on Zebra RPC, wou will need to adjust your config.** The
+  **If you rely on Zebra RPC, you will need to adjust your config.** The
   simplest change is to disable authentication by adding `enable_cookie_auth =
   false` to the `[rpc]` section of the Zebra config file; [refer to the
   docs](https://zebra.zfnd.org/user/lightwalletd.html#json-rpc).
