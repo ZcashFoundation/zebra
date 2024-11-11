@@ -523,13 +523,10 @@ impl DiskWriteBatch {
                 HashMap::new(),
                 |mut issued_assets: HashMap<orchard::AssetBase, AssetState>,
                  (asset_base, asset_state_change)| {
-                    let new_state = issued_assets
-                        .get(&asset_base)
-                        .copied()
-                        .or_else(|| issued_assets_cf.zs_get(&asset_base))
-                        .map(|prev| prev.with_change(asset_state_change))
-                        .unwrap_or(asset_state_change);
-                    issued_assets.insert(asset_base, new_state);
+                    issued_assets
+                        .entry(asset_base)
+                        .and_modify(|prev| prev.apply_change(asset_state_change))
+                        .or_insert(asset_state_change);
                     issued_assets
                 },
             );

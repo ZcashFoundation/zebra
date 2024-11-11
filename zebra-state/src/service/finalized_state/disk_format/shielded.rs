@@ -33,28 +33,24 @@ pub struct AssetState {
 
 impl AssetState {
     /// Adds partial asset states
-    pub fn with_change(&self, change: Self) -> Self {
-        Self {
-            is_finalized: self.is_finalized || change.is_finalized,
-            total_supply: self
-                .total_supply
-                .checked_add(change.total_supply)
-                .expect("asset supply sum should not exceed u64 size"),
-        }
+    pub fn apply_change(&mut self, change: Self) {
+        self.is_finalized |= change.is_finalized;
+        self.total_supply = self
+            .total_supply
+            .checked_add(change.total_supply)
+            .expect("asset supply sum should not exceed u64 size");
     }
 
     /// Adds partial asset states
-    pub fn with_revert(&self, change: Self) -> Self {
-        Self {
-            is_finalized: self.is_finalized && !change.is_finalized,
-            total_supply: self
-                .total_supply
-                .checked_sub(change.total_supply)
-                .expect("change should be less than total supply"),
-        }
+    pub fn revert_change(&mut self, change: Self) {
+        self.is_finalized &= !change.is_finalized;
+        self.total_supply = self
+            .total_supply
+            .checked_sub(change.total_supply)
+            .expect("validated change should be less than total supply");
     }
 
-    pub fn from_note(is_finalized: bool, note: orchard_zsa::Note) -> (AssetBase, Self) {
+    fn from_note(is_finalized: bool, note: orchard_zsa::Note) -> (AssetBase, Self) {
         (
             note.asset(),
             Self {
@@ -64,7 +60,7 @@ impl AssetState {
         )
     }
 
-    pub fn from_notes(
+    fn from_notes(
         is_finalized: bool,
         notes: &[orchard_zsa::Note],
     ) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
@@ -73,7 +69,7 @@ impl AssetState {
             .map(move |note| Self::from_note(is_finalized, *note))
     }
 
-    pub fn from_burn(burn: BurnItem) -> (AssetBase, Self) {
+    fn from_burn(burn: BurnItem) -> (AssetBase, Self) {
         (
             burn.asset(),
             Self {
@@ -83,7 +79,7 @@ impl AssetState {
         )
     }
 
-    pub fn from_burns(burns: Vec<BurnItem>) -> impl Iterator<Item = (AssetBase, Self)> {
+    fn from_burns(burns: Vec<BurnItem>) -> impl Iterator<Item = (AssetBase, Self)> {
         burns.into_iter().map(Self::from_burn)
     }
 
