@@ -1,5 +1,5 @@
 # Google Cloud integration tests that run when Rust code or dependencies are modified,
-# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by mergify.)
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by GitHub's Merge Queue.)
 #
 # Specific conditions and dependencies are set for each job to ensure they are executed in the correct sequence and under the right circumstances.
 # Each test has a description of the conditions under which it runs.
@@ -36,10 +36,6 @@ on:
 #! `sub-deploy-integration-tests-gcp.yml` workflow file as inputs. If modified in this file, they must
 #! also be updated in the `sub-deploy-integration-tests-gcp.yml` file.
 jobs:
-  # to also run a job on Mergify head branches,
-  # add `|| (github.event_name == 'push' && startsWith(github.head_ref, 'mergify/merge-queue/'))`:
-  # https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows#running-your-workflow-based-on-the-head-or-base-branch-of-a-pull-request-1
-
   # Check if the cached state disks used by the tests are available for the default network.
   #
   # The default network is mainnet unless a manually triggered workflow or repository variable
@@ -48,7 +44,7 @@ jobs:
   # The outputs for this job have the same names as the workflow outputs in sub-find-cached-disks.yml
   get-available-disks:
     name: Check if cached state disks exist for ${{ inputs.network || vars.ZCASH_NETWORK }}
-    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     uses: ./.github/workflows/sub-find-cached-disks.yml
     with:
@@ -554,7 +550,7 @@ jobs:
         scan-task-commands-test,
       ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
-    # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
+    # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
     runs-on: ubuntu-latest
     steps:

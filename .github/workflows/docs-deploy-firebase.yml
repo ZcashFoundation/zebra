@@ -1,5 +1,5 @@
 # Google Cloud docs updates that run when docs, Rust code, or dependencies are modified,
-# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are deployed by mergify.)
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are deployed by GitHub's Merge Queue.)
 
 # - Builds and deploys Zebra Book Docs using mdBook, setting up necessary tools and deploying to Firebase.
 # - Compiles and deploys external documentation, setting up Rust with the beta toolchain and default profile, building the docs, and deploying them to Firebase.
@@ -74,7 +74,7 @@ env:
 jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
-    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 5
     runs-on: ubuntu-latest
