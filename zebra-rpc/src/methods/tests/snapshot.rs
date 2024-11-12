@@ -5,7 +5,7 @@
 //! cargo insta test --review --release -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use insta::dynamic_redaction;
 use tower::buffer::Buffer;

@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{collections::HashSet, fmt::Debug};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, FutureExt, StreamExt, TryFutureExt};
@@ -30,7 +30,7 @@ use zebra_chain::{
     transparent::{self, Address},
 };
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::{
     constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
@@ -1035,9 +1035,20 @@ where
             {
                 mempool::Response::Transactions(txns) => {
                     if let Some(tx) = txns.first() {
-                        return Ok(GetRawTransaction::Raw(tx.transaction.clone().into()));
+                        let hex = tx.transaction.clone().into();
+
+                        return Ok(if verbose {
+                            GetRawTransaction::Object {
+                                hex,
+                                height: None,
+                                confirmations: None,
+                            }
+                        } else {
+                            GetRawTransaction::Raw(hex)
+                        });
                     }
                 }
+
                 _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
             };
 
@@ -1048,20 +1059,26 @@ where
                 .await
                 .map_server_error()?
             {
-                zebra_state::ReadResponse::Transaction(Some(MinedTx {
-                    tx,
-                    height,
-                    confirmations,
-                })) => Ok(GetRawTransaction::from_mined_tx(
-                    tx,
-                    Some(height),
-                    confirmations,
-                    verbose,
-                )),
+                zebra_state::ReadResponse::Transaction(Some(tx)) => {
+                    let hex = tx.tx.into();
+
+                    Ok(if verbose {
+                        GetRawTransaction::Object {
+                            hex,
+                            height: Some(tx.height.0),
+                            confirmations: Some(tx.confirmations),
+                        }
+                    } else {
+                        GetRawTransaction::Raw(hex)
+                    })
+                }
+
                 zebra_state::ReadResponse::Transaction(None) => {
+                    // TODO: Return the correct err code (-5).
                     Err("Transaction not found").map_server_error()
                 }
-                _ => unreachable!("unmatched response to a transaction request"),
+
+                _ => unreachable!("unmatched response to a `Transaction` read request"),
             }
         }
         .boxed()
@@ -1706,12 +1723,14 @@ pub enum GetRawTransaction {
         /// The raw transaction, encoded as hex bytes.
         #[serde(with = "hex")]
         hex: SerializedTransaction,
-        /// The height of the block in the best chain that contains the transaction, or -1 if
-        /// the transaction is in the mempool.
-        height: i32,
-        /// The confirmations of the block in the best chain that contains the transaction,
-        /// or 0 if the transaction is in the mempool.
-        confirmations: u32,
+        /// The height of the block in the best chain that contains the tx or `None` if the tx is in
+        /// the mempool.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
+        /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
+        /// if the tx is in the mempool.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confirmations: Option<u32>,
     },
 }
 
@@ -1721,8 +1740,8 @@ impl Default for GetRawTransaction {
             hex: SerializedTransaction::from(
                 [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
             ),
-            height: i32::default(),
-            confirmations: u32::default(),
+            height: Option::default(),
+            confirmations: Option::default(),
         }
     }
 }
@@ -1783,33 +1802,6 @@ pub struct GetAddressTxIdsRequest {
     start: u32,
     // The height to end looking for transactions.
     end: u32,
-}
-
-impl GetRawTransaction {
-    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
-    #[allow(clippy::unwrap_in_result)]
-    fn from_mined_tx(
-        tx: Arc<Transaction>,
-        height: Option<block::Height>,
-        confirmations: u32,
-        verbose: bool,
-    ) -> Self {
-        if verbose {
-            GetRawTransaction::Object {
-                hex: tx.into(),
-                height: match height {
-                    Some(height) => height
-                        .0
-                        .try_into()
-                        .expect("valid block heights are limited to i32::MAX"),
-                    None => -1,
-                },
-                confirmations,
-            }
-        } else {
-            GetRawTransaction::Raw(tx.into())
-        }
-    }
 }
 
 /// Information about the sapling and orchard note commitment trees if any.

@@ -1,15 +1,17 @@
 //! Fixed test vectors for RPC methods.
 
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 
 use tower::buffer::Buffer;
 
+use zebra_chain::serialization::ZcashSerialize;
 use zebra_chain::{
     amount::Amount,
     block::Block,
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::Network::*,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    serialization::ZcashDeserializeInto,
     transaction::UnminedTxId,
 };
 use zebra_node_services::BoxError;
@@ -473,10 +475,11 @@ async fn rpc_getrawtransaction() {
                         conventional_fee: Amount::zero(),
                     }]));
                 });
+
             let txid = HexData(tx.hash().bytes_in_display_order().to_vec());
-            let (response, _) =
-                futures::join!(rpc.get_raw_transaction(txid, Some(0u8)), mempool_req);
-            let get_tx = response.expect("We should have a GetRawTransaction struct");
+            let (rsp, _) = futures::join!(rpc.get_raw_transaction(txid, Some(0u8)), mempool_req);
+            let get_tx = rsp.expect("We should have a GetRawTransaction struct");
+
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
@@ -520,6 +523,7 @@ async fn rpc_getrawtransaction() {
             }
 
             let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(txid));
+
             let GetRawTransaction::Object {
                 hex,
                 height,
@@ -529,8 +533,11 @@ async fn rpc_getrawtransaction() {
                 unreachable!("Should return a Raw enum")
             };
 
+            let height = height.expect("state requests should have height");
+            let confirmations = confirmations.expect("state requests should have confirmations");
+
             assert_eq!(hex.as_ref(), tx.zcash_serialize_to_vec().unwrap());
-            assert_eq!(height, block_idx as i32);
+            assert_eq!(height, block_idx as u32);
 
             let depth_response = read_state
                 .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
