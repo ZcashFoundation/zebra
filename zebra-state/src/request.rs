@@ -227,6 +227,10 @@ pub struct ContextuallyVerifiedBlock {
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
+
+    /// A partial map of `issued_assets` with entries for asset states that were updated in
+    /// this block.
+    pub(crate) issued_assets: IssuedAssets,
 }
 
 /// Wraps note commitment trees and the history tree together.
@@ -431,6 +435,7 @@ impl ContextuallyVerifiedBlock {
     pub fn with_block_and_spent_utxos(
         semantically_verified: SemanticallyVerifiedBlock,
         mut spent_outputs: HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
+        issued_assets: IssuedAssets,
     ) -> Result<Self, ValueBalanceError> {
         let SemanticallyVerifiedBlock {
             block,
@@ -459,6 +464,7 @@ impl ContextuallyVerifiedBlock {
                 &utxos_from_ordered_utxos(spent_outputs),
                 deferred_balance,
             )?,
+            issued_assets,
         })
     }
 }

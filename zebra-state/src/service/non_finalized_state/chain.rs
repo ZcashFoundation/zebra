@@ -177,6 +177,11 @@ pub struct ChainInner {
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
+    /// A partial map of `issued_assets` with entries for asset states that were updated in
+    /// this chain.
+    // TODO: Add reference to ZIP
+    pub(crate) issued_assets: HashMap<AssetBase, AssetState>,
+
     // Nullifiers
     //
     /// The Sprout nullifiers revealed by `blocks`.
@@ -240,6 +245,7 @@ impl Chain {
             orchard_anchors_by_height: Default::default(),
             orchard_trees_by_height: Default::default(),
             orchard_subtrees: Default::default(),
+            issued_assets: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
@@ -942,9 +948,8 @@ impl Chain {
 
     /// Returns the Orchard issued asset state if one is present in
     /// the chain for the provided asset base.
-    pub fn issued_asset(&self, _asset_base: &AssetBase) -> Option<AssetState> {
-        // self.orchard_issued_assets.get(asset_base).cloned()
-        None
+    pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
+        self.issued_assets.get(asset_base).cloned()
     }
 
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
