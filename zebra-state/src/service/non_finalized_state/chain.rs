@@ -16,13 +16,16 @@ use zebra_chain::{
     block::{self, Height},
     history_tree::HistoryTree,
     orchard,
+    orchard_zsa::{AssetBase, AssetState},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
     sapling, sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::Transaction::*,
-    transaction::{self, Transaction},
+    transaction::{
+        self,
+        Transaction::{self, *},
+    },
     transparent,
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
@@ -935,6 +938,13 @@ impl Chain {
         } else {
             None
         }
+    }
+
+    /// Returns the Orchard issued asset state if one is present in
+    /// the chain for the provided asset base.
+    pub fn issued_asset(&self, _asset_base: &AssetBase) -> Option<AssetState> {
+        // self.orchard_issued_assets.get(asset_base).cloned()
+        None
     }
 
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.

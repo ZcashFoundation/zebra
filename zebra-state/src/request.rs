@@ -365,7 +365,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_balance: block.deferred_balance,
-            issued_assets: block.issued_assets_changes.combine(),
+            issued_assets: block.issued_assets_changes,
         }
     }
 }

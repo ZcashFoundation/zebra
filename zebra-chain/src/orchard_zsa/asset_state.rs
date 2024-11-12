@@ -30,13 +30,22 @@ pub struct AssetStateChange {
 }
 
 impl AssetState {
-    fn with_change(mut self, change: AssetStateChange) -> Self {
+    /// Updates and returns self with the provided [`AssetStateChange`] if the change is valid, or
+    /// returns None otherwise.
+    pub fn with_change(mut self, change: AssetStateChange) -> Option<Self> {
+        if self.is_finalized {
+            return None;
+        }
+
         self.is_finalized |= change.is_finalized;
-        self.total_supply = self
-            .total_supply
-            .checked_add_signed(change.supply_change)
-            .expect("burn amounts must not be greater than initial supply");
-        self
+        self.total_supply = self.total_supply.checked_add_signed(change.supply_change)?;
+        Some(self)
+    }
+}
+
+impl From<HashMap<AssetBase, AssetState>> for IssuedAssets {
+    fn from(issued_assets: HashMap<AssetBase, AssetState>) -> Self {
+        Self(issued_assets)
     }
 }
 
@@ -94,7 +103,8 @@ impl std::ops::AddAssign for AssetStateChange {
 pub struct IssuedAssets(HashMap<AssetBase, AssetState>);
 
 impl IssuedAssets {
-    fn new() -> Self {
+    /// Creates a new [`IssuedAssets`].
+    pub fn new() -> Self {
         Self(HashMap::new())
     }
 
@@ -156,11 +166,14 @@ impl IssuedAssetsChange {
     pub fn apply_with(self, f: impl Fn(AssetBase) -> AssetState) -> IssuedAssets {
         let mut issued_assets = IssuedAssets::new();
 
-        issued_assets.update(
-            self.0
-                .into_iter()
-                .map(|(asset_base, change)| (asset_base, f(asset_base).with_change(change))),
-        );
+        issued_assets.update(self.0.into_iter().map(|(asset_base, change)| {
+            (
+                asset_base,
+                f(asset_base)
+                    .with_change(change)
+                    .expect("must be valid change"),
+            )
+        }));
 
         issued_assets
     }
@@ -177,5 +190,15 @@ impl std::ops::Add for IssuedAssetsChange {
             rhs.update(self.0.into_iter());
             rhs
         }
+    }
+}
+
+impl IntoIterator for IssuedAssetsChange {
+    type Item = (AssetBase, AssetStateChange);
+
+    type IntoIter = std::collections::hash_map::IntoIter<AssetBase, AssetStateChange>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
     }
 }
