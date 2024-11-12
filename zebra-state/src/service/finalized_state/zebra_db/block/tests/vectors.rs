@@ -130,7 +130,8 @@ fn test_block_db_round_trip_with(
                 .collect();
             let new_outputs =
                 new_ordered_outputs_with_height(&original_block, Height(0), &transaction_hashes);
-            let (burns, issuance) = IssuedAssetsChange::from_block(&original_block);
+            let (burns, issuance) =
+                IssuedAssetsChange::from_transactions(&original_block.transactions);
 
             CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
                 block: original_block.clone(),

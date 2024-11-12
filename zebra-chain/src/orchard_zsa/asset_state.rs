@@ -5,7 +5,7 @@ use std::{collections::HashMap, sync::Arc};
 use orchard::issuance::IssueAction;
 pub use orchard::note::AssetBase;
 
-use crate::block::Block;
+use crate::transaction::Transaction;
 
 use super::BurnItem;
 
@@ -30,9 +30,9 @@ pub struct AssetStateChange {
 }
 
 impl AssetState {
-    /// Updates and returns self with the provided [`AssetStateChange`] if the change is valid, or
-    /// returns None otherwise.
-    pub fn with_change(mut self, change: AssetStateChange) -> Option<Self> {
+    /// Updates and returns self with the provided [`AssetStateChange`] if
+    /// the change is valid, or returns None otherwise.
+    pub fn apply_change(mut self, change: AssetStateChange) -> Option<Self> {
         if self.is_finalized {
             return None;
         }
@@ -40,6 +40,15 @@ impl AssetState {
         self.is_finalized |= change.is_finalized;
         self.total_supply = self.total_supply.checked_add_signed(change.supply_change)?;
         Some(self)
+    }
+
+    /// Reverts the provided [`AssetStateChange`].
+    pub fn revert_change(&mut self, change: AssetStateChange) {
+        self.is_finalized &= !change.is_finalized;
+        self.total_supply = self
+            .total_supply
+            .checked_add_signed(-change.supply_change)
+            .expect("reversions must not overflow");
     }
 }
 
@@ -108,6 +117,11 @@ impl IssuedAssets {
         Self(HashMap::new())
     }
 
+    /// Returns an iterator of the inner HashMap.
+    pub fn iter(&self) -> impl Iterator<Item = (&AssetBase, &AssetState)> {
+        self.0.iter()
+    }
+
     fn update<'a>(&mut self, issued_assets: impl Iterator<Item = (AssetBase, AssetState)> + 'a) {
         for (asset_base, asset_state) in issued_assets {
             self.0.insert(asset_base, asset_state);
@@ -140,15 +154,15 @@ impl IssuedAssetsChange {
         }
     }
 
-    /// Accepts a reference to an [`Arc<Block>`].
+    /// Accepts a slice of [`Arc<Transaction>`]s.
     ///
     /// Returns a tuple, ([`IssuedAssetsChange`], [`IssuedAssetsChange`]), where
     /// the first item is from burns and the second one is for issuance.
-    pub fn from_block(block: &Arc<Block>) -> (Self, Self) {
+    pub fn from_transactions(transactions: &[Arc<Transaction>]) -> (Self, Self) {
         let mut burn_change = Self::new();
         let mut issuance_change = Self::new();
 
-        for transaction in &block.transactions {
+        for transaction in transactions {
             burn_change.update(AssetStateChange::from_burns(transaction.orchard_burns()));
             issuance_change.update(AssetStateChange::from_issue_actions(
                 transaction.orchard_issue_actions(),
@@ -156,6 +170,23 @@ impl IssuedAssetsChange {
         }
 
         (burn_change, issuance_change)
+    }
+
+    /// Accepts a slice of [`Arc<Transaction>`]s.
+    ///
+    /// Returns an [`IssuedAssetsChange`] representing all of the changes to the issued assets
+    /// map that should be applied for the provided transactions.
+    pub fn combined_from_transactions(transactions: &[Arc<Transaction>]) -> Self {
+        let mut issued_assets_change = Self::new();
+
+        for transaction in transactions {
+            issued_assets_change.update(AssetStateChange::from_burns(transaction.orchard_burns()));
+            issued_assets_change.update(AssetStateChange::from_issue_actions(
+                transaction.orchard_issue_actions(),
+            ));
+        }
+
+        issued_assets_change
     }
 
     /// Consumes self and accepts a closure for looking up previous asset states.
@@ -170,7 +201,7 @@ impl IssuedAssetsChange {
             (
                 asset_base,
                 f(asset_base)
-                    .with_change(change)
+                    .apply_change(change)
                     .expect("must be valid change"),
             )
         }));

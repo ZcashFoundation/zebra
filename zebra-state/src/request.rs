@@ -313,7 +313,7 @@ pub struct FinalizedBlock {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IssuedAssetsOrChanges {
     /// A map of updated issued assets.
-    State(IssuedAssets),
+    Updated(IssuedAssets),
 
     /// A map of changes to apply to the issued assets map.
     Change(IssuedAssetsChange),
@@ -499,7 +499,7 @@ impl SemanticallyVerifiedBlock {
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
-        let (burns, issuance) = IssuedAssetsChange::from_block(&block);
+        let (burns, issuance) = IssuedAssetsChange::from_transactions(&block.transactions);
 
         Self {
             block,
@@ -537,7 +537,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
-        let (burns, issuance) = IssuedAssetsChange::from_block(&block);
+        let (burns, issuance) = IssuedAssetsChange::from_transactions(&block.transactions);
 
         Self {
             block,
@@ -556,8 +556,6 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
 
 impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(valid: ContextuallyVerifiedBlock) -> Self {
-        let (burns, issuance) = IssuedAssetsChange::from_block(&valid.block);
-
         Self {
             block: valid.block,
             hash: valid.hash,
@@ -571,18 +569,13 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
                     .constrain::<NonNegative>()
                     .expect("deferred balance in a block must me non-negative"),
             ),
-            issued_assets_changes: IssuedAssetsOrChanges::BurnAndIssuanceChanges {
-                burns,
-                issuance,
-            },
+            issued_assets_changes: IssuedAssetsOrChanges::Updated(valid.issued_assets),
         }
     }
 }
 
 impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
     fn from(finalized: FinalizedBlock) -> Self {
-        let (burns, issuance) = IssuedAssetsChange::from_block(&finalized.block);
-
         Self {
             block: finalized.block,
             hash: finalized.hash,
@@ -590,10 +583,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
             deferred_balance: finalized.deferred_balance,
-            issued_assets_changes: IssuedAssetsOrChanges::BurnAndIssuanceChanges {
-                burns,
-                issuance,
-            },
+            issued_assets_changes: finalized.issued_assets,
         }
     }
 }

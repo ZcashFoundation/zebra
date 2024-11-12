@@ -315,7 +315,7 @@ where
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            let (burns, issuance) = IssuedAssetsChange::from_block(&block);
+            let (burns, issuance) = IssuedAssetsChange::from_transactions(&block.transactions);
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
                 hash,

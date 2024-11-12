@@ -520,7 +520,7 @@ impl DiskWriteBatch {
         let mut batch = zebra_db.issued_assets_cf().with_batch_for_writing(self);
 
         let updated_issued_assets = match issued_assets_or_changes.clone().combine() {
-            IssuedAssetsOrChanges::State(issued_assets) => issued_assets,
+            IssuedAssetsOrChanges::Updated(issued_assets) => issued_assets,
             IssuedAssetsOrChanges::Change(issued_assets_change) => issued_assets_change
                 .apply_with(|asset_base| zebra_db.issued_asset(&asset_base).unwrap_or_default()),
             IssuedAssetsOrChanges::BurnAndIssuanceChanges { .. } => {

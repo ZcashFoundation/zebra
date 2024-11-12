@@ -27,7 +27,7 @@ pub fn valid_burns_and_issuance(
             .issued_asset(&asset_base)
             .or_else(|| finalized_state.issued_asset(&asset_base))
             .ok_or(ValidateContextError::InvalidBurn)?
-            .with_change(burn_change)
+            .apply_change(burn_change)
             .ok_or(ValidateContextError::InvalidBurn)?;
 
         issued_assets
@@ -49,7 +49,7 @@ pub fn valid_burns_and_issuance(
         let _ = issued_assets.insert(
             asset_base,
             asset_state
-                .with_change(issuance_change)
+                .apply_change(issuance_change)
                 .ok_or(ValidateContextError::InvalidIssuance)?,
         );
     }

@@ -16,7 +16,7 @@ use zebra_chain::{
     block::{self, Height},
     history_tree::HistoryTree,
     orchard,
-    orchard_zsa::{AssetBase, AssetState},
+    orchard_zsa::{AssetBase, AssetState, IssuedAssets, IssuedAssetsChange},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
@@ -952,6 +952,36 @@ impl Chain {
         self.issued_assets.get(asset_base).cloned()
     }
 
+    /// Remove the History tree index at `height`.
+    fn revert_issued_assets(
+        &mut self,
+        position: RevertPosition,
+        issued_assets: &IssuedAssets,
+        transactions: &[Arc<Transaction>],
+    ) {
+        if position == RevertPosition::Root {
+            trace!(?position, "removing unmodified issued assets");
+            for (asset_base, &asset_state) in issued_assets.iter() {
+                if self
+                    .issued_asset(asset_base)
+                    .expect("issued assets for chain should include those in all blocks")
+                    == asset_state
+                {
+                    self.issued_assets.remove(asset_base);
+                }
+            }
+        } else {
+            trace!(?position, "reverting changes to issued assets");
+            for (asset_base, change) in IssuedAssetsChange::combined_from_transactions(transactions)
+            {
+                self.issued_assets
+                    .entry(asset_base)
+                    .or_default()
+                    .revert_change(change);
+            }
+        }
+    }
+
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
@@ -1454,6 +1484,9 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
+        self.issued_assets
+            .extend(contextually_valid.issued_assets.clone());
+
         Ok(())
     }
 
@@ -1682,6 +1715,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             spent_outputs,
             transaction_hashes,
             chain_value_pool_change,
+            issued_assets,
         ) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
@@ -1690,6 +1724,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             &contextually_valid.spent_outputs,
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
+            &contextually_valid.issued_assets,
         );
 
         // remove the blocks hash from `height_by_hash`
@@ -1787,6 +1822,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
+
+        // revert the issued assets map, if needed
+        self.revert_issued_assets(position, issued_assets, &block.transactions);
 
         // revert the chain value pool balances, if needed
         self.revert_chain_with(chain_value_pool_change, position);
