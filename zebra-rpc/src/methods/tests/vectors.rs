@@ -664,6 +664,7 @@ async fn rpc_getblockheader() {
             version: 4,
             merkle_root: block.header.merkle_root,
             final_sapling_root: expected_final_sapling_root,
+            sapling_tree_size: sapling_tree.count(),
             time: block.header.time.timestamp(),
             nonce: expected_nonce,
             solution: block.header.solution,
