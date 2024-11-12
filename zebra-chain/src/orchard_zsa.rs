@@ -6,8 +6,11 @@ pub(crate) mod arbitrary;
 
 mod common;
 
+mod asset_state;
 mod burn;
 mod issuance;
 
-pub(crate) use burn::{Burn, NoBurn};
+pub(crate) use burn::{Burn, BurnItem, NoBurn};
 pub(crate) use issuance::IssueData;
+
+pub use asset_state::{AssetBase, AssetState, AssetStateChange, IssuedAssetsChange};

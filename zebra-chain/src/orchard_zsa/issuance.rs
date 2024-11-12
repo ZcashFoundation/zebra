@@ -57,6 +57,11 @@ impl IssueData {
             })
         })
     }
+
+    /// Returns issuance actions
+    pub fn actions(&self) -> &NonEmpty<IssueAction> {
+        self.0.actions()
+    }
 }
 
 // Sizes of the serialized values for types in bytes (used for TrustedPreallocate impls)

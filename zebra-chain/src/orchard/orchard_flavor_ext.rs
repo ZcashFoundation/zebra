@@ -9,7 +9,10 @@ use proptest_derive::Arbitrary;
 
 use orchard::{note_encryption::OrchardDomainCommon, orchard_flavor};
 
-use crate::serialization::{ZcashDeserialize, ZcashSerialize};
+use crate::{
+    orchard_zsa,
+    serialization::{ZcashDeserialize, ZcashSerialize},
+};
 
 #[cfg(feature = "tx-v6")]
 use crate::orchard_zsa::{Burn, NoBurn};
@@ -50,7 +53,13 @@ pub trait OrchardFlavorExt: Clone + Debug {
 
     /// A type representing a burn field for this protocol version.
     #[cfg(feature = "tx-v6")]
-    type BurnType: Clone + Debug + Default + ZcashDeserialize + ZcashSerialize + TestArbitrary;
+    type BurnType: Clone
+        + Debug
+        + Default
+        + ZcashDeserialize
+        + ZcashSerialize
+        + TestArbitrary
+        + AsRef<[orchard_zsa::BurnItem]>;
 }
 
 /// A structure representing a tag for Orchard protocol variant used for the transaction version `V5`.

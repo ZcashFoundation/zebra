@@ -24,6 +24,7 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
+    orchard_zsa::IssuedAssetsChange,
     parameters::{subsidy::FundingStreamReceiver, Network},
     transparent,
     work::equihash,
@@ -314,6 +315,8 @@ where
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
+            let (issued_assets_burns_change, issued_assets_issuance_change) =
+                IssuedAssetsChange::from_block(&block);
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
                 hash,
@@ -321,6 +324,8 @@ where
                 new_outputs,
                 transaction_hashes,
                 deferred_balance: Some(expected_deferred_amount),
+                issued_assets_burns_change,
+                issued_assets_issuance_change,
             };
 
             // Return early for proposal requests when getblocktemplate-rpcs feature is enabled

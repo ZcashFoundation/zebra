@@ -11,6 +11,7 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     orchard,
+    orchard_zsa::IssuedAssetsChange,
     parallel::tree::NoteCommitmentTrees,
     sapling,
     serialization::SerializationError,
@@ -163,6 +164,12 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
     /// This block's contribution to the deferred pool.
     pub deferred_balance: Option<Amount<NonNegative>>,
+    /// A map of burns to be applied to the issued assets map.
+    // TODO: Reference ZIP.
+    pub issued_assets_burns_change: IssuedAssetsChange,
+    /// A map of issuance to be applied to the issued assets map.
+    // TODO: Reference ZIP.
+    pub issued_assets_issuance_change: IssuedAssetsChange,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -392,6 +399,8 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance,
+            issued_assets_burns_change: _,
+            issued_assets_issuance_change: _,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -445,6 +454,8 @@ impl SemanticallyVerifiedBlock {
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let (issued_assets_burns_change, issued_assets_issuance_change) =
+            IssuedAssetsChange::from_block(&block);
 
         Self {
             block,
@@ -453,6 +464,8 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
+            issued_assets_burns_change,
+            issued_assets_issuance_change,
         }
     }
 
@@ -477,6 +490,8 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
+        let (issued_assets_burns_change, issued_assets_issuance_change) =
+            IssuedAssetsChange::from_block(&block);
 
         Self {
             block,
@@ -485,12 +500,17 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
+            issued_assets_burns_change,
+            issued_assets_issuance_change,
         }
     }
 }
 
 impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
     fn from(valid: ContextuallyVerifiedBlock) -> Self {
+        let (issued_assets_burns_change, issued_assets_issuance_change) =
+            IssuedAssetsChange::from_block(&valid.block);
+
         Self {
             block: valid.block,
             hash: valid.hash,
@@ -504,12 +524,17 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
                     .constrain::<NonNegative>()
                     .expect("deferred balance in a block must me non-negative"),
             ),
+            issued_assets_burns_change,
+            issued_assets_issuance_change,
         }
     }
 }
 
 impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
     fn from(finalized: FinalizedBlock) -> Self {
+        let (issued_assets_burns_change, issued_assets_issuance_change) =
+            IssuedAssetsChange::from_block(&finalized.block);
+
         Self {
             block: finalized.block,
             hash: finalized.hash,
@@ -517,6 +542,8 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
             deferred_balance: finalized.deferred_balance,
+            issued_assets_burns_change,
+            issued_assets_issuance_change,
         }
     }
 }

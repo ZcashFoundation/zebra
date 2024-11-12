@@ -78,6 +78,31 @@ macro_rules! orchard_shielded_data_iter {
     };
 }
 
+macro_rules! orchard_shielded_data_map {
+    ($self:expr, $mapper:expr, $mapper2:expr) => {
+        match $self {
+            Transaction::V5 {
+                orchard_shielded_data: Some(shielded_data),
+                ..
+            } => $mapper(shielded_data),
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data: Some(shielded_data),
+                ..
+            } => $mapper2(shielded_data),
+
+            // No Orchard shielded data
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. }
+            | Transaction::V6 { .. } => &[],
+        }
+    };
+}
+
 // FIXME: doc this
 // Move down
 macro_rules! orchard_shielded_data_field {
@@ -1069,6 +1094,45 @@ impl Transaction {
                     ),
             ),
         }
+    }
+
+    /// Access the Orchard issue data in this transaction, if any,
+    /// regardless of version.
+    #[cfg(feature = "tx-v6")]
+    fn orchard_issue_data(&self) -> &Option<orchard_zsa::IssueData> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => &None,
+
+            Transaction::V6 {
+                orchard_zsa_issue_data,
+                ..
+            } => orchard_zsa_issue_data,
+        }
+    }
+
+    /// Access the Orchard issuance actions in this transaction, if there are any,
+    /// regardless of version.
+    #[cfg(feature = "tx-v6")]
+    pub fn orchard_issue_actions(&self) -> impl Iterator<Item = &::orchard::issuance::IssueAction> {
+        self.orchard_issue_data()
+            .iter()
+            .flat_map(orchard_zsa::IssueData::actions)
+    }
+
+    /// Access the Orchard asset burns in this transaction, if there are any,
+    /// regardless of version.
+    #[cfg(feature = "tx-v6")]
+    pub fn orchard_burns<'a>(&'a self) -> &[orchard_zsa::BurnItem] {
+        use crate::orchard::{OrchardVanilla, OrchardZSA};
+        orchard_shielded_data_map!(
+            self,
+            |data: &'a orchard::ShieldedData<OrchardVanilla>| data.burn.as_ref(),
+            |data: &'a orchard::ShieldedData<OrchardZSA>| data.burn.as_ref()
+        )
     }
 
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
