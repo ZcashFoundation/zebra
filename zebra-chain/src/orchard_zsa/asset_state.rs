@@ -20,7 +20,10 @@ pub struct AssetState {
 }
 
 /// A change to apply to the issued assets map.
-// TODO: Reference ZIP
+// TODO:
+// - Reference ZIP
+// - Make this an enum of _either_ a finalization _or_ a supply change
+//    (applying the finalize flag for each issuance note will cause unexpected panics).
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AssetStateChange {
     /// Whether the asset should be finalized such that no more of it can be issued.
