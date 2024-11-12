@@ -13,4 +13,4 @@ mod issuance;
 pub(crate) use burn::{Burn, BurnItem, NoBurn};
 pub(crate) use issuance::IssueData;
 
-pub use asset_state::{AssetBase, AssetState, AssetStateChange, IssuedAssetsChange};
+pub use asset_state::{AssetBase, AssetState, AssetStateChange, IssuedAssets, IssuedAssetsChange};

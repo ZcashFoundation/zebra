@@ -29,7 +29,7 @@ use zebra_test::vectors::{MAINNET_BLOCKS, TESTNET_BLOCKS};
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
-    request::{FinalizedBlock, Treestate},
+    request::{FinalizedBlock, IssuedAssetsOrChanges, Treestate},
     service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb, STATE_COLUMN_FAMILIES_IN_CODE},
     CheckpointVerifiedBlock, Config, SemanticallyVerifiedBlock,
 };
@@ -130,8 +130,7 @@ fn test_block_db_round_trip_with(
                 .collect();
             let new_outputs =
                 new_ordered_outputs_with_height(&original_block, Height(0), &transaction_hashes);
-            let (issued_assets_burns_change, issued_assets_issuance_change) =
-                IssuedAssetsChange::from_block(&original_block);
+            let (burns, issuance) = IssuedAssetsChange::from_block(&original_block);
 
             CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
                 block: original_block.clone(),
@@ -140,8 +139,10 @@ fn test_block_db_round_trip_with(
                 new_outputs,
                 transaction_hashes,
                 deferred_balance: None,
-                issued_assets_burns_change,
-                issued_assets_issuance_change,
+                issued_assets_changes: IssuedAssetsOrChanges::BurnAndIssuanceChanges {
+                    burns,
+                    issuance,
+                },
             })
         };
 

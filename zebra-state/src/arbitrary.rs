@@ -12,7 +12,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    request::ContextuallyVerifiedBlock, service::chain_tip::ChainTipBlock,
+    request::{ContextuallyVerifiedBlock, IssuedAssetsOrChanges},
+    service::chain_tip::ChainTipBlock,
     SemanticallyVerifiedBlock,
 };
 
@@ -31,8 +32,7 @@ impl Prepare for Arc<Block> {
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs =
             transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
-        let (issued_assets_burns_change, issued_assets_issuance_change) =
-            IssuedAssetsChange::from_block(&block);
+        let (burns, issuance) = IssuedAssetsChange::from_block(&block);
 
         SemanticallyVerifiedBlock {
             block,
@@ -41,8 +41,10 @@ impl Prepare for Arc<Block> {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
-            issued_assets_burns_change,
-            issued_assets_issuance_change,
+            issued_assets_changes: IssuedAssetsOrChanges::BurnAndIssuanceChanges {
+                burns,
+                issuance,
+            },
         }
     }
 }
@@ -117,8 +119,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: _,
-            issued_assets_burns_change: _,
-            issued_assets_issuance_change: _,
+            issued_assets_changes: _,
         } = block.into();
 
         Self {
