@@ -33,15 +33,15 @@ use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::{
-    constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
     methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
     queue::Queue,
+    server::{
+        self,
+        error::{MapServerError, OkOrServerError},
+    },
 };
 
-mod errors;
 pub mod hex_data;
-
-use errors::{MapServerError, OkOrServerError};
 
 // We don't use a types/ module here, because it is redundant.
 pub mod trees;
@@ -740,7 +740,9 @@ where
                         Ok(GetBlock::Raw(block.into()))
                     }
                     zebra_state::ReadResponse::Block(None) => Err(Error {
-                        code: MISSING_BLOCK_ERROR_CODE,
+                        // `lightwalletd` expects error code `-8` when a block is not found:
+                        // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>                   zebra_state::ReadResponse::Block(None) => Err(Error {
+                        code: server::error::LegacyCode::InvalidParameter.into(),
                         message: "Block not found".to_string(),
                         data: None,
                     }),
@@ -783,10 +785,12 @@ where
                             zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
                             zebra_state::ReadResponse::BlockHash(None) => {
                                 return Err(Error {
-                                    code: MISSING_BLOCK_ERROR_CODE,
+                                    // `lightwalletd` expects error code `-8` when a block is not found:
+                                    // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>                   zebra_state::ReadResponse::Block(None) => Err(Error {
+                                    code: server::error::LegacyCode::InvalidParameter.into(),
                                     message: "block height not in best chain".to_string(),
                                     data: None,
-                                })
+                                });
                             }
                             _ => unreachable!("unmatched response to a block hash request"),
                         }
@@ -1112,10 +1116,12 @@ where
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
                     return Err(Error {
-                        code: MISSING_BLOCK_ERROR_CODE,
+                        // `lightwalletd` expects error code `-8` when a block is not found:
+                        // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>                   zebra_state::ReadResponse::Block(None) => Err(Error {
+                        code: server::error::LegacyCode::InvalidParameter.into(),
                         message: "the requested block was not found".to_string(),
                         data: None,
-                    })
+                    });
                 }
                 _ => unreachable!("unmatched response to a block request"),
             };
@@ -1237,7 +1243,7 @@ where
                 })
             } else {
                 Err(Error {
-                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    code: server::error::LegacyCode::Misc.into(),
                     message: format!("invalid pool name, must be one of: {:?}", POOL_LIST),
                     data: None,
                 })

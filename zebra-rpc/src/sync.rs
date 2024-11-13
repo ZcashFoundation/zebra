@@ -20,10 +20,7 @@ use zebra_state::{
 
 use zebra_chain::diagnostic::task::WaitForPanics;
 
-use crate::{
-    constants::MISSING_BLOCK_ERROR_CODE,
-    methods::{hex_data::HexData, GetBlockHeightAndHash},
-};
+use crate::{methods::{hex_data::HexData, GetBlockHeightAndHash}, server};
 
 /// How long to wait between calls to `getbestblockheightandhash` when it:
 /// - Returns an error, or
@@ -383,7 +380,7 @@ impl SyncerRpcMethods for RpcRequestClient {
             Err(err)
                 if err
                     .downcast_ref::<jsonrpc_core::Error>()
-                    .is_some_and(|err| err.code == MISSING_BLOCK_ERROR_CODE) =>
+                    .is_some_and(|err| err.code == server::error::LegacyCode::InvalidParameter.into()) =>
             {
                 Ok(None)
             }

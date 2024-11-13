@@ -32,35 +32,37 @@ use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};
 
-use crate::methods::{
-    best_chain_tip_height,
-    errors::MapServerError,
-    get_block_template_rpcs::{
-        constants::{
-            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
-            ZCASHD_FUNDING_STREAM_ORDER,
-        },
-        get_block_template::{
-            check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
-            fetch_state_tip_and_local_time, validate_block_proposal,
-        },
-        // TODO: move the types/* modules directly under get_block_template_rpcs,
-        //       and combine any modules with the same names.
-        types::{
-            get_block_template::{
-                proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+use crate::{
+    methods::{
+        best_chain_tip_height,
+        get_block_template_rpcs::{
+            constants::{
+                DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
+                ZCASHD_FUNDING_STREAM_ORDER,
             },
-            get_mining_info,
-            long_poll::LongPollInput,
-            peer_info::PeerInfo,
-            submit_block,
-            subsidy::{BlockSubsidy, FundingStream},
-            unified_address, validate_address, z_validate_address,
+            get_block_template::{
+                check_miner_address, check_synced_to_tip, fetch_mempool_transactions,
+                fetch_state_tip_and_local_time, validate_block_proposal,
+            },
+            // TODO: move the types/* modules directly under get_block_template_rpcs,
+            //       and combine any modules with the same names.
+            types::{
+                get_block_template::{
+                    proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
+                },
+                get_mining_info,
+                long_poll::LongPollInput,
+                peer_info::PeerInfo,
+                submit_block,
+                subsidy::{BlockSubsidy, FundingStream},
+                unified_address, validate_address, z_validate_address,
+            },
         },
+        height_from_signed_int,
+        hex_data::HexData,
+        GetBlockHash,
     },
-    height_from_signed_int,
-    hex_data::HexData,
-    GetBlockHash, MISSING_BLOCK_ERROR_CODE,
+    server::{self, error::MapServerError},
 };
 
 pub mod constants;
@@ -589,7 +591,7 @@ where
             match response {
                 zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHash(hash)),
                 zebra_state::ReadResponse::BlockHash(None) => Err(Error {
-                    code: MISSING_BLOCK_ERROR_CODE,
+                    code: server::error::LegacyCode::InvalidParameter.into(),
                     message: "Block not found".to_string(),
                     data: None,
                 }),

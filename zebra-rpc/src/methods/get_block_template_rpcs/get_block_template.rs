@@ -25,12 +25,12 @@ use zebra_consensus::{
 use zebra_node_services::mempool;
 use zebra_state::GetBlockTemplateChainInfo;
 
-use crate::methods::{
-    errors::OkOrServerError,
-    get_block_template_rpcs::{
+use crate::{
+    methods::get_block_template_rpcs::{
         constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
         types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
     },
+    server::error::OkOrServerError,
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
