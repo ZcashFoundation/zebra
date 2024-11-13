@@ -1,5 +1,6 @@
 ### Tests that fail on Nix, but aren’t skipped by `ZEBRA_SKIP_NETWORK_TESTS`.
 {
+  extraFeatures,
   lib,
   stdenv,
 }:
@@ -62,4 +63,56 @@
 ++ lib.optionals stdenv.hostPlatform.isLinux [
   ## zebrad – acceptance
   "non_blocking_logger"
+]
+## These tests seem to only fail when the `elasticsearch` feature is enabled on MacOS.
+++ lib.optionals (stdenv.hostPlatform.isDarwin && lib.elem "elasticsearch" extraFeatures) [
+  ## zebra-rpc
+  "methods::tests::snapshot::test_rpc_response_data"
+  "methods::tests::snapshot::test_z_get_treestate"
+  "methods::tests::vectors::rpc_getaddresstxids_invalid_arguments"
+  "methods::tests::vectors::rpc_getaddresstxids_response"
+  "methods::tests::vectors::rpc_getaddressutxos_response"
+  "methods::tests::vectors::rpc_getbestblockhash"
+  "methods::tests::vectors::rpc_getblock"
+  "methods::tests::vectors::rpc_getblockcount"
+  "methods::tests::vectors::rpc_getblockcount_empty_state"
+  "methods::tests::vectors::rpc_getblockhash"
+  "methods::tests::vectors::rpc_getmininginfo"
+  "methods::tests::vectors::rpc_getnetworksolps"
+  "methods::tests::vectors::rpc_getpeerinfo"
+  "methods::tests::vectors::rpc_getrawtransaction"
+  "methods::tests::vectors::rpc_submitblock_errors"
+  ## zebra-scan
+  "service::tests::scan_service_registers_keys_correctly"
+  "tests::vectors::scanning_zecpages_from_populated_zebra_state"
+  ## zebra-state
+  "service::read::tests::vectors::empty_read_state_still_responds_to_requests"
+  "service::read::tests::vectors::populated_read_state_responds_correctly"
+  "service::tests::chain_tip_sender_is_updated"
+  "service::tests::empty_state_still_responds_to_requests"
+  "service::tests::state_behaves_when_blocks_are_committed_in_order"
+  "service::tests::state_behaves_when_blocks_are_committed_out_of_order"
+  "service::tests::value_pool_is_updated"
+  ## zebra-state – basic
+  "check_transcripts_mainnet"
+  "check_transcripts_testnet"
+  ## zebrad
+  "components::inbound::tests::fake_peer_set::caches_getaddr_response"
+  "components::inbound::tests::fake_peer_set::inbound_block_height_lookahead_limit"
+  "components::inbound::tests::fake_peer_set::mempool_advertise_transaction_ids"
+  "components::inbound::tests::fake_peer_set::mempool_push_transaction"
+  "components::inbound::tests::fake_peer_set::mempool_requests_for_transactions"
+  "components::inbound::tests::fake_peer_set::mempool_transaction_expiration"
+  "components::mempool::tests::vector::mempool_cancel_downloads_after_network_upgrade"
+  "components::mempool::tests::vector::mempool_cancel_mined"
+  "components::mempool::tests::vector::mempool_failed_download_is_not_rejected"
+  "components::mempool::tests::vector::mempool_failed_verification_is_rejected"
+  "components::mempool::tests::vector::mempool_queue"
+  "components::mempool::tests::vector::mempool_reverifies_after_tip_change"
+  "components::mempool::tests::vector::mempool_service_basic"
+  "components::mempool::tests::vector::mempool_service_disabled"
+  ## zebrad – acceptance
+  "db_init_outside_future_executor"
+  "nu6_funding_streams_and_coinbase_balance"
+  "validate_regtest_genesis_block"
 ]

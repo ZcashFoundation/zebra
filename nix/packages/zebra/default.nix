@@ -47,10 +47,10 @@ craneLib.buildPackage (
     ##       be removed.
     ZEBRA_SKIP_NETWORK_TESTS = true;
 
-    cargoTestExtraArgs =
-      lib.escapeShellArgs
-      (["--"]
-        ++ lib.concatMap (test: ["--skip" test]) (import ./failing-tests.nix {inherit lib stdenv;}));
+    cargoTestExtraArgs = let
+      failingTests = import ./failing-tests.nix {inherit extraFeatures lib stdenv;};
+    in
+      lib.escapeShellArgs (["--"] ++ lib.concatMap (test: ["--skip" test]) failingTests);
 
     meta.mainProgram = "zebrad";
   }
