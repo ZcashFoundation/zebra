@@ -37,7 +37,7 @@ use crate::{
     queue::Queue,
     server::{
         self,
-        error::{MapError, OkOrServerError},
+        error::{MapError, OkOrError},
     },
 };
 
@@ -554,7 +554,7 @@ where
             };
 
             let tip_block_time = block_header
-                .ok_or_server_error("unexpectedly could not read best chain tip block header")?
+                .ok_or_error("unexpectedly could not read best chain tip block header")?
                 .time;
 
             let now = Utc::now();
@@ -843,7 +843,7 @@ where
                 let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
                 let tx = match tx_ids_response.map_error()? {
                     zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
-                        .ok_or_server_error("Block not found")?
+                        .ok_or_error("Block not found")?
                         .iter()
                         .map(|tx_id| tx_id.encode_hex())
                         .collect(),
@@ -881,12 +881,9 @@ where
                         futs.next().await.expect("`futs` should not be empty");
 
                     match block_header_response.map_error()? {
-                        zebra_state::ReadResponse::BlockHeader(header) => Some(
-                            header
-                                .ok_or_server_error("Block not found")?
-                                .time
-                                .timestamp(),
-                        ),
+                        zebra_state::ReadResponse::BlockHeader(header) => {
+                            Some(header.ok_or_error("Block not found")?.time.timestamp())
+                        }
                         _ => unreachable!("unmatched response to a BlockHeader request"),
                     }
                 } else {
@@ -926,14 +923,14 @@ where
         self.latest_chain_tip
             .best_tip_hash()
             .map(GetBlockHash)
-            .ok_or_server_error("No blocks in state")
+            .ok_or_error("No blocks in state")
     }
 
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash> {
         self.latest_chain_tip
             .best_tip_height_and_hash()
             .map(|(height, hash)| GetBlockHeightAndHash { height, hash })
-            .ok_or_server_error("No blocks in state")
+            .ok_or_error("No blocks in state")
     }
 
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
@@ -1404,7 +1401,7 @@ where
 {
     latest_chain_tip
         .best_tip_height()
-        .ok_or_server_error("No blocks in state")
+        .ok_or_error("No blocks in state")
 }
 
 /// Response to a `getinfo` RPC request.
