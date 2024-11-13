@@ -9,7 +9,6 @@
 /// - All explicit discriminants fit within `i64`.
 pub enum LegacyCode {
     // General application defined errors
-
     /// `std::exception` thrown in command handling
     Misc = -1,
     /// Server is in safe mode, and command is not allowed in safe mode
