@@ -13,7 +13,7 @@ use jsonrpc_core::{
     BoxFuture, Metadata, MethodCall, Notification,
 };
 
-use crate::{constants::MAX_PARAMS_LOG_LENGTH, server};
+use crate::server;
 
 /// JSON-RPC [`Middleware`] with compatibility workarounds.
 ///
@@ -81,6 +81,8 @@ impl FixRpcResponseMiddleware {
     ///
     /// Prints out only the method name and the received parameters.
     fn call_description(call: &Call) -> String {
+        const MAX_PARAMS_LOG_LENGTH: usize = 100;
+
         match call {
             Call::MethodCall(MethodCall { method, params, .. }) => {
                 let mut params = format!("{params:?}");
