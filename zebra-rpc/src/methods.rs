@@ -6,7 +6,12 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    hash::Hash,
+    sync::Arc,
+};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, FutureExt, StreamExt, TryFutureExt};
@@ -20,16 +25,21 @@ use tracing::Instrument;
 
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
+    amount::{Amount, NonNegative, COIN},
     block::{self, Height, SerializedBlock},
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::ZcashDeserialize,
+    serialization::{ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
-    transaction::{self, SerializedTransaction, Transaction, UnminedTx},
-    transparent::{self, Address},
+    transaction::{self, LockTime, SerializedTransaction, Transaction, UnminedTx},
+    transparent::{self, opcodes::OpCode, Address, Input, OutPoint, Script},
 };
+
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{
+    GetBlockTemplateChainInfo, HashOrHeight, MinedTx, OutputIndex, OutputLocation,
+    TransactionLocation,
+};
 
 use crate::{
     constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
@@ -234,6 +244,35 @@ pub trait Rpc {
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> BoxFuture<Result<GetSubtrees>>;
+
+    /// Returns the hex string of the raw transaction based on the given inputs `transactions`, `addresses`,
+    /// `locktime` and `expiryheight`.
+    ///
+    /// zcashd reference: [`z_create_raw_transaction`](https://zcash.github.io/rpc/createrawtransaction.html)
+    /// method: post
+    /// tags: blockchain
+    ///
+    /// # Parameters
+    ///
+    /// - `transactions`: (string, required) A json array of json objects
+    /// - `addresses`: (string, required) A json object object with addresses as keys and amounts as values.
+    ///   ["address": x.xxx] (numeric, required) They key is the Zcash address, the value is the ZEC amount
+    /// - `locktime`: (numeric, optional, default=0) Raw locktime. Non-0 value also locktime-actives inputs
+    /// - `expiryheight`: (numeric, optional, default=nextblockheight+20 (pre-Blossom) or nextblockheight+40 (post-Blossom)) Expiry height of
+    ///    transaction (if Overwinter is active)
+    ///
+    /// # Notes
+    /// The transaction's inputs are not signed, and it is not stored in the wallet or transmitted
+    /// to the network.
+    /// Transaction IDs for inputs are in hex format
+    #[rpc(name = "createrawtransaction")]
+    fn create_raw_transaction(
+        &self,
+        transactions: Vec<TxInput>,
+        addresses: HashMap<String, f64>,
+        locktime: Option<u32>,
+        expiryheight: Option<u32>,
+    ) -> BoxFuture<Result<String>>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
@@ -1005,6 +1044,175 @@ where
         .boxed()
     }
 
+    fn create_raw_transaction(
+        &self,
+        transactions: Vec<TxInput>,
+        addresses: HashMap<String, f64>,
+        locktime: Option<u32>,
+        expiryheight: Option<u32>,
+    ) -> BoxFuture<Result<String>> {
+        let mut state = self.state.clone();
+        let network = self.network.clone();
+
+        async move {
+            let chain_info_request = zebra_state::ReadRequest::ChainInfo;
+            let response: zebra_state::ReadResponse = state
+                .ready()
+                .and_then(|service| service.call(chain_info_request))
+                .await
+                .map_server_error()?;
+
+            let zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                tip_height, ..
+            }) = response
+            else {
+                unreachable!("unmatched response to a chain info request")
+            };
+
+            let lock_time = if let Some(lock_time) = locktime {
+                LockTime::Height(block::Height(lock_time))
+            } else {
+                LockTime::Height(block::Height(0))
+            };
+
+            // Use next block height if exceeds MAX_EXPIRY_HEIGHT or is beyond tip
+            let next_block_height = tip_height.0 + 1;
+            let current_upgrade = NetworkUpgrade::current(&network, tip_height);
+            let next_network_upgrade = NetworkUpgrade::current(&network, block::Height(next_block_height));
+
+            let expiry_height_as_u32 = if let Some(expiry_height) = expiryheight {
+                // DoS mitigation: reject transactions expiring soon (as is done in zcashd)
+                if expiry_height != 0 && next_block_height + block::Height::BLOCK_EXPIRY_HEIGHT_THRESHOLD > expiry_height {
+                    Error::invalid_params(format!("invalid parameter, expiryheight should be at least {} to avoid 
+                    transaction expiring soon", next_block_height + block::Height::BLOCK_EXPIRY_HEIGHT_THRESHOLD));
+                }
+
+                if next_network_upgrade < NetworkUpgrade::Overwinter {
+                    Error::invalid_params("invalid parameter, expiryheight can only be used if Overwinter is active when the transaction is mined");
+                }
+
+                if block::Height(expiry_height) > block::Height::MAX_EXPIRY_HEIGHT
+                    || expiry_height > tip_height.0
+                {
+                    Error::invalid_params("invalid parameter, expiryheight out of range");
+                }
+                expiry_height
+            } else {
+                next_block_height
+            };
+
+            // Set a default sequence based on the lock time.
+            let default_tx_input_sequence = if lock_time == LockTime::Height(block::Height(0)) {
+                u32::MAX
+            } else {
+                u32::MAX - 1
+            };
+
+            // Compute tx inputs
+            let tx_inputs: Vec<Input> = transactions
+                .iter()
+                .map(|input| {
+                    Ok(Input::PrevOut {
+                        outpoint: OutPoint {
+                            hash: transaction::Hash::from_hex(&input.txid).map_err(|_| {
+                                Error::invalid_params(format!("invalid parameter, transaction id {} is an invalid hex string", input.txid))
+                            })?,
+                            index: input.vout,
+                        },
+                        unlock_script: Script::new(&[]),
+                        sequence: input.sequence.unwrap_or(default_tx_input_sequence),
+                    })
+                })
+                .collect::<Result<Vec<Input>>>()?;
+
+            // Comput tx outputs
+            let mut unique_addresses = HashSet::new();
+            let mut tx_outputs: Vec<zebra_chain::transparent::Output> = Vec::new();
+
+            for (address, amount) in addresses {
+                if !unique_addresses.insert(address.clone()) {
+                    return Err(Error::invalid_params("invalid parameter, invalid duplicate address"));
+                }
+
+                let address = address.parse().map_server_error()?;
+
+                let lock_script = match address {
+                    Address::PayToScriptHash { network_kind: _, script_hash } => {
+                        let mut script_bytes = vec![];
+                        script_bytes.push(OpCode::Hash160 as u8);
+                        script_bytes.extend_from_slice(&script_hash);
+                        script_bytes.push(OpCode::Equal as u8);
+                        Script::new(&script_bytes)
+                    }
+                    Address::PayToPublicKeyHash { network_kind: _, pub_key_hash } => {
+                        let mut script_bytes = vec![];
+                        script_bytes.push(OpCode::Dup as u8);
+                        script_bytes.push(OpCode::Hash160 as u8);
+                        script_bytes.extend_from_slice(&pub_key_hash);
+                        script_bytes.push(OpCode::EqualVerify as u8);
+                        script_bytes.push(OpCode::CheckSig as u8);
+                        Script::new(&script_bytes)
+                    }
+                };
+
+                let zatoshi_amount = (amount * COIN as f64) as i64;
+                let value = Amount::<NonNegative>::try_from(zatoshi_amount)
+                    .map_err(|e| Error::invalid_params(format!("invalid amount: {}", e)))?;
+
+                let tx_out = zebra_chain::transparent::Output {
+                    value,
+                    lock_script
+                };
+                tx_outputs.push(tx_out);
+            }
+
+            let tx = match current_upgrade {
+                NetworkUpgrade::Genesis | NetworkUpgrade::BeforeOverwinter => Transaction::V1 {
+                    inputs: tx_inputs,
+                    outputs: tx_outputs,
+                    lock_time,
+                },
+                NetworkUpgrade::Overwinter => Transaction::V3 {
+                    inputs: tx_inputs,
+                    outputs: tx_outputs,
+                    lock_time,
+                    expiry_height: block::Height(expiry_height_as_u32 + 20),
+                    joinsplit_data: None,
+                },
+                NetworkUpgrade::Sapling => Transaction::V4 {
+                    inputs: tx_inputs,
+                    outputs: tx_outputs,
+                    lock_time,
+                    expiry_height: block::Height(expiry_height_as_u32 + 20),
+                    joinsplit_data: None,
+                    sapling_shielded_data: None,
+                },
+                NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
+                    Transaction::V4 {
+                        inputs: tx_inputs,
+                        outputs: tx_outputs,
+                        lock_time,
+                        expiry_height: block::Height(expiry_height_as_u32 + 40),
+                        joinsplit_data: None,
+                        sapling_shielded_data: None,
+                    }
+                }
+                NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => Transaction::V5 {
+                    network_upgrade: current_upgrade,
+                    lock_time,
+                    expiry_height: block::Height(expiry_height_as_u32 + 40),
+                    inputs: tx_inputs,
+                    outputs: tx_outputs,
+                    sapling_shielded_data: None,
+                    orchard_shielded_data: None,
+                },
+            };
+
+            Ok(hex::encode(tx.zcash_serialize_to_vec().map_server_error()?))
+        }
+        .boxed()
+    }
+
     // TODO: use HexData or SentTransactionHash to handle the transaction ID
     fn get_raw_transaction(
         &self,
@@ -1701,6 +1909,15 @@ impl Default for GetBlockHash {
     fn default() -> Self {
         GetBlockHash(block::Hash([0; 32]))
     }
+}
+
+/// A struct used for the `transactions` parameter for
+/// [`Rpc::create_raw_transaction` method].
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct TxInput {
+    txid: String,
+    vout: u32,
+    sequence: Option<u32>,
 }
 
 /// Response to a `getrawtransaction` RPC request.

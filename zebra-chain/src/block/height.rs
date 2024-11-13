@@ -77,6 +77,10 @@ impl Height {
     /// height and above.
     pub const MAX_EXPIRY_HEIGHT: Height = Height(499_999_999);
 
+    /// The number of blocks within expiry height when a tx is considered
+    /// to be expiring soon .
+    pub const BLOCK_EXPIRY_HEIGHT_THRESHOLD: u32 = 3;
+
     /// Returns the next [`Height`].
     ///
     /// # Panics
