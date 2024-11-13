@@ -30,7 +30,7 @@ use crate::{
         constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
         types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
     },
-    server::error::OkOrError,
+    server::{self, error::OkOrError},
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -181,7 +181,10 @@ where
     // but this is ok for an estimate
     let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
         .estimate_distance_to_network_chain_tip(network)
-        .ok_or_error("no chain tip available yet")?;
+        .ok_or_error(
+            server::error::LegacyCode::default(),
+            "no chain tip available yet",
+        )?;
 
     if !sync_status.is_close_to_tip()
         || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP

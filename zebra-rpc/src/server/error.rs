@@ -65,7 +65,11 @@ pub(crate) trait MapError<T> {
 }
 
 pub(crate) trait OkOrError<T> {
-    fn ok_or_error(self, message: impl ToString) -> std::result::Result<T, jsonrpc_core::Error>;
+    fn ok_or_error(
+        self,
+        code: impl Into<jsonrpc_core::ErrorCode>,
+        message: impl ToString,
+    ) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
 impl<T, E> MapError<T> for Result<T, E>
@@ -82,9 +86,13 @@ where
 }
 
 impl<T> OkOrError<T> for Option<T> {
-    fn ok_or_error(self, message: impl ToString) -> Result<T, jsonrpc_core::Error> {
+    fn ok_or_error(
+        self,
+        code: impl Into<jsonrpc_core::ErrorCode>,
+        message: impl ToString,
+    ) -> Result<T, jsonrpc_core::Error> {
         self.ok_or(jsonrpc_core::Error {
-            code: jsonrpc_core::ErrorCode::ServerError(0),
+            code: code.into(),
             message: message.to_string(),
             data: None,
         })
