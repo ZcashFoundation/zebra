@@ -7,9 +7,11 @@
 /// ## Notes
 ///
 /// - All explicit discriminants fit within `i64`.
+#[derive(Default)]
 pub enum LegacyCode {
     // General application defined errors
     /// `std::exception` thrown in command handling
+    #[default]
     Misc = -1,
     /// Server is in safe mode, and command is not allowed in safe mode
     ForbiddenBySafeMode = -2,
@@ -56,20 +58,23 @@ impl From<LegacyCode> for jsonrpc_core::ErrorCode {
 }
 
 pub(crate) trait MapError<T> {
-    fn map_error(self) -> std::result::Result<T, jsonrpc_core::Error>;
+    fn map_error(
+        self,
+        code: impl Into<jsonrpc_core::ErrorCode>,
+    ) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
 pub(crate) trait OkOrError<T> {
-    fn ok_or_error<S: ToString>(self, message: S) -> std::result::Result<T, jsonrpc_core::Error>;
+    fn ok_or_error(self, message: impl ToString) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
 impl<T, E> MapError<T> for Result<T, E>
 where
     E: ToString,
 {
-    fn map_error(self) -> Result<T, jsonrpc_core::Error> {
+    fn map_error(self, code: impl Into<jsonrpc_core::ErrorCode>) -> Result<T, jsonrpc_core::Error> {
         self.map_err(|error| jsonrpc_core::Error {
-            code: jsonrpc_core::ErrorCode::ServerError(0),
+            code: code.into(),
             message: error.to_string(),
             data: None,
         })
@@ -77,7 +82,7 @@ where
 }
 
 impl<T> OkOrError<T> for Option<T> {
-    fn ok_or_error<S: ToString>(self, message: S) -> Result<T, jsonrpc_core::Error> {
+    fn ok_or_error(self, message: impl ToString) -> Result<T, jsonrpc_core::Error> {
         self.ok_or(jsonrpc_core::Error {
             code: jsonrpc_core::ErrorCode::ServerError(0),
             message: message.to_string(),

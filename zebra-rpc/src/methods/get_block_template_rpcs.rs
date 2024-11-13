@@ -586,7 +586,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_error()?;
+                .map_error(server::error::LegacyCode::default())?;
 
             match response {
                 zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHash(hash)),
@@ -844,7 +844,7 @@ where
                                     Is Zebra shutting down?"
                                 );
 
-                                return Err(recv_error).map_error();
+                                return Err(recv_error).map_error(server::error::LegacyCode::default());
                             }
                         }
                     }
@@ -1036,7 +1036,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_error()?;
+                    .map_error(server::error::LegacyCode::default())?;
                 current_block_size = match response {
                     zebra_state::ReadResponse::TipBlockSize(Some(block_size)) => Some(block_size),
                     _ => None,
@@ -1225,12 +1225,14 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let total_block_subsidy = block_subsidy(height, &network).map_error()?;
-            let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy).map_error()?;
+            let total_block_subsidy =
+                block_subsidy(height, &network).map_error(server::error::LegacyCode::default())?;
+            let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy)
+                .map_error(server::error::LegacyCode::default())?;
 
             let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
                 funding_stream_values(height, &network, total_block_subsidy)
-                    .map_error()?
+                    .map_error(server::error::LegacyCode::default())?
                     .into_iter()
                     // Separate the funding streams into deferred and non-deferred streams
                     .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
@@ -1267,8 +1269,12 @@ where
                 founders: founders.into(),
                 funding_streams,
                 lockbox_streams,
-                funding_streams_total: funding_streams_total.map_error()?.into(),
-                lockbox_total: lockbox_total.map_error()?.into(),
+                funding_streams_total: funding_streams_total
+                    .map_error(server::error::LegacyCode::default())?
+                    .into(),
+                lockbox_total: lockbox_total
+                    .map_error(server::error::LegacyCode::default())?
+                    .into(),
                 total_block_subsidy: total_block_subsidy.into(),
             })
         }
@@ -1429,7 +1435,10 @@ where
 
             let mut block_hashes = Vec::new();
             for _ in 0..num_blocks {
-                let block_template = rpc.get_block_template(None).await.map_error()?;
+                let block_template = rpc
+                    .get_block_template(None)
+                    .await
+                    .map_error(server::error::LegacyCode::default())?;
 
                 let get_block_template::Response::TemplateMode(block_template) = block_template
                 else {
@@ -1445,14 +1454,17 @@ where
                     TimeSource::CurTime,
                     NetworkUpgrade::current(&network, Height(block_template.height)),
                 )
-                .map_error()?;
-                let hex_proposal_block =
-                    HexData(proposal_block.zcash_serialize_to_vec().map_error()?);
+                .map_error(server::error::LegacyCode::default())?;
+                let hex_proposal_block = HexData(
+                    proposal_block
+                        .zcash_serialize_to_vec()
+                        .map_error(server::error::LegacyCode::default())?,
+                );
 
                 let _submit = rpc
                     .submit_block(hex_proposal_block, None)
                     .await
-                    .map_error()?;
+                    .map_error(server::error::LegacyCode::default())?;
 
                 block_hashes.push(GetBlockHash(proposal_block.hash()));
             }
