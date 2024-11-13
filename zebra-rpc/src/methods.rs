@@ -37,7 +37,7 @@ use crate::{
     queue::Queue,
     server::{
         self,
-        error::{MapServerError, OkOrServerError},
+        error::{MapError, OkOrServerError},
     },
 };
 
@@ -531,7 +531,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error()?;
 
             let zebra_state::ReadResponse::TipPoolValues {
                 tip_height,
@@ -547,7 +547,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error()?;
 
             let zebra_state::ReadResponse::BlockHeader(block_header) = response else {
                 unreachable!("unmatched response to a BlockHeader request")
@@ -640,7 +640,7 @@ where
             let valid_addresses = address_strings.valid_addresses()?;
 
             let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
-            let response = state.oneshot(request).await.map_server_error()?;
+            let response = state.oneshot(request).await.map_error()?;
 
             match response {
                 zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
@@ -676,7 +676,7 @@ where
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);
 
-            let response = mempool.oneshot(request).await.map_server_error()?;
+            let response = mempool.oneshot(request).await.map_error()?;
 
             let mut queue_results = match response {
                 mempool::Response::Queued(results) => results,
@@ -693,15 +693,15 @@ where
                 .pop()
                 .expect("there should be exactly one item in Vec")
                 .inspect_err(|err| tracing::debug!("sent transaction to mempool: {:?}", &err))
-                .map_server_error()?
+                .map_error()?
                 .await;
 
             tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
 
             queue_result
-                .map_server_error()?
+                .map_error()?
                 .map(|_| SentTransactionHash(transaction_hash))
-                .map_server_error()
+                .map_error()
         }
         .boxed()
     }
@@ -721,7 +721,7 @@ where
         let verbosity = verbosity.unwrap_or(DEFAULT_GETBLOCK_VERBOSITY);
 
         async move {
-            let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
+            let hash_or_height: HashOrHeight = hash_or_height.parse().map_error()?;
 
             if verbosity == 0 {
                 // # Performance
@@ -733,7 +733,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_server_error()?;
+                    .map_error()?;
 
                 match response {
                     zebra_state::ReadResponse::Block(Some(block)) => {
@@ -779,7 +779,7 @@ where
                             .ready()
                             .and_then(|service| service.call(request))
                             .await
-                            .map_server_error()?;
+                            .map_error()?;
 
                         match response {
                             zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
@@ -841,7 +841,7 @@ where
                 }
 
                 let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-                let tx = match tx_ids_response.map_server_error()? {
+                let tx = match tx_ids_response.map_error()? {
                     zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
                         .ok_or_server_error("Block not found")?
                         .iter()
@@ -851,26 +851,24 @@ where
                 };
 
                 let sapling_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let sapling_note_commitment_tree_count =
-                    match sapling_tree_response.map_server_error()? {
-                        zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::SaplingTree(None) => 0,
-                        _ => unreachable!("unmatched response to a SaplingTree request"),
-                    };
+                let sapling_note_commitment_tree_count = match sapling_tree_response.map_error()? {
+                    zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
+                    zebra_state::ReadResponse::SaplingTree(None) => 0,
+                    _ => unreachable!("unmatched response to a SaplingTree request"),
+                };
 
                 let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let orchard_note_commitment_tree_count =
-                    match orchard_tree_response.map_server_error()? {
-                        zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::OrchardTree(None) => 0,
-                        _ => unreachable!("unmatched response to a OrchardTree request"),
-                    };
+                let orchard_note_commitment_tree_count = match orchard_tree_response.map_error()? {
+                    zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
+                    zebra_state::ReadResponse::OrchardTree(None) => 0,
+                    _ => unreachable!("unmatched response to a OrchardTree request"),
+                };
 
                 // From <https://zcash.github.io/rpc/getblock.html>
                 const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
 
                 let depth_response = futs.next().await.expect("`futs` should not be empty");
-                let confirmations = match depth_response.map_server_error()? {
+                let confirmations = match depth_response.map_error()? {
                     // Confirmations are one more than the depth.
                     // Depth is limited by height, so it will never overflow an i64.
                     zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
@@ -882,7 +880,7 @@ where
                     let block_header_response =
                         futs.next().await.expect("`futs` should not be empty");
 
-                    match block_header_response.map_server_error()? {
+                    match block_header_response.map_error()? {
                         zebra_state::ReadResponse::BlockHeader(header) => Some(
                             header
                                 .ok_or_server_error("Block not found")?
@@ -964,7 +962,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error()?;
 
             match response {
                 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -1035,7 +1033,7 @@ where
                     ])))
                 })
                 .await
-                .map_server_error()?
+                .map_error()?
             {
                 mempool::Response::Transactions(txns) => {
                     if let Some(tx) = txns.first() {
@@ -1061,7 +1059,7 @@ where
                 .ready()
                 .and_then(|service| service.call(zebra_state::ReadRequest::Transaction(txid)))
                 .await
-                .map_server_error()?
+                .map_error()?
             {
                 zebra_state::ReadResponse::Transaction(Some(tx)) => {
                     let hex = tx.tx.into();
@@ -1079,7 +1077,7 @@ where
 
                 zebra_state::ReadResponse::Transaction(None) => {
                     // TODO: Return the correct err code (-5).
-                    Err("Transaction not found").map_server_error()
+                    Err("Transaction not found").map_error()
                 }
 
                 _ => unreachable!("unmatched response to a `Transaction` read request"),
@@ -1097,7 +1095,7 @@ where
 
         async move {
             // Convert the [`hash_or_height`] string into an actual hash or height.
-            let hash_or_height = hash_or_height.parse().map_server_error()?;
+            let hash_or_height = hash_or_height.parse().map_error()?;
 
             // Fetch the block referenced by [`hash_or_height`] from the state.
             //
@@ -1111,7 +1109,7 @@ where
                 .ready()
                 .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
                 .await
-                .map_server_error()?
+                .map_error()?
             {
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
@@ -1145,7 +1143,7 @@ where
                         service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
                     })
                     .await
-                    .map_server_error()?
+                    .map_error()?
                 {
                     zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to a Sapling tree request"),
@@ -1162,7 +1160,7 @@ where
                         service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
                     })
                     .await
-                    .map_server_error()?
+                    .map_error()?
                 {
                     zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to an Orchard tree request"),
@@ -1195,7 +1193,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_server_error()?;
+                    .map_error()?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
@@ -1221,7 +1219,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_server_error()?;
+                    .map_error()?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
@@ -1281,7 +1279,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error()?;
 
             let hashes = match response {
                 zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
@@ -1328,7 +1326,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error()?;
             let utxos = match response {
                 zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),

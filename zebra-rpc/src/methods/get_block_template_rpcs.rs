@@ -62,7 +62,7 @@ use crate::{
         hex_data::HexData,
         GetBlockHash,
     },
-    server::{self, error::MapServerError},
+    server::{self, error::MapError},
 };
 
 pub mod constants;
@@ -586,7 +586,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error()?;
 
             match response {
                 zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHash(hash)),
@@ -844,7 +844,7 @@ where
                                     Is Zebra shutting down?"
                                 );
 
-                                return Err(recv_error).map_server_error();
+                                return Err(recv_error).map_error();
                             }
                         }
                     }
@@ -1036,7 +1036,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_server_error()?;
+                    .map_error()?;
                 current_block_size = match response {
                     zebra_state::ReadResponse::TipBlockSize(Some(block_size)) => Some(block_size),
                     _ => None,
@@ -1225,13 +1225,12 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let total_block_subsidy = block_subsidy(height, &network).map_server_error()?;
-            let miner_subsidy =
-                miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
+            let total_block_subsidy = block_subsidy(height, &network).map_error()?;
+            let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy).map_error()?;
 
             let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
                 funding_stream_values(height, &network, total_block_subsidy)
-                    .map_server_error()?
+                    .map_error()?
                     .into_iter()
                     // Separate the funding streams into deferred and non-deferred streams
                     .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
@@ -1268,8 +1267,8 @@ where
                 founders: founders.into(),
                 funding_streams,
                 lockbox_streams,
-                funding_streams_total: funding_streams_total.map_server_error()?.into(),
-                lockbox_total: lockbox_total.map_server_error()?.into(),
+                funding_streams_total: funding_streams_total.map_error()?.into(),
+                lockbox_total: lockbox_total.map_error()?.into(),
                 total_block_subsidy: total_block_subsidy.into(),
             })
         }
@@ -1430,7 +1429,7 @@ where
 
             let mut block_hashes = Vec::new();
             for _ in 0..num_blocks {
-                let block_template = rpc.get_block_template(None).await.map_server_error()?;
+                let block_template = rpc.get_block_template(None).await.map_error()?;
 
                 let get_block_template::Response::TemplateMode(block_template) = block_template
                 else {
@@ -1446,14 +1445,14 @@ where
                     TimeSource::CurTime,
                     NetworkUpgrade::current(&network, Height(block_template.height)),
                 )
-                .map_server_error()?;
+                .map_error()?;
                 let hex_proposal_block =
-                    HexData(proposal_block.zcash_serialize_to_vec().map_server_error()?);
+                    HexData(proposal_block.zcash_serialize_to_vec().map_error()?);
 
                 let _submit = rpc
                     .submit_block(hex_proposal_block, None)
                     .await
-                    .map_server_error()?;
+                    .map_error()?;
 
                 block_hashes.push(GetBlockHash(proposal_block.hash()));
             }

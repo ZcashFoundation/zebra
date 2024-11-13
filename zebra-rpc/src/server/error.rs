@@ -55,8 +55,8 @@ impl From<LegacyCode> for jsonrpc_core::ErrorCode {
     }
 }
 
-pub(crate) trait MapServerError<T> {
-    fn map_server_error(self) -> std::result::Result<T, jsonrpc_core::Error>;
+pub(crate) trait MapError<T> {
+    fn map_error(self) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
 pub(crate) trait OkOrServerError<T> {
@@ -66,11 +66,11 @@ pub(crate) trait OkOrServerError<T> {
     ) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
-impl<T, E> MapServerError<T> for Result<T, E>
+impl<T, E> MapError<T> for Result<T, E>
 where
     E: ToString,
 {
-    fn map_server_error(self) -> Result<T, jsonrpc_core::Error> {
+    fn map_error(self) -> Result<T, jsonrpc_core::Error> {
         self.map_err(|error| jsonrpc_core::Error {
             code: jsonrpc_core::ErrorCode::ServerError(0),
             message: error.to_string(),
