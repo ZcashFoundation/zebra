@@ -847,23 +847,24 @@ where
                     unreachable!("unmatched response to a OrchardTree request");
                 };
 
+                let nu5_activation = NetworkUpgrade::Nu5.activation_height(&self_clone.network);
+
                 // This could be `None` if there's a chain reorg between state queries.
                 let orchard_tree =
-                    orchard_tree.ok_or_server_error("missing sapling tree for block")?;
+                    orchard_tree.ok_or_server_error("missing orchard tree for block")?;
 
-                let orchard_tree_size = orchard_tree.count();
-                let final_orchard_root: [u8; 32] = if orchard_tree_size != 0 {
-                    let mut root: [u8; 32] = orchard_tree.root().into();
-                    root.reverse();
-                    root
-                } else {
-                    [0; 32]
-                };
+                let final_orchard_root =
+                    if nu5_activation.is_some() && height >= nu5_activation.unwrap() {
+                        Some(orchard_tree.root().into())
+                    } else {
+                        None
+                    };
 
                 let sapling = SaplingTrees {
                     size: sapling_tree_size,
                 };
 
+                let orchard_tree_size = orchard_tree.count();
                 let orchard = OrchardTrees {
                     size: orchard_tree_size,
                 };
@@ -887,7 +888,7 @@ where
                     // TODO
                     size: None,
                     final_sapling_root: Some(final_sapling_root),
-                    final_orchard_root: Some(final_orchard_root),
+                    final_orchard_root,
                     previous_block_hash: Some(previous_block_hash),
                     next_block_hash,
                 })
@@ -976,14 +977,16 @@ where
                 let mut nonce = *header.nonce;
                 nonce.reverse();
 
+                let sapling_activation = NetworkUpgrade::Sapling.activation_height(&network);
                 let sapling_tree_size = sapling_tree.count();
-                let final_sapling_root: [u8; 32] = if sapling_tree_size != 0 {
-                    let mut root: [u8; 32] = sapling_tree.root().into();
-                    root.reverse();
-                    root
-                } else {
-                    [0; 32]
-                };
+                let final_sapling_root: [u8; 32] =
+                    if sapling_activation.is_some() && height >= sapling_activation.unwrap() {
+                        let mut root: [u8; 32] = sapling_tree.root().into();
+                        root.reverse();
+                        root
+                    } else {
+                        [0; 32]
+                    };
 
                 let difficulty = header.difficulty_threshold.relative_to_network(&network);
 
