@@ -42,7 +42,7 @@ pub use error::{
     ValidateContextError,
 };
 pub use request::{
-    CheckpointVerifiedBlock, HashOrHeight, IssuedAssetsOrChanges, ReadRequest, Request,
+    CheckpointVerifiedBlock, HashOrHeight, IssuedAssetsOrChange, ReadRequest, Request,
     SemanticallyVerifiedBlock,
 };
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};

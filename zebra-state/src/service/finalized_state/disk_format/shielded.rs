@@ -233,7 +233,7 @@ impl FromDisk for AssetState {
 
         Self {
             is_finalized: is_finalized_byte != 0,
-            total_supply: u64::from_be_bytes(total_supply_bytes).into(),
+            total_supply: u64::from_be_bytes(total_supply_bytes),
         }
     }
 }

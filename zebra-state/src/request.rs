@@ -166,7 +166,7 @@ pub struct SemanticallyVerifiedBlock {
     pub deferred_balance: Option<Amount<NonNegative>>,
     /// A map of burns to be applied to the issued assets map.
     // TODO: Reference ZIP.
-    pub issued_assets_changes: IssuedAssetsOrChanges,
+    pub issued_assets_change: Option<IssuedAssetsChange>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -304,51 +304,47 @@ pub struct FinalizedBlock {
     /// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
     /// updates asset states to be inserted into the finalized state, replacing the previous
     /// asset states for those asset bases.
-    pub issued_assets: IssuedAssetsOrChanges,
+    pub issued_assets: IssuedAssetsOrChange,
 }
 
 /// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
 /// updates asset states to be inserted into the finalized state, replacing the previous
 /// asset states for those asset bases.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum IssuedAssetsOrChanges {
+pub enum IssuedAssetsOrChange {
     /// A map of updated issued assets.
     Updated(IssuedAssets),
 
     /// A map of changes to apply to the issued assets map.
     Change(IssuedAssetsChange),
-
-    /// A map of changes from burns and issuance to apply to the issued assets map.
-    BurnAndIssuanceChanges {
-        /// A map of changes from burns to apply to the issued assets map.
-        burns: IssuedAssetsChange,
-        /// A map of changes from issuance to apply to the issued assets map.
-        issuance: IssuedAssetsChange,
-    },
 }
 
-impl IssuedAssetsOrChanges {
-    /// Combines fields in the `BurnAndIssuanceChanges` variant then returns a `Change` variant, or
-    /// returns self unmodified.
-    pub fn combine(self) -> Self {
-        let Self::BurnAndIssuanceChanges { burns, issuance } = self else {
-            return self;
-        };
-
-        Self::Change(burns + issuance)
+impl From<IssuedAssetsChange> for IssuedAssetsOrChange {
+    fn from(change: IssuedAssetsChange) -> Self {
+        Self::Change(change)
     }
 }
 
-impl From<IssuedAssetsChange> for IssuedAssetsOrChanges {
-    fn from(change: IssuedAssetsChange) -> Self {
-        Self::Change(change)
+impl From<IssuedAssets> for IssuedAssetsOrChange {
+    fn from(updated_issued_assets: IssuedAssets) -> Self {
+        Self::Updated(updated_issued_assets)
     }
 }
 
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+        let issued_assets = block
+            .issued_assets_change
+            .clone()
+            .expect("checkpoint verified block should have issued assets change")
+            .into();
+
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            issued_assets,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
@@ -356,11 +352,20 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
-        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate)
+        let issued_assets = block.issued_assets.clone().into();
+        Self::from_semantically_verified(
+            SemanticallyVerifiedBlock::from(block),
+            treestate,
+            issued_assets,
+        )
     }
 
     /// Constructs [`FinalizedBlock`] from [`SemanticallyVerifiedBlock`] and its [`Treestate`].
-    fn from_semantically_verified(block: SemanticallyVerifiedBlock, treestate: Treestate) -> Self {
+    fn from_semantically_verified(
+        block: SemanticallyVerifiedBlock,
+        treestate: Treestate,
+        issued_assets: IssuedAssetsOrChange,
+    ) -> Self {
         Self {
             block: block.block,
             hash: block.hash,
@@ -369,7 +374,7 @@ impl FinalizedBlock {
             transaction_hashes: block.transaction_hashes,
             treestate,
             deferred_balance: block.deferred_balance,
-            issued_assets: block.issued_assets_changes,
+            issued_assets,
         }
     }
 }
@@ -444,7 +449,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance,
-            issued_assets_changes: _,
+            issued_assets_change: _,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -476,11 +481,14 @@ impl CheckpointVerifiedBlock {
         block: Arc<Block>,
         hash: Option<block::Hash>,
         deferred_balance: Option<Amount<NonNegative>>,
-    ) -> Self {
+    ) -> Option<Self> {
+        let issued_assets_change = IssuedAssetsChange::from_transactions(&block.transactions)?;
         let mut block = Self::with_hash(block.clone(), hash.unwrap_or(block.hash()));
         block.deferred_balance = deferred_balance;
-        block
+        block.issued_assets_change = Some(issued_assets_change);
+        Some(block)
     }
+
     /// Creates a block that's ready to be committed to the finalized state,
     /// using a precalculated [`block::Hash`].
     ///
@@ -499,7 +507,6 @@ impl SemanticallyVerifiedBlock {
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
-        let (burns, issuance) = IssuedAssetsChange::from_transactions(&block.transactions);
 
         Self {
             block,
@@ -508,11 +515,7 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
-            issued_assets_changes: IssuedAssetsOrChanges::BurnAndIssuanceChanges {
-                burns,
-                issuance,
-            }
-            .combine(),
+            issued_assets_change: None,
         }
     }
 
@@ -537,7 +540,6 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             .expect("semantically verified block should have a coinbase height");
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs = transparent::new_ordered_outputs(&block, &transaction_hashes);
-        let (burns, issuance) = IssuedAssetsChange::from_transactions(&block.transactions);
 
         Self {
             block,
@@ -546,10 +548,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
-            issued_assets_changes: IssuedAssetsOrChanges::BurnAndIssuanceChanges {
-                burns,
-                issuance,
-            },
+            issued_assets_change: None,
         }
     }
 }
@@ -569,21 +568,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
                     .constrain::<NonNegative>()
                     .expect("deferred balance in a block must me non-negative"),
             ),
-            issued_assets_changes: IssuedAssetsOrChanges::Updated(valid.issued_assets),
-        }
-    }
-}
-
-impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
-    fn from(finalized: FinalizedBlock) -> Self {
-        Self {
-            block: finalized.block,
-            hash: finalized.hash,
-            height: finalized.height,
-            new_outputs: finalized.new_outputs,
-            transaction_hashes: finalized.transaction_hashes,
-            deferred_balance: finalized.deferred_balance,
-            issued_assets_changes: finalized.issued_assets,
+            issued_assets_change: None,
         }
     }
 }

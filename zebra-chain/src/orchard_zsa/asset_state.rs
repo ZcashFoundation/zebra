@@ -1,6 +1,9 @@
 //! Defines and implements the issued asset state types
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use orchard::issuance::IssueAction;
 pub use orchard::note::AssetBase;
@@ -16,42 +19,108 @@ pub struct AssetState {
     pub is_finalized: bool,
 
     /// The circulating supply that has been issued for an asset.
-    pub total_supply: u128,
+    pub total_supply: u64,
 }
 
 /// A change to apply to the issued assets map.
-// TODO:
-// - Reference ZIP
-// - Make this an enum of _either_ a finalization _or_ a supply change
-//    (applying the finalize flag for each issuance note will cause unexpected panics).
+// TODO: Reference ZIP
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AssetStateChange {
     /// Whether the asset should be finalized such that no more of it can be issued.
     pub is_finalized: bool,
-    /// The change in supply from newly issued assets or burned assets.
-    pub supply_change: i128,
+    /// The change in supply from newly issued assets or burned assets, if any.
+    pub supply_change: SupplyChange,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// An asset supply change to apply to the issued assets map.
+pub enum SupplyChange {
+    Issuance(u64),
+    Burn(u64),
+}
+
+impl Default for SupplyChange {
+    fn default() -> Self {
+        Self::Issuance(0)
+    }
+}
+
+impl SupplyChange {
+    fn apply_to(self, total_supply: u64) -> Option<u64> {
+        match self {
+            SupplyChange::Issuance(amount) => total_supply.checked_add(amount),
+            SupplyChange::Burn(amount) => total_supply.checked_sub(amount),
+        }
+    }
+
+    fn as_i128(self) -> i128 {
+        match self {
+            SupplyChange::Issuance(amount) => i128::from(amount),
+            SupplyChange::Burn(amount) => -i128::from(amount),
+        }
+    }
+
+    fn add(&mut self, rhs: Self) -> bool {
+        if let Some(result) = self
+            .as_i128()
+            .checked_add(rhs.as_i128())
+            .and_then(|signed| match signed {
+                0.. => signed.try_into().ok().map(Self::Issuance),
+                ..0 => signed.try_into().ok().map(Self::Burn),
+            })
+        {
+            *self = result;
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl std::ops::Neg for SupplyChange {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        match self {
+            Self::Issuance(amount) => Self::Burn(amount),
+            Self::Burn(amount) => Self::Issuance(amount),
+        }
+    }
 }
 
 impl AssetState {
     /// Updates and returns self with the provided [`AssetStateChange`] if
     /// the change is valid, or returns None otherwise.
-    pub fn apply_change(mut self, change: AssetStateChange) -> Option<Self> {
-        if self.is_finalized {
-            return None;
-        }
+    pub fn apply_change(self, change: AssetStateChange) -> Option<Self> {
+        self.apply_finalization(change.is_finalized)?
+            .apply_supply_change(change.supply_change)
+    }
 
-        self.is_finalized |= change.is_finalized;
-        self.total_supply = self.total_supply.checked_add_signed(change.supply_change)?;
+    fn apply_finalization(mut self, is_finalized: bool) -> Option<Self> {
+        if self.is_finalized {
+            None
+        } else {
+            self.is_finalized = is_finalized;
+            Some(self)
+        }
+    }
+
+    fn apply_supply_change(mut self, supply_change: SupplyChange) -> Option<Self> {
+        self.total_supply = supply_change.apply_to(self.total_supply)?;
         Some(self)
     }
 
     /// Reverts the provided [`AssetStateChange`].
     pub fn revert_change(&mut self, change: AssetStateChange) {
-        self.is_finalized &= !change.is_finalized;
-        self.total_supply = self
-            .total_supply
-            .checked_add_signed(-change.supply_change)
-            .expect("reversions must not overflow");
+        *self = self
+            .revert_finalization(change.is_finalized)
+            .apply_supply_change(-change.supply_change)
+            .expect("reverted change should be validated");
+    }
+
+    fn revert_finalization(mut self, is_finalized: bool) -> Self {
+        self.is_finalized &= !is_finalized;
+        self
     }
 }
 
@@ -62,50 +131,79 @@ impl From<HashMap<AssetBase, AssetState>> for IssuedAssets {
 }
 
 impl AssetStateChange {
-    fn from_note(is_finalized: bool, note: orchard::Note) -> (AssetBase, Self) {
+    fn new(
+        asset_base: AssetBase,
+        supply_change: SupplyChange,
+        is_finalized: bool,
+    ) -> (AssetBase, Self) {
         (
-            note.asset(),
+            asset_base,
             Self {
                 is_finalized,
-                supply_change: note.value().inner().into(),
+                supply_change,
             },
         )
     }
 
-    fn from_notes(
-        is_finalized: bool,
-        notes: &[orchard::Note],
-    ) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
-        notes
-            .iter()
-            .map(move |note| Self::from_note(is_finalized, *note))
+    fn from_transaction(tx: &Arc<Transaction>) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
+        Self::from_burns(tx.orchard_burns())
+            .chain(Self::from_issue_actions(tx.orchard_issue_actions()))
     }
 
     fn from_issue_actions<'a>(
         actions: impl Iterator<Item = &'a IssueAction> + 'a,
     ) -> impl Iterator<Item = (AssetBase, Self)> + 'a {
-        actions.flat_map(|action| Self::from_notes(action.is_finalized(), action.notes()))
+        actions.flat_map(Self::from_issue_action)
     }
 
-    fn from_burn(burn: &BurnItem) -> (AssetBase, Self) {
-        (
-            burn.asset(),
-            Self {
-                is_finalized: false,
-                supply_change: -i128::from(burn.amount()),
-            },
+    fn from_issue_action(action: &IssueAction) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
+        let supply_changes = Self::from_notes(action.notes());
+        let finalize_changes = action
+            .is_finalized()
+            .then(|| {
+                action
+                    .notes()
+                    .iter()
+                    .map(orchard::Note::asset)
+                    .collect::<HashSet<AssetBase>>()
+            })
+            .unwrap_or_default()
+            .into_iter()
+            .map(|asset_base| Self::new(asset_base, SupplyChange::Issuance(0), true));
+
+        supply_changes.chain(finalize_changes)
+    }
+
+    fn from_notes(notes: &[orchard::Note]) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
+        notes.iter().copied().map(Self::from_note)
+    }
+
+    fn from_note(note: orchard::Note) -> (AssetBase, Self) {
+        Self::new(
+            note.asset(),
+            SupplyChange::Issuance(note.value().inner()),
+            false,
         )
     }
 
     fn from_burns(burns: &[BurnItem]) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
         burns.iter().map(Self::from_burn)
     }
-}
 
-impl std::ops::AddAssign for AssetStateChange {
-    fn add_assign(&mut self, rhs: Self) {
-        self.is_finalized |= rhs.is_finalized;
-        self.supply_change += rhs.supply_change;
+    fn from_burn(burn: &BurnItem) -> (AssetBase, Self) {
+        Self::new(burn.asset(), SupplyChange::Burn(burn.amount()), false)
+    }
+
+    /// Updates and returns self with the provided [`AssetStateChange`] if
+    /// the change is valid, or returns None otherwise.
+    pub fn apply_change(&mut self, change: AssetStateChange) -> bool {
+        self.is_finalized |= change.is_finalized;
+        self.supply_change.add(change.supply_change)
+    }
+
+    /// Returns true if the AssetStateChange is for an asset burn.
+    pub fn is_burn(&self) -> bool {
+        matches!(self.supply_change, SupplyChange::Burn(_))
     }
 }
 
@@ -143,7 +241,7 @@ impl IntoIterator for IssuedAssets {
 }
 
 /// A map of changes to apply to the issued assets map.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IssuedAssetsChange(HashMap<AssetBase, AssetStateChange>);
 
 impl IssuedAssetsChange {
@@ -151,45 +249,33 @@ impl IssuedAssetsChange {
         Self(HashMap::new())
     }
 
-    fn update<'a>(&mut self, changes: impl Iterator<Item = (AssetBase, AssetStateChange)> + 'a) {
+    fn update<'a>(
+        &mut self,
+        changes: impl Iterator<Item = (AssetBase, AssetStateChange)> + 'a,
+    ) -> bool {
         for (asset_base, change) in changes {
-            *self.0.entry(asset_base).or_default() += change;
-        }
-    }
-
-    /// Accepts a slice of [`Arc<Transaction>`]s.
-    ///
-    /// Returns a tuple, ([`IssuedAssetsChange`], [`IssuedAssetsChange`]), where
-    /// the first item is from burns and the second one is for issuance.
-    pub fn from_transactions(transactions: &[Arc<Transaction>]) -> (Self, Self) {
-        let mut burn_change = Self::new();
-        let mut issuance_change = Self::new();
-
-        for transaction in transactions {
-            burn_change.update(AssetStateChange::from_burns(transaction.orchard_burns()));
-            issuance_change.update(AssetStateChange::from_issue_actions(
-                transaction.orchard_issue_actions(),
-            ));
+            if !self.0.entry(asset_base).or_default().apply_change(change) {
+                return false;
+            }
         }
 
-        (burn_change, issuance_change)
+        true
     }
 
     /// Accepts a slice of [`Arc<Transaction>`]s.
     ///
     /// Returns an [`IssuedAssetsChange`] representing all of the changes to the issued assets
     /// map that should be applied for the provided transactions.
-    pub fn combined_from_transactions(transactions: &[Arc<Transaction>]) -> Self {
+    pub fn from_transactions(transactions: &[Arc<Transaction>]) -> Option<Self> {
         let mut issued_assets_change = Self::new();
 
         for transaction in transactions {
-            issued_assets_change.update(AssetStateChange::from_burns(transaction.orchard_burns()));
-            issued_assets_change.update(AssetStateChange::from_issue_actions(
-                transaction.orchard_issue_actions(),
-            ));
+            if !issued_assets_change.update(AssetStateChange::from_transaction(transaction)) {
+                return None;
+            }
         }
 
-        issued_assets_change
+        Some(issued_assets_change)
     }
 
     /// Consumes self and accepts a closure for looking up previous asset states.

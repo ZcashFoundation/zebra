@@ -29,7 +29,7 @@ use zebra_chain::{
     transparent,
     work::equihash,
 };
-use zebra_state::{self as zs, IssuedAssetsOrChanges};
+use zebra_state as zs;
 
 use crate::{error::*, transaction as tx, BoxError};
 
@@ -315,7 +315,9 @@ where
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            let (burns, issuance) = IssuedAssetsChange::from_transactions(&block.transactions);
+            let issued_assets_change = IssuedAssetsChange::from_transactions(&block.transactions)
+                .ok_or(TransactionError::InvalidAssetIssuanceOrBurn)?;
+
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
                 hash,
@@ -323,10 +325,7 @@ where
                 new_outputs,
                 transaction_hashes,
                 deferred_balance: Some(expected_deferred_amount),
-                issued_assets_changes: IssuedAssetsOrChanges::BurnAndIssuanceChanges {
-                    burns,
-                    issuance,
-                },
+                issued_assets_change: Some(issued_assets_change),
             };
 
             // Return early for proposal requests when getblocktemplate-rpcs feature is enabled

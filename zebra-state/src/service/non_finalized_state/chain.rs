@@ -972,7 +972,8 @@ impl Chain {
             }
         } else {
             trace!(?position, "reverting changes to issued assets");
-            for (asset_base, change) in IssuedAssetsChange::combined_from_transactions(transactions)
+            for (asset_base, change) in IssuedAssetsChange::from_transactions(transactions)
+                .expect("blocks in chain state must be valid")
             {
                 self.issued_assets
                     .entry(asset_base)

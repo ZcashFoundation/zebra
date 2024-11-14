@@ -34,7 +34,7 @@ use crate::{
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    BoxError, IssuedAssetsOrChanges, TypedColumnFamily,
+    BoxError, IssuedAssetsOrChange, TypedColumnFamily,
 };
 
 // Doc-only items
@@ -515,17 +515,14 @@ impl DiskWriteBatch {
     pub fn prepare_issued_assets_batch(
         &mut self,
         zebra_db: &ZebraDb,
-        issued_assets_or_changes: &IssuedAssetsOrChanges,
+        issued_assets_or_changes: &IssuedAssetsOrChange,
     ) -> Result<(), BoxError> {
         let mut batch = zebra_db.issued_assets_cf().with_batch_for_writing(self);
 
-        let updated_issued_assets = match issued_assets_or_changes.clone().combine() {
-            IssuedAssetsOrChanges::Updated(issued_assets) => issued_assets,
-            IssuedAssetsOrChanges::Change(issued_assets_change) => issued_assets_change
+        let updated_issued_assets = match issued_assets_or_changes.clone() {
+            IssuedAssetsOrChange::Updated(issued_assets) => issued_assets,
+            IssuedAssetsOrChange::Change(issued_assets_change) => issued_assets_change
                 .apply_with(|asset_base| zebra_db.issued_asset(&asset_base).unwrap_or_default()),
-            IssuedAssetsOrChanges::BurnAndIssuanceChanges { .. } => {
-                panic!("unexpected variant returned from `combine()`")
-            }
         };
 
         for (asset_base, updated_issued_asset_state) in updated_issued_assets {
