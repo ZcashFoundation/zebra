@@ -16,6 +16,12 @@ categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
 
 [features]
 
+default = []
+
+nsm = [
+    "zebra-chain/nsm",
+]
+
 # Production features that activate extra dependencies, or extra features in dependencies
 
 progress-bar = [
@@ -110,3 +116,6 @@ tokio = { version = "1.41.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.42", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.42" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nsm"))'] }

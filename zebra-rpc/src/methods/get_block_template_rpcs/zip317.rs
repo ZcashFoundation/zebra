@@ -12,7 +12,7 @@ use rand::{
 };
 
 use zebra_chain::{
-    amount::NegativeOrZero,
+    amount::{Amount, NegativeOrZero, NonNegative},
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
     transaction::{zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
@@ -43,6 +43,7 @@ pub async fn select_mempool_transactions(
     mempool_txs: Vec<VerifiedUnminedTx>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
+    #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
 ) -> Vec<VerifiedUnminedTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
@@ -52,6 +53,8 @@ pub async fn select_mempool_transactions(
         miner_address,
         like_zcashd,
         extra_coinbase_data,
+        #[cfg(zcash_unstable = "nsm")]
+        burn_amount,
     );
 
     // Setup the transaction lists.
@@ -120,6 +123,7 @@ pub fn fake_coinbase_transaction(
     miner_address: &transparent::Address,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
+    #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
     // They can also change the `u32` consensus branch id.
@@ -139,6 +143,8 @@ pub fn fake_coinbase_transaction(
         miner_fee,
         like_zcashd,
         extra_coinbase_data,
+        #[cfg(zcash_unstable = "nsm")]
+        burn_amount,
     );
 
     TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)

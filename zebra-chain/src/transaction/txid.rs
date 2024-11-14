@@ -29,6 +29,8 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
             Transaction::V5 { .. } => self.txid_v5(),
+            #[cfg(zcash_unstable = "nsm")]
+            Transaction::ZFuture { .. } => self.txid_zfuture(),
         }
     }
 
@@ -47,6 +49,15 @@ impl<'a> TxIdBuilder<'a> {
     /// In this case it's the hash of a tree of hashes of specific parts of the
     /// transaction, as specified in ZIP-244 and ZIP-225.
     fn txid_v5(self) -> Result<Hash, io::Error> {
+        // The v5 txid (from ZIP-244) is computed using librustzcash. Convert the zebra
+        // transaction to a librustzcash transaction.
+        let alt_tx: zcash_primitives::transaction::Transaction = self.trans.try_into()?;
+        Ok(Hash(*alt_tx.txid().as_ref()))
+    }
+
+    #[cfg(zcash_unstable = "nsm")]
+    /// Compute the Transaction ID for a ZFuture transaction in the given network upgrade.
+    fn txid_zfuture(self) -> Result<Hash, io::Error> {
         // The v5 txid (from ZIP-244) is computed using librustzcash. Convert the zebra
         // transaction to a librustzcash transaction.
         let alt_tx: zcash_primitives::transaction::Transaction = self.trans.try_into()?;

@@ -286,13 +286,13 @@ pub trait GetBlockTemplateRpc {
         address: String,
     ) -> BoxFuture<Result<unified_address::Response>>;
 
-    #[rpc(name = "generate")]
     /// Mine blocks immediately. Returns the block hashes of the generated blocks.
     ///
     /// # Parameters
     ///
     /// - `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.
     ///
+    /// - `burn_amount`: (numeric, optional) The amount of money to be burned in a transaction [ZIP-233]
     /// # Notes
     ///
     /// Only works if the network of the running zebrad process is `Regtest`.
@@ -300,7 +300,14 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
     /// tags: generating
-    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>>;
+    #[rpc(name = "generate")]
+    fn generate(
+        &self,
+        num_blocks: u32,
+        // the burn_amount field should be currently hidden behind zcash_unstable flag, but it doesn't compile due to the rpc macro
+        //#[cfg(zcash_unstable = "nsm")]
+        burn_amount: Option<Amount<NonNegative>>,
+    ) -> BoxFuture<Result<Vec<GetBlockHash>>>;
 }
 
 /// RPC method implementations.
@@ -882,6 +889,13 @@ where
                 "selecting transactions for the template from the mempool"
             );
 
+            #[cfg(zcash_unstable = "nsm")]
+            let burn_amount = if let Some(params) = parameters {
+                params.burn_amount
+            } else {
+                None
+            };
+
             // Randomly select some mempool transactions.
             let mempool_txs = zip317::select_mempool_transactions(
                 &network,
@@ -890,6 +904,8 @@ where
                 mempool_txs,
                 debug_like_zcashd,
                 extra_coinbase_data.clone(),
+                #[cfg(zcash_unstable = "nsm")]
+                burn_amount,
             )
             .await;
 
@@ -902,7 +918,6 @@ where
             );
 
             // - After this point, the template only depends on the previously fetched data.
-
             let response = GetBlockTemplate::new(
                 &network,
                 &miner_address,
@@ -912,6 +927,8 @@ where
                 submit_old,
                 debug_like_zcashd,
                 extra_coinbase_data,
+                #[cfg(zcash_unstable = "nsm")]
+                burn_amount,
             );
 
             Ok(response.into())
@@ -1406,7 +1423,12 @@ where
         .boxed()
     }
 
-    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>> {
+    fn generate(
+        &self,
+        num_blocks: u32,
+        //#[cfg(zcash_unstable = "nsm")]
+        burn_amount: Option<Amount<NonNegative>>,
+    ) -> BoxFuture<Result<Vec<GetBlockHash>>> {
         let rpc: GetBlockTemplateRpcImpl<
             Mempool,
             State,
@@ -1427,8 +1449,18 @@ where
             }
 
             let mut block_hashes = Vec::new();
+            #[cfg(not(zcash_unstable = "nsm"))]
+            let params = None;
+            #[cfg(zcash_unstable = "nsm")]
+            let params = Some(get_block_template::JsonParameters {
+                burn_amount,
+                ..Default::default()
+            });
             for _ in 0..num_blocks {
-                let block_template = rpc.get_block_template(None).await.map_server_error()?;
+                let block_template = rpc
+                    .get_block_template(params.clone())
+                    .await
+                    .map_server_error()?;
 
                 let get_block_template::Response::TemplateMode(block_template) = block_template
                 else {
