@@ -1093,8 +1093,8 @@ where
                 }
 
                 zebra_state::ReadResponse::Transaction(None) => {
-                    // TODO: Return the correct err code (-5).
-                    Err("Transaction not found").map_error(server::error::LegacyCode::default())
+                    Err("No such mempool or main chain transaction")
+                        .map_error(server::error::LegacyCode::InvalidAddressOrKey)
                 }
 
                 _ => unreachable!("unmatched response to a `Transaction` read request"),
