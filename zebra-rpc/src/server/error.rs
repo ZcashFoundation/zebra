@@ -57,14 +57,19 @@ impl From<LegacyCode> for jsonrpc_core::ErrorCode {
     }
 }
 
+/// A trait for mapping errors to [`jsonrpc_core::Error`].
 pub(crate) trait MapError<T> {
+    /// Maps errors to [`jsonrpc_core::Error`] with a specific error code.
     fn map_error(
         self,
         code: impl Into<jsonrpc_core::ErrorCode>,
     ) -> std::result::Result<T, jsonrpc_core::Error>;
 }
 
+/// A trait for conditionally converting a value into a `Result<T, jsonrpc_core::Error>`.
 pub(crate) trait OkOrError<T> {
+    /// Converts the implementing type to `Result<T, jsonrpc_core::Error>`, using an error code and
+    /// message if conversion is to `Err`.
     fn ok_or_error(
         self,
         code: impl Into<jsonrpc_core::ErrorCode>,
