@@ -92,21 +92,20 @@ impl AssetState {
     /// Updates and returns self with the provided [`AssetStateChange`] if
     /// the change is valid, or returns None otherwise.
     pub fn apply_change(self, change: AssetStateChange) -> Option<Self> {
-        self.apply_finalization(change.is_finalized)?
-            .apply_supply_change(change.supply_change)
+        self.apply_finalization(change)?.apply_supply_change(change)
     }
 
-    fn apply_finalization(mut self, is_finalized: bool) -> Option<Self> {
-        if self.is_finalized {
+    fn apply_finalization(mut self, change: AssetStateChange) -> Option<Self> {
+        if self.is_finalized && change.is_issuance() {
             None
         } else {
-            self.is_finalized = is_finalized;
+            self.is_finalized |= change.is_finalized;
             Some(self)
         }
     }
 
-    fn apply_supply_change(mut self, supply_change: SupplyChange) -> Option<Self> {
-        self.total_supply = supply_change.apply_to(self.total_supply)?;
+    fn apply_supply_change(mut self, change: AssetStateChange) -> Option<Self> {
+        self.total_supply = change.supply_change.apply_to(self.total_supply)?;
         Some(self)
     }
 
@@ -114,13 +113,18 @@ impl AssetState {
     pub fn revert_change(&mut self, change: AssetStateChange) {
         *self = self
             .revert_finalization(change.is_finalized)
-            .apply_supply_change(-change.supply_change)
+            .revert_supply_change(change)
             .expect("reverted change should be validated");
     }
 
     fn revert_finalization(mut self, is_finalized: bool) -> Self {
         self.is_finalized &= !is_finalized;
         self
+    }
+
+    fn revert_supply_change(mut self, change: AssetStateChange) -> Option<Self> {
+        self.total_supply = (-change.supply_change).apply_to(self.total_supply)?;
+        Some(self)
     }
 }
 
@@ -197,6 +201,9 @@ impl AssetStateChange {
     /// Updates and returns self with the provided [`AssetStateChange`] if
     /// the change is valid, or returns None otherwise.
     pub fn apply_change(&mut self, change: AssetStateChange) -> bool {
+        if self.is_finalized && change.is_issuance() {
+            return false;
+        }
         self.is_finalized |= change.is_finalized;
         self.supply_change.add(change.supply_change)
     }
@@ -204,6 +211,11 @@ impl AssetStateChange {
     /// Returns true if the AssetStateChange is for an asset burn.
     pub fn is_burn(&self) -> bool {
         matches!(self.supply_change, SupplyChange::Burn(_))
+    }
+
+    /// Returns true if the AssetStateChange is for an asset burn.
+    pub fn is_issuance(&self) -> bool {
+        matches!(self.supply_change, SupplyChange::Issuance(_))
     }
 }
 
