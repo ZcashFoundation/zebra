@@ -3,34 +3,42 @@
 # This file can be edited and validated using:
 # https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/config-editor
 
-queue_rules:
-  - name: urgent
+# Provides a means to set configuration values that act as fallbacks
+# for queue_rules and pull_request_rules
+defaults:
+  actions:
+    squash:
+      # TODO: Adapt our PR template to use title+body
+      commit_message: all-commits
+
+  queue_rule:
     # Allow to update/rebase the original pull request if possible to check its mergeability,
     # and it does not create a draft PR if not needed
     allow_inplace_checks: True
-    allow_checks_interruption: False
     speculative_checks: 1
-    batch_size: 8
-    # Wait a short time to embark hotfixes together in a merge train
-    batch_max_wait_time: "2 minutes"
-    conditions:
+    batch_size: 20
+    # Wait for about 10% of the time it takes Rust PRs to run CI (~1h)
+    batch_max_wait_time: "10 minutes"
+    queue_conditions:
       # Mergify automatically applies status check, approval, and conversation rules,
       # which are the same as the GitHub main branch protection rules
       # https://docs.mergify.com/conditions/#about-branch-protection
       - base=main
 
-  - name: batched
-    allow_inplace_checks: True
-    allow_checks_interruption: True
-    speculative_checks: 1
-    batch_size: 20
-    # Wait for about 10% of the time it takes Rust PRs to run CI (3h)
-    batch_max_wait_time: "20 minutes"
-    conditions:
-      - base=main
+# Allows to define the rules that reign over our merge queues
+queue_rules:
+  - name: urgent
+    batch_size: 8
+    # Wait a short time to embark hotfixes together in a merge train
+    batch_max_wait_time: "2 minutes"
 
+  - name: batched
+
+# Rules that will determine which priority a pull request has when entering
+# our merge queue
+#
 # These rules are checked in order, the first one to be satisfied applies
-pull_request_rules:
+priority_rules:
   - name: move to urgent queue when CI passes with multiple reviews
     conditions:
       # This queue handles a PR if it:
@@ -45,10 +53,8 @@ pull_request_rules:
       - -draft
       # does not include the do-not-merge label
       - label!=do-not-merge
-    actions:
-      queue:
-        name: urgent
-        method: squash
+    allow_checks_interruption: true
+    priority: high
 
   - name: move to urgent queue when CI passes with 1 review
     conditions:
@@ -62,12 +68,9 @@ pull_request_rules:
       - base=main
       - -draft
       - label!=do-not-merge
-    actions:
-      queue:
-        name: urgent
-        method: squash
+    priority: high
 
-  - name: move to batched queue when CI passes with multiple reviews
+  - name: move to medium queue when CI passes with multiple reviews
     conditions:
       # This queue handles a PR if it:
       # has multiple approving reviewers
@@ -77,12 +80,9 @@ pull_request_rules:
       - base=main
       - -draft
       - label!=do-not-merge
-    actions:
-      queue:
-        name: batched
-        method: squash
+    priority: medium
 
-  - name: move to batched queue when CI passes with 1 review
+  - name: move to low queue when CI passes with 1 review
     conditions:
       # This queue handles a PR if it:
       # has at least one approving reviewer (branch protection rule)
@@ -93,7 +93,4 @@ pull_request_rules:
       - base=main
       - -draft
       - label!=do-not-merge
-    actions:
-      queue:
-        name: batched
-        method: squash
+    priority: low
