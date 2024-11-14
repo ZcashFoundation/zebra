@@ -96,7 +96,7 @@ parsed and the notes for each tree collected in their appropriate positions, the
 root of each tree is computed. While the trees are being built, the respective
 block nullifier sets are updated in memory as note nullifiers are revealed. If
 the rest of the block is validated according to consensus rules, that root is
-committed to its own datastructure via our state service (Sprout anchors,
+committed to its own data structure via our state service (Sprout anchors,
 Sapling anchors). Sapling block validation includes comparing the specified
 FinalSaplingRoot in its block header to the root of the Sapling `NoteCommitment`
 tree that we have just computed to make sure they match.
