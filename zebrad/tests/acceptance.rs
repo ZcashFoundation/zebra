@@ -2555,7 +2555,7 @@ async fn submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
 
-/// Check that the the end of support code is called at least once.
+/// Check that the end of support code is called at least once.
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -3474,7 +3474,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         "invalid block with excessive coinbase output value should be rejected"
     );
 
-    // Use an invalid coinbase transaction (with an output value less than than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
+    // Use an invalid coinbase transaction (with an output value less than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
     let network = base_network_params
         .clone()
         .with_post_nu6_funding_streams(ConfiguredFundingStreams {
