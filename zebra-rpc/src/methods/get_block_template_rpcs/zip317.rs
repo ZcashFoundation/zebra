@@ -12,7 +12,7 @@ use rand::{
 };
 
 use zebra_chain::{
-    amount::NegativeOrZero,
+    amount::{Amount, NegativeOrZero, NonNegative},
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
     transaction::{zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
@@ -36,6 +36,7 @@ use crate::methods::get_block_template_rpcs::{
 /// Returns selected transactions from `mempool_txs`.
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+#[allow(clippy::too_many_arguments)]
 pub async fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
@@ -43,6 +44,8 @@ pub async fn select_mempool_transactions(
     mempool_txs: Vec<VerifiedUnminedTx>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
+    expected_block_subsidy: Amount<NonNegative>,
+    #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
 ) -> Vec<VerifiedUnminedTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
@@ -52,6 +55,9 @@ pub async fn select_mempool_transactions(
         miner_address,
         like_zcashd,
         extra_coinbase_data,
+        expected_block_subsidy,
+        #[cfg(zcash_unstable = "nsm")]
+        burn_amount,
     );
 
     // Setup the transaction lists.
@@ -120,6 +126,8 @@ pub fn fake_coinbase_transaction(
     miner_address: &transparent::Address,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
+    expected_block_subsidy: Amount<NonNegative>,
+    #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
     // They can also change the `u32` consensus branch id.
@@ -139,6 +147,9 @@ pub fn fake_coinbase_transaction(
         miner_fee,
         like_zcashd,
         extra_coinbase_data,
+        expected_block_subsidy,
+        #[cfg(zcash_unstable = "nsm")]
+        burn_amount,
     );
 
     TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)

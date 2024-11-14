@@ -163,6 +163,8 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
     /// This block's contribution to the deferred pool.
     pub deferred_balance: Option<Amount<NonNegative>>,
+    /// This block's miner fees
+    pub block_miner_fees: Option<Amount<NonNegative>>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -392,6 +394,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance,
+            block_miner_fees: _,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -453,6 +456,7 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
+            block_miner_fees: None,
         }
     }
 
@@ -485,6 +489,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
+            block_miner_fees: None,
         }
     }
 }
@@ -504,6 +509,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
                     .constrain::<NonNegative>()
                     .expect("deferred balance in a block must me non-negative"),
             ),
+            block_miner_fees: None,
         }
     }
 }
@@ -517,6 +523,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
             deferred_balance: finalized.deferred_balance,
+            block_miner_fees: None,
         }
     }
 }
@@ -624,6 +631,9 @@ pub enum Request {
     /// Returns [`Response::Tip(Option<(Height, block::Hash)>)`](Response::Tip)
     /// with the current best chain tip.
     Tip,
+
+    #[cfg(zcash_unstable = "nsm")]
+    TipPoolValues,
 
     /// Computes a block locator object based on the current best chain.
     ///
@@ -778,6 +788,8 @@ impl Request {
             Request::AwaitUtxo(_) => "await_utxo",
             Request::Depth(_) => "depth",
             Request::Tip => "tip",
+            #[cfg(zcash_unstable = "nsm")]
+            Request::TipPoolValues => "tip_pool_values",
             Request::BlockLocator => "block_locator",
             Request::Transaction(_) => "transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
@@ -1128,6 +1140,8 @@ impl TryFrom<Request> for ReadRequest {
     fn try_from(request: Request) -> Result<ReadRequest, Self::Error> {
         match request {
             Request::Tip => Ok(ReadRequest::Tip),
+            #[cfg(zcash_unstable = "nsm")]
+            Request::TipPoolValues => Ok(ReadRequest::TipPoolValues),
             Request::Depth(hash) => Ok(ReadRequest::Depth(hash)),
             Request::BestChainNextMedianTimePast => Ok(ReadRequest::BestChainNextMedianTimePast),
             Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),

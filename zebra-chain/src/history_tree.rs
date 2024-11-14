@@ -112,6 +112,17 @@ impl NonEmptyHistoryTree {
                 )?;
                 InnerHistoryTree::OrchardOnward(tree)
             }
+            #[cfg(zcash_unstable = "nsm")]
+            NetworkUpgrade::ZFuture => {
+                let tree = Tree::<OrchardOnward>::new_from_cache(
+                    network,
+                    network_upgrade,
+                    size,
+                    &peaks,
+                    &Default::default(),
+                )?;
+                InnerHistoryTree::OrchardOnward(tree)
+            }
         };
         Ok(Self {
             network: network.clone(),
@@ -157,6 +168,16 @@ impl NonEmptyHistoryTree {
                 (InnerHistoryTree::PreOrchard(tree), entry)
             }
             NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => {
+                let (tree, entry) = Tree::<OrchardOnward>::new_from_block(
+                    network,
+                    block,
+                    sapling_root,
+                    orchard_root,
+                )?;
+                (InnerHistoryTree::OrchardOnward(tree), entry)
+            }
+            #[cfg(zcash_unstable = "nsm")]
+            NetworkUpgrade::ZFuture => {
                 let (tree, entry) = Tree::<OrchardOnward>::new_from_block(
                     network,
                     block,

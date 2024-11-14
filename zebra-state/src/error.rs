@@ -8,6 +8,7 @@ use thiserror::Error;
 use zebra_chain::{
     amount::{self, NegativeAllowed, NonNegative},
     block,
+    error::{CoinbaseTransactionError, SubsidyError},
     history_tree::HistoryTreeError,
     orchard, sapling, sprout, transaction, transparent,
     value_balance::{ValueBalance, ValueBalanceError},
@@ -264,6 +265,24 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error("could not validate block subsidy")]
+    SubsidyError(Box<SubsidyError>),
+
+    #[error("could not validate coinbase transaction")]
+    CoinbaseTransactionError(Box<CoinbaseTransactionError>),
+}
+
+impl From<SubsidyError> for ValidateContextError {
+    fn from(err: SubsidyError) -> Self {
+        ValidateContextError::SubsidyError(Box::new(err))
+    }
+}
+
+impl From<CoinbaseTransactionError> for ValidateContextError {
+    fn from(err: CoinbaseTransactionError) -> Self {
+        ValidateContextError::CoinbaseTransactionError(Box::new(err))
+    }
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

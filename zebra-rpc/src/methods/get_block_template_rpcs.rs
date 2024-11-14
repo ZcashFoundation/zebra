@@ -11,7 +11,11 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
-    block::{self, Block, Height, TryIntoHeight},
+    block::{
+        self,
+        subsidy::{funding_streams, general},
+        Block, Height, TryIntoHeight,
+    },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
@@ -25,12 +29,13 @@ use zebra_chain::{
     },
     work::difficulty::{ParameterDifficulty as _, U256},
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
-};
+
+use zebra_consensus::RouterError;
+
+use zebra_state::{ReadRequest, ReadResponse};
+
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::methods::{
     best_chain_tip_height,
@@ -286,13 +291,13 @@ pub trait GetBlockTemplateRpc {
         address: String,
     ) -> BoxFuture<Result<unified_address::Response>>;
 
-    #[rpc(name = "generate")]
     /// Mine blocks immediately. Returns the block hashes of the generated blocks.
     ///
     /// # Parameters
     ///
     /// - `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.
     ///
+    /// - `burn_amount`: (numeric, optional) The amount of money to be burned in a transaction [ZIP-233]
     /// # Notes
     ///
     /// Only works if the network of the running zebrad process is `Regtest`.
@@ -300,7 +305,14 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
     /// tags: generating
-    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>>;
+    #[rpc(name = "generate")]
+    fn generate(
+        &self,
+        num_blocks: u32,
+        // the burn_amount field should be currently hidden behind zcash_unstable flag, but it doesn't compile due to the rpc macro
+        //#[cfg(zcash_unstable = "nsm")]
+        burn_amount: Option<Amount<NonNegative>>,
+    ) -> BoxFuture<Result<Vec<GetBlockHash>>>;
 }
 
 /// RPC method implementations.
@@ -613,7 +625,7 @@ where
         let mempool = self.mempool.clone();
         let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
-        let state = self.state.clone();
+        let mut state = self.state.clone();
 
         if let Some(HexData(block_proposal_bytes)) = parameters
             .as_ref()
@@ -882,6 +894,45 @@ where
                 "selecting transactions for the template from the mempool"
             );
 
+            #[cfg(zcash_unstable = "nsm")]
+            let burn_amount = if let Some(params) = parameters {
+                params.burn_amount
+            } else {
+                None
+            };
+
+            #[cfg(zcash_unstable = "nsm")]
+            let expected_block_subsidy = {
+                let money_reserve = match state
+                    .ready()
+                    .await
+                    .map_err(|_| Error {
+                        code: ErrorCode::InternalError,
+                        message: "".into(),
+                        data: None,
+                    })?
+                    .call(ReadRequest::TipPoolValues)
+                    .await
+                    .map_err(|_| Error {
+                        code: ErrorCode::InternalError,
+                        message: "".into(),
+                        data: None,
+                    })? {
+                    ReadResponse::TipPoolValues {
+                        tip_hash: _,
+                        tip_height: _,
+                        value_balance,
+                    } => value_balance.money_reserve(),
+                    _ => unreachable!("wrong response to ReadRequest::TipPoolValues"),
+                };
+                general::block_subsidy(next_block_height, &network, money_reserve)
+                    .map_server_error()?
+            };
+
+            #[cfg(not(zcash_unstable = "nsm"))]
+            let expected_block_subsidy =
+                general::block_subsidy_pre_nsm(next_block_height, &network).map_server_error()?;
+
             // Randomly select some mempool transactions.
             let mempool_txs = zip317::select_mempool_transactions(
                 &network,
@@ -890,6 +941,9 @@ where
                 mempool_txs,
                 debug_like_zcashd,
                 extra_coinbase_data.clone(),
+                expected_block_subsidy,
+                #[cfg(zcash_unstable = "nsm")]
+                burn_amount,
             )
             .await;
 
@@ -902,7 +956,6 @@ where
             );
 
             // - After this point, the template only depends on the previously fetched data.
-
             let response = GetBlockTemplate::new(
                 &network,
                 &miner_address,
@@ -912,6 +965,9 @@ where
                 submit_old,
                 debug_like_zcashd,
                 extra_coinbase_data,
+                expected_block_subsidy,
+                #[cfg(zcash_unstable = "nsm")]
+                burn_amount,
             );
 
             Ok(response.into())
@@ -1202,6 +1258,8 @@ where
     fn get_block_subsidy(&self, height: Option<u32>) -> BoxFuture<Result<BlockSubsidy>> {
         let latest_chain_tip = self.latest_chain_tip.clone();
         let network = self.network.clone();
+        #[cfg(zcash_unstable = "nsm")]
+        let mut state_service = self.state.clone();
 
         async move {
             let height = if let Some(height) = height {
@@ -1223,12 +1281,42 @@ where
             // Always zero for post-halving blocks
             let founders = Amount::zero();
 
-            let total_block_subsidy = block_subsidy(height, &network).map_server_error()?;
+            #[cfg(zcash_unstable = "nsm")]
+            let total_block_subsidy = {
+                let money_reserve = match state_service
+                    .ready()
+                    .await
+                    .map_err(|_| Error {
+                        code: ErrorCode::InternalError,
+                        message: "".into(),
+                        data: None,
+                    })?
+                    .call(ReadRequest::TipPoolValues)
+                    .await
+                    .map_err(|_| Error {
+                        code: ErrorCode::InternalError,
+                        message: "".into(),
+                        data: None,
+                    })? {
+                    ReadResponse::TipPoolValues {
+                        tip_hash: _,
+                        tip_height: _,
+                        value_balance,
+                    } => value_balance.money_reserve(),
+                    _ => unreachable!("wrong response to ReadRequest::TipPoolValues"),
+                };
+                general::block_subsidy(height, &network, money_reserve).map_server_error()?
+            };
+
+            #[cfg(not(zcash_unstable = "nsm"))]
+            let total_block_subsidy =
+                general::block_subsidy_pre_nsm(height, &network).map_server_error()?;
+
             let miner_subsidy =
-                miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
+                general::miner_subsidy(height, &network, total_block_subsidy).map_server_error()?;
 
             let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
-                funding_stream_values(height, &network, total_block_subsidy)
+                funding_streams::funding_stream_values(height, &network, total_block_subsidy)
                     .map_server_error()?
                     .into_iter()
                     // Separate the funding streams into deferred and non-deferred streams
@@ -1255,7 +1343,8 @@ where
                     streams
                         .into_iter()
                         .map(|(receiver, value)| {
-                            let address = funding_stream_address(height, &network, receiver);
+                            let address =
+                                funding_streams::funding_stream_address(height, &network, receiver);
                             FundingStream::new(is_nu6, receiver, value, address)
                         })
                         .collect()
@@ -1406,7 +1495,12 @@ where
         .boxed()
     }
 
-    fn generate(&self, num_blocks: u32) -> BoxFuture<Result<Vec<GetBlockHash>>> {
+    fn generate(
+        &self,
+        num_blocks: u32,
+        //#[cfg(zcash_unstable = "nsm")]
+        burn_amount: Option<Amount<NonNegative>>,
+    ) -> BoxFuture<Result<Vec<GetBlockHash>>> {
         let rpc: GetBlockTemplateRpcImpl<
             Mempool,
             State,
@@ -1427,8 +1521,18 @@ where
             }
 
             let mut block_hashes = Vec::new();
+            #[cfg(not(zcash_unstable = "nsm"))]
+            let params = None;
+            #[cfg(zcash_unstable = "nsm")]
+            let params = Some(get_block_template::JsonParameters {
+                burn_amount,
+                ..Default::default()
+            });
             for _ in 0..num_blocks {
-                let block_template = rpc.get_block_template(None).await.map_server_error()?;
+                let block_template = rpc
+                    .get_block_template(params.clone())
+                    .await
+                    .map_server_error()?;
 
                 let get_block_template::Response::TemplateMode(block_template) = block_template
                 else {

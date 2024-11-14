@@ -1246,6 +1246,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         parameters::NetworkKind,
         serialization::DateTime32,
         transaction::{zip317, VerifiedUnminedTx},
+        value_balance::ValueBalance,
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
     };
     use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -1337,6 +1338,16 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                     max_time: fake_max_time,
                     history_tree: fake_history_tree(&Mainnet),
                 }));
+
+            #[cfg(zcash_unstable = "nsm")]
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::TipPoolValues))
+                .await
+                .respond(ReadResponse::TipPoolValues {
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    value_balance: ValueBalance::zero(),
+                });
         }
     };
 

@@ -46,6 +46,8 @@ async fn test_rpc_response_data() {
         .with_activation_heights(ConfiguredActivationHeights {
             blossom: Some(584_000),
             nu6: Some(POST_NU6_FUNDING_STREAMS_TESTNET.height_range().start.0),
+            #[cfg(zcash_unstable = "nsm")]
+            zfuture: Some(3_000_000),
             ..Default::default()
         })
         .to_network();
