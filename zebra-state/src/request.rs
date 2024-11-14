@@ -528,7 +528,11 @@ impl SemanticallyVerifiedBlock {
 
 impl From<Arc<Block>> for CheckpointVerifiedBlock {
     fn from(block: Arc<Block>) -> Self {
-        CheckpointVerifiedBlock(SemanticallyVerifiedBlock::from(block))
+        let mut block = SemanticallyVerifiedBlock::from(block);
+        block.issued_assets_change =
+            IssuedAssetsChange::from_transactions(&block.block.transactions);
+
+        CheckpointVerifiedBlock(block)
     }
 }
 

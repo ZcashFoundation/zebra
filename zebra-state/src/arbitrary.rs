@@ -5,6 +5,7 @@ use std::sync::Arc;
 use zebra_chain::{
     amount::Amount,
     block::{self, Block},
+    orchard_zsa::IssuedAssetsChange,
     transaction::Transaction,
     transparent,
     value_balance::ValueBalance,
@@ -30,6 +31,7 @@ impl Prepare for Arc<Block> {
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs =
             transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
+        let issued_assets_change = IssuedAssetsChange::from_transactions(&block.transactions);
 
         SemanticallyVerifiedBlock {
             block,
@@ -38,7 +40,7 @@ impl Prepare for Arc<Block> {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
-            issued_assets_change: None,
+            issued_assets_change,
         }
     }
 }
