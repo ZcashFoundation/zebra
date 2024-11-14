@@ -723,166 +723,166 @@ where
         hash_or_height: String,
         verbosity: Option<u8>,
     ) -> BoxFuture<Result<GetBlock>> {
-        // From <https://zcash.github.io/rpc/getblock.html>
-        const DEFAULT_GETBLOCK_VERBOSITY: u8 = 1;
-
         let mut state = self.state.clone();
-        let verbosity = verbosity.unwrap_or(DEFAULT_GETBLOCK_VERBOSITY);
 
         async move {
             let hash_or_height: HashOrHeight = hash_or_height
                 .parse()
                 .map_error(server::error::LegacyCode::default())?;
 
-            if verbosity == 0 {
-                // # Performance
-                //
-                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                // so it needs to load block data very efficiently.
-                let request = zebra_state::ReadRequest::Block(hash_or_height);
-                let response = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_error(server::error::LegacyCode::default())?;
+            match verbosity.unwrap_or(1) {
+                0 => {
+                    // # Performance
+                    //
+                    // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
+                    // so it needs to load block data very efficiently.
+                    let request = zebra_state::ReadRequest::Block(hash_or_height);
+                    let response = state
+                        .ready()
+                        .and_then(|service| service.call(request))
+                        .await
+                        .map_error(server::error::LegacyCode::default())?;
 
-                match response {
-                    zebra_state::ReadResponse::Block(Some(block)) => {
-                        Ok(GetBlock::Raw(block.into()))
-                    }
-                    zebra_state::ReadResponse::Block(None) => Err(Error {
-                        // `lightwalletd` expects error code `-8` when a block is not found:
-                        // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>                   zebra_state::ReadResponse::Block(None) => Err(Error {
-                        code: server::error::LegacyCode::InvalidParameter.into(),
-                        message: "Block not found".to_string(),
-                        data: None,
-                    }),
-                    _ => unreachable!("unmatched response to a block request"),
-                }
-            } else if verbosity == 1 || verbosity == 2 {
-                // # Performance
-                //
-                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                // so it needs to load all its fields very efficiently.
-                //
-                // Currently, we get the block hash and transaction IDs from indexes,
-                // which is much more efficient than loading all the block data,
-                // then hashing the block header and all the transactions.
-
-                // Get the block hash from the height -> hash index, if needed
-                //
-                // # Concurrency
-                //
-                // For consistency, this lookup must be performed first, then all the other
-                // lookups must be based on the hash.
-                //
-                // All possible responses are valid, even if the best chain changes. Clients
-                // must be able to handle chain forks, including a hash for a block that is
-                // later discovered to be on a side chain.
-
-                let should_read_block_header = verbosity == 2;
-
-                let hash = match hash_or_height {
-                    HashOrHeight::Hash(hash) => hash,
-                    HashOrHeight::Height(height) => {
-                        let request = zebra_state::ReadRequest::BestChainBlockHash(height);
-                        let response = state
-                            .ready()
-                            .and_then(|service| service.call(request))
-                            .await
-                            .map_error(server::error::LegacyCode::default())?;
-
-                        match response {
-                            zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
-                            zebra_state::ReadResponse::BlockHash(None) => {
-                                return Err(Error {
-                                    // `lightwalletd` expects error code `-8` when a block is not found:
-                                    // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>                   zebra_state::ReadResponse::Block(None) => Err(Error {
-                                    code: server::error::LegacyCode::InvalidParameter.into(),
-                                    message: "block height not in best chain".to_string(),
-                                    data: None,
-                                });
-                            }
-                            _ => unreachable!("unmatched response to a block hash request"),
+                    match response {
+                        zebra_state::ReadResponse::Block(Some(block)) => {
+                            Ok(GetBlock::Raw(block.into()))
                         }
+                        zebra_state::ReadResponse::Block(None) => Err("Block not found")
+                            // `lightwalletd` expects error code `-8` when a block is not found:
+                            // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
+                            .map_error(server::error::LegacyCode::InvalidParameter),
+                        _ => unreachable!("unmatched response to a block request"),
                     }
-                };
+                }
+                verbosity @ 1 | verbosity @ 2 => {
+                    // # Performance
+                    //
+                    // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
+                    // so it needs to load all its fields very efficiently.
+                    //
+                    // Currently, we get the block hash and transaction IDs from indexes,
+                    // which is much more efficient than loading all the block data,
+                    // then hashing the block header and all the transactions.
 
-                // TODO:  look up the height if we only have a hash,
-                //        this needs a new state request for the height -> hash index
-                let height = hash_or_height.height();
-
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                let mut requests = vec![
-                    // Get transaction IDs from the transaction index by block hash
+                    // Get the block hash from the height -> hash index, if needed
                     //
                     // # Concurrency
                     //
-                    // A block's transaction IDs are never modified, so all possible responses are
-                    // valid. Clients that query block heights must be able to handle chain forks,
-                    // including getting transaction IDs from any chain fork.
-                    zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
-                    // Sapling trees
-                    zebra_state::ReadRequest::SaplingTree(hash.into()),
-                    // Orchard trees
-                    zebra_state::ReadRequest::OrchardTree(hash.into()),
-                    // Get block confirmations from the block height index
+                    // For consistency, this lookup must be performed first, then all the other
+                    // lookups must be based on the hash.
                     //
+                    // All possible responses are valid, even if the best chain changes. Clients
+                    // must be able to handle chain forks, including a hash for a block that is
+                    // later discovered to be on a side chain.
+
+                    let should_read_block_header = verbosity == 2;
+
+                    let hash = match hash_or_height {
+                        HashOrHeight::Hash(hash) => hash,
+                        HashOrHeight::Height(height) => {
+                            let request = zebra_state::ReadRequest::BestChainBlockHash(height);
+                            let response = state
+                                .ready()
+                                .and_then(|service| service.call(request))
+                                .await
+                                .map_error(server::error::LegacyCode::default())?;
+
+                            match response {
+                                zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
+                                zebra_state::ReadResponse::BlockHash(None) => {
+                                    return Err("block height not in best chain")
+                                        // `lightwalletd` expects error code `-8` when a block is not found:
+                                        // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
+                                        .map_error(server::error::LegacyCode::InvalidParameter);
+                                }
+                                _ => unreachable!("unmatched response to a block hash request"),
+                            }
+                        }
+                    };
+
+                    // TODO:  look up the height if we only have a hash,
+                    //        this needs a new state request for the height -> hash index
+                    let height = hash_or_height.height();
+
                     // # Concurrency
                     //
-                    // All possible responses are valid, even if a block is added to the chain, or
-                    // the best chain changes. Clients must be able to handle chain forks, including
-                    // different confirmation values before or after added blocks, and switching
-                    // between -1 and multiple different confirmation values.
-                    zebra_state::ReadRequest::Depth(hash),
-                ];
+                    // We look up by block hash so the hash, transaction IDs, and confirmations
+                    // are consistent.
+                    let mut requests = vec![
+                        // Get transaction IDs from the transaction index by block hash
+                        //
+                        // # Concurrency
+                        //
+                        // A block's transaction IDs are never modified, so all possible responses are
+                        // valid. Clients that query block heights must be able to handle chain forks,
+                        // including getting transaction IDs from any chain fork.
+                        zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
+                        // Sapling trees
+                        zebra_state::ReadRequest::SaplingTree(hash.into()),
+                        // Orchard trees
+                        zebra_state::ReadRequest::OrchardTree(hash.into()),
+                        // Get block confirmations from the block height index
+                        //
+                        // # Concurrency
+                        //
+                        // All possible responses are valid, even if a block is added to the chain, or
+                        // the best chain changes. Clients must be able to handle chain forks, including
+                        // different confirmation values before or after added blocks, and switching
+                        // between -1 and multiple different confirmation values.
+                        zebra_state::ReadRequest::Depth(hash),
+                    ];
 
-                if should_read_block_header {
-                    // Block header
-                    requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
-                }
+                    if should_read_block_header {
+                        // Block header
+                        requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
+                    }
 
-                let mut futs = FuturesOrdered::new();
+                    let mut futs = FuturesOrdered::new();
 
-                for request in requests {
-                    futs.push_back(state.clone().oneshot(request));
-                }
+                    for request in requests {
+                        futs.push_back(state.clone().oneshot(request));
+                    }
 
-                let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-                let tx = match tx_ids_response.map_error(server::error::LegacyCode::default())? {
-                    zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
-                        .ok_or_error(server::error::LegacyCode::default(), "Block not found")?
-                        .iter()
-                        .map(|tx_id| tx_id.encode_hex())
-                        .collect(),
-                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
-                };
+                    let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
+                    let tx = match tx_ids_response.map_error(server::error::LegacyCode::default())?
+                    {
+                        zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
+                            .ok_or_error(server::error::LegacyCode::default(), "Block not found")?
+                            .iter()
+                            .map(|tx_id| tx_id.encode_hex())
+                            .collect(),
+                        _ => unreachable!(
+                            "unmatched response to a transaction_ids_for_block request"
+                        ),
+                    };
 
-                let sapling_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let sapling_note_commitment_tree_count =
-                    match sapling_tree_response.map_error(server::error::LegacyCode::default())? {
+                    let sapling_tree_response =
+                        futs.next().await.expect("`futs` should not be empty");
+                    let sapling_note_commitment_tree_count = match sapling_tree_response
+                        .map_error(server::error::LegacyCode::default())?
+                    {
                         zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
                         zebra_state::ReadResponse::SaplingTree(None) => 0,
                         _ => unreachable!("unmatched response to a SaplingTree request"),
                     };
 
-                let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let orchard_note_commitment_tree_count =
-                    match orchard_tree_response.map_error(server::error::LegacyCode::default())? {
+                    let orchard_tree_response =
+                        futs.next().await.expect("`futs` should not be empty");
+                    let orchard_note_commitment_tree_count = match orchard_tree_response
+                        .map_error(server::error::LegacyCode::default())?
+                    {
                         zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
                         zebra_state::ReadResponse::OrchardTree(None) => 0,
                         _ => unreachable!("unmatched response to a OrchardTree request"),
                     };
 
-                // From <https://zcash.github.io/rpc/getblock.html>
-                const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
+                    // From <https://zcash.github.io/rpc/getblock.html>
+                    const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
 
-                let depth_response = futs.next().await.expect("`futs` should not be empty");
-                let confirmations =
-                    match depth_response.map_error(server::error::LegacyCode::default())? {
+                    let depth_response = futs.next().await.expect("`futs` should not be empty");
+                    let confirmations = match depth_response
+                        .map_error(server::error::LegacyCode::default())?
+                    {
                         // Confirmations are one more than the depth.
                         // Depth is limited by height, so it will never overflow an i64.
                         zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
@@ -890,50 +890,49 @@ where
                         _ => unreachable!("unmatched response to a depth request"),
                     };
 
-                let time = if should_read_block_header {
-                    let block_header_response =
-                        futs.next().await.expect("`futs` should not be empty");
+                    let time = if should_read_block_header {
+                        let block_header_response =
+                            futs.next().await.expect("`futs` should not be empty");
 
-                    match block_header_response.map_error(server::error::LegacyCode::default())? {
-                        zebra_state::ReadResponse::BlockHeader(header) => Some(
-                            header
-                                .ok_or_error(
-                                    server::error::LegacyCode::default(),
-                                    "Block not found",
-                                )?
-                                .time
-                                .timestamp(),
-                        ),
-                        _ => unreachable!("unmatched response to a BlockHeader request"),
-                    }
-                } else {
-                    None
-                };
+                        match block_header_response
+                            .map_error(server::error::LegacyCode::default())?
+                        {
+                            zebra_state::ReadResponse::BlockHeader(header) => Some(
+                                header
+                                    .ok_or_error(
+                                        server::error::LegacyCode::default(),
+                                        "Block not found",
+                                    )?
+                                    .time
+                                    .timestamp(),
+                            ),
+                            _ => unreachable!("unmatched response to a BlockHeader request"),
+                        }
+                    } else {
+                        None
+                    };
 
-                let sapling = SaplingTrees {
-                    size: sapling_note_commitment_tree_count,
-                };
+                    let sapling = SaplingTrees {
+                        size: sapling_note_commitment_tree_count,
+                    };
 
-                let orchard = OrchardTrees {
-                    size: orchard_note_commitment_tree_count,
-                };
+                    let orchard = OrchardTrees {
+                        size: orchard_note_commitment_tree_count,
+                    };
 
-                let trees = GetBlockTrees { sapling, orchard };
+                    let trees = GetBlockTrees { sapling, orchard };
 
-                Ok(GetBlock::Object {
-                    hash: GetBlockHash(hash),
-                    confirmations,
-                    height,
-                    time,
-                    tx,
-                    trees,
-                })
-            } else {
-                Err(Error {
-                    code: ErrorCode::InvalidParams,
-                    message: "Invalid verbosity value".to_string(),
-                    data: None,
-                })
+                    Ok(GetBlock::Object {
+                        hash: GetBlockHash(hash),
+                        confirmations,
+                        height,
+                        time,
+                        tx,
+                        trees,
+                    })
+                }
+                _ => Err("Verbosity must be in range from 0 to 2".to_string())
+                    .map_error(server::error::LegacyCode::InvalidParameter),
             }
         }
         .boxed()
