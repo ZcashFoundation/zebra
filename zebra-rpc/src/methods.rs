@@ -1423,7 +1423,7 @@ where
 {
     latest_chain_tip
         .best_tip_height()
-        .ok_or_error(server::error::LegacyCode::default(),"No blocks in state")
+        .ok_or_error(server::error::LegacyCode::default(), "No blocks in state")
 }
 
 /// Response to a `getinfo` RPC request.
