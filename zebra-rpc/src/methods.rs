@@ -667,11 +667,12 @@ where
         let queue_sender = self.queue_sender.clone();
 
         async move {
-            let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex).map_err(|_| {
-                Error::invalid_params("raw transaction is not specified as a hex string")
-            })?;
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L1259-L1260>
+            let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex)
+                .map_error(server::error::LegacyCode::Deserialization)?;
             let raw_transaction = Transaction::zcash_deserialize(&*raw_transaction_bytes)
-                .map_err(|_| Error::invalid_params("raw transaction is structurally invalid"))?;
+                .map_error(server::error::LegacyCode::Deserialization)?;
 
             let transaction_hash = raw_transaction.hash();
 
@@ -703,14 +704,20 @@ where
                 .expect("there should be exactly one item in Vec")
                 .inspect_err(|err| tracing::debug!("sent transaction to mempool: {:?}", &err))
                 .map_error(server::error::LegacyCode::default())?
-                .await;
+                .await
+                .map_error(server::error::LegacyCode::default())?;
 
             tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
 
             queue_result
-                .map_error(server::error::LegacyCode::default())?
                 .map(|_| SentTransactionHash(transaction_hash))
-                .map_error(server::error::LegacyCode::default())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L1290-L1301>
+                // Note that this error code might not exactly match the one returned by zcashd
+                // since zcashd's error code selection logic is more granular. We'd need to
+                // propagate the error coming from the verifier to be able to return more specific
+                // error codes.
+                .map_error(server::error::LegacyCode::Verify)
         }
         .boxed()
     }
