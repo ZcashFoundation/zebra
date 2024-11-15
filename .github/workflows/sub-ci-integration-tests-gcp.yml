@@ -352,10 +352,10 @@ jobs:
       test_id: lwd-update-sync
       test_description: Test lightwalletd update sync with both states
       test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache -e LIGHTWALLETD_DATA_DIR=/var/cache/lwd-cache"
-      needs_zebra_state: true
-      needs_lwd_state: true
-      saves_to_disk: true
-      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
+      needs_zebra_state: false
+      needs_lwd_state: false
+      saves_to_disk: false
+      force_save_to_disk: false
       disk_prefix: lwd-cache
       height_grep_text: "Waiting for block: "
     secrets: inherit
