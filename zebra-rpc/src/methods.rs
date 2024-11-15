@@ -735,7 +735,9 @@ where
         async move {
             let hash_or_height: HashOrHeight = hash_or_height
                 .parse()
-                .map_error(server::error::LegacyCode::default())?;
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
             match verbosity.unwrap_or(1) {
                 0 => {
@@ -757,6 +759,9 @@ where
                         zebra_state::ReadResponse::Block(None) => Err("Block not found")
                             // `lightwalletd` expects error code `-8` when a block is not found:
                             // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
+                            // This is because `lightwalletd` requests blocks by height, and
+                            // `zcashd` returns `-8` for invalid heights:
+                            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                             .map_error(server::error::LegacyCode::InvalidParameter),
                         _ => unreachable!("unmatched response to a block request"),
                     }
@@ -800,6 +805,9 @@ where
                                     return Err("block height not in best chain")
                                         // `lightwalletd` expects error code `-8` when a block is not found:
                                         // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
+                                        // This is because `lightwalletd` requests blocks by height, and
+                                        // `zcashd` returns `-8` for invalid heights:
+                                        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                                         .map_error(server::error::LegacyCode::InvalidParameter);
                                 }
                                 _ => unreachable!("unmatched response to a block hash request"),
