@@ -888,7 +888,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .await;
 
     // Push block 2 to the state. This will increase the tip height past the expected
-    // tip height that the the tx was verified at.
+    // tip height that the tx was verified at.
     state_service
         .ready()
         .await

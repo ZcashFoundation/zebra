@@ -1,5 +1,5 @@
 # Google Cloud unit tests that run when Rust code or dependencies are modified,
-# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by mergify.)
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are tested by GitHub's Merge Queue.)
 #
 # This workflow is designed for running various unit tests within Docker containers.
 # Jobs:
@@ -48,7 +48,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -89,7 +89,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -109,7 +109,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -129,7 +129,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -183,7 +183,7 @@ jobs:
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
     needs: [ test-all, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-zebra-conf-path ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
-    # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
+    # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     # TODO: if a job times out, we want to create a ticket. Does failure() do that? Or do we need cancelled()?
     if: failure() && github.event.pull_request == null
     runs-on: ubuntu-latest
