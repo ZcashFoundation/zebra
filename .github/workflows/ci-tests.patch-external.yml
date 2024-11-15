@@ -25,36 +25,42 @@ jobs:
   ###
   test-all:
     name: Test all
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   test-fake-activation-heights:
     name: Test with fake activation heights
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   test-empty-sync:
     name: Test checkpoint sync from empty state
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   test-lightwalletd-integration:
     name: Test integration with lightwalletd
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   test-configuration-file:
     name: Test CI default Docker config file / Test default-conf in Docker
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   test-configuration-file-testnet:
     name: Test CI testnet Docker config file / Test default-conf in Docker
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -62,6 +68,7 @@ jobs:
 
   test-zebra-conf-path:
     name: Test CI custom Docker config file / Test custom-conf in Docker
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
@@ -74,66 +81,77 @@ jobs:
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   get-available-disks:
     name: Check if cached state disks exist for Mainnet / Check if cached state disks exist
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   test-stateful-sync:
     name: Zebra checkpoint update / Run sync-past-checkpoint test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   test-update-sync:
     name: Zebra tip update / Run update-to-tip test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   checkpoints-mainnet:
     name: Generate checkpoints mainnet / Run checkpoints-mainnet test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   lightwalletd-rpc-test:
     name: Zebra tip JSON-RPC / Run fully-synced-rpc test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   lightwalletd-transactions-test:
     name: lightwalletd tip send / Run lwd-send-transactions test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   get-block-template-test:
     name: get block template / Run get-block-template test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   submit-block-test:
     name: submit block / Run submit-block test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   lightwalletd-full-sync:
     name: lightwalletd tip / Run lwd-full-sync test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   lightwalletd-update-sync:
     name: lightwalletd tip update / Run lwd-update-sync test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
 
   lightwalletd-grpc-test:
     name: lightwalletd GRPC tests / Run lwd-grpc-wallet test
+    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
