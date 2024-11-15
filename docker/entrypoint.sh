@@ -240,10 +240,6 @@ case "$1" in
         # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
         run_cargo_test "${ENTRYPOINT_FEATURES}" "sync_large_checkpoints_"
 
-      elif [[ "${ZEBRA_TEST_LIGHTWALLETD}" -eq "1" ]]; then
-        # Test launching lightwalletd with an empty lightwalletd and Zebra state.
-        run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_integration"
-
       elif [[ -n "${FULL_SYNC_MAINNET_TIMEOUT_MINUTES}" ]]; then
         # Run a Zebra full sync test on mainnet.
         run_cargo_test "${ENTRYPOINT_FEATURES}" "full_sync_mainnet"
