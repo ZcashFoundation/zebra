@@ -1128,10 +1128,11 @@ where
         let network = self.network.clone();
 
         async move {
-            // Convert the [`hash_or_height`] string into an actual hash or height.
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
             let hash_or_height = hash_or_height
                 .parse()
-                .map_error(server::error::LegacyCode::default())?;
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
             // Fetch the block referenced by [`hash_or_height`] from the state.
             //
@@ -1149,13 +1150,9 @@ where
             {
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
-                    return Err(Error {
-                        // `lightwalletd` expects error code `-8` when a block is not found:
-                        // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>                   zebra_state::ReadResponse::Block(None) => Err(Error {
-                        code: server::error::LegacyCode::InvalidParameter.into(),
-                        message: "the requested block was not found".to_string(),
-                        data: None,
-                    });
+                    // Reference for the legacy error code:
+                    // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                    return Err("the requested block is not in the main chain").map_error(server::error::LegacyCode::InvalidParameter);
                 }
                 _ => unreachable!("unmatched response to a block request"),
             };
