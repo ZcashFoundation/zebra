@@ -4,7 +4,8 @@
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) mod arbitrary;
 
-mod common;
+#[cfg(test)]
+mod tests;
 
 mod asset_state;
 mod burn;
