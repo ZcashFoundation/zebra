@@ -1152,7 +1152,8 @@ where
                 zebra_state::ReadResponse::Block(None) => {
                     // Reference for the legacy error code:
                     // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                    return Err("the requested block is not in the main chain").map_error(server::error::LegacyCode::InvalidParameter);
+                    return Err("the requested block is not in the main chain")
+                        .map_error(server::error::LegacyCode::InvalidParameter);
                 }
                 _ => unreachable!("unmatched response to a block request"),
             };
@@ -1531,13 +1532,15 @@ impl AddressStrings {
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
     pub fn valid_addresses(self) -> Result<HashSet<Address>> {
+        // Reference for the legacy error code:
+        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
         let valid_addresses: HashSet<Address> = self
             .addresses
             .into_iter()
             .map(|address| {
-                address.parse().map_err(|error| {
-                    Error::invalid_params(format!("invalid address {address:?}: {error}"))
-                })
+                address
+                    .parse()
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
             })
             .collect::<Result<_>>()?;
 
