@@ -972,13 +972,17 @@ impl Chain {
             }
         } else {
             trace!(?position, "reverting changes to issued assets");
-            for (asset_base, change) in IssuedAssetsChange::from_transactions(transactions)
+            for issued_assets_change in IssuedAssetsChange::from_transactions(transactions)
                 .expect("blocks in chain state must be valid")
+                .iter()
+                .rev()
             {
-                self.issued_assets
-                    .entry(asset_base)
-                    .or_default()
-                    .revert_change(change);
+                for (asset_base, change) in issued_assets_change.iter() {
+                    self.issued_assets
+                        .entry(asset_base)
+                        .or_default()
+                        .revert_change(change);
+                }
             }
         }
     }

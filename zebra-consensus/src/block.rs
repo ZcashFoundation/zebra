@@ -15,7 +15,7 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::stream::FuturesUnordered;
+use futures::stream::FuturesOrdered;
 use futures_util::FutureExt;
 use thiserror::Error;
 use tower::{Service, ServiceExt};
@@ -24,7 +24,6 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
-    orchard_zsa::IssuedAssetsChange,
     parameters::{subsidy::FundingStreamReceiver, Network},
     transparent,
     work::equihash,
@@ -227,7 +226,7 @@ where
             tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
 
             // Send transactions to the transaction verifier to be checked
-            let mut async_checks = FuturesUnordered::new();
+            let mut async_checks = FuturesOrdered::new();
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
@@ -244,7 +243,7 @@ where
                         height,
                         time: block.header.time,
                     });
-                async_checks.push(rsp);
+                async_checks.push_back(rsp);
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
@@ -253,26 +252,32 @@ where
             // Sum up some block totals from the transaction responses.
             let mut legacy_sigop_count = 0;
             let mut block_miner_fees = Ok(Amount::zero());
+            let mut issued_assets_changes = Vec::new();
 
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
                 tracing::trace!(?result, remaining = async_checks.len());
-                let response = result
+                let crate::transaction::Response::Block {
+                    tx_id: _,
+                    miner_fee,
+                    legacy_sigop_count: tx_legacy_sigop_count,
+                    issued_assets_change,
+                } = result
                     .map_err(Into::into)
-                    .map_err(VerifyBlockError::Transaction)?;
+                    .map_err(VerifyBlockError::Transaction)?
+                else {
+                    panic!("unexpected response from transaction verifier");
+                };
 
-                assert!(
-                    matches!(response, tx::Response::Block { .. }),
-                    "unexpected response from transaction verifier: {response:?}"
-                );
-
-                legacy_sigop_count += response.legacy_sigop_count();
+                legacy_sigop_count += tx_legacy_sigop_count;
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.
-                if let Some(miner_fee) = response.miner_fee() {
+                if let Some(miner_fee) = miner_fee {
                     block_miner_fees += miner_fee;
                 }
+
+                issued_assets_changes.push(issued_assets_change);
             }
 
             // Check the summed block totals
@@ -315,9 +320,6 @@ where
             let new_outputs = Arc::into_inner(known_utxos)
                 .expect("all verification tasks using known_utxos are complete");
 
-            let issued_assets_change = IssuedAssetsChange::from_transactions(&block.transactions)
-                .ok_or(TransactionError::InvalidAssetIssuanceOrBurn)?;
-
             let prepared_block = zs::SemanticallyVerifiedBlock {
                 block,
                 hash,
@@ -325,7 +327,7 @@ where
                 new_outputs,
                 transaction_hashes,
                 deferred_balance: Some(expected_deferred_amount),
-                issued_assets_change: Some(issued_assets_change),
+                issued_assets_changes: issued_assets_changes.into(),
             };
 
             // Return early for proposal requests when getblocktemplate-rpcs feature is enabled

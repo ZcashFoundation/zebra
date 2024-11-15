@@ -27,7 +27,9 @@ pub struct AssetState {
 #[derive(Copy, Clone, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AssetStateChange {
     /// Whether the asset should be finalized such that no more of it can be issued.
-    pub is_finalized: bool,
+    pub should_finalize: bool,
+    /// Whether the asset should be finalized such that no more of it can be issued.
+    pub includes_issuance: bool,
     /// The change in supply from newly issued assets or burned assets, if any.
     pub supply_change: SupplyChange,
 }
@@ -35,7 +37,10 @@ pub struct AssetStateChange {
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 /// An asset supply change to apply to the issued assets map.
 pub enum SupplyChange {
+    /// An issuance that should increase the total supply of an asset
     Issuance(u64),
+
+    /// A burn that should reduce the total supply of an asset.
     Burn(u64),
 }
 
@@ -46,6 +51,9 @@ impl Default for SupplyChange {
 }
 
 impl SupplyChange {
+    /// Applies `self` to a provided `total_supply` of an asset.
+    ///
+    /// Returns the updated total supply after the [`SupplyChange`] has been applied.
     fn apply_to(self, total_supply: u64) -> Option<u64> {
         match self {
             SupplyChange::Issuance(amount) => total_supply.checked_add(amount),
@@ -53,6 +61,8 @@ impl SupplyChange {
         }
     }
 
+    /// Returns the [`SupplyChange`] amount as an [`i128`] where burned amounts
+    /// are negative.
     fn as_i128(self) -> i128 {
         match self {
             SupplyChange::Issuance(amount) => i128::from(amount),
@@ -60,11 +70,16 @@ impl SupplyChange {
         }
     }
 
+    /// Attempts to add another supply change to `self`.
+    ///
+    /// Returns true if successful or false if the result would be invalid.
     fn add(&mut self, rhs: Self) -> bool {
         if let Some(result) = self
             .as_i128()
             .checked_add(rhs.as_i128())
             .and_then(|signed| match signed {
+                // Burn amounts MUST not be 0
+                // TODO: Reference ZIP
                 0.. => signed.try_into().ok().map(Self::Issuance),
                 ..0 => signed.try_into().ok().map(Self::Burn),
             })
@@ -74,6 +89,11 @@ impl SupplyChange {
         } else {
             false
         }
+    }
+
+    /// Returns true if this [`SupplyChange`] is an issuance.
+    pub fn is_issuance(&self) -> bool {
+        matches!(self, SupplyChange::Issuance(_))
     }
 }
 
@@ -95,15 +115,19 @@ impl AssetState {
         self.apply_finalization(change)?.apply_supply_change(change)
     }
 
+    /// Updates the `is_finalized` field on `self` if the change is valid and
+    /// returns `self`, or returns None otherwise.
     fn apply_finalization(mut self, change: AssetStateChange) -> Option<Self> {
-        if self.is_finalized && change.is_issuance() {
+        if self.is_finalized && change.includes_issuance {
             None
         } else {
-            self.is_finalized |= change.is_finalized;
+            self.is_finalized |= change.should_finalize;
             Some(self)
         }
     }
 
+    /// Updates the `supply_change` field on `self` if the change is valid and
+    /// returns `self`, or returns None otherwise.
     fn apply_supply_change(mut self, change: AssetStateChange) -> Option<Self> {
         self.total_supply = change.supply_change.apply_to(self.total_supply)?;
         Some(self)
@@ -112,16 +136,18 @@ impl AssetState {
     /// Reverts the provided [`AssetStateChange`].
     pub fn revert_change(&mut self, change: AssetStateChange) {
         *self = self
-            .revert_finalization(change.is_finalized)
+            .revert_finalization(change.should_finalize)
             .revert_supply_change(change)
             .expect("reverted change should be validated");
     }
 
-    fn revert_finalization(mut self, is_finalized: bool) -> Self {
-        self.is_finalized &= !is_finalized;
+    /// Reverts the changes to `is_finalized` from the provied [`AssetStateChange`].
+    fn revert_finalization(mut self, should_finalize: bool) -> Self {
+        self.is_finalized &= !should_finalize;
         self
     }
 
+    /// Reverts the changes to `supply_change` from the provied [`AssetStateChange`].
     fn revert_supply_change(mut self, change: AssetStateChange) -> Option<Self> {
         self.total_supply = (-change.supply_change).apply_to(self.total_supply)?;
         Some(self)
@@ -135,31 +161,40 @@ impl From<HashMap<AssetBase, AssetState>> for IssuedAssets {
 }
 
 impl AssetStateChange {
+    /// Creates a new [`AssetStateChange`] from an asset base, supply change, and
+    /// `should_finalize` flag.
     fn new(
         asset_base: AssetBase,
         supply_change: SupplyChange,
-        is_finalized: bool,
+        should_finalize: bool,
     ) -> (AssetBase, Self) {
         (
             asset_base,
             Self {
-                is_finalized,
+                should_finalize,
+                includes_issuance: supply_change.is_issuance(),
                 supply_change,
             },
         )
     }
 
+    /// Accepts a transaction and returns an iterator of asset bases and issued asset state changes
+    /// that should be applied to those asset bases when committing the transaction to the chain state.
     fn from_transaction(tx: &Arc<Transaction>) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
         Self::from_burns(tx.orchard_burns())
             .chain(Self::from_issue_actions(tx.orchard_issue_actions()))
     }
 
+    /// Accepts an iterator of [`IssueAction`]s and returns an iterator of asset bases and issued asset state changes
+    /// that should be applied to those asset bases when committing the provided issue actions to the chain state.
     fn from_issue_actions<'a>(
         actions: impl Iterator<Item = &'a IssueAction> + 'a,
     ) -> impl Iterator<Item = (AssetBase, Self)> + 'a {
         actions.flat_map(Self::from_issue_action)
     }
 
+    /// Accepts an [`IssueAction`] and returns an iterator of asset bases and issued asset state changes
+    /// that should be applied to those asset bases when committing the provided issue action to the chain state.
     fn from_issue_action(action: &IssueAction) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
         let supply_changes = Self::from_notes(action.notes());
         let finalize_changes = action
@@ -178,10 +213,14 @@ impl AssetStateChange {
         supply_changes.chain(finalize_changes)
     }
 
+    /// Accepts an iterator of [`orchard::Note`]s and returns an iterator of asset bases and issued asset state changes
+    /// that should be applied to those asset bases when committing the provided orchard notes to the chain state.
     fn from_notes(notes: &[orchard::Note]) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
         notes.iter().copied().map(Self::from_note)
     }
 
+    /// Accepts an [`orchard::Note`] and returns an iterator of asset bases and issued asset state changes
+    /// that should be applied to those asset bases when committing the provided orchard note to the chain state.
     fn from_note(note: orchard::Note) -> (AssetBase, Self) {
         Self::new(
             note.asset(),
@@ -190,10 +229,14 @@ impl AssetStateChange {
         )
     }
 
+    /// Accepts an iterator of [`BurnItem`]s and returns an iterator of asset bases and issued asset state changes
+    /// that should be applied to those asset bases when committing the provided asset burns to the chain state.
     fn from_burns(burns: &[BurnItem]) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
         burns.iter().map(Self::from_burn)
     }
 
+    /// Accepts an [`BurnItem`] and returns an iterator of asset bases and issued asset state changes
+    /// that should be applied to those asset bases when committing the provided burn to the chain state.
     fn from_burn(burn: &BurnItem) -> (AssetBase, Self) {
         Self::new(burn.asset(), SupplyChange::Burn(burn.amount()), false)
     }
@@ -201,25 +244,16 @@ impl AssetStateChange {
     /// Updates and returns self with the provided [`AssetStateChange`] if
     /// the change is valid, or returns None otherwise.
     pub fn apply_change(&mut self, change: AssetStateChange) -> bool {
-        if self.is_finalized && change.is_issuance() {
+        if self.should_finalize && change.includes_issuance {
             return false;
         }
-        self.is_finalized |= change.is_finalized;
+        self.should_finalize |= change.should_finalize;
+        self.includes_issuance |= change.includes_issuance;
         self.supply_change.add(change.supply_change)
-    }
-
-    /// Returns true if the AssetStateChange is for an asset burn.
-    pub fn is_burn(&self) -> bool {
-        matches!(self.supply_change, SupplyChange::Burn(_))
-    }
-
-    /// Returns true if the AssetStateChange is for an asset burn.
-    pub fn is_issuance(&self) -> bool {
-        matches!(self.supply_change, SupplyChange::Issuance(_))
     }
 }
 
-/// An `issued_asset` map
+/// An map of issued asset states by asset base.
 // TODO: Reference ZIP
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct IssuedAssets(HashMap<AssetBase, AssetState>);
@@ -235,10 +269,9 @@ impl IssuedAssets {
         self.0.iter()
     }
 
-    fn update<'a>(&mut self, issued_assets: impl Iterator<Item = (AssetBase, AssetState)> + 'a) {
-        for (asset_base, asset_state) in issued_assets {
-            self.0.insert(asset_base, asset_state);
-        }
+    /// Extends inner [`HashMap`] with updated asset states from the provided iterator
+    fn extend<'a>(&mut self, issued_assets: impl Iterator<Item = (AssetBase, AssetState)> + 'a) {
+        self.0.extend(issued_assets);
     }
 }
 
@@ -257,10 +290,12 @@ impl IntoIterator for IssuedAssets {
 pub struct IssuedAssetsChange(HashMap<AssetBase, AssetStateChange>);
 
 impl IssuedAssetsChange {
+    /// Creates a new [`IssuedAssetsChange`].
     fn new() -> Self {
         Self(HashMap::new())
     }
 
+    /// Applies changes in the provided iterator to an [`IssuedAssetsChange`].
     fn update<'a>(
         &mut self,
         changes: impl Iterator<Item = (AssetBase, AssetStateChange)> + 'a,
@@ -274,20 +309,26 @@ impl IssuedAssetsChange {
         true
     }
 
+    /// Accepts a [`Arc<Transaction>`].
+    ///
+    /// Returns an [`IssuedAssetsChange`] representing all of the changes to the issued assets
+    /// map that should be applied for the provided transaction, or `None` if the change would be invalid.
+    pub fn from_transaction(transaction: &Arc<Transaction>) -> Option<Self> {
+        let mut issued_assets_change = Self::new();
+
+        if !issued_assets_change.update(AssetStateChange::from_transaction(transaction)) {
+            return None;
+        }
+
+        Some(issued_assets_change)
+    }
+
     /// Accepts a slice of [`Arc<Transaction>`]s.
     ///
     /// Returns an [`IssuedAssetsChange`] representing all of the changes to the issued assets
     /// map that should be applied for the provided transactions.
-    pub fn from_transactions(transactions: &[Arc<Transaction>]) -> Option<Self> {
-        let mut issued_assets_change = Self::new();
-
-        for transaction in transactions {
-            if !issued_assets_change.update(AssetStateChange::from_transaction(transaction)) {
-                return None;
-            }
-        }
-
-        Some(issued_assets_change)
+    pub fn from_transactions(transactions: &[Arc<Transaction>]) -> Option<Arc<[Self]>> {
+        transactions.iter().map(Self::from_transaction).collect()
     }
 
     /// Consumes self and accepts a closure for looking up previous asset states.
@@ -298,7 +339,7 @@ impl IssuedAssetsChange {
     pub fn apply_with(self, f: impl Fn(AssetBase) -> AssetState) -> IssuedAssets {
         let mut issued_assets = IssuedAssets::new();
 
-        issued_assets.update(self.0.into_iter().map(|(asset_base, change)| {
+        issued_assets.extend(self.0.into_iter().map(|(asset_base, change)| {
             (
                 asset_base,
                 f(asset_base)
@@ -308,6 +349,11 @@ impl IssuedAssetsChange {
         }));
 
         issued_assets
+    }
+
+    /// Iterates over the inner [`HashMap`] of asset bases and state changes.
+    pub fn iter(&self) -> impl Iterator<Item = (AssetBase, AssetStateChange)> + '_ {
+        self.0.iter().map(|(&base, &state)| (base, state))
     }
 }
 
@@ -322,15 +368,5 @@ impl std::ops::Add for IssuedAssetsChange {
             rhs.update(self.0.into_iter());
             rhs
         }
-    }
-}
-
-impl IntoIterator for IssuedAssetsChange {
-    type Item = (AssetBase, AssetStateChange);
-
-    type IntoIter = std::collections::hash_map::IntoIter<AssetBase, AssetStateChange>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
     }
 }
