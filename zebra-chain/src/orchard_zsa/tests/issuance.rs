@@ -1,11 +1,17 @@
-use crate::{block::Block, serialization::ZcashDeserialize, transaction::Transaction};
+use crate::{
+    block::Block, orchard_zsa::IssuedAssetsChange, serialization::ZcashDeserialize,
+    transaction::Transaction,
+};
 
 use super::vectors::BLOCKS;
 
 #[test]
 fn issuance_block() {
     let issuance_block =
-        Block::zcash_deserialize(BLOCKS[0].as_ref()).expect("issuance block should deserialize");
+        Block::zcash_deserialize(BLOCKS[0]).expect("issuance block should deserialize");
+
+    IssuedAssetsChange::from_transactions(&issuance_block.transactions)
+        .expect("issuance in block should be valid");
 
     for transaction in issuance_block.transactions {
         if let Transaction::V6 {

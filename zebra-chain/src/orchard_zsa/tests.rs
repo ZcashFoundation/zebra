@@ -1,2 +1,4 @@
+#[cfg(test)]
 mod issuance;
-mod vectors;
+
+pub mod vectors;

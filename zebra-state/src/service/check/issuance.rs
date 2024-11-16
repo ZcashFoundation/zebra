@@ -59,9 +59,7 @@ pub fn valid_burns_and_issuance(
                 .apply_change(change)
                 .ok_or(ValidateContextError::InvalidIssuance)?;
 
-            issued_assets
-                .insert(asset_base, updated_asset_state)
-                .expect("transactions must have only one burn item per asset base");
+            issued_assets.insert(asset_base, updated_asset_state);
         }
     }
 
