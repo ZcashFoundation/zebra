@@ -50,7 +50,7 @@ byteorder = "1.5.0"
 bytes = "1.8.0"
 chrono = { version = "0.4.38", default-features = false }
 clap = "4.5.20"
-color-eyre = { version = "0.6.3", default-features = false }
+color-eyre = { version = "~0.6", default-features = false }
 console-subscriber = "0.4.0"
 criterion = "0.5.1"
 dirs = "5.0.1"
