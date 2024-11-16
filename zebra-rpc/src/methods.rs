@@ -1050,12 +1050,12 @@ where
 
         async move {
             // Reference for the legacy error code:
-            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/server.cpp#L137-L138>
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L544>
             let txid = transaction::Hash::from_bytes_in_display_order(
                 &txid
                     .try_into()
                     .map_err(|_| "invalid TXID length")
-                    .map_error(server::error::LegacyCode::InvalidParameter)?,
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)?,
             );
 
             // Check the mempool first.
