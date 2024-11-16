@@ -2,12 +2,14 @@
 
 use std::{sync::Arc, time::Duration};
 
+use block::genesis::regtest_genesis_block;
 use color_eyre::eyre::Report;
 use once_cell::sync::Lazy;
 use tower::{layer::Layer, timeout::TimeoutLayer};
 
 use zebra_chain::{
     block::Block,
+    orchard_zsa::tests::vectors::valid_issuance_blocks,
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
 };
 use zebra_state as zs;
@@ -267,6 +269,33 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
 
     let transcript = Transcript::from(STATE_VERIFY_TRANSCRIPT_GENESIS.iter().cloned());
     transcript.check(state_service.clone()).await.unwrap();
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_issuance_blocks_test() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(Some(1), None, Some(1));
+    let (block_verifier_router, _state_service) = verifiers_from_network(network.clone()).await;
+
+    let block_verifier_router =
+        TimeoutLayer::new(Duration::from_secs(VERIFY_TIMEOUT_SECONDS)).layer(block_verifier_router);
+
+    let commit_genesis = [(
+        Request::Commit(regtest_genesis_block()),
+        Ok(network.genesis_hash()),
+    )];
+
+    let commit_issuance_blocks = valid_issuance_blocks()
+        .into_iter()
+        .map(|block| (Request::Commit(block.clone()), Ok(block.hash())));
+
+    Transcript::from(commit_genesis.into_iter().chain(commit_issuance_blocks))
+        .check(block_verifier_router.clone())
+        .await
+        .unwrap();
 
     Ok(())
 }
