@@ -424,6 +424,340 @@ async fn rpc_getbestblockhash() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn rpc_createrawtransaction() {
+    use zebra_chain::block::{Hash, Height};
+
+    let _init_guard = zebra_test::init();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+
+    // nu5 block height
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
+    // nu5 block hash
+    let fake_tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
+
+    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+    mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
+    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        "RPC test",
+        Mainnet,
+        false,
+        true,
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        mock_chain_tip.clone(),
+    );
+
+    // Test basic transaction creation
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), 1.0);
+            addresses
+        },
+        None,
+        None,
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_ok(),
+        "Basic transaction creation should succeed"
+    );
+
+    // Test transaction with invalid input transaction id
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "00000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), 1.0);
+            addresses
+        },
+        None,
+        None,
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_err(),
+        "RPC should not return transaction hash with invalid transaction id in input"
+    );
+    assert!(response
+        .unwrap_err()
+        .message
+        .contains("invalid parameter, transaction id"));
+
+    // Test invalid inputs: invalid transparent address in HashMap
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz2".to_string(), 1.0);
+            addresses
+        },
+        None,
+        None,
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_err(),
+        "RPC should err if address to value mapping contains invalid address"
+    );
+    assert!(response
+        .unwrap_err()
+        .message
+        .contains("t-addr decoding error"));
+
+    // Test inputs containing a valid locktime
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), 1.0);
+            addresses
+        },
+        Some(100),
+        None,
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_ok(),
+        "RPC with valid locktime input should succeed"
+    );
+
+    // Test inputs containing a valid expiry_height
+
+    let expiry_height = fake_tip_height.0 + 40;
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), 1.0);
+            addresses
+        },
+        None,
+        Some(expiry_height),
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_ok(),
+        "RPC with valid expiry_height should succeed"
+    );
+
+    // Test inputs containing an invalid expiry_height: expiry_height is not more than block::Height::BLOCK_EXPIRY_HEIGHT_THRESHOLD
+
+    let expiry_height = fake_tip_height.0 + 1;
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), 1.0);
+            addresses
+        },
+        None,
+        Some(expiry_height),
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_err(),
+        "RPC should err if expiry_height is within range of block expiry threshold"
+    );
+    assert!(response
+        .unwrap_err()
+        .message
+        .contains("invalid parameter, expiryheight should be at least"));
+
+    // Test inputs containing an invalid expiry_height: expiry_height greater than block::Height::MAX_EXPIRY_HEIGHT
+
+    let expiry_height = Height::MAX_EXPIRY_HEIGHT.0;
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), 1.0);
+            addresses
+        },
+        None,
+        Some(expiry_height),
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_err(),
+        "RPC should err if expiry_height is greater than the MAX_EXPIRY_HEIGHT"
+    );
+    assert!(response
+        .unwrap_err()
+        .message
+        .contains("Invalid parameter, expiryheight must be nonnegative and less than"));
+
+    // Test inputs containing an invalid expiry_height: expiry_height can only be used if NetworkUpgrade::Overwinter is active
+    {
+        let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
+        mock_chain_tip_sender.send_best_tip_height(Height(
+            NetworkUpgrade::BeforeOverwinter
+                .activation_height(&Mainnet)
+                .unwrap()
+                .0,
+        ));
+        mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
+        mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+
+        let (rpc, _) = RpcImpl::new(
+            "RPC test",
+            "RPC test",
+            Mainnet,
+            false,
+            true,
+            Buffer::new(mempool.clone(), 1),
+            Buffer::new(state.clone(), 1),
+            mock_chain_tip.clone(),
+        );
+
+        let expiry_height = fake_tip_height.0 + 40;
+
+        let tx_future = rpc.create_raw_transaction(
+            vec![TxInput {
+                txid: "0000000000000000000000000000000000000000000000000000000000000000"
+                    .to_string(),
+                vout: 0,
+                sequence: None,
+            }],
+            {
+                let mut addresses: HashMap<String, f64> = HashMap::new();
+                addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), 1.0);
+                addresses
+            },
+            None,
+            Some(expiry_height),
+        );
+
+        let response = tx_future.await;
+
+        assert!(
+            response.is_err(),
+            "RPC should err if NetworkUpgrade::Overwinter is not active and expiryheight is used."
+        );
+        assert!(response
+            .unwrap_err()
+            .message
+            .contains("invalid parameter, expiryheight can only be used if Overwinter is active when the transaction is mined"));
+    }
+
+    // Test transaction creation with invalid ZEC value: more than 21 million
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses: HashMap<String, f64> = HashMap::new();
+            addresses.insert(
+                "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(),
+                21_000_001.0,
+            );
+            addresses
+        },
+        None,
+        None,
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_err(),
+        "RPC should err if inputs contains an invalid ZEC value"
+    );
+    assert!(response.unwrap_err().message.contains("invalid amount"));
+
+    // Test transaction creation with invalid ZEC value: negative amount
+
+    let tx_future = rpc.create_raw_transaction(
+        vec![TxInput {
+            txid: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
+            vout: 0,
+            sequence: None,
+        }],
+        {
+            let mut addresses = HashMap::new();
+            addresses.insert("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string(), -4.0);
+            addresses
+        },
+        None,
+        None,
+    );
+
+    let response = tx_future.await;
+
+    assert!(
+        response.is_err(),
+        "RPC should err if inputs contains an invalid ZEC value"
+    );
+    assert!(response.unwrap_err().message.contains("invalid amount"));
+
+    mempool.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(rpc_tx_queue_task_result.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn rpc_getrawtransaction() {
     let _init_guard = zebra_test::init();
 

@@ -32,14 +32,11 @@ use zebra_chain::{
     serialization::{ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, LockTime, SerializedTransaction, Transaction, UnminedTx},
-    transparent::{self, opcodes::OpCode, Address, Input, OutPoint, Script},
+    transparent::{self, opcodes::OpCode, Address, Input, OutPoint, Output, Script},
 };
 
 use zebra_node_services::mempool;
-use zebra_state::{
-    GetBlockTemplateChainInfo, HashOrHeight, MinedTx, OutputIndex, OutputLocation,
-    TransactionLocation,
-};
+use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::{
     constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
@@ -1051,23 +1048,11 @@ where
         locktime: Option<u32>,
         expiryheight: Option<u32>,
     ) -> BoxFuture<Result<String>> {
-        let mut state = self.state.clone();
         let network = self.network.clone();
+        let latest_chain_tip = self.latest_chain_tip.clone();
 
         async move {
-            let chain_info_request = zebra_state::ReadRequest::ChainInfo;
-            let response: zebra_state::ReadResponse = state
-                .ready()
-                .and_then(|service| service.call(chain_info_request))
-                .await
-                .map_server_error()?;
-
-            let zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
-                tip_height, ..
-            }) = response
-            else {
-                unreachable!("unmatched response to a chain info request")
-            };
+            let tip_height = best_chain_tip_height(&latest_chain_tip).map_server_error()?;
 
             let lock_time = if let Some(lock_time) = locktime {
                 LockTime::Height(block::Height(lock_time))
@@ -1078,37 +1063,42 @@ where
             // Use next block height if exceeds MAX_EXPIRY_HEIGHT or is beyond tip
             let next_block_height = tip_height.0 + 1;
             let current_upgrade = NetworkUpgrade::current(&network, tip_height);
-            let next_network_upgrade = NetworkUpgrade::current(&network, block::Height(next_block_height));
+            let next_network_upgrade = NetworkUpgrade::current(&network, Height(next_block_height));
 
             let expiry_height_as_u32 = if let Some(expiry_height) = expiryheight {
+                if next_network_upgrade < NetworkUpgrade::Overwinter {
+                    return Err(Error::invalid_params(
+                        "invalid parameter, expiryheight can only be used if Overwinter is active when the transaction is mined"
+                    )).map_server_error();
+                }
+
+                if block::Height(expiry_height) >= block::Height::MAX_EXPIRY_HEIGHT {
+                    return Err(Error::invalid_params(
+                        format!("Invalid parameter, expiryheight must be nonnegative and less than {:?}.", 
+                            block::Height::MAX_EXPIRY_HEIGHT)
+                    ));
+                }
+
                 // DoS mitigation: reject transactions expiring soon (as is done in zcashd)
                 if expiry_height != 0 && next_block_height + block::Height::BLOCK_EXPIRY_HEIGHT_THRESHOLD > expiry_height {
-                    Error::invalid_params(format!("invalid parameter, expiryheight should be at least {} to avoid 
-                    transaction expiring soon", next_block_height + block::Height::BLOCK_EXPIRY_HEIGHT_THRESHOLD));
+                    return Err(Error::invalid_params(
+                        format!("invalid parameter, expiryheight should be at least {} to avoid transaction expiring soon", 
+                            next_block_height + block::Height::BLOCK_EXPIRY_HEIGHT_THRESHOLD)
+                    ));
                 }
 
-                if next_network_upgrade < NetworkUpgrade::Overwinter {
-                    Error::invalid_params("invalid parameter, expiryheight can only be used if Overwinter is active when the transaction is mined");
-                }
-
-                if block::Height(expiry_height) > block::Height::MAX_EXPIRY_HEIGHT
-                    || expiry_height > tip_height.0
-                {
-                    Error::invalid_params("invalid parameter, expiryheight out of range");
-                }
                 expiry_height
             } else {
                 next_block_height
             };
-
-            // Set a default sequence based on the lock time.
+            // Set a default sequence based on the lock time
             let default_tx_input_sequence = if lock_time == LockTime::Height(block::Height(0)) {
                 u32::MAX
             } else {
                 u32::MAX - 1
             };
 
-            // Compute tx inputs
+            // Handle tx inputs
             let tx_inputs: Vec<Input> = transactions
                 .iter()
                 .map(|input| {
@@ -1125,15 +1115,14 @@ where
                 })
                 .collect::<Result<Vec<Input>>>()?;
 
-            // Comput tx outputs
-            let mut unique_addresses = HashSet::new();
-            let mut tx_outputs: Vec<zebra_chain::transparent::Output> = Vec::new();
+            // Handle tx outputs
+            let mut tx_outputs: Vec<Output> = Vec::new();
+
+            // Check if addresses contained in params are valid
+            let address_strings = AddressStrings { addresses: addresses.clone().keys().cloned().collect() };
+            let _result = address_strings.valid_addresses().map_err(|e| e.to_string()).map_server_error()?;
 
             for (address, amount) in addresses {
-                if !unique_addresses.insert(address.clone()) {
-                    return Err(Error::invalid_params("invalid parameter, invalid duplicate address"));
-                }
-
                 let address = address.parse().map_server_error()?;
 
                 let lock_script = match address {
@@ -1159,7 +1148,7 @@ where
                 let value = Amount::<NonNegative>::try_from(zatoshi_amount)
                     .map_err(|e| Error::invalid_params(format!("invalid amount: {}", e)))?;
 
-                let tx_out = zebra_chain::transparent::Output {
+                let tx_out = Output {
                     value,
                     lock_script
                 };
@@ -1913,7 +1902,7 @@ impl Default for GetBlockHash {
 
 /// A struct used for the `transactions` parameter for
 /// [`Rpc::create_raw_transaction` method].
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct TxInput {
     txid: String,
     vout: u32,
