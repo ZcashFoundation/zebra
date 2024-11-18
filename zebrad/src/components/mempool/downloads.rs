@@ -47,6 +47,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{
     block::Height,
     transaction::{self, UnminedTxId, VerifiedUnminedTx},
+    transparent,
 };
 use zebra_consensus::transaction as tx;
 use zebra_network as zn;
@@ -153,7 +154,11 @@ where
     pending: FuturesUnordered<
         JoinHandle<
             Result<
-                (VerifiedUnminedTx, Option<Height>),
+                (
+                    VerifiedUnminedTx,
+                    Vec<transparent::OutPoint>,
+                    Option<Height>,
+                ),
                 (TransactionDownloadVerifyError, UnminedTxId),
             >,
         >,
@@ -173,8 +178,14 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item =
-        Result<(VerifiedUnminedTx, Option<Height>), (UnminedTxId, TransactionDownloadVerifyError)>;
+    type Item = Result<
+        (
+            VerifiedUnminedTx,
+            Vec<transparent::OutPoint>,
+            Option<Height>,
+        ),
+        (UnminedTxId, TransactionDownloadVerifyError),
+    >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -189,9 +200,9 @@ where
         // TODO: this would be cleaner with poll_map (#2693)
         if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
             match join_result.expect("transaction download and verify tasks must not panic") {
-                Ok((tx, tip_height)) => {
+                Ok((tx, spent_mempool_outpoints, tip_height)) => {
                     this.cancel_handles.remove(&tx.transaction.id);
-                    Poll::Ready(Some(Ok((tx, tip_height))))
+                    Poll::Ready(Some(Ok((tx, spent_mempool_outpoints, tip_height))))
                 }
                 Err((e, hash)) => {
                     this.cancel_handles.remove(&hash);
@@ -347,8 +358,11 @@ where
                     height: next_height,
                 })
                 .map_ok(|rsp| {
-                    (rsp.into_mempool_transaction()
-                        .expect("unexpected non-mempool response to mempool request"), tip_height)
+                    let tx::Response::Mempool { transaction, spent_mempool_outpoints } = rsp else {
+                        panic!("unexpected non-mempool response to mempool request")
+                    };
+
+                    (transaction, spent_mempool_outpoints, tip_height)
                 })
                 .await;
 
@@ -357,12 +371,12 @@ where
 
             result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
         }
-        .map_ok(|(tx, tip_height)| {
+        .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
             metrics::counter!(
                 "mempool.verified.transactions.total",
                 "version" => format!("{}", tx.transaction.transaction.version()),
             ).increment(1);
-            (tx, tip_height)
+            (tx, spent_mempool_outpoints, tip_height)
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
@@ -387,6 +401,7 @@ where
             };
 
             // Send the result to responder channel if one was provided.
+            // TODO: Wait until transactions are added to the verified set before sending an Ok to `rsp_tx`.
             if let Some(rsp_tx) = rsp_tx {
                 let _ = rsp_tx.send(
                     result

@@ -4,7 +4,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Duration, Utc};
 use proptest::{collection::vec, prelude::*};
-use tower::ServiceExt;
+use tower::{buffer::Buffer, ServiceExt};
 
 use zebra_chain::{
     amount::Amount,
@@ -450,7 +450,8 @@ fn validate(
         // Initialize the verifier
         let state_service =
             tower::service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = transaction::Verifier::new(&network, state_service);
+        let verifier = transaction::Verifier::new_for_tests(&network, state_service);
+        let verifier = Buffer::new(verifier, 10);
 
         // Test the transaction verifier
         verifier
@@ -462,5 +463,9 @@ fn validate(
                 time: block_time,
             })
             .await
+            .map_err(|err| {
+                *err.downcast()
+                    .expect("error type should be TransactionError")
+            })
     })
 }

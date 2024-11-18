@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
+    time::Duration,
 };
 
 use chrono::{DateTime, Utc};
@@ -13,7 +14,13 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     FutureExt,
 };
-use tower::{timeout::Timeout, Service, ServiceExt};
+use tokio::sync::oneshot;
+use tower::{
+    buffer::Buffer,
+    timeout::{error::Elapsed, Timeout},
+    util::BoxService,
+    Service, ServiceExt,
+};
 use tracing::Instrument;
 
 use zebra_chain::{
@@ -26,9 +33,10 @@ use zebra_chain::{
     transaction::{
         self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
     },
-    transparent::{self, OrderedUtxo},
+    transparent,
 };
 
+use zebra_node_services::mempool;
 use zebra_script::CachedFfiTransaction;
 use zebra_state as zs;
 
@@ -52,6 +60,23 @@ mod tests;
 ///     chain in the correct order.)
 const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6 * 60);
 
+/// A timeout applied to output lookup requests sent to the mempool. This is shorter than the
+/// timeout for the state UTXO lookups because a block is likely to be mined every 75 seconds
+/// after Blossom is active, changing the best chain tip and requiring re-verification of transactions
+/// in the mempool.
+///
+/// This is how long Zebra will wait for an output to be added to the mempool before verification
+/// of the transaction that spends it will fail.
+const MEMPOOL_OUTPUT_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How long to wait after responding to a mempool request with a transaction that creates new
+/// transparent outputs before polling the mempool service so that it will try adding the verified
+/// transaction and responding to any potential `AwaitOutput` requests.
+///
+/// This should be long enough for the mempool service's `Downloads` to finish processing the
+/// response from the transaction verifier.
+const POLL_MEMPOOL_DELAY: std::time::Duration = Duration::from_millis(50);
+
 /// Asynchronous transaction verification.
 ///
 /// # Correctness
@@ -59,24 +84,55 @@ const UTXO_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// Transaction verification requests should be wrapped in a timeout, so that
 /// out-of-order and invalid requests do not hang indefinitely. See the [`router`](`crate::router`)
 /// module documentation for details.
-#[derive(Debug, Clone)]
-pub struct Verifier<ZS> {
+pub struct Verifier<ZS, Mempool> {
     network: Network,
     state: Timeout<ZS>,
+    // TODO: Use an enum so that this can either be Pending(oneshot::Receiver) or Initialized(MempoolService)
+    mempool: Option<Timeout<Mempool>>,
     script_verifier: script::Verifier,
+    mempool_setup_rx: oneshot::Receiver<Mempool>,
 }
 
-impl<ZS> Verifier<ZS>
+impl<ZS, Mempool> Verifier<ZS, Mempool>
+where
+    ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
+    ZS::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
+{
+    /// Create a new transaction verifier.
+    pub fn new(network: &Network, state: ZS, mempool_setup_rx: oneshot::Receiver<Mempool>) -> Self {
+        Self {
+            network: network.clone(),
+            state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
+            mempool: None,
+            script_verifier: script::Verifier,
+            mempool_setup_rx,
+        }
+    }
+}
+
+impl<ZS>
+    Verifier<
+        ZS,
+        Buffer<BoxService<mempool::Request, mempool::Response, BoxError>, mempool::Request>,
+    >
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
 {
-    /// Create a new transaction verifier.
-    pub fn new(network: &Network, state: ZS) -> Self {
+    /// Create a new transaction verifier with a closed channel receiver for mempool setup for tests.
+    #[cfg(test)]
+    pub fn new_for_tests(network: &Network, state: ZS) -> Self {
         Self {
             network: network.clone(),
             state: Timeout::new(state, UTXO_LOOKUP_TIMEOUT),
+            mempool: None,
             script_verifier: script::Verifier,
+            mempool_setup_rx: oneshot::channel().1,
         }
     }
 }
@@ -156,12 +212,24 @@ pub enum Response {
         /// [`Response::Mempool`] responses are uniquely identified by the
         /// [`UnminedTxId`] variant for their transaction version.
         transaction: VerifiedUnminedTx,
+
+        /// A list of spent [`transparent::OutPoint`]s that were found in
+        /// the mempool's list of `created_outputs`.
+        ///
+        /// Used by the mempool to determine dependencies between transactions
+        /// in the mempool and to avoid adding transactions with missing spends
+        /// to its verified set.
+        spent_mempool_outpoints: Vec<transparent::OutPoint>,
     },
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl From<VerifiedUnminedTx> for Response {
     fn from(transaction: VerifiedUnminedTx) -> Self {
-        Response::Mempool { transaction }
+        Response::Mempool {
+            transaction,
+            spent_mempool_outpoints: Vec::new(),
+        }
     }
 }
 
@@ -228,14 +296,6 @@ impl Request {
 }
 
 impl Response {
-    /// The verified mempool transaction, if this is a mempool response.
-    pub fn into_mempool_transaction(self) -> Option<VerifiedUnminedTx> {
-        match self {
-            Response::Block { .. } => None,
-            Response::Mempool { transaction, .. } => Some(transaction),
-        }
-    }
-
     /// The unmined transaction ID for the transaction in this response.
     pub fn tx_id(&self) -> UnminedTxId {
         match self {
@@ -276,10 +336,15 @@ impl Response {
     }
 }
 
-impl<ZS> Service<Request> for Verifier<ZS>
+impl<ZS, Mempool> Service<Request> for Verifier<ZS, Mempool>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
 {
     type Response = Response;
     type Error = TransactionError;
@@ -287,6 +352,14 @@ where
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // Note: The block verifier expects the transaction verifier to always be ready.
+
+        if self.mempool.is_none() {
+            if let Ok(mempool) = self.mempool_setup_rx.try_recv() {
+                self.mempool = Some(Timeout::new(mempool, MEMPOOL_OUTPUT_LOOKUP_TIMEOUT));
+            }
+        }
+
         Poll::Ready(Ok(()))
     }
 
@@ -295,6 +368,7 @@ where
         let script_verifier = self.script_verifier;
         let network = self.network.clone();
         let state = self.state.clone();
+        let mempool = self.mempool.clone();
 
         let tx = req.transaction();
         let tx_id = req.tx_id();
@@ -370,8 +444,8 @@ where
             // Load spent UTXOs from state.
             // The UTXOs are required for almost all the async checks.
             let load_spent_utxos_fut =
-                Self::spent_utxos(tx.clone(), req.known_utxos(), req.is_mempool(), state.clone());
-            let (spent_utxos, spent_outputs) = load_spent_utxos_fut.await?;
+                Self::spent_utxos(tx.clone(), req.clone(), state.clone(), mempool.clone(),);
+            let (spent_utxos, spent_outputs, spent_mempool_outpoints) = load_spent_utxos_fut.await?;
 
             // WONTFIX: Return an error for Request::Block as well to replace this check in
             //       the state once #2336 has been implemented?
@@ -473,7 +547,22 @@ where
                         ),
                         legacy_sigop_count,
                     )?;
-                    Response::Mempool { transaction }
+
+                    if let Some(mut mempool) = mempool {
+                        if !transaction.transaction.transaction.outputs().is_empty() {
+                            tokio::spawn(async move {
+                                tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
+                                let _ = mempool
+                                    .ready()
+                                    .await
+                                    .expect("mempool poll_ready() method should not return an error")
+                                    .call(mempool::Request::CheckForVerifiedTransactions)
+                                    .await;
+                            });
+                        }
+                    }
+
+                    Response::Mempool { transaction, spent_mempool_outpoints }
                 },
             };
 
@@ -488,10 +577,15 @@ where
     }
 }
 
-impl<ZS> Verifier<ZS>
+impl<ZS, Mempool> Verifier<ZS, Mempool>
 where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send + 'static,
+    Mempool: Service<mempool::Request, Response = mempool::Response, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    Mempool::Future: Send + 'static,
 {
     /// Fetches the median-time-past of the *next* block after the best state tip.
     ///
@@ -514,33 +608,42 @@ where
         }
     }
 
-    /// Wait for the UTXOs that are being spent by the given transaction.
+    /// Waits for the UTXOs that are being spent by the given transaction to arrive in
+    /// the state for [`Block`](Request::Block) requests.
     ///
-    /// `known_utxos` are additional UTXOs known at the time of validation (i.e.
-    /// from previous transactions in the block).
+    /// Looks up UTXOs that are being spent by the given transaction in the state or waits
+    /// for them to be added to the mempool for [`Mempool`](Request::Mempool) requests.
     ///
-    /// Returns a tuple with a OutPoint -> Utxo map, and a vector of Outputs
-    /// in the same order as the matching inputs in the transaction.
+    /// Returns a triple containing:
+    /// - `OutPoint` -> `Utxo` map,
+    /// - vec of `Output`s in the same order as the matching inputs in the `tx`,
+    /// - vec of `Outpoint`s spent by a mempool `tx` that were not found in the best chain's utxo set.
     async fn spent_utxos(
         tx: Arc<Transaction>,
-        known_utxos: Arc<HashMap<transparent::OutPoint, OrderedUtxo>>,
-        is_mempool: bool,
+        req: Request,
         state: Timeout<ZS>,
+        mempool: Option<Timeout<Mempool>>,
     ) -> Result<
         (
             HashMap<transparent::OutPoint, transparent::Utxo>,
             Vec<transparent::Output>,
+            Vec<transparent::OutPoint>,
         ),
         TransactionError,
     > {
+        let is_mempool = req.is_mempool();
+        // Additional UTXOs known at the time of validation,
+        // i.e., from previous transactions in the block.
+        let known_utxos = req.known_utxos();
+
         let inputs = tx.inputs();
         let mut spent_utxos = HashMap::new();
         let mut spent_outputs = Vec::new();
+        let mut spent_mempool_outpoints = Vec::new();
+
         for input in inputs {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 tracing::trace!("awaiting outpoint lookup");
-                // Currently, Zebra only supports known UTXOs in block transactions.
-                // But it might support them in the mempool in future.
                 let utxo = if let Some(output) = known_utxos.get(outpoint) {
                     tracing::trace!("UXTO in known_utxos, discarding query");
                     output.utxo.clone()
@@ -548,11 +651,17 @@ where
                     let query = state
                         .clone()
                         .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
-                    if let zebra_state::Response::UnspentBestChainUtxo(utxo) = query.await? {
-                        utxo.ok_or(TransactionError::TransparentInputNotFound)?
-                    } else {
+
+                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query.await? else {
                         unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
-                    }
+                    };
+
+                    let Some(utxo) = utxo else {
+                        spent_mempool_outpoints.push(*outpoint);
+                        continue;
+                    };
+
+                    utxo
                 } else {
                     let query = state
                         .clone()
@@ -570,7 +679,41 @@ where
                 continue;
             }
         }
-        Ok((spent_utxos, spent_outputs))
+
+        if let Some(mempool) = mempool {
+            for &spent_mempool_outpoint in &spent_mempool_outpoints {
+                let query = mempool
+                    .clone()
+                    .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
+
+                let output = match query.await {
+                    Ok(mempool::Response::UnspentOutput(output)) => output,
+                    Ok(_) => unreachable!("UnspentOutput always responds with UnspentOutput"),
+                    Err(err) => {
+                        return match err.downcast::<Elapsed>() {
+                            Ok(_) => Err(TransactionError::TransparentInputNotFound),
+                            Err(err) => Err(err.into()),
+                        };
+                    }
+                };
+
+                spent_outputs.push(output.clone());
+                spent_utxos.insert(
+                    spent_mempool_outpoint,
+                    // Assume the Utxo height will be next height after the best chain tip height
+                    //
+                    // # Correctness
+                    //
+                    // If the tip height changes while an umined transaction is being verified,
+                    // the transaction must be re-verified before being added to the mempool.
+                    transparent::Utxo::new(output, req.height(), false),
+                );
+            }
+        } else if !spent_mempool_outpoints.is_empty() {
+            return Err(TransactionError::TransparentInputNotFound);
+        }
+
+        Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
     }
 
     /// Accepts `request`, a transaction verifier [`&Request`](Request),
