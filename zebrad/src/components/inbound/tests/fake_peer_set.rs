@@ -31,8 +31,8 @@ use crate::{
     components::{
         inbound::{downloads::MAX_INBOUND_CONCURRENCY, Inbound, InboundSetupData},
         mempool::{
-            gossip_mempool_transaction_id, unmined_transactions_in_blocks, Config as MempoolConfig,
-            Mempool, MempoolError, SameEffectsChainRejectionError, UnboxMempoolError,
+            gossip_mempool_transaction_id, Config as MempoolConfig, Mempool, MempoolError,
+            SameEffectsChainRejectionError, UnboxMempoolError,
         },
         sync::{self, BlockGossipError, SyncStatus, PEER_GOSSIP_DELAY},
     },
@@ -785,7 +785,7 @@ async fn caches_getaddr_response() {
             _transaction_verifier,
             _groth16_download_handle,
             _max_checkpoint_height,
-        ) = zebra_consensus::router::init(
+        ) = zebra_consensus::router::init_test(
             consensus_config.clone(),
             &network,
             state_service.clone(),
@@ -894,8 +894,12 @@ async fn setup(
 
     // Download task panics and timeouts are propagated to the tests that use Groth16 verifiers.
     let (block_verifier, _transaction_verifier, _groth16_download_handle, _max_checkpoint_height) =
-        zebra_consensus::router::init(consensus_config.clone(), &network, state_service.clone())
-            .await;
+        zebra_consensus::router::init_test(
+            consensus_config.clone(),
+            &network,
+            state_service.clone(),
+        )
+        .await;
 
     let mut peer_set = MockService::build()
         .with_max_request_delay(MAX_PEER_SET_REQUEST_DELAY)
@@ -1050,14 +1054,15 @@ fn add_some_stuff_to_mempool(
     network: Network,
 ) -> Vec<VerifiedUnminedTx> {
     // get the genesis block coinbase transaction from the Zcash blockchain.
-    let genesis_transactions: Vec<_> = unmined_transactions_in_blocks(..=0, &network)
+    let genesis_transactions: Vec<_> = network
+        .unmined_transactions_in_blocks(..=0)
         .take(1)
         .collect();
 
     // Insert the genesis block coinbase transaction into the mempool storage.
     mempool_service
         .storage()
-        .insert(genesis_transactions[0].clone())
+        .insert(genesis_transactions[0].clone(), Vec::new())
         .unwrap();
 
     genesis_transactions

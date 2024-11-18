@@ -424,6 +424,7 @@ proptest! {
                     .await?
                     .respond(mempool::Response::FullTransactions {
                         transactions,
+                        transaction_dependencies: Default::default(),
                         last_seen_tip_hash: [0; 32].into(),
                     });
 

@@ -648,7 +648,13 @@ where
 
             // The loop returns the server long poll ID,
             // which should be different to the client long poll ID.
-            let (server_long_poll_id, chain_tip_and_local_time, mempool_txs, submit_old) = loop {
+            let (
+                server_long_poll_id,
+                chain_tip_and_local_time,
+                mempool_txs,
+                mempool_tx_deps,
+                submit_old,
+            ) = loop {
                 // Check if we are synced to the tip.
                 // The result of this check can change during long polling.
                 //
@@ -688,12 +694,13 @@ where
                 //
                 // Optional TODO:
                 // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
-                let Some(mempool_txs) = fetch_mempool_transactions(mempool.clone(), tip_hash)
-                    .await?
-                    // If the mempool and state responses are out of sync:
-                    // - if we are not long polling, omit mempool transactions from the template,
-                    // - if we are long polling, continue to the next iteration of the loop to make fresh state and mempool requests.
-                    .or_else(|| client_long_poll_id.is_none().then(Vec::new))
+                let Some((mempool_txs, mempool_tx_deps)) =
+                    fetch_mempool_transactions(mempool.clone(), tip_hash)
+                        .await?
+                        // If the mempool and state responses are out of sync:
+                        // - if we are not long polling, omit mempool transactions from the template,
+                        // - if we are long polling, continue to the next iteration of the loop to make fresh state and mempool requests.
+                        .or_else(|| client_long_poll_id.is_none().then(Default::default))
                 else {
                     continue;
                 };
@@ -728,6 +735,7 @@ where
                         server_long_poll_id,
                         chain_tip_and_local_time,
                         mempool_txs,
+                        mempool_tx_deps,
                         submit_old,
                     );
                 }
@@ -888,15 +896,15 @@ where
                 next_block_height,
                 &miner_address,
                 mempool_txs,
+                mempool_tx_deps,
                 debug_like_zcashd,
                 extra_coinbase_data.clone(),
-            )
-            .await;
+            );
 
             tracing::debug!(
                 selected_mempool_tx_hashes = ?mempool_txs
                     .iter()
-                    .map(|tx| tx.transaction.id.mined_id())
+                    .map(|#[cfg(not(test))] tx, #[cfg(test)] (_, tx)| tx.transaction.id.mined_id())
                     .collect::<Vec<_>>(),
                 "selected transactions for the template from the mempool"
             );
