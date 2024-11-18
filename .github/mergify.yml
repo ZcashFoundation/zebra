@@ -3,6 +3,10 @@
 # This file can be edited and validated using:
 # https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/config-editor
 
+# Set the maximum number of PRs that can be checked in parallel in a queue
+merge_queue:
+  max_parallel_checks: 5
+
 # Provides a means to set configuration values that act as fallbacks
 # for queue_rules and pull_request_rules
 defaults:
@@ -15,7 +19,6 @@ defaults:
     # Allow to update/rebase the original pull request if possible to check its mergeability,
     # and it does not create a draft PR if not needed
     allow_inplace_checks: True
-    speculative_checks: 1
     batch_size: 20
     # Wait for about 10% of the time it takes Rust PRs to run CI (~1h)
     batch_max_wait_time: "10 minutes"
