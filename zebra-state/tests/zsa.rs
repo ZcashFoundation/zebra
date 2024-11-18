@@ -17,8 +17,10 @@ use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 fn patch_block_coinbase_height(block: &mut Block, previous_block: &Block) {
     let mut transactions: Vec<Arc<zebra_chain::transaction::Transaction>> =
         block.transactions.iter().cloned().collect();
+    //let transactions: &mut Vec<Arc<zebra_chain::transaction::Transaction>> =
+    //    Arc::make_mut(&mut block.transactions);
     if let Some(tx_arc) = transactions.first_mut() {
-        let mut tx = (**tx_arc).clone();
+        let tx = Arc::make_mut(&mut *tx_arc);
         if let Some(input) = tx.inputs_mut().first_mut() {
             if let zebra_chain::transparent::Input::Coinbase { ref mut height, .. } = input {
                 *height = previous_block
@@ -28,19 +30,18 @@ fn patch_block_coinbase_height(block: &mut Block, previous_block: &Block) {
                     .expect("block has next coinbase_height"); //zebra_chain::block::Height(new_height)
             }
         }
-        *tx_arc = Arc::new(tx);
     }
     block.transactions = transactions.into();
 }
 
 fn patch_block(block: &mut Block, previous_block: &Block, commitment_bytes: [u8; 32]) {
-    let mut header = *block.header;
+    let header = Arc::make_mut(&mut block.header);
     header.previous_block_hash = previous_block.hash();
     *header.commitment_bytes = commitment_bytes;
-    block.header = header.into();
     patch_block_coinbase_height(block, previous_block);
 }
 
+// FIXME: remove printlns
 fn create_transcript_data(
     network: Network,
 ) -> Vec<(Request, Result<Response, ExpectedTranscriptError>)> {
@@ -146,7 +147,7 @@ fn create_transcript_data(
 #[tokio::test(flavor = "multi_thread")]
 //#[tokio::test]
 async fn check_zsa_workflow() -> Result<(), Report> {
-    let _init_guard = zebra_test::init();
+    //let _init_guard = zebra_test::init();
     //let network = Network::new_default_testnet();
     let network = Network::new_regtest(None, None, None);
 
