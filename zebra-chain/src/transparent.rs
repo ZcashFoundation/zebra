@@ -12,7 +12,8 @@ use crate::{
 
 mod address;
 mod keys;
-mod opcodes;
+
+pub mod opcodes;
 mod script;
 mod serialize;
 mod utxo;
