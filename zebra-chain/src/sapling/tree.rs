@@ -147,6 +147,26 @@ impl TryFrom<[u8; 32]> for Root {
     }
 }
 
+impl ToHex for &Root {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        <[u8; 32]>::from(*self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        <[u8; 32]>::from(*self).encode_hex_upper()
+    }
+}
+
+impl ToHex for Root {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
+    }
+}
+
 impl ZcashSerialize for Root {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&<[u8; 32]>::from(*self)[..])?;
