@@ -90,6 +90,15 @@ impl HashOrHeight {
     }
 }
 
+impl std::fmt::Display for HashOrHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HashOrHeight::Hash(hash) => write!(f, "{hash}"),
+            HashOrHeight::Height(height) => write!(f, "{}", height.0),
+        }
+    }
+}
+
 impl From<block::Hash> for HashOrHeight {
     fn from(hash: block::Hash) -> Self {
         Self::Hash(hash)
