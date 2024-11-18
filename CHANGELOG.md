@@ -8,39 +8,41 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ## [Zebra 2.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.1) - 2024-10-30
 
 - Zebra now supports NU6 on Mainnet. This patch release updates dependencies
-  required for NU6.
+  required for NU6. The 2.0.0 release was pointing to the incorrect dependencies
+  and would panic on NU6 activation.
 
 ### Breaking Changes
 
 - The JSON RPC endpoint has cookie-based authentication enabled by default.
-
-### Added
-
-- NU6-related documentation
-  ([#8949](https://github.com/ZcashFoundation/zebra/pull/8949))
-- A cookie-based authentication system for the JSON RPC endpoint
-  ([#8900](https://github.com/ZcashFoundation/zebra/pull/8900),
-  [#8965](https://github.com/ZcashFoundation/zebra/pull/8965))
+  **If you rely on Zebra RPC, you will need to adjust your config.** The
+  simplest change is to disable authentication by adding `enable_cookie_auth =
+  false` to the `[rpc]` section of the Zebra config file; [refer to the
+  docs for more information](https://zebra.zfnd.org/user/lightwalletd.html#json-rpc) (this was added
+  in v2.0.0, but is being mentioned again here for clarity).
 
 ### Changed
 
--  Set the activation height of NU6 for Mainnet and bump Zebra's current network
-   protocol version
-   ([#8960](https://github.com/ZcashFoundation/zebra/pull/8960))
+- Use ECC deps with activation height for NU6
+  ([#8960](https://github.com/ZcashFoundation/zebra/pull/8978))
 
 ### Contributors
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
 @arya2, @gustavovalverde, @oxarbitrage and @upbqdn.
 
-## [Zebra 2.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0) - 2024-10-25
+## [Zebra 2.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0) - 2024-10-25 - [YANKED]
 
-This release brings full support for NU6.
+This release was intended to support NU6 but was pointing to the wrong version
+of dependencies which would make Zebra panic at NU6 activation. Use v2.0.1 instead.
 
 ### Breaking Changes
 
 - Zebra now supports NU6 on Mainnet.
 - The JSON RPC endpoint has a cookie-based authentication enabled by default.
+  **If you rely on Zebra RPC, you will need to adjust your config.** The
+  simplest change is to disable authentication by adding `enable_cookie_auth =
+  false` to the `[rpc]` section of the Zebra config file; [refer to the
+  docs](https://zebra.zfnd.org/user/lightwalletd.html#json-rpc).
 
 ### Added
 
@@ -109,7 +111,7 @@ by syncing Zebra from scratch, or by using the `copy-state` command to create a 
 command, first make a copy Zebra's Testnet configuration with a different cache directory path, for example, if Zebra's configuration is at the
 default path, by running `cp ~/.config/zebrad.toml ./zebrad-copy-target.toml`, then opening the new configuration file and editing the
 `cache_dir` path in the `state` section. Once there's a copy of Zebra's configuration with the new state cache directory path, run:
-`zebrad copy-state --target-config-path "./zebrad-copy-target.toml" --max-source-height "2975999"`, and then update the original 
+`zebrad copy-state --target-config-path "./zebrad-copy-target.toml" --max-source-height "2975999"`, and then update the original
 Zebra configuration to use the new state cache directory.
 
 ### Added
@@ -155,7 +157,7 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 - Support for custom Testnets and Regtest is greatly enhanced.
 - Windows is now back in the second tier of supported platforms.
 - The end-of-support time interval is set to match `zcashd`'s 16 weeks.
-- The RPC serialization of empty treestates matches `zcashd`. 
+- The RPC serialization of empty treestates matches `zcashd`.
 
 ### Added
 
@@ -221,11 +223,11 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 
 ## [Zebra 1.6.1](https://github.com/ZcashFoundation/zebra/releases/tag/v1.6.1) - 2024-04-15
 
-This release adds an OpenAPI specification for Zebra's RPC methods and startup logs about Zebra's storage usage and other database information. 
+This release adds an OpenAPI specification for Zebra's RPC methods and startup logs about Zebra's storage usage and other database information.
 
 It also includes:
 - Bug fixes and improved error messages for some zebra-scan gRPC methods
-- A performance improvement in Zebra's `getblock` RPC method  
+- A performance improvement in Zebra's `getblock` RPC method
 
 ### Added
 
