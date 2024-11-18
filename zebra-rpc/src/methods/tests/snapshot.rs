@@ -376,8 +376,9 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getrawtransaction` verbosity=0
     //
-    // - similar to `getrawmempool` described above, a mempool request will be made to get the requested
-    // transaction from the mempool, response will be empty as we have this transaction in state
+    // - Similarly to `getrawmempool` described above, a mempool request will be made to get the
+    // requested transaction from the mempool. Response will be empty as we have this transaction in
+    // state.
     let mempool_req = mempool
         .expect_request_that(|request| {
             matches!(request, mempool::Request::TransactionsByMinedId(_))
