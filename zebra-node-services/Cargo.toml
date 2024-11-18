@@ -45,15 +45,15 @@ zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.42" }
 color-eyre = { version = "0.6.3", optional = true }
 jsonrpc-core = { version = "18.0.0", optional = true }
 # Security: avoid default dependency on openssl
-reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"], optional = true }
-serde = { version = "1.0.211", optional = true }
-serde_json = { version = "1.0.132", optional = true }
-tokio = { version = "1.41.0", features = ["time", "sync"] }
+reqwest = { version = "0.12.9", default-features = false, features = ["rustls-tls"], optional = true }
+serde = { version = "1.0.215", optional = true }
+serde_json = { version = "1.0.133", optional = true }
+tokio = { version = "1.41.1", features = ["time", "sync"] }
 
 [dev-dependencies]
 
 color-eyre = "0.6.3"
 jsonrpc-core = "18.0.0"
-reqwest = { version = "0.11.26", default-features = false, features = ["rustls-tls"] }
-serde = "1.0.211"
-serde_json = "1.0.132"
+reqwest = { version = "0.12.9", default-features = false, features = ["rustls-tls"] }
+serde = "1.0.215"
+serde_json = "1.0.133"
