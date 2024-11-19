@@ -34,3 +34,5 @@ jobs:
         run: cargo doc --all-features --document-private-items
       - name: Run format check
         run: cargo fmt -- --check
+      - name: Run clippy
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings
