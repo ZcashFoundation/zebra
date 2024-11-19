@@ -308,24 +308,36 @@ We use the following rocksdb column families:
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
-| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
 | *Sprout*                           |                        |                               |         |
-| `sprout_nullifiers`                | `sprout::Nullifier`    | `TransactionLocation`         | Create  |
+| `sprout_nullifiers`                | `sprout::Nullifier`    | `()`                          | Create  |
 | `sprout_anchors`                   | `sprout::tree::Root`   | `sprout::NoteCommitmentTree`  | Create  |
 | `sprout_note_commitment_tree`      | `()`                   | `sprout::NoteCommitmentTree`  | Update  |
 | *Sapling*                          |                        |                               |         |
-| `sapling_nullifiers`               | `sapling::Nullifier`   | `TransactionLocation`         | Create  |
+| `sapling_nullifiers`               | `sapling::Nullifier`   | `()`                          | Create  |
 | `sapling_anchors`                  | `sapling::tree::Root`  | `()`                          | Create  |
 | `sapling_note_commitment_tree`     | `block::Height`        | `sapling::NoteCommitmentTree` | Create  |
 | `sapling_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Orchard*                          |                        |                               |         |
-| `orchard_nullifiers`               | `orchard::Nullifier`   | `TransactionLocation`         | Create  |
+| `orchard_nullifiers`               | `orchard::Nullifier`   | `()`                          | Create  |
 | `orchard_anchors`                  | `orchard::tree::Root`  | `()`                          | Create  |
 | `orchard_note_commitment_tree`     | `block::Height`        | `orchard::NoteCommitmentTree` | Create  |
 | `orchard_note_commitment_subtree`  | `block::Height`        | `NoteCommitmentSubtreeData`   | Create  |
 | *Chain*                            |                        |                               |         |
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
+
+With the following additional modifications when compiled with the `indexer` feature:
+
+| Column Family                      | Keys                   | Values                        | Changes |
+| ---------------------------------- | ---------------------- | ----------------------------- | ------- |
+| *Transparent*                      |                        |                               |         |
+| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
+| *Sprout*                           |                        |                               |         |
+| `sprout_nullifiers`                | `sprout::Nullifier`    | `TransactionLocation`         | Create  |
+| *Sapling*                          |                        |                               |         |
+| `sapling_nullifiers`               | `sapling::Nullifier`   | `TransactionLocation`         | Create  |
+| *Orchard*                          |                        |                               |         |
+| `orchard_nullifiers`               | `orchard::Nullifier`   | `TransactionLocation`         | Create  |
 
 ### Data Formats
 [rocksdb-data-format]: #rocksdb-data-format
