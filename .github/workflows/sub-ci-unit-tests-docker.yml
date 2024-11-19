@@ -138,7 +138,7 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD=1 -e TEST_LWD_INTEGRATION=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:

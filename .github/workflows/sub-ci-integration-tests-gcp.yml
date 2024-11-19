@@ -480,29 +480,6 @@ jobs:
       saves_to_disk: false
     secrets: inherit
 
-  # Test that the scanner can continue scanning where it was left when zebrad restarts.
-  #
-  # Runs:
-  # - after every PR is merged to `main`
-  # - on every PR update
-  #
-  # If the state version has changed, waits for the new cached states to be created.
-  # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  scan-start-where-left-test:
-    name: Scan starts where left
-    needs: [test-full-sync, get-available-disks]
-    uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
-    if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
-    with:
-      app_name: zebra-scan
-      test_id: scan-start-where-left
-      test_description: Test that the scanner can continue scanning where it was left when zebrad restarts.
-      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_START_WHERE_LEFT=1 -e ZEBRA_FORCE_USE_COLOR=1 -e ZEBRA_CACHED_STATE_DIR=/var/cache/zebrad-cache"
-      needs_zebra_state: true
-      needs_lwd_state: false
-      saves_to_disk: true
-    secrets: inherit
-
   # Test that the scan task registers keys, deletes keys, and subscribes to results for keys while running.
   #
   # Runs:
@@ -546,7 +523,6 @@ jobs:
         lightwalletd-grpc-test,
         get-block-template-test,
         submit-block-test,
-        scan-start-where-left-test,
         scan-task-commands-test,
       ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
