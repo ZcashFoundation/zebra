@@ -967,7 +967,9 @@ where
         let network = self.network.clone();
 
         async move {
-            let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
+            let hash_or_height: HashOrHeight = hash_or_height
+                .parse()
+                .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
             let zebra_state::ReadResponse::BlockHeader {
                 header,
                 hash,
@@ -977,32 +979,38 @@ where
                 .clone()
                 .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
                 .await
-                .map_server_error()?
+                .map_error(server::error::LegacyCode::Misc)?
             else {
                 panic!("unexpected response to BlockHeader request")
             };
 
             let response = if !verbose {
-                GetBlockHeader::Raw(HexData(header.zcash_serialize_to_vec().map_server_error()?))
+                GetBlockHeader::Raw(HexData(
+                    header
+                        .zcash_serialize_to_vec()
+                        .map_error(server::error::LegacyCode::Misc)?,
+                ))
             } else {
                 let zebra_state::ReadResponse::SaplingTree(sapling_tree) = state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::SaplingTree(hash_or_height))
                     .await
-                    .map_server_error()?
+                    .map_error(server::error::LegacyCode::Misc)?
                 else {
                     panic!("unexpected response to SaplingTree request")
                 };
 
                 // This could be `None` if there's a chain reorg between state queries.
-                let sapling_tree =
-                    sapling_tree.ok_or_server_error("missing sapling tree for block")?;
+                let sapling_tree = sapling_tree.ok_or_error(
+                    server::error::LegacyCode::Misc,
+                    "missing sapling tree for block",
+                )?;
 
                 let zebra_state::ReadResponse::Depth(depth) = state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::Depth(hash))
                     .await
-                    .map_server_error()?
+                    .map_error(server::error::LegacyCode::Misc)?
                 else {
                     panic!("unexpected response to SaplingTree request")
                 };
