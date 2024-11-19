@@ -917,19 +917,19 @@ where
                         _ => unreachable!("unmatched response to a depth request"),
                     };
 
-                let (time, height) = if should_read_block_header {
-                    let block_header_response =
-                        futs.next().await.expect("`futs` should not be empty");
+                    let (time, height) = if should_read_block_header {
+                        let block_header_response =
+                            futs.next().await.expect("`futs` should not be empty");
 
-                    match block_header_response.map_server_error()? {
-                        zebra_state::ReadResponse::BlockHeader { header, height, .. } => {
-                            (Some(header.time.timestamp()), Some(height))
+                        match block_header_response.map_error(server::error::LegacyCode::Misc)? {
+                            zebra_state::ReadResponse::BlockHeader { header, height, .. } => {
+                                (Some(header.time.timestamp()), Some(height))
+                            }
+                            _ => unreachable!("unmatched response to a BlockHeader request"),
                         }
-                        _ => unreachable!("unmatched response to a BlockHeader request"),
-                    }
-                } else {
-                    (None, hash_or_height.height())
-                };
+                    } else {
+                        (None, hash_or_height.height())
+                    };
 
                     let sapling = SaplingTrees {
                         size: sapling_note_commitment_tree_count,
