@@ -59,7 +59,7 @@ fi
 : "${RUN_ALL_EXPERIMENTAL_TESTS:=}"
 : "${TEST_FAKE_ACTIVATION_HEIGHTS:=}"
 : "${TEST_ZEBRA_EMPTY_SYNC:=}"
-: "${ZEBRA_TEST_LIGHTWALLETD:=}"
+: "${TEST_LWD_INTEGRATION:=}"
 : "${FULL_SYNC_MAINNET_TIMEOUT_MINUTES:=}"
 : "${FULL_SYNC_TESTNET_TIMEOUT_MINUTES:=}"
 : "${TEST_DISK_REBUILD:=}"
@@ -239,10 +239,6 @@ case "$1" in
         # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
         run_cargo_test "${ENTRYPOINT_FEATURES}" "sync_large_checkpoints_"
 
-      elif [[ "${ZEBRA_TEST_LIGHTWALLETD}" -eq "1" ]]; then
-        # Test launching lightwalletd with an empty lightwalletd and Zebra state.
-        run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_integration"
-
       elif [[ -n "${FULL_SYNC_MAINNET_TIMEOUT_MINUTES}" ]]; then
         # Run a Zebra full sync test on mainnet.
         run_cargo_test "${ENTRYPOINT_FEATURES}" "full_sync_mainnet"
@@ -302,6 +298,10 @@ case "$1" in
         # Run both the fully synced RPC test and the subtree snapshot test, one test at a time.
         # Since these tests use the same cached state, a state problem in the first test can fail the second test.
         run_cargo_test "${ENTRYPOINT_FEATURES}" "--test-threads" "1" "fully_synced_rpc_"
+
+      elif [[ "${TEST_LWD_INTEGRATION}" -eq "1" ]]; then
+        # Test launching lightwalletd with an empty lightwalletd and Zebra state.
+        run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_integration"
 
       elif [[ "${TEST_LWD_FULL_SYNC}" -eq "1" ]]; then
         # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
