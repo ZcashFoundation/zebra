@@ -61,6 +61,9 @@ pub enum Request {
     /// Outdated requests are pruned on a regular basis.
     AwaitOutput(transparent::OutPoint),
 
+    /// Request a [`VerifiedUnminedTx`] and its dependencies by its mined id.
+    TransactionWithDepsByMinedId(transaction::Hash),
+
     /// Get all the [`VerifiedUnminedTx`] in the mempool.
     ///
     /// Equivalent to `TransactionsById(TransactionIds)`,
@@ -123,6 +126,14 @@ pub enum Response {
 
     /// Response to [`Request::AwaitOutput`] with the transparent output
     UnspentOutput(transparent::Output),
+
+    /// Response to [`Request::TransactionWithDepsByMinedId`].
+    TransactionWithDeps {
+        /// The queried transaction
+        transaction: VerifiedUnminedTx,
+        /// A list of dependencies of the queried transaction.
+        dependencies: HashSet<transaction::Hash>,
+    },
 
     /// Returns all [`VerifiedUnminedTx`] in the mempool.
     //
