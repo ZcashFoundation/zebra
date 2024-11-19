@@ -28,7 +28,6 @@ use std::{
 
 use futures::{future::FutureExt, stream::Stream};
 use tokio::sync::{broadcast, oneshot};
-use tokio_stream::StreamExt;
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -43,7 +42,7 @@ use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
-use crate::components::{mempool::crawler::RATE_LIMIT_DELAY, sync::SyncStatus};
+use crate::components::sync::SyncStatus;
 
 pub mod config;
 mod crawler;
@@ -586,10 +585,8 @@ impl Service<Request> for Mempool {
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
             // Clean up completed download tasks and add to mempool if successful.
-            while let Poll::Ready(Some(r)) =
-                pin!(tx_downloads.timeout(RATE_LIMIT_DELAY)).poll_next(cx)
-            {
-                match r {
+            while let Poll::Ready(Some((result, rsp_tx))) = pin!(&mut *tx_downloads).poll_next(cx) {
+                match result {
                     Ok(Ok((tx, spent_mempool_outpoints, expected_tip_height))) => {
                         // # Correctness:
                         //
@@ -609,27 +606,45 @@ impl Service<Request> for Mempool {
                                 // Save transaction ids that we will send to peers
                                 send_to_peers_ids.insert(inserted_id);
                             }
+
+                            // Send the result to responder channel if one was provided.
+                            if let Some(rsp_tx) = rsp_tx {
+                                let _ = rsp_tx
+                                    .send(insert_result.map(|_| ()).map_err(|err| err.into()));
+                            }
                         } else {
                             tracing::trace!("chain grew during tx verification, retrying ..",);
 
                             // We don't care if re-queueing the transaction request fails.
                             let _result = tx_downloads
-                                .download_if_needed_and_verify(tx.transaction.into(), None);
+                                .download_if_needed_and_verify(tx.transaction.into(), rsp_tx);
                         }
                     }
                     Ok(Err((tx_id, error))) => {
                         tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
+
                         storage.reject_if_needed(tx_id, error);
+
+                        // Send the result to responder channel if one was provided.
+                        if let Some(rsp_tx) = rsp_tx {
+                            let _ =
+                                rsp_tx.send(Err("timeout waiting for verification result".into()));
+                        }
                     }
-                    Err(_elapsed) => {
+                    Err(elapsed) => {
                         // A timeout happens when the stream hangs waiting for another service,
                         // so there is no specific transaction ID.
 
                         tracing::info!("mempool transaction failed to verify due to timeout");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
+
+                        // Send the result to responder channel if one was provided.
+                        if let Some(rsp_tx) = rsp_tx {
+                            let _ = rsp_tx.send(Err(elapsed.into()));
+                        }
                     }
                 };
             }
