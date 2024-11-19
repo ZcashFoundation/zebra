@@ -430,7 +430,7 @@ where
                 )?,
 
             };
-            
+
             if let Some(unmined_tx) = req.mempool_transaction() {
                 let check_anchors_and_revealed_nullifiers_query = state
                     .clone()
