@@ -760,6 +760,7 @@ where
             None
         };
 
+        let self_clone = self.clone();
         async move {
             let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
 
@@ -839,9 +840,28 @@ where
                     zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
                         .ok_or_server_error("Block not found")?
                         .iter()
-                        .map(|tx_id| tx_id.encode_hex())
+                        .map(|tx_id| GetBlockTransaction::Hash(*tx_id))
                         .collect(),
                     _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
+                };
+
+                let tx = if verbosity >= 2 {
+                    let mut tx_obj_vec = vec![];
+                    for txid in tx {
+                        let GetBlockTransaction::Hash(txid) = txid else {
+                            unreachable!("must be a Hash")
+                        };
+                        let get_tx_result: Result<GetRawTransaction> = self_clone
+                            .get_raw_transaction(txid.encode_hex(), Some(1))
+                            .await;
+                        let GetRawTransaction::Object(tx_obj) = get_tx_result? else {
+                            unreachable!("must return Object");
+                        };
+                        tx_obj_vec.push(GetBlockTransaction::Object(tx_obj));
+                    }
+                    tx_obj_vec
+                } else {
+                    tx
                 };
 
                 let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
@@ -1771,11 +1791,9 @@ pub enum GetBlock {
 
         // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
         //
-        /// List of transaction IDs in block order, hex-encoded.
-        //
-        // TODO: use a typed Vec<transaction::Hash> here
-        // TODO: support Objects
-        tx: Vec<String>,
+        /// List of transactions in block order, hex-encoded if verbosity=1 or
+        /// as objects if verbosity=2.
+        tx: Vec<GetBlockTransaction>,
 
         /// The height of the requested block.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -1803,7 +1821,7 @@ pub enum GetBlock {
         difficulty: Option<f64>,
 
         // `chainwork` would be here, but we don't plan on supporting it
-        // `anchor` would be here. Undocumented. TODO: decide if we want to support it
+        // `anchor` would be here. Not planned to be supported.
         // `chainSupply` would be here, TODO: implement
         // `valuePools` would be here, TODO: implement
         //
@@ -1842,6 +1860,17 @@ impl Default for GetBlock {
             solution: None,
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+/// The transaction list in a `getblock` call. Can be a list of transaction
+/// IDs or the full transaction details depending on verbosity.
+pub enum GetBlockTransaction {
+    /// The transaction hash, hex-encoded.
+    Hash(#[serde(with = "hex")] transaction::Hash),
+    /// The block object.
+    Object(TransactionObject),
 }
 
 /// Response to a `getblockheader` RPC request.
@@ -1987,22 +2016,33 @@ pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
     Raw(#[serde(with = "hex")] SerializedTransaction),
     /// The transaction object.
-    Object {
-        /// The raw transaction, encoded as hex bytes.
-        #[serde(with = "hex")]
-        hex: SerializedTransaction,
-        /// The height of the block in the best chain that contains the transaction, or -1 if
-        /// the transaction is in the mempool.
-        height: i32,
-        /// The confirmations of the block in the best chain that contains the transaction,
-        /// or 0 if the transaction is in the mempool.
-        confirmations: u32,
-    },
+    Object(TransactionObject),
 }
 
 impl Default for GetRawTransaction {
     fn default() -> Self {
-        Self::Object {
+        Self::Object(TransactionObject::default())
+    }
+}
+
+/// A Transaction object as returnedb by `getrawtransaction` RPC request.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct TransactionObject {
+    /// The raw transaction, encoded as hex bytes.
+    #[serde(with = "hex")]
+    pub hex: SerializedTransaction,
+    /// The height of the block in the best chain that contains the transaction, or -1 if
+    /// the transaction is in the mempool.
+    pub height: i32,
+    /// The confirmations of the block in the best chain that contains the transaction,
+    /// or 0 if the transaction is in the mempool.
+    pub confirmations: u32,
+    // TODO: many fields not yet supported
+}
+
+impl Default for TransactionObject {
+    fn default() -> Self {
+        Self {
             hex: SerializedTransaction::from(
                 [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
             ),
@@ -2080,7 +2120,7 @@ impl GetRawTransaction {
         verbose: bool,
     ) -> Self {
         if verbose {
-            GetRawTransaction::Object {
+            GetRawTransaction::Object(TransactionObject {
                 hex: tx.into(),
                 height: match height {
                     Some(height) => height
@@ -2090,7 +2130,7 @@ impl GetRawTransaction {
                     None => -1,
                 },
                 confirmations,
-            }
+            })
         } else {
             GetRawTransaction::Raw(tx.into())
         }
