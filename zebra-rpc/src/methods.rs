@@ -750,9 +750,16 @@ where
 
         let mut state = self.state.clone();
         let verbosity = verbosity.unwrap_or(DEFAULT_GETBLOCK_VERBOSITY);
-        let self_clone = self.clone();
-
+        let network = self.network.clone();
         let original_hash_or_height = hash_or_height.clone();
+
+        // If verbosity requires a call to `get_block_header`, resolve it here
+        let get_block_header_future = if matches!(verbosity, 1 | 2) {
+            Some(self.get_block_header(original_hash_or_height.clone(), Some(true)))
+        } else {
+            None
+        };
+
         async move {
             let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
 
@@ -779,10 +786,8 @@ where
                     }),
                     _ => unreachable!("unmatched response to a block request"),
                 }
-            } else if matches!(verbosity, 1 | 2) {
-                let get_block_header_result: Result<GetBlockHeader> = self_clone
-                    .get_block_header(original_hash_or_height, Some(true))
-                    .await;
+            } else if let Some(get_block_header_future) = get_block_header_future {
+                let get_block_header_result: Result<GetBlockHeader> = get_block_header_future.await;
 
                 let GetBlockHeader::Object(block_header) = get_block_header_result? else {
                     panic!("must return Object")
@@ -846,7 +851,7 @@ where
                     unreachable!("unmatched response to a OrchardTree request");
                 };
 
-                let nu5_activation = NetworkUpgrade::Nu5.activation_height(&self_clone.network);
+                let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
 
                 // This could be `None` if there's a chain reorg between state queries.
                 let orchard_tree =
