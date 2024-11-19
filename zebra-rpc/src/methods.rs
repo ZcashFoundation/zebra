@@ -157,7 +157,7 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
-    /// - `verbosity`: (number, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data, and 3 for a partially filled json object (which is faster and useful for lightwalletd-only usage)
+    /// - `verbosity`: (number, optional, default=1, example=1) 0 for hex encoded data, 1 for a json object, and 2 for json object with transaction data.
     ///
     /// # Notes
     ///
@@ -881,10 +881,8 @@ where
                     solution: Some(solution),
                     bits: Some(bits),
                     difficulty: Some(difficulty),
-                    // TODO
                     tx,
                     trees,
-                    // TODO
                     size: None,
                     final_sapling_root: Some(final_sapling_root),
                     final_orchard_root,
