@@ -176,7 +176,7 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| tx.hash().encode_hex())
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
                 size: None,
@@ -219,7 +219,7 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| tx.hash().encode_hex())
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
                 size: None,
@@ -262,7 +262,7 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| tx.hash().encode_hex())
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
                 size: None,
@@ -305,7 +305,7 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| tx.hash().encode_hex())
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
                 size: None,
@@ -348,7 +348,7 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| tx.hash().encode_hex())
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
                 size: None,
@@ -391,7 +391,7 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| tx.hash().encode_hex())
+                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
                 size: None,
@@ -766,11 +766,11 @@ async fn rpc_getrawtransaction() {
             }
 
             let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(tx_hash));
-            let GetRawTransaction::Object {
+            let GetRawTransaction::Object(TransactionObject {
                 hex,
                 height,
                 confirmations,
-            } = response.expect("We should have a GetRawTransaction struct")
+            }) = response.expect("We should have a GetRawTransaction struct")
             else {
                 unreachable!("Should return a Raw enum")
             };
