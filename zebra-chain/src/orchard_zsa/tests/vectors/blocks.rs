@@ -1,4 +1,4 @@
-// FIXME: pub is needed to access test vectors from another crates, change it to pub(crate) then
+/// FIXME: pub is needed to access test vectors from another crates, change it to pub(crate) then
 pub const BLOCKS: [&[u8]; 4] = [
     // Genesis block
     &[],
