@@ -417,13 +417,20 @@ where
                 // FIXME: implement proper V6 verification
                 #[cfg(feature = "tx-v6")]
                 Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
                     ..
-                } =>  {
-                    tracing::debug!(?tx, "V6 transaction verification is not supported for now");
-                    return Err(TransactionError::WrongVersion);
-                }
-            };
+                } => Self::verify_v6_transaction(
+                    &req,
+                    &network,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )?,
 
+            };
+            
             if let Some(unmined_tx) = req.mempool_transaction() {
                 let check_anchors_and_revealed_nullifiers_query = state
                     .clone()
@@ -792,6 +799,106 @@ where
         }
     }
 
+    // FIXME: Consider avoiding code duplication with verify_v5_transaction.
+    // FIXME: Fix the following doc comment if needed (now it's basically a copy of the same comment for V5).
+    /// Verify a V6 transaction.
+    ///
+    /// Returns a set of asynchronous checks that must all succeed for the transaction to be
+    /// considered valid. These checks include:
+    ///
+    /// - transaction support by the considered network upgrade (see [`Request::upgrade`])
+    /// - transparent transfers
+    /// - sapling shielded data (TODO)
+    /// - orchard shielded data (TODO)
+    ///
+    /// The parameters of this method are:
+    ///
+    /// - the `request` to verify (that contains the transaction and other metadata, see [`Request`]
+    ///   for more information)
+    /// - the `network` to consider when verifying
+    /// - the `script_verifier` to use for verifying the transparent transfers
+    /// - the prepared `cached_ffi_transaction` used by the script verifier
+    /// - the sapling shielded data of the transaction, if any
+    /// - the orchard shielded data of the transaction, if any
+    #[allow(clippy::unwrap_in_result)]
+    fn verify_v6_transaction(
+        request: &Request,
+        network: &Network,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<orchard::OrchardZSA>>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        let transaction = request.transaction();
+        let upgrade = request.upgrade(network);
+
+        Self::verify_v6_transaction_network_upgrade(&transaction, upgrade)?;
+
+        let shielded_sighash = transaction.sighash(
+            upgrade
+                .branch_id()
+                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
+            HashType::ALL,
+            cached_ffi_transaction.all_previous_outputs(),
+            None,
+        );
+
+        Ok(Self::verify_transparent_inputs_and_outputs(
+            request,
+            network,
+            script_verifier,
+            cached_ffi_transaction,
+        )?
+        .and(Self::verify_sapling_shielded_data(
+            sapling_shielded_data,
+            &shielded_sighash,
+        )?)
+        .and(Self::verify_orchard_shielded_data(
+            orchard_shielded_data,
+            &shielded_sighash,
+        )?))
+        // FIXME: Do we need to verify IssueBundle here in a some way?
+        // FIXME: Do we need to verify burns (separately or inside verify_orchard_shielded_data)?
+    }
+
+    /// Verifies if a V6 `transaction` is supported by `network_upgrade`.
+    fn verify_v6_transaction_network_upgrade(
+        transaction: &Transaction,
+        network_upgrade: NetworkUpgrade,
+    ) -> Result<(), TransactionError> {
+        match network_upgrade {
+            // FIXME: Fix the following comment if needed (now it's basically a copy of the same comment for V5).
+            // Supports V6 transactions
+            //
+            // # Consensus
+            //
+            // > [NU5 onward] The transaction version number MUST be 4 or 5.
+            // > If the transaction version number is 4 then the version group ID MUST be 0x892F2085.
+            // > If the transaction version number is 5 then the version group ID MUST be 0x26A7270A.
+            //
+            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+            //
+            // Note: Here we verify the transaction version number of the above rule, the group
+            // id is checked in zebra-chain crate, in the transaction serialize.
+            NetworkUpgrade::Nu7 => Ok(()),
+
+            // Does not support V6 transactions
+            NetworkUpgrade::Genesis
+            | NetworkUpgrade::BeforeOverwinter
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Sapling
+            | NetworkUpgrade::Blossom
+            | NetworkUpgrade::Heartwood
+            | NetworkUpgrade::Canopy
+            // FIXME: Just checking: is it correct that we consider Nu5 and Nu6 as unsupported for V6?
+            | NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6 => Err(TransactionError::UnsupportedByNetworkUpgrade(
+                transaction.version(),
+                network_upgrade,
+            )),
+        }
+    }
+
     /// Verifies if a transaction's transparent inputs are valid using the provided
     /// `script_verifier` and `cached_ffi_transaction`.
     ///
@@ -1022,8 +1129,8 @@ where
     }
 
     /// Verifies a transaction's Orchard shielded data.
-    fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
+    fn verify_orchard_shielded_data<V: primitives::halo2::OrchardVerifier>(
+        orchard_shielded_data: &Option<orchard::ShieldedData<V>>,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();
@@ -1041,7 +1148,7 @@ where
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
             async_checks.push(
-                primitives::halo2::VERIFIER
+                V::get_verifier()
                     .clone()
                     .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
             );

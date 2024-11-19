@@ -19,7 +19,7 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
-use zebra_chain::orchard::{OrchardFlavorExt, OrchardVanilla};
+use zebra_chain::orchard::{OrchardFlavorExt, OrchardVanilla, OrchardZSA};
 
 use crate::BoxError;
 
@@ -75,10 +75,13 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;
 
+// FIXME: Check if the Orchard code (called from the zebra-consensus) checks burn as a part of bidning signature
 lazy_static::lazy_static! {
-    /// The halo2 proof verifying key.
-    // FIXME: support OrchardZSA?
-    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();
+    /// The halo2 proof verifying key for Orchard Vanilla
+    pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();
+
+    /// The halo2 proof verifying key for Orchard ZSA
+    pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey = ItemVerifyingKey::build::<<OrchardZSA as OrchardFlavorExt>::Flavor>();
 }
 
 // === TEMPORARY BATCH HALO2 SUBSTITUTE ===
@@ -133,8 +136,8 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl From<&zebra_chain::orchard::ShieldedData<OrchardVanilla>> for Item {
-    fn from(shielded_data: &zebra_chain::orchard::ShieldedData<OrchardVanilla>) -> Item {
+impl<V: OrchardVerifier> From<&zebra_chain::orchard::ShieldedData<V>> for Item {
+    fn from(shielded_data: &zebra_chain::orchard::ShieldedData<V>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
@@ -148,11 +151,13 @@ impl From<&zebra_chain::orchard::ShieldedData<OrchardVanilla>> for Item {
 
         // FIXME: simplify the flags creation - make `Flags::from_parts` method pub?
         // FIXME: support OrchardZSA?
-        let flags = match (enable_spend, enable_output) {
-            (false, false) => orchard::builder::BundleType::DISABLED.flags(),
-            (false, true) => orchard::bundle::Flags::SPENDS_DISABLED_WITHOUT_ZSA,
-            (true, false) => orchard::bundle::Flags::OUTPUTS_DISABLED,
-            (true, true) => orchard::bundle::Flags::ENABLED_WITHOUT_ZSA,
+        let flags = match (enable_spend, enable_output, V::ZSA_ENABLED) {
+            (false, false, _) => orchard::builder::BundleType::DISABLED.flags(),
+            (false, true, false) => orchard::bundle::Flags::SPENDS_DISABLED_WITHOUT_ZSA,
+            (false, true, true) => orchard::bundle::Flags::SPENDS_DISABLED_WITH_ZSA,
+            (true, false, _) => orchard::bundle::Flags::OUTPUTS_DISABLED,
+            (true, true, false) => orchard::bundle::Flags::ENABLED_WITHOUT_ZSA,
+            (true, true, true) => orchard::bundle::Flags::ENABLED_WITH_ZSA,
         };
 
         let instances = shielded_data
@@ -204,23 +209,22 @@ impl From<halo2::plonk::Error> for Halo2Error {
     }
 }
 
-/// Global batch verification context for Halo2 proofs of Action statements.
-///
-/// This service transparently batches contemporaneous proof verifications,
-/// handling batch failures by falling back to individual verification.
-///
-/// Note that making a `Service` call requires mutable access to the service, so
-/// you should call `.clone()` on the global handle to create a local, mutable
-/// handle.
-pub static VERIFIER: Lazy<
-    Fallback<
-        Batch<Verifier, Item>,
-        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
-    >,
-> = Lazy::new(|| {
+type VerificationContext = Fallback<
+    Batch<Verifier, Item>,
+    ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
+>;
+
+pub(crate) trait OrchardVerifier: OrchardFlavorExt {
+    const ZSA_ENABLED: bool;
+
+    fn get_verifying_key() -> &'static ItemVerifyingKey;
+    fn get_verifier() -> &'static VerificationContext;
+}
+
+fn create_verification_context<V: OrchardVerifier>() -> VerificationContext {
     Fallback::new(
         Batch::new(
-            Verifier::new(&VERIFYING_KEY),
+            Verifier::new(V::get_verifying_key()),
             HALO2_MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
@@ -235,11 +239,50 @@ pub static VERIFIER: Lazy<
         // to erase the result type.
         // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
-            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY).boxed())
+            (|item: Item| Verifier::verify_single_spawning(item, V::get_verifying_key()).boxed())
                 as fn(_) -> _,
         ),
     )
-});
+}
+
+/// Global batch verification context for Halo2 proofs of Action statements.
+///
+/// This service transparently batches contemporaneous proof verifications,
+/// handling batch failures by falling back to individual verification.
+///
+/// Note that making a `Service` call requires mutable access to the service, so
+/// you should call `.clone()` on the global handle to create a local, mutable
+/// handle.
+pub static VERIFIER_VANILLA: Lazy<VerificationContext> =
+    Lazy::new(create_verification_context::<OrchardVanilla>);
+
+/// FIXME: copy a doc from VERIFIER_VANILLA or just refer to its doc?
+pub static VERIFIER_ZSA: Lazy<VerificationContext> =
+    Lazy::new(create_verification_context::<OrchardZSA>);
+
+impl OrchardVerifier for OrchardVanilla {
+    const ZSA_ENABLED: bool = false;
+
+    fn get_verifying_key() -> &'static ItemVerifyingKey {
+        &VERIFYING_KEY_VANILLA
+    }
+
+    fn get_verifier() -> &'static VerificationContext {
+        &VERIFIER_VANILLA
+    }
+}
+
+impl OrchardVerifier for OrchardZSA {
+    const ZSA_ENABLED: bool = true;
+
+    fn get_verifying_key() -> &'static ItemVerifyingKey {
+        &VERIFYING_KEY_ZSA
+    }
+
+    fn get_verifier() -> &'static VerificationContext {
+        &VERIFIER_ZSA
+    }
+}
 
 /// Halo2 proof verifier implementation
 ///
