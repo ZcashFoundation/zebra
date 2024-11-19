@@ -43,7 +43,10 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::Duration,
 };
@@ -111,6 +114,7 @@ type ProxyItem<Request, Response, Error> =
 pub struct MockService<Request, Response, Assertion, Error = BoxError> {
     receiver: broadcast::Receiver<ProxyItem<Request, Response, Error>>,
     sender: broadcast::Sender<ProxyItem<Request, Response, Error>>,
+    poll_count: Arc<AtomicUsize>,
     max_request_delay: Duration,
     _assertion_type: PhantomData<Assertion>,
 }
@@ -155,6 +159,7 @@ where
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _context: &mut Context) -> Poll<Result<(), Self::Error>> {
+        self.poll_count.fetch_add(1, Ordering::SeqCst);
         Poll::Ready(Ok(()))
     }
 
@@ -271,6 +276,7 @@ impl MockServiceBuilder {
         MockService {
             receiver,
             sender,
+            poll_count: Arc::new(AtomicUsize::new(0)),
             max_request_delay: self.max_request_delay.unwrap_or(DEFAULT_MAX_REQUEST_DELAY),
             _assertion_type: PhantomData,
         }
@@ -453,6 +459,13 @@ impl<Request, Response, Error> MockService<Request, Response, PanicAssertion, Er
                 std::any::type_name::<Self>(),
             ),
         }
+    }
+
+    /// Returns a count of the number of times this service has been polled.
+    ///
+    /// Note: The poll count wraps around on overflow.
+    pub fn poll_count(&self) -> usize {
+        self.poll_count.load(Ordering::SeqCst)
     }
 }
 
@@ -667,6 +680,13 @@ impl<Request, Response, Error> MockService<Request, Response, PropTestAssertion,
             }
         }
     }
+
+    /// Returns a count of the number of times this service has been polled.
+    ///
+    /// Note: The poll count wraps around on overflow.
+    pub fn poll_count(&self) -> usize {
+        self.poll_count.load(Ordering::SeqCst)
+    }
 }
 
 /// Code that is independent of the assertions used in [`MockService`].
@@ -708,6 +728,7 @@ impl<Request, Response, Assertion, Error> Clone
         MockService {
             receiver: self.sender.subscribe(),
             sender: self.sender.clone(),
+            poll_count: self.poll_count.clone(),
             max_request_delay: self.max_request_delay,
             _assertion_type: PhantomData,
         }

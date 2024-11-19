@@ -179,11 +179,13 @@ impl StartCmd {
         .await;
 
         info!("initializing verifiers");
+        let (tx_verifier_setup_tx, tx_verifier_setup_rx) = oneshot::channel();
         let (block_verifier_router, tx_verifier, consensus_task_handles, max_checkpoint_height) =
             zebra_consensus::router::init(
                 config.consensus.clone(),
                 &config.network.network,
                 state.clone(),
+                tx_verifier_setup_rx,
             )
             .await;
 
@@ -211,6 +213,10 @@ impl StartCmd {
         let mempool = ServiceBuilder::new()
             .buffer(mempool::downloads::MAX_INBOUND_CONCURRENCY)
             .service(mempool);
+
+        if tx_verifier_setup_tx.send(mempool.clone()).is_err() {
+            warn!("error setting up the transaction verifier with a handle to the mempool service");
+        };
 
         info!("fully initializing inbound peer request handler");
         // Fully start the inbound service as soon as possible

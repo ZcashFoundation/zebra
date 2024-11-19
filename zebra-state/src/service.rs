@@ -1301,20 +1301,36 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let header = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::block_header(
-                                    non_finalized_state.best_chain(),
-                                    &state.db,
-                                    hash_or_height,
-                                )
-                            },
-                        );
+                        let best_chain = state.latest_best_chain();
+
+                        let height = hash_or_height
+                            .height_or_else(|hash| {
+                                read::find::height_by_hash(best_chain.clone(), &state.db, hash)
+                            })
+                            .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                        let hash = hash_or_height
+                            .hash_or_else(|height| {
+                                read::find::hash_by_height(best_chain.clone(), &state.db, height)
+                            })
+                            .ok_or_else(|| BoxError::from("block hash or height not found"))?;
+
+                        let next_height = height.next()?;
+                        let next_block_hash =
+                            read::find::hash_by_height(best_chain.clone(), &state.db, next_height);
+
+                        let header = read::block_header(best_chain, &state.db, height.into())
+                            .ok_or_else(|| BoxError::from("block hash or height not found"))?;
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
 
-                        Ok(ReadResponse::BlockHeader(header))
+                        Ok(ReadResponse::BlockHeader {
+                            header,
+                            hash,
+                            height,
+                            next_block_hash,
+                        })
                     })
                 })
                 .wait_for_panics()

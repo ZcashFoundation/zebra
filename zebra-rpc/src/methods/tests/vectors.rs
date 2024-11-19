@@ -211,7 +211,7 @@ async fn rpc_getblock() {
             GetBlock::Object {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: None,
+                height: Some(Height(i as u32)),
                 time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
@@ -370,6 +370,109 @@ async fn rpc_getblock_missing_error() {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+
+    // The queue task should continue without errors or panics
+    let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
+    assert!(rpc_tx_queue_task_result.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_getblockheader() {
+    let _init_guard = zebra_test::init();
+
+    // Create a continuous chain of mainnet blocks from genesis
+    let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
+        .iter()
+        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .collect();
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    // Create a populated state service
+    let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+
+    // Init RPC
+    let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
+        "RPC test",
+        "RPC test",
+        Mainnet,
+        false,
+        true,
+        Buffer::new(mempool.clone(), 1),
+        read_state.clone(),
+        latest_chain_tip,
+    );
+
+    // Make height calls with verbose=false and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let expected_result = GetBlockHeader::Raw(HexData(
+            block
+                .header
+                .clone()
+                .zcash_serialize_to_vec()
+                .expect("test block header should serialize"),
+        ));
+
+        let hash = block.hash();
+        let height = Height(i as u32);
+
+        for hash_or_height in [HashOrHeight::from(height), hash.into()] {
+            let get_block_header = rpc
+                .get_block_header(hash_or_height.to_string(), Some(false))
+                .await
+                .expect("we should have a GetBlockHeader struct");
+            assert_eq!(get_block_header, expected_result);
+        }
+
+        let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::SaplingTree(height.into()))
+            .await
+            .expect("should have sapling tree for block hash")
+        else {
+            panic!("unexpected response to SaplingTree request")
+        };
+
+        let mut expected_nonce = *block.header.nonce;
+        expected_nonce.reverse();
+        let sapling_tree = sapling_tree.expect("should always have sapling root");
+        let expected_final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
+            let mut root: [u8; 32] = sapling_tree.root().into();
+            root.reverse();
+            root
+        } else {
+            [0; 32]
+        };
+
+        let expected_result = GetBlockHeader::Object(Box::new(GetBlockHeaderObject {
+            hash: GetBlockHash(hash),
+            confirmations: 11 - i as i64,
+            height,
+            version: 4,
+            merkle_root: block.header.merkle_root,
+            final_sapling_root: expected_final_sapling_root,
+            time: block.header.time.timestamp(),
+            nonce: expected_nonce,
+            solution: block.header.solution,
+            bits: block.header.difficulty_threshold,
+            difficulty: block
+                .header
+                .difficulty_threshold
+                .relative_to_network(&Mainnet),
+            previous_block_hash: GetBlockHash(block.header.previous_block_hash),
+            next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+        }));
+
+        for hash_or_height in [HashOrHeight::from(Height(i as u32)), block.hash().into()] {
+            let get_block_header = rpc
+                .get_block_header(hash_or_height.to_string(), Some(true))
+                .await
+                .expect("we should have a GetBlockHeader struct");
+            assert_eq!(get_block_header, expected_result);
+        }
+    }
+
+    mempool.expect_no_requests().await;
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
@@ -931,8 +1034,12 @@ async fn rpc_getblockcount() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &Mainnet,
+        state.clone(),
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
@@ -976,8 +1083,12 @@ async fn rpc_getblockcount_empty_state() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &Mainnet,
+        state.clone(),
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1023,8 +1134,12 @@ async fn rpc_getpeerinfo() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
 
     let mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
         std::net::SocketAddr::new(
@@ -1093,8 +1208,12 @@ async fn rpc_getblockhash() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &Mainnet,
+        state.clone(),
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1358,6 +1477,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                 .await
                 .respond(mempool::Response::FullTransactions {
                     transactions,
+                    transaction_dependencies: Default::default(),
                     last_seen_tip_hash,
                 });
         }
@@ -1579,8 +1699,12 @@ async fn rpc_submitblock_errors() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &Mainnet, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &Mainnet,
+        state.clone(),
+    )
+    .await;
 
     // Init RPC
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
