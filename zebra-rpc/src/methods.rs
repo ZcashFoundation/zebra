@@ -163,8 +163,7 @@ pub trait Rpc {
     ///
     /// Zebra previously partially supported verbosity=1 by returning only the
     /// fields required by lightwalletd ([`lightwalletd` only reads the `tx`
-    /// field of the
-    /// result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152)).
+    /// field of the result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152)).
     /// That verbosity level was migrated to "3"; so while lightwalletd will
     /// still work by using verbosity=1, it will sync faster if it is changed to
     /// use verbosity=3.
@@ -1749,7 +1748,7 @@ pub enum GetBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         version: Option<u32>,
 
-        /// The merkle root of the requesteed block.
+        /// The merkle root of the requested block.
         #[serde(with = "opthex", rename = "merkleroot")]
         #[serde(skip_serializing_if = "Option::is_none")]
         merkle_root: Option<block::merkle::Root>,
@@ -2224,6 +2223,7 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
     }
 }
 
+/// A helper module to serialize `Option<T: ToHex>` as a hex string.
 mod opthex {
     use hex::ToHex;
     use serde::Serializer;
