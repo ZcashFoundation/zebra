@@ -1172,9 +1172,9 @@ where
             match mempool
                 .ready()
                 .and_then(|service| {
-                    service.call(mempool::Request::TransactionsByMinedId(HashSet::from([
+                    service.call(mempool::Request::TransactionsByMinedId([
                         txid,
-                    ])))
+                    ].into()))
                 })
                 .await
                 .map_error(server::error::LegacyCode::default())?
