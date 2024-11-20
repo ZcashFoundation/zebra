@@ -1,6 +1,6 @@
 //! Randomised property tests for RPC methods.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
 use hex::ToHex;
@@ -450,24 +450,22 @@ proptest! {
         })?;
     }
 
-    /// Test that the method rejects an input that's not a transaction.
+    /// Calls `get_raw_transaction` with:
     ///
-    /// Try to call `get_raw_transaction` using random bytes that fail to deserialize as a txid, and
-    /// check that it fails with an expected error.
+    /// 1. an invalid TXID that won't deserialize due to wrong length;
+    /// 2. a valid TXID that is not in the mempool nor in the state;
+    ///
+    /// and checks that the RPC returns the right error code.
     #[test]
-    fn get_raw_transaction_invalid_transaction_results_in_an_error(
-        random_bytes in any::<Vec<u8>>(),
+    fn check_err_for_get_raw_transaction(
+        invalid_txid in vec(any::<u8>(), 0..31),
+        unknown_txid: [u8; 32]
     ) {
-        if random_bytes.len() == 32 {
-            return Ok::<_, TestCaseError>(());
-        }
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
         tokio::time::pause();
-
-        prop_assume!(transaction::Hash::zcash_deserialize(&*random_bytes).is_err());
 
         runtime.block_on(async move {
             let mut mempool = MockService::build().for_prop_tests();
@@ -484,25 +482,30 @@ proptest! {
                 NoChainTip,
             );
 
-            let send_task = tokio::spawn(rpc.get_raw_transaction(HexData(random_bytes), Some(0)));
+            let mempool_query = mempool.expect_no_requests();
+            let state_query = state.expect_no_requests();
 
-            mempool.expect_no_requests().await?;
-            state.expect_no_requests().await?;
+            let rpc_query = rpc.get_raw_transaction(HexData(invalid_txid), Some(1));
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
+            let (rsp, _, _) = tokio::join!(rpc_query, mempool_query, state_query);
 
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        ..
-                    })
-                ),
-                "Result is not an invalid parameters error: {result:?}"
-            );
+            check_err_code(rsp, ErrorCode::ServerError(-5))?;
+
+            let txid = transaction::Hash::from_bytes_in_display_order(&unknown_txid);
+
+            let mempool_query = mempool
+                .expect_request(mempool::Request::TransactionsByMinedId([txid].into()))
+                .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
+
+            let state_query = state
+                .expect_request(zebra_state::ReadRequest::Transaction(txid))
+                .map_ok(|r| r.respond(zebra_state::ReadResponse::Transaction(None)));
+
+            let rpc_query = rpc.get_raw_transaction(HexData(unknown_txid.to_vec()), Some(1));
+
+            let (rsp, _, _) =  tokio::join!(rpc_query, mempool_query, state_query);
+
+            check_err_code(rsp, ErrorCode::ServerError(-5))?;
 
             // The queue task should continue without errors or panics
             let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
@@ -1008,3 +1011,13 @@ proptest! {
 #[derive(Clone, Copy, Debug, Error)]
 #[error("a dummy error type")]
 pub struct DummyError;
+
+/// Checks that the given RPC response contains the given error code.
+fn check_err_code<T>(rsp: Result<T, Error>, error_code: ErrorCode) -> Result<(), TestCaseError> {
+    prop_assert!(
+        matches!(&rsp, Err(Error { code, .. }) if *code == error_code),
+        "the RPC response must match the error code: {error_code:?}"
+    );
+
+    Ok(())
+}
