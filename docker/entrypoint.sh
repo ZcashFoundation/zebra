@@ -224,12 +224,12 @@ case "$1" in
       if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
         # Run unit, basic acceptance tests, and ignored tests, only showing command output if the test fails.
         # If the lightwalletd environmental variables are set, we will also run those tests.
-        exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace -- --nocapture --include-ignored --exclude check_no_git_refs_in_cargo_lock
+        exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
       elif [[ "${RUN_ALL_EXPERIMENTAL_TESTS}" -eq "1" ]]; then
         # Run unit, basic acceptance tests, and ignored tests with experimental features.
         # If the lightwalletd environmental variables are set, we will also run those tests.
-        exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES_EXPERIMENTAL}" --workspace -- --nocapture --include-ignored --exclude check_no_git_refs_in_cargo_lock
+        exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES_EXPERIMENTAL}" --workspace -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
       elif [[ "${RUN_CHECK_NO_GIT_REFS}" -eq "1" ]]; then
         # Run the check_no_git_refs_in_cargo_lock test.
