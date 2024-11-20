@@ -169,7 +169,7 @@ async fn verify_generated_halo2_proofs() {
     // Use separate verifier so shared batch tasks aren't killed when the test ends (#2390)
     let mut verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&OrchardVanilla::get_verifying_key()),
+            Verifier::new(OrchardVanilla::get_verifying_key()),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -177,7 +177,7 @@ async fn verify_generated_halo2_proofs() {
         tower::service_fn(
             (|item: Item| {
                 ready(
-                    item.verify_single(&OrchardVanilla::get_verifying_key())
+                    item.verify_single(OrchardVanilla::get_verifying_key())
                         .map_err(Halo2Error::from),
                 )
             }) as fn(_) -> _,
@@ -242,7 +242,7 @@ async fn correctly_err_on_invalid_halo2_proofs() {
     // Use separate verifier so shared batch tasks aren't killed when the test ends (#2390)
     let mut verifier = Fallback::new(
         Batch::new(
-            Verifier::new(&OrchardVanilla::get_verifying_key()),
+            Verifier::new(OrchardVanilla::get_verifying_key()),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -250,7 +250,7 @@ async fn correctly_err_on_invalid_halo2_proofs() {
         tower::service_fn(
             (|item: Item| {
                 ready(
-                    item.verify_single(&OrchardVanilla::get_verifying_key())
+                    item.verify_single(OrchardVanilla::get_verifying_key())
                         .map_err(Halo2Error::from),
                 )
             }) as fn(_) -> _,

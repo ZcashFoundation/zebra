@@ -5,11 +5,10 @@ use super::vectors::BLOCKS;
 #[test]
 fn deserialize_blocks() {
     let issuance_block =
-        Block::zcash_deserialize(BLOCKS[1].as_ref()).expect("issuance block should deserialize");
-    let transfer_block =
-        Block::zcash_deserialize(BLOCKS[2].as_ref()).expect("transfer block should deserialize");
-    let burn_block =
-        Block::zcash_deserialize(BLOCKS[3].as_ref()).expect("burn block should deserialize");
+        Block::zcash_deserialize(BLOCKS[1]).expect("issuance block should deserialize");
+    let _transfer_block =
+        Block::zcash_deserialize(BLOCKS[2]).expect("transfer block should deserialize");
+    let _burn_block = Block::zcash_deserialize(BLOCKS[3]).expect("burn block should deserialize");
 
     for transaction in issuance_block.transactions {
         if let Transaction::V6 {

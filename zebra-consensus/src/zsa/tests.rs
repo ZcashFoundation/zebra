@@ -99,8 +99,7 @@ fn create_transcript_data() -> [(Request, Result<Hash, ExpectedTranscriptError>)
     .map(|block| (Request::Commit(block.clone()), Ok(block.hash())))
 }
 
-// FIMXE: uncomment when blocks test data will be fixed
-//#[tokio::test(flavor = "multi_thread")]
+#[tokio::test(flavor = "multi_thread")]
 async fn check_zsa_workflow() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
