@@ -9,7 +9,7 @@ assignees: ''
 
 # Prepare for the Release
 
-- [ ] Make sure there has been [at least one successful full sync test](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-integration-tests-gcp.yml?query=event%3Aschedule) since the last state change, or start a manual full sync.
+- [ ] Make sure there has been [at least one successful full sync test in the main branch](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml?query=branch%3Amain) since the last state change, or start a manual full sync.
 - [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged.
       (See the release ticket checklist for details)
 
@@ -57,7 +57,13 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 - [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
+- [ ] Add the `A-release` tag to the release pull request in order for the `check_no_git_refs_in_cargo_lock` to run.
 
+## Zebra git sources dependencies
+
+- [ ] Ensure the `check_no_git_refs_in_cargo_lock` check passes.
+
+This check runs automatically on pull requests with the `A-release` label. It must pass for crates to be published to crates.io. If the check fails, you should either halt the release process or proceed with the understanding that the crates will not be published on crates.io.
 
 # Update Versions and End of Support
 
@@ -76,7 +82,7 @@ Zebra's Rust API doesn't have any support or stability guarantees, so we keep al
 
 ### Update Crate Versions
 
-If you're publishing crates for the first time, [log in to crates.io](https://github.com/ZcashFoundation/zebra/blob/doc-crate-own/book/src/dev/crate-owners.md#logging-in-to-cratesio),
+If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
 and make sure you're a member of owners group.
 
 Check that the release will work:
@@ -103,7 +109,7 @@ Crate publishing is [automatically checked in CI](https://github.com/ZcashFounda
 ## Update End of Support
 
 The end of support height is calculated from the current blockchain height:
-- [ ] Find where the Zcash blockchain tip is now by using a [Zcash explorer](https://zcashblockexplorer.com/blocks) or other tool.
+- [ ] Find where the Zcash blockchain tip is now by using a [Zcash Block Explorer](https://mainnet.zcashexplorer.app/) or other tool.
 - [ ] Replace `ESTIMATED_RELEASE_HEIGHT` in [`end_of_support.rs`](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/src/components/sync/end_of_support.rs) with the height you estimate the release will be tagged.
 
 <details>
@@ -141,8 +147,7 @@ The end of support height is calculated from the current blockchain height:
 ## Test the Pre-Release
 
 - [ ] Wait until the Docker binaries have been built on `main`, and the quick tests have passed:
-    - [ ] [ci-unit-tests-docker.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-unit-tests-docker.yml?query=branch%3Amain)
-    - [ ] [ci-integration-tests-gcp.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-integration-tests-gcp.yml?query=branch%3Amain)
+    - [ ] [ci-tests.yml](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml?query=branch%3Amain)
 - [ ] Wait until the [pre-release deployment machines have successfully launched](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml?query=event%3Arelease)
 
 ## Publish Release
@@ -151,7 +156,7 @@ The end of support height is calculated from the current blockchain height:
 
 ## Publish Crates
 
-- [ ] [Run `cargo login`](https://github.com/ZcashFoundation/zebra/blob/doc-crate-own/book/src/dev/crate-owners.md#logging-in-to-cratesio)
+- [ ] [Run `cargo login`](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio)
 - [ ] Run `cargo clean` in the zebra repo (optional)
 - [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
 - [ ] Check that Zebra can be installed from `crates.io`:
@@ -159,7 +164,9 @@ The end of support height is calculated from the current blockchain height:
       and put the output in a comment on the PR.
 
 ## Publish Docker Images
+
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
+- [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
 - [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Remove `do-not-merge` from the PRs you added it to
 
