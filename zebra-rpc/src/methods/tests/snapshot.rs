@@ -406,8 +406,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // `getrawtransaction` verbosity=0
     //
     // - Similarly to `getrawmempool` described above, a mempool request will be made to get the
-    // requested transaction from the mempool. Response will be empty as we have this transaction in
-    // state.
+    //   requested transaction from the mempool. Response will be empty as we have this transaction
+    //   in the state.
     let mempool_req = mempool
         .expect_request_that(|request| {
             matches!(request, mempool::Request::TransactionsByMinedId(_))
@@ -423,12 +423,10 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             .to_vec(),
     );
 
-    // make the api call
-    let get_raw_tx = rpc.get_raw_transaction(txid.clone(), Some(0u8));
-    let (response, _) = futures::join!(get_raw_tx, mempool_req);
-    let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
-
-    snapshot_rpc_getrawtransaction("verbosity_0", get_raw_transaction, &settings);
+    let rpc_req = rpc.get_raw_transaction(txid.clone(), Some(0u8));
+    let (rsp, _) = futures::join!(rpc_req, mempool_req);
+    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_verbosity=0"), rsp));
+    mempool.expect_no_requests().await;
 
     // `getrawtransaction` verbosity=1
     let mempool_req = mempool
@@ -439,12 +437,29 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             responder.respond(mempool::Response::Transactions(vec![]));
         });
 
-    // make the api call
-    let get_raw_tx = rpc.get_raw_transaction(txid, Some(1u8));
-    let (response, _) = futures::join!(get_raw_tx, mempool_req);
-    let get_raw_transaction = response.expect("We should have a GetRawTransaction struct");
+    let rpc_req = rpc.get_raw_transaction(txid, Some(1u8));
+    let (rsp, _) = futures::join!(rpc_req, mempool_req);
+    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_verbosity=1"), rsp));
+    mempool.expect_no_requests().await;
 
-    snapshot_rpc_getrawtransaction("verbosity_1", get_raw_transaction, &settings);
+    // `getrawtransaction` with invalid txid
+    let rsp = rpc.get_raw_transaction(HexData(vec![0; 31]), Some(1)).await;
+    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_invalid_txid"), rsp));
+    mempool.expect_no_requests().await;
+
+    // `getrawtransaction` with unknown txid
+    let mempool_req = mempool
+        .expect_request_that(|request| {
+            matches!(request, mempool::Request::TransactionsByMinedId(_))
+        })
+        .map(|responder| {
+            responder.respond(mempool::Response::Transactions(vec![]));
+        });
+
+    let rpc_req = rpc.get_raw_transaction(HexData(vec![0; 32]), Some(1));
+    let (rsp, _) = futures::join!(rpc_req, mempool_req);
+    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_unknown_txid"), rsp));
+    mempool.expect_no_requests().await;
 
     // `getaddresstxids`
     let get_address_tx_ids = rpc
@@ -668,17 +683,6 @@ fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHash, settings: &insta::Setti
 /// Snapshot `getrawmempool` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
-}
-
-/// Snapshot `getrawtransaction` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getrawtransaction(
-    variant: &'static str,
-    raw_transaction: GetRawTransaction,
-    settings: &insta::Settings,
-) {
-    settings.bind(|| {
-        insta::assert_json_snapshot!(format!("get_raw_transaction_{variant}"), raw_transaction)
-    });
 }
 
 /// Snapshot valid `getaddressbalance` response, using `cargo insta` and JSON serialization.
