@@ -935,17 +935,13 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     );
 
     // call the method with an invalid address string
-    let address = "11111111".to_string();
-    let addresses = vec![address.clone()];
     let error = rpc
         .0
-        .get_address_utxos(AddressStrings::new(addresses))
+        .get_address_utxos(AddressStrings::new(vec!["t1invalidaddress".to_owned()]))
         .await
         .unwrap_err();
-    assert_eq!(
-        error.message,
-        format!("invalid address \"{address}\": parse error: t-addr decoding error")
-    );
+
+    assert_eq!(error.code, ErrorCode::ServerError(-5));
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
