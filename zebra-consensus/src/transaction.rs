@@ -406,7 +406,7 @@ where
                 let verified_tx = result?;
 
                 return Ok(Response::Block {
-                    tx_id: verified_tx.transaction.id,
+                    tx_id,
                     miner_fee: Some(verified_tx.miner_fee),
                     legacy_sigop_count: verified_tx.legacy_sigop_count
                 });
@@ -673,8 +673,8 @@ where
             panic!("unexpected response to TransactionWithDepsByMinedId request");
         };
 
-        // Note: This does not verify that the spends are in order, this should be
-        //       done during contextual validation in zebra-state.
+        // Note: This does not verify that the spends are in order, the spend order
+        //       should be verified during contextual validation in zebra-state.
         let has_all_tx_deps = dependencies
             .into_iter()
             .all(|dependency_id| known_outpoint_hashes.contains(&dependency_id));
