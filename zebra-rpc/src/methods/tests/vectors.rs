@@ -734,25 +734,18 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     );
 
     // call the method with an invalid address string
-    let address = "11111111".to_string();
-    let addresses = vec![address.clone()];
-    let start: u32 = 1;
-    let end: u32 = 2;
-    let error = rpc
+    let rpc_rsp = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start,
-            end,
+            addresses: vec!["t1invalidaddress".to_owned()],
+            start: 1,
+            end: 2,
         })
         .await
         .unwrap_err();
-    assert_eq!(
-        error.message,
-        format!(
-            "invalid address \"{}\": parse error: t-addr decoding error",
-            address.clone()
-        )
-    );
+
+    assert_eq!(rpc_rsp.code, ErrorCode::ServerError(-5));
+
+    mempool.expect_no_requests().await;
 
     // create a valid address
     let address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string();
