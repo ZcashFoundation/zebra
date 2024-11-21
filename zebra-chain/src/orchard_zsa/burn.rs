@@ -2,9 +2,12 @@
 
 use std::io;
 
+use halo2::pasta::pallas;
+
 use crate::{
     amount::Amount,
     block::MAX_BLOCK_BYTES,
+    orchard::ValueCommitment,
     serialization::{
         ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
     },
@@ -109,6 +112,13 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NoBurn;
 
+impl From<NoBurn> for ValueCommitment {
+    fn from(_burn: NoBurn) -> ValueCommitment {
+        // FIXME: is there a simpler way to get zero ValueCommitment?
+        ValueCommitment::new(pallas::Scalar::zero(), Amount::zero())
+    }
+}
+
 impl ZcashSerialize for NoBurn {
     fn zcash_serialize<W: io::Write>(&self, mut _writer: W) -> Result<(), io::Error> {
         Ok(())
@@ -128,6 +138,18 @@ pub struct Burn(Vec<BurnItem>);
 impl From<Vec<BurnItem>> for Burn {
     fn from(inner: Vec<BurnItem>) -> Self {
         Self(inner)
+    }
+}
+
+// FIXME: consider conversion from reference to Burn instead, to avoid using `clone` when it's called
+impl From<Burn> for ValueCommitment {
+    fn from(burn: Burn) -> ValueCommitment {
+        burn.0
+            .into_iter()
+            .map(|BurnItem(asset, amount)| {
+                ValueCommitment::with_asset(pallas::Scalar::zero(), amount, &asset)
+            })
+            .sum()
     }
 }
 

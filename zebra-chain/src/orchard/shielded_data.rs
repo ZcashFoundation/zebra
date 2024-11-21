@@ -119,7 +119,13 @@ impl<V: OrchardFlavorExt> ShieldedData<V> {
         let cv_balance: ValueCommitment =
             ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);
 
+        #[cfg(not(feature = "tx-v6"))]
         let key_bytes: [u8; 32] = (cv - cv_balance).into();
+
+        // FIXME: use asset to create ValueCommitment here for burns and above for value_balance?
+        #[cfg(feature = "tx-v6")]
+        let key_bytes: [u8; 32] = (cv - cv_balance - self.burn.clone().into()).into();
+
         key_bytes.into()
     }
 

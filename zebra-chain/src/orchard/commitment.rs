@@ -14,6 +14,8 @@ use halo2::{
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 
+use orchard::note::AssetBase;
+
 use crate::{
     amount::Amount,
     error::RandError,
@@ -248,6 +250,15 @@ impl ValueCommitment {
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
         let v = pallas::Scalar::from(value);
         Self::from(*V * v + *R * rcv)
+    }
+
+    /// Generate a new `ValueCommitment` from an existing `rcv on a `value` (ZSA version).
+    #[cfg(feature = "tx-v6")]
+    #[allow(non_snake_case)]
+    pub fn with_asset(rcv: pallas::Scalar, value: Amount, asset: &AssetBase) -> Self {
+        let v = pallas::Scalar::from(value);
+        let V_zsa = asset.cv_base();
+        Self::from(V_zsa * v + *R * rcv)
     }
 }
 
