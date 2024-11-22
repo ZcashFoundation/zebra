@@ -626,12 +626,6 @@ impl Service<Request> for Mempool {
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
 
                         storage.reject_if_needed(tx_id, error);
-
-                        // Send the result to responder channel if one was provided.
-                        if let Some(rsp_tx) = rsp_tx {
-                            let _ =
-                                rsp_tx.send(Err("timeout waiting for verification result".into()));
-                        }
                     }
                     Err(elapsed) => {
                         // A timeout happens when the stream hangs waiting for another service,

@@ -276,7 +276,7 @@ where
     pub fn download_if_needed_and_verify(
         &mut self,
         gossiped_tx: Gossip,
-        rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
+        mut rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
 
@@ -402,11 +402,11 @@ where
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
         .map_err(move |e| (e, txid))
-            .inspect(move |result| {
-                // Hide the transaction data to avoid filling the logs
-                let result = result.as_ref().map(|_tx| txid);
-                debug!("mempool transaction result: {result:?}");
-            })
+        .inspect(move |result| {
+            // Hide the transaction data to avoid filling the logs
+            let result = result.as_ref().map(|_tx| txid);
+            debug!("mempool transaction result: {result:?}");
+        })
         .in_current_span();
 
         let task = tokio::spawn(async move {
@@ -418,9 +418,32 @@ where
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
                     metrics::counter!("mempool.cancelled.verify.tasks.total").increment(1);
+                    if let Some(rsp_tx) = rsp_tx.take() {
+                        let _ = rsp_tx.send(Err("verification cancelled".into()));
+                    }
+
                     Ok(Err((TransactionDownloadVerifyError::Cancelled, txid)))
                 }
-                verification = fut => verification,
+                verification = fut => {
+                    verification
+                        .inspect_err(|_elapsed| {
+                            if let Some(rsp_tx) = rsp_tx.take() {
+                                let _ = rsp_tx.send(Err("timeout waiting for verification result".into()));
+                            }
+                        })
+                        .inspect(|inner_result| {
+                            let _ = inner_result
+                                .as_ref()
+                                .inspect_err(|(tx_verifier_error, tx_id)| {
+                                    if let Some(rsp_tx) = rsp_tx.take() {
+                                        let error_msg = format!(
+                                            "failed to validate tx: {tx_id}, error: {tx_verifier_error}"
+                                        );
+                                        let _ = rsp_tx.send(Err(error_msg.into()));
+                                    }
+                                });
+                        })
+                },
             };
 
             (result, rsp_tx)
