@@ -6,12 +6,9 @@ use std::collections::HashSet;
 
 use tokio::sync::oneshot;
 use zebra_chain::{
-    transaction::{self, UnminedTx, UnminedTxId},
+    transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_chain::transaction::VerifiedUnminedTx;
 
 use crate::BoxError;
 
