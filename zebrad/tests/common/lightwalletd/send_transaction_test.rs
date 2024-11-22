@@ -98,7 +98,7 @@ pub async fn run() -> Result<()> {
             .await?
             .into_iter()
             .take_while(|block| {
-                count += block.transactions.len();
+                count += block.transactions.len() - 1;
                 count <= max_sent_transactions()
             })
             .collect();
