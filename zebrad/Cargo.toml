@@ -48,6 +48,8 @@ features = [
     "journald",
     "prometheus",
     "sentry",
+    "indexer",
+    "getblocktemplate-rpcs"
 ]
 
 [features]
@@ -59,8 +61,8 @@ default-release-binaries = ["default", "sentry"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
-# Indexer RPC support
-indexer-rpcs = ["zebra-rpc/indexer-rpcs"]
+# Indexer support
+indexer = ["zebra-rpc/indexer-rpcs", "zebra-state/indexer"]
 
 # Mining RPC support
 getblocktemplate-rpcs = [

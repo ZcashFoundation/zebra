@@ -20,6 +20,7 @@ use std::{
 };
 
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
+use zebra_db::transparent::TX_LOC_BY_SPENT_OUT_LOC;
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
@@ -77,6 +78,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "tx_loc_by_transparent_addr_loc",
     "utxo_by_out_loc",
     "utxo_loc_by_transparent_addr_loc",
+    TX_LOC_BY_SPENT_OUT_LOC,
     // Sprout
     "sprout_nullifiers",
     "sprout_anchors",
