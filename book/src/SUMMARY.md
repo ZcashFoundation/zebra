@@ -31,6 +31,7 @@
     - [Network Architecture](dev/diagrams/zebra-network.md)
   - [Upgrading the State Database](dev/state-db-upgrades.md)
   - [Zebra versioning and releases](dev/release-process.md)
+    - [Zebra Crates](dev/crate-owners.md) 
   - [Continuous Integration](dev/continuous-integration.md)
   - [Continuous Delivery](dev/continuous-delivery.md)
   - [Generating Zebra Checkpoints](dev/zebra-checkpoints.md)
