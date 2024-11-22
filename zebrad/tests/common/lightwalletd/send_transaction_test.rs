@@ -185,7 +185,11 @@ pub async fn run() -> Result<()> {
         let sleep_until_lwd_last_mempool_refresh =
             tokio::time::sleep(std::time::Duration::from_secs(4));
 
-        let transactions = &block.transactions;
+        let transactions: Vec<_> = block
+            .transactions
+            .iter()
+            .filter(|tx| !tx.is_coinbase())
+            .collect();
 
         let transaction_hashes: Vec<transaction::Hash> =
             transactions.iter().map(|tx| tx.hash()).collect();
