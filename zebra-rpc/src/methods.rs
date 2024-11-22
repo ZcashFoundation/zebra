@@ -852,12 +852,12 @@ where
                 let orchard_tree =
                     orchard_tree.ok_or_server_error("missing orchard tree for block")?;
 
-                let final_orchard_root =
-                    if nu5_activation.is_some() && height >= nu5_activation.unwrap() {
+                let final_orchard_root = match nu5_activation {
+                    Some(activation_height) if height >= activation_height => {
                         Some(orchard_tree.root().into())
-                    } else {
-                        None
-                    };
+                    }
+                    _other => None,
+                };
 
                 let sapling = SaplingTrees {
                     size: sapling_tree_size,
