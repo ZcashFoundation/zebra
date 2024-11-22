@@ -299,9 +299,10 @@ async fn send_transactions_from_block(
     // TODO: Update `load_transactions_from_future_blocks()` to return block height offsets and,
     //       only check if a transaction from the first block has shielded elements
     assert!(
-            !has_tx_with_shielded_elements || counter >= 1,
-            "failed to read v4+ transactions with shielded elements from future blocks in mempool via lightwalletd"
-        );
+        !has_tx_with_shielded_elements || counter >= 1,
+        "failed to read v4+ transactions with shielded elements \
+        from future blocks in mempool via lightwalletd"
+    );
 
     // TODO: GetMempoolStream: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
