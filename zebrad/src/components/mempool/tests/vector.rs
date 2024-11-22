@@ -981,6 +981,8 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     // Wait for post-verification steps in mempool's Downloads
     tokio::time::sleep(Duration::from_secs(1)).await;
 
+    // Note: Buffered services shouldn't be polled without being called.
+    //       See `mempool::Request::CheckForVerifiedTransactions` for more details.
     mempool
         .ready()
         .await
