@@ -186,13 +186,19 @@ pub async fn run() -> Result<()> {
     let mut counter = 0;
 
     for block in blocks {
-        let (zebrad_child, has_shielded_elements, count) =
-            send_transactions_from_block(zebrad, &mut rpc_client, &zebrad_rpc_client, block)
-                .await?;
+        let (zebrad_child, has_shielded_elements, count) = send_transactions_from_block(
+            zebrad,
+            &mut rpc_client,
+            &zebrad_rpc_client,
+            block.clone(),
+        )
+        .await?;
 
         zebrad = zebrad_child;
         has_tx_with_shielded_elements |= has_shielded_elements;
         counter += count;
+
+        zebrad_rpc_client.submit_block(block).await?;
     }
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
@@ -231,6 +237,10 @@ async fn send_transactions_from_block(
         .filter(|tx| !tx.is_coinbase())
         .collect();
 
+    if !transactions.is_empty() {
+        return Ok((zebrad, false, 0));
+    }
+
     let transaction_hashes: Vec<transaction::Hash> =
         transactions.iter().map(|tx| tx.hash()).collect();
 
@@ -241,7 +251,7 @@ async fn send_transactions_from_block(
     );
 
     let mut has_tx_with_shielded_elements = false;
-    for transaction in transactions {
+    for &transaction in &transactions {
         let transaction_hash = transaction.hash();
 
         // See <https://github.com/zcash/lightwalletd/blob/master/parser/transaction.go#L367>
@@ -328,8 +338,6 @@ async fn send_transactions_from_block(
         // TODO: check tx.data or tx.height here?
         _counter += 1;
     }
-
-    zebrad_rpc_client.submit_block(block).await?;
 
     Ok((zebrad, has_tx_with_shielded_elements, counter))
 }
