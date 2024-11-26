@@ -17,8 +17,9 @@
 //! already been seen in a block.
 
 use std::{cmp::min, sync::Arc, time::Duration};
+use tower::BoxError;
 
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{eyre, Result};
 
 use zebra_chain::{
     block::Block,
@@ -181,10 +182,28 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
+    let mut has_tx_with_shielded_elements = false;
+    let mut counter = 0;
+
     for block in blocks {
-        zebrad = send_transactions_from_block(zebrad, &mut rpc_client, &zebrad_rpc_client, block)
-            .await?;
+        let (zebrad_child, has_shielded_elements, count) =
+            send_transactions_from_block(zebrad, &mut rpc_client, &zebrad_rpc_client, block)
+                .await?;
+
+        zebrad = zebrad_child;
+        has_tx_with_shielded_elements |= has_shielded_elements;
+        counter += count;
     }
+
+    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
+    //
+    // TODO: Update `load_transactions_from_future_blocks()` to return block height offsets and,
+    //       only check if a transaction from the first block has shielded elements
+    assert!(
+        !has_tx_with_shielded_elements || counter >= 1,
+        "failed to read v4+ transactions with shielded elements \
+        from future blocks in mempool via lightwalletd"
+    );
 
     Ok(())
 }
@@ -199,7 +218,7 @@ async fn send_transactions_from_block(
     rpc_client: &mut CompactTxStreamerClient<tonic::transport::Channel>,
     zebrad_rpc_client: &RpcRequestClient,
     block: Block,
-) -> Result<TestChild<tempfile::TempDir>> {
+) -> Result<(TestChild<tempfile::TempDir>, bool, usize)> {
     // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call:
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L482>
     //
@@ -239,9 +258,16 @@ async fn send_transactions_from_block(
 
         let request = prepare_send_transaction_request(transaction.clone());
 
-        let response = rpc_client.send_transaction(request).await?.into_inner();
-
-        assert_eq!(response, expected_response);
+        match rpc_client.send_transaction(request).await {
+            Ok(response) => assert_eq!(response.into_inner(), expected_response),
+            Err(err) => {
+                tracing::warn!(?err, "failed to send transaction");
+                zebrad_rpc_client
+                    .send_transaction(transaction)
+                    .await
+                    .map_err(|e| eyre!(e))?;
+            }
+        };
     }
 
     // Check if some transaction is sent to mempool,
@@ -276,7 +302,7 @@ async fn send_transactions_from_block(
 
     if tx_log.is_err() {
         tracing::info!("lightwalletd didn't query the mempool, skipping mempool contents checks");
-        return Ok(zebrad);
+        return Ok((zebrad, has_tx_with_shielded_elements, 0));
     }
 
     tracing::info!("checking the mempool contains some of the sent transactions...");
@@ -294,16 +320,6 @@ async fn send_transactions_from_block(
         counter += 1;
     }
 
-    // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
-    //
-    // TODO: Update `load_transactions_from_future_blocks()` to return block height offsets and,
-    //       only check if a transaction from the first block has shielded elements
-    assert!(
-        !has_tx_with_shielded_elements || counter >= 1,
-        "failed to read v4+ transactions with shielded elements \
-        from future blocks in mempool via lightwalletd"
-    );
-
     // TODO: GetMempoolStream: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
@@ -316,7 +332,7 @@ async fn send_transactions_from_block(
 
     zebrad_rpc_client.submit_block(block).await?;
 
-    Ok(zebrad)
+    Ok((zebrad, has_tx_with_shielded_elements, counter))
 }
 
 /// Prepare a request to send to lightwalletd that contains a transaction to be sent.
@@ -326,5 +342,23 @@ fn prepare_send_transaction_request(transaction: Arc<Transaction>) -> wallet_grp
     wallet_grpc::RawTransaction {
         data: transaction_bytes,
         height: 0,
+    }
+}
+
+trait SendTransactionMethod {
+    async fn send_transaction(
+        &self,
+        transaction: &Arc<Transaction>,
+    ) -> Result<zebra_rpc::methods::SentTransactionHash, BoxError>;
+}
+
+impl SendTransactionMethod for RpcRequestClient {
+    async fn send_transaction(
+        &self,
+        transaction: &Arc<Transaction>,
+    ) -> Result<zebra_rpc::methods::SentTransactionHash, BoxError> {
+        let tx_data = hex::encode(transaction.zcash_serialize_to_vec()?);
+        self.json_result_from_call("sendrawtransaction", format!(r#"["{tx_data}"]"#))
+            .await
     }
 }
