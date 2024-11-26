@@ -212,7 +212,6 @@ pub async fn run() -> Result<()> {
 /// can be found in the mempool via lightwalletd, and commits the block to Zebra's chainstate.
 ///
 /// Returns the zebrad test child that's handling the RPC requests.
-#[tracing::instrument]
 async fn send_transactions_from_block(
     mut zebrad: TestChild<tempfile::TempDir>,
     rpc_client: &mut CompactTxStreamerClient<tonic::transport::Channel>,
