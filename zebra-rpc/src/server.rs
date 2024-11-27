@@ -211,7 +211,10 @@ impl RpcServer {
             .expect("Unable to get local address");
         info!("{OPENED_RPC_ENDPOINT_MSG}{}", addr);
 
+        #[cfg(feature = "getblocktemplate-rpcs")]
         let mut rpc_module = rpc_impl.into_rpc();
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        let rpc_module = rpc_impl.into_rpc();
         #[cfg(feature = "getblocktemplate-rpcs")]
         rpc_module
             .merge(get_block_template_rpc_impl.into_rpc())
