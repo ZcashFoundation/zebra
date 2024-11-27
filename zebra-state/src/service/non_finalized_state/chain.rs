@@ -16,13 +16,16 @@ use zebra_chain::{
     block::{self, Height},
     history_tree::HistoryTree,
     orchard,
+    orchard_zsa::{AssetBase, AssetState, IssuedAssets, IssuedAssetsChange},
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
     sapling, sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::Transaction::*,
-    transaction::{self, Transaction},
+    transaction::{
+        self,
+        Transaction::{self, *},
+    },
     transparent,
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
@@ -174,6 +177,11 @@ pub struct ChainInner {
     pub(crate) orchard_subtrees:
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
 
+    /// A partial map of `issued_assets` with entries for asset states that were updated in
+    /// this chain.
+    // TODO: Add reference to ZIP
+    pub(crate) issued_assets: HashMap<AssetBase, AssetState>,
+
     // Nullifiers
     //
     /// The Sprout nullifiers revealed by `blocks`.
@@ -237,6 +245,7 @@ impl Chain {
             orchard_anchors_by_height: Default::default(),
             orchard_trees_by_height: Default::default(),
             orchard_subtrees: Default::default(),
+            issued_assets: Default::default(),
             sprout_nullifiers: Default::default(),
             sapling_nullifiers: Default::default(),
             orchard_nullifiers: Default::default(),
@@ -937,6 +946,47 @@ impl Chain {
         }
     }
 
+    /// Returns the Orchard issued asset state if one is present in
+    /// the chain for the provided asset base.
+    pub fn issued_asset(&self, asset_base: &AssetBase) -> Option<AssetState> {
+        self.issued_assets.get(asset_base).cloned()
+    }
+
+    /// Remove the History tree index at `height`.
+    fn revert_issued_assets(
+        &mut self,
+        position: RevertPosition,
+        issued_assets: &IssuedAssets,
+        transactions: &[Arc<Transaction>],
+    ) {
+        if position == RevertPosition::Root {
+            trace!(?position, "removing unmodified issued assets");
+            for (asset_base, &asset_state) in issued_assets.iter() {
+                if self
+                    .issued_asset(asset_base)
+                    .expect("issued assets for chain should include those in all blocks")
+                    == asset_state
+                {
+                    self.issued_assets.remove(asset_base);
+                }
+            }
+        } else {
+            trace!(?position, "reverting changes to issued assets");
+            for issued_assets_change in IssuedAssetsChange::from_transactions(transactions)
+                .expect("blocks in chain state must be valid")
+                .iter()
+                .rev()
+            {
+                for (asset_base, change) in issued_assets_change.iter() {
+                    self.issued_assets
+                        .entry(asset_base)
+                        .or_default()
+                        .revert_change(change);
+                }
+            }
+        }
+    }
+
     /// Adds the Orchard `tree` to the tree and anchor indexes at `height`.
     ///
     /// `height` can be either:
@@ -1439,6 +1489,9 @@ impl Chain {
 
         self.add_history_tree(height, history_tree);
 
+        self.issued_assets
+            .extend(contextually_valid.issued_assets.clone());
+
         Ok(())
     }
 
@@ -1667,6 +1720,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             spent_outputs,
             transaction_hashes,
             chain_value_pool_change,
+            issued_assets,
         ) = (
             contextually_valid.block.as_ref(),
             contextually_valid.hash,
@@ -1675,6 +1729,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             &contextually_valid.spent_outputs,
             &contextually_valid.transaction_hashes,
             &contextually_valid.chain_value_pool_change,
+            &contextually_valid.issued_assets,
         );
 
         // remove the blocks hash from `height_by_hash`
@@ -1772,6 +1827,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
+
+        // revert the issued assets map, if needed
+        self.revert_issued_assets(position, issued_assets, &block.transactions);
 
         // revert the chain value pool balances, if needed
         self.revert_chain_with(chain_value_pool_change, position);

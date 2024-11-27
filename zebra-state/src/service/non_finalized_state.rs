@@ -325,6 +325,9 @@ impl NonFinalizedState {
             finalized_state,
         )?;
 
+        let issued_assets =
+            check::issuance::valid_burns_and_issuance(finalized_state, &new_chain, &prepared)?;
+
         // Reads from disk
         check::anchors::block_sapling_orchard_anchors_refer_to_final_treestates(
             finalized_state,
@@ -343,6 +346,8 @@ impl NonFinalizedState {
         let contextual = ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             prepared.clone(),
             spent_utxos.clone(),
+            // TODO: Refactor this into repeated `With::with()` calls, see http_request_compatibility module.
+            issued_assets,
         )
         .map_err(|value_balance_error| {
             ValidateContextError::CalculateBlockChainValueChange {

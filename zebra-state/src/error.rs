@@ -264,6 +264,12 @@ pub enum ValidateContextError {
         tx_index_in_block: Option<usize>,
         transaction_hash: transaction::Hash,
     },
+
+    #[error("burn amounts must be less than issued asset supply")]
+    InvalidBurn,
+
+    #[error("must not issue finalized assets")]
+    InvalidIssuance,
 }
 
 /// Trait for creating the corresponding duplicate nullifier error from a nullifier.

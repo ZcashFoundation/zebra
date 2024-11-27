@@ -5,6 +5,7 @@ use std::sync::Arc;
 use zebra_chain::{
     amount::Amount,
     block::{self, Block},
+    orchard_zsa::IssuedAssetsChange,
     transaction::Transaction,
     transparent,
     value_balance::ValueBalance,
@@ -30,6 +31,8 @@ impl Prepare for Arc<Block> {
         let transaction_hashes: Arc<[_]> = block.transactions.iter().map(|tx| tx.hash()).collect();
         let new_outputs =
             transparent::new_ordered_outputs_with_height(&block, height, &transaction_hashes);
+        let issued_assets_changes = IssuedAssetsChange::from_transactions(&block.transactions)
+            .expect("prepared blocks should be semantically valid");
 
         SemanticallyVerifiedBlock {
             block,
@@ -38,6 +41,7 @@ impl Prepare for Arc<Block> {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
+            issued_assets_changes,
         }
     }
 }
@@ -96,8 +100,12 @@ impl ContextuallyVerifiedBlock {
             .map(|outpoint| (outpoint, zero_utxo.clone()))
             .collect();
 
-        ContextuallyVerifiedBlock::with_block_and_spent_utxos(block, zero_spent_utxos)
-            .expect("all UTXOs are provided with zero values")
+        ContextuallyVerifiedBlock::with_block_and_spent_utxos(
+            block,
+            zero_spent_utxos,
+            Default::default(),
+        )
+        .expect("all UTXOs are provided with zero values")
     }
 
     /// Create a [`ContextuallyVerifiedBlock`] from a [`Block`] or [`SemanticallyVerifiedBlock`],
@@ -112,6 +120,7 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: _,
+            issued_assets_changes: _,
         } = block.into();
 
         Self {
@@ -125,6 +134,7 @@ impl ContextuallyVerifiedBlock {
             spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
+            issued_assets: Default::default(),
         }
     }
 }

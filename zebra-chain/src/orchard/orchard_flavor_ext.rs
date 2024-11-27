@@ -11,6 +11,7 @@ use orchard::{note_encryption::OrchardDomainCommon, orchard_flavor};
 
 use crate::{
     orchard::ValueCommitment,
+    orchard_zsa,
     serialization::{ZcashDeserialize, ZcashSerialize},
 };
 
@@ -59,6 +60,7 @@ pub trait OrchardFlavorExt: Clone + Debug {
         + ZcashDeserialize
         + ZcashSerialize
         + Into<ValueCommitment>
+        + AsRef<[orchard_zsa::BurnItem]>
         + TestArbitrary;
 }
 

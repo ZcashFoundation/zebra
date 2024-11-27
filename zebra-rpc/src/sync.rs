@@ -13,8 +13,8 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_state::{
-    spawn_init_read_only, ChainTipBlock, ChainTipChange, ChainTipSender, CheckpointVerifiedBlock,
-    LatestChainTip, NonFinalizedState, ReadStateService, SemanticallyVerifiedBlock, ZebraDb,
+    spawn_init_read_only, ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip,
+    NonFinalizedState, ReadStateService, SemanticallyVerifiedBlock, ZebraDb,
     MAX_BLOCK_REORG_HEIGHT,
 };
 
@@ -262,7 +262,7 @@ impl TrustedChainSync {
         tokio::task::spawn_blocking(move || {
             let (height, hash) = db.tip()?;
             db.block(height.into())
-                .map(|block| CheckpointVerifiedBlock::with_hash(block, hash))
+                .map(|block| SemanticallyVerifiedBlock::with_hash(block, hash))
                 .map(ChainTipBlock::from)
         })
         .wait_for_panics()

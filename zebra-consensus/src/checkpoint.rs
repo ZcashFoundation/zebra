@@ -42,7 +42,7 @@ use crate::{
         Progress::{self, *},
         TargetHeight::{self, *},
     },
-    error::{BlockError, SubsidyError},
+    error::{BlockError, SubsidyError, TransactionError},
     funding_stream_values, BoxError, ParameterCheckpoint as _,
 };
 
@@ -619,7 +619,8 @@ where
         };
 
         // don't do precalculation until the block passes basic difficulty checks
-        let block = CheckpointVerifiedBlock::new(block, Some(hash), expected_deferred_amount);
+        let block = CheckpointVerifiedBlock::new(block, Some(hash), expected_deferred_amount)
+            .ok_or_else(|| VerifyBlockError::from(TransactionError::InvalidAssetIssuanceOrBurn))?;
 
         crate::block::check::merkle_root_validity(
             &self.network,

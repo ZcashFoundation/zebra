@@ -9,7 +9,9 @@ use bincode::Options;
 
 use zebra_chain::{
     block::Height,
-    orchard, sapling, sprout,
+    orchard,
+    orchard_zsa::{AssetBase, AssetState},
+    sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
@@ -205,5 +207,48 @@ impl<Node: FromDisk> FromDisk for NoteCommitmentSubtreeData<Node> {
             Height::from_bytes(height_bytes),
             Node::from_bytes(node_bytes),
         )
+    }
+}
+
+// TODO: Replace `.unwrap()`s with `.expect()`s
+
+impl IntoDisk for AssetState {
+    type Bytes = [u8; 9];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        [
+            vec![self.is_finalized as u8],
+            self.total_supply.to_be_bytes().to_vec(),
+        ]
+        .concat()
+        .try_into()
+        .unwrap()
+    }
+}
+
+impl FromDisk for AssetState {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let (&is_finalized_byte, bytes) = bytes.as_ref().split_first().unwrap();
+        let (&total_supply_bytes, _bytes) = bytes.split_first_chunk().unwrap();
+
+        Self {
+            is_finalized: is_finalized_byte != 0,
+            total_supply: u64::from_be_bytes(total_supply_bytes),
+        }
+    }
+}
+
+impl IntoDisk for AssetBase {
+    type Bytes = [u8; 32];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.to_bytes()
+    }
+}
+
+impl FromDisk for AssetBase {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        let (asset_base_bytes, _) = bytes.as_ref().split_first_chunk().unwrap();
+        Self::from_bytes(asset_base_bytes).unwrap()
     }
 }
