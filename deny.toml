@@ -84,6 +84,9 @@ skip-tree = [
     # wait for jsonrpsee to update hyper
     { name = "hyper", version = "=0.14.31" },
 
+    # wait for reqwest to be updated in zebra
+    { name = "reqwest", version = "=0.11.27" },
+
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
 
