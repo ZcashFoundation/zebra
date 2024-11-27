@@ -21,6 +21,8 @@ impl Arbitrary for BurnItem {
         // just for certainty, as there's no difference, which flavor to use)
         // FIXME: should we filter/protect from including native assets into burn here?
         BundleArb::<orchard::orchard_flavor::OrchardVanilla>::arb_asset_to_burn()
+            .prop_map(|(asset_base, value)| BurnItem::from((asset_base, value)))
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
