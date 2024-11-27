@@ -19,10 +19,8 @@ impl Arbitrary for BurnItem {
         // FIXME: move arb_asset_to_burn out of BundleArb in orchard
         // as it does not depend on flavor (we pinned it here OrchardVanilla
         // just for certainty, as there's no difference, which flavor to use)
-        // FIXME: consider to use BurnItem(asset_base, value.try_into().expect("Invalid value for Amount"))
-        // instead of filtering non-convertable values
         // FIXME: should we filter/protect from including native assets into burn here?
-        BundleArb::<orchard::orchard_flavor::OrchardVanilla>::arb_asset_to_burn().boxed()
+        BundleArb::<orchard::orchard_flavor::OrchardVanilla>::arb_asset_to_burn()
     }
 
     type Strategy = BoxedStrategy<Self>;
