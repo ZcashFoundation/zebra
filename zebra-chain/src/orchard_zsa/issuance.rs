@@ -7,8 +7,6 @@ use halo2::pasta::pallas;
 // For pallas::Base::from_repr only
 use group::ff::PrimeField;
 
-use nonempty::NonEmpty;
-
 use zcash_primitives::transaction::components::issuance::{read_v6_bundle, write_v6_bundle};
 
 use orchard::{
@@ -57,8 +55,8 @@ impl IssueData {
     }
 
     /// Returns issuance actions
-    pub fn actions(&self) -> &NonEmpty<IssueAction> {
-        self.0.actions()
+    pub fn actions(&self) -> impl Iterator<Item = &IssueAction> {
+        self.0.actions().iter()
     }
 }
 
