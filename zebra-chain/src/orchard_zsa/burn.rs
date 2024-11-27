@@ -37,6 +37,7 @@ const AMOUNT_SIZE: u64 = 8;
 // FIXME: is this a correct way to calculate (simple sum of sizes of components)?
 const BURN_ITEM_SIZE: u64 = ASSET_BASE_SIZE + AMOUNT_SIZE;
 
+// FIXME: Define BurnItem (or, even Burn/NoBurn) in Orchard and reuse it here?
 /// Orchard ZSA burn item.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, u64);
@@ -67,7 +68,7 @@ impl ZcashSerialize for BurnItem {
         let BurnItem(asset_base, amount) = self;
 
         asset_base.zcash_serialize(&mut writer)?;
-        writer.write_all(&amount.to_be_bytes())?;
+        writer.write_all(&amount.to_le_bytes())?;
 
         Ok(())
     }
@@ -75,12 +76,10 @@ impl ZcashSerialize for BurnItem {
 
 impl ZcashDeserialize for BurnItem {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let asset_base = AssetBase::zcash_deserialize(&mut reader)?;
         let mut amount_bytes = [0; 8];
         reader.read_exact(&mut amount_bytes)?;
-        Ok(Self(
-            AssetBase::zcash_deserialize(&mut reader)?,
-            u64::from_be_bytes(amount_bytes),
-        ))
+        Ok(Self(asset_base, u64::from_le_bytes(amount_bytes)))
     }
 }
 
