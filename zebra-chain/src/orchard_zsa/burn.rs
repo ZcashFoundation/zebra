@@ -5,6 +5,7 @@ use std::io;
 use halo2::pasta::pallas;
 
 use crate::{
+    amount::Amount,
     block::MAX_BLOCK_BYTES,
     orchard::ValueCommitment,
     serialization::{
@@ -166,7 +167,14 @@ impl From<Burn> for ValueCommitment {
         burn.0
             .into_iter()
             .map(|BurnItem(asset, amount)| {
-                ValueCommitment::with_asset(pallas::Scalar::zero(), amount, &asset)
+                ValueCommitment::with_asset(
+                    pallas::Scalar::zero(),
+                    // FIXME: consider to use TryFrom and return an error instead of using "expect"
+                    amount
+                        .try_into()
+                        .expect("should convert Burn amount to i64"),
+                    &asset,
+                )
             })
             .sum()
     }

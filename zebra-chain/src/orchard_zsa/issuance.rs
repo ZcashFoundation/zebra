@@ -7,6 +7,8 @@ use halo2::pasta::pallas;
 // For pallas::Base::from_repr only
 use group::ff::PrimeField;
 
+use nonempty::NonEmpty;
+
 use zcash_primitives::transaction::components::issuance::{read_v6_bundle, write_v6_bundle};
 
 use orchard::{
