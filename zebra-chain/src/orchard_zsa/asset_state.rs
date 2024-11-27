@@ -242,7 +242,7 @@ impl AssetStateChange {
     /// Accepts an [`BurnItem`] and returns an iterator of asset bases and issued asset state changes
     /// that should be applied to those asset bases when committing the provided burn to the chain state.
     fn from_burn(burn: &BurnItem) -> (AssetBase, Self) {
-        Self::new(burn.asset(), SupplyChange::Burn(burn.amount()), false)
+        Self::new(burn.asset(), SupplyChange::Burn(burn.raw_amount()), false)
     }
 
     /// Updates and returns self with the provided [`AssetStateChange`] if

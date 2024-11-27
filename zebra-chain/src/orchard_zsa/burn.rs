@@ -40,7 +40,7 @@ const BURN_ITEM_SIZE: u64 = ASSET_BASE_SIZE + AMOUNT_SIZE;
 // FIXME: Define BurnItem (or, even Burn/NoBurn) in Orchard and reuse it here?
 /// Orchard ZSA burn item.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct BurnItem(AssetBase, u64);
+pub struct BurnItem(AssetBase, NoteValue);
 
 impl BurnItem {
     /// Returns [`AssetBase`] being burned.
@@ -48,18 +48,16 @@ impl BurnItem {
         self.0
     }
 
-    /// Returns [`u64`] representing amount being burned.
-    pub fn amount(&self) -> u64 {
-        self.1
+    /// Returns the raw [`u64`] amount being burned.
+    pub fn raw_amount(&self) -> u64 {
+        self.1.inner()
     }
 }
 
 // Convert from burn item type used in `orchard` crate
-impl TryFrom<(AssetBase, NoteValue)> for BurnItem {
-    type Error = crate::amount::Error;
-
-    fn try_from(item: (AssetBase, NoteValue)) -> Result<Self, Self::Error> {
-        Ok(Self(item.0, item.1.inner()))
+impl From<(AssetBase, NoteValue)> for BurnItem {
+    fn from(item: (AssetBase, NoteValue)) -> Self {
+        Self(item.0, item.1)
     }
 }
 
@@ -68,7 +66,7 @@ impl ZcashSerialize for BurnItem {
         let BurnItem(asset_base, amount) = self;
 
         asset_base.zcash_serialize(&mut writer)?;
-        writer.write_all(&amount.to_le_bytes())?;
+        writer.write_all(&amount.to_bytes())?;
 
         Ok(())
     }
@@ -79,7 +77,7 @@ impl ZcashDeserialize for BurnItem {
         let asset_base = AssetBase::zcash_deserialize(&mut reader)?;
         let mut amount_bytes = [0; 8];
         reader.read_exact(&mut amount_bytes)?;
-        Ok(Self(asset_base, u64::from_le_bytes(amount_bytes)))
+        Ok(Self(asset_base, NoteValue::from_bytes(amount_bytes)))
     }
 }
 
@@ -98,7 +96,7 @@ impl serde::Serialize for BurnItem {
         S: serde::Serializer,
     {
         // FIXME: return a custom error with a meaningful description?
-        (self.0.to_bytes(), &self.1).serialize(serializer)
+        (self.0.to_bytes(), &self.1.inner()).serialize(serializer)
     }
 }
 
@@ -114,7 +112,7 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
             // FIXME: duplicates the body of AssetBase::zcash_deserialize?
             Option::from(AssetBase::from_bytes(&asset_base_bytes))
                 .ok_or_else(|| serde::de::Error::custom("Invalid orchard_zsa AssetBase"))?,
-            amount,
+            NoteValue::from_raw(amount),
         ))
     }
 }
@@ -170,6 +168,7 @@ impl From<Burn> for ValueCommitment {
                     pallas::Scalar::zero(),
                     // FIXME: consider to use TryFrom and return an error instead of using "expect"
                     amount
+                        .inner()
                         .try_into()
                         .expect("should convert Burn amount to i64"),
                     &asset,

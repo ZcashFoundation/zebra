@@ -47,7 +47,7 @@ pub fn valid_burns_and_issuance(
             // through the check it total_supply < burn.amount (the total supply is zero if the
             // asset is not issued). May be validation functions from the orcharfd crate need to be
             // reused in a some way?
-            if asset_state.total_supply < burn.amount() {
+            if asset_state.total_supply < burn.raw_amount() {
                 return Err(ValidateContextError::InvalidBurn);
             } else {
                 // Any burned asset bases in the transaction will also be present in the issued assets change,
