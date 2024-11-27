@@ -211,6 +211,7 @@ impl AssetStateChange {
             })
             .unwrap_or_default()
             .into_iter()
+            // FIXME: We use 0 as a value - is that correct?
             .map(|asset_base| Self::new(asset_base, SupplyChange::Issuance(0), true));
 
         supply_changes.chain(finalize_changes)
