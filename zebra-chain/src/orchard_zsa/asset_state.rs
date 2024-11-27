@@ -28,6 +28,7 @@ pub struct AssetState {
 pub struct AssetStateChange {
     /// Whether the asset should be finalized such that no more of it can be issued.
     pub should_finalize: bool,
+    // FIXME: is this a correct comment?
     /// Whether the asset should be finalized such that no more of it can be issued.
     pub includes_issuance: bool,
     /// The change in supply from newly issued assets or burned assets, if any.
@@ -50,6 +51,7 @@ impl Default for SupplyChange {
     }
 }
 
+// FIXME: can we reuse some functions from orchard crate?s
 impl SupplyChange {
     /// Applies `self` to a provided `total_supply` of an asset.
     ///
@@ -81,7 +83,8 @@ impl SupplyChange {
                 // Burn amounts MUST not be 0
                 // TODO: Reference ZIP
                 0.. => signed.try_into().ok().map(Self::Issuance),
-                ..0 => signed.try_into().ok().map(Self::Burn),
+                // FIXME: (-signed) - is this a correct fix?
+                ..0 => (-signed).try_into().ok().map(Self::Burn),
             })
         {
             *self = result;
