@@ -279,10 +279,12 @@ async fn send_transactions_from_block(
         };
     }
 
-    // Check if some transaction is sent to mempool,
-    // Fails if there are only coinbase transactions in the first 50 future blocks
-    tracing::info!("waiting for mempool to verify some transactions...");
-    zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
+    if transactions.len() >= 10 {
+        // Check if some transaction is sent to mempool,
+        // Fails if there are only coinbase transactions in the first 50 future blocks
+        tracing::info!("waiting for mempool to verify some transactions...");
+        zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
+    }
 
     // Wait for more transactions to verify, `GetMempoolTx` only returns txs where tx.HasShieldedElements()
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L537>
