@@ -9,7 +9,7 @@ pub(crate) mod arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod tests;
 
-mod asset_state;
+pub mod asset_state;
 mod burn;
 mod issuance;
 

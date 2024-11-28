@@ -8,7 +8,7 @@ use std::{
 use orchard::issuance::IssueAction;
 pub use orchard::note::AssetBase;
 
-use crate::transaction::Transaction;
+use crate::{serialization::ZcashSerialize, transaction::Transaction};
 
 use super::BurnItem;
 
@@ -375,5 +375,30 @@ impl std::ops::Add for IssuedAssetsChange {
             rhs.update(self.0.into_iter());
             rhs
         }
+    }
+}
+/// Used in snapshot test for `getassetstate` RPC method.
+// TODO: Replace with `AssetBase::random()` or a known value.
+pub trait RandomAssetBase {
+    /// Generates a ZSA random asset.
+    ///
+    /// This is only used in tests.
+    fn random_serialized() -> String;
+}
+
+impl RandomAssetBase for AssetBase {
+    fn random_serialized() -> String {
+        let isk = orchard::keys::IssuanceAuthorizingKey::from_bytes(
+            k256::NonZeroScalar::random(&mut rand_core::OsRng)
+                .to_bytes()
+                .into(),
+        )
+        .unwrap();
+        let ik = orchard::keys::IssuanceValidatingKey::from(&isk);
+        let asset_descr = b"zsa_asset".to_vec();
+        AssetBase::derive(&ik, &asset_descr)
+            .zcash_serialize_to_vec()
+            .map(hex::encode)
+            .expect("random asset base should serialize")
     }
 }

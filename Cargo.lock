@@ -6034,6 +6034,7 @@ dependencies = [
  "incrementalmerkletree",
  "itertools 0.13.0",
  "jubjub",
+ "k256",
  "lazy_static",
  "nonempty",
  "num-integer",
