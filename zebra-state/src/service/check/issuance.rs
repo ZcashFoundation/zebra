@@ -4,23 +4,9 @@ use std::{collections::HashMap, sync::Arc};
 
 use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssets};
 
-use crate::{SemanticallyVerifiedBlock, ValidateContextError, ZebraDb};
+use crate::{service::read, SemanticallyVerifiedBlock, ValidateContextError, ZebraDb};
 
 use super::Chain;
-
-// TODO: Factor out chain/disk read to a fn in the `read` module.
-fn asset_state(
-    finalized_state: &ZebraDb,
-    parent_chain: &Arc<Chain>,
-    issued_assets: &HashMap<AssetBase, AssetState>,
-    asset_base: &AssetBase,
-) -> Option<AssetState> {
-    issued_assets
-        .get(asset_base)
-        .copied()
-        .or_else(|| parent_chain.issued_asset(asset_base))
-        .or_else(|| finalized_state.issued_asset(asset_base))
-}
 
 pub fn valid_burns_and_issuance(
     finalized_state: &ZebraDb,
@@ -83,4 +69,16 @@ pub fn valid_burns_and_issuance(
     }
 
     Ok(issued_assets.into())
+}
+
+fn asset_state(
+    finalized_state: &ZebraDb,
+    parent_chain: &Arc<Chain>,
+    issued_assets: &HashMap<AssetBase, AssetState>,
+    asset_base: &AssetBase,
+) -> Option<AssetState> {
+    issued_assets
+        .get(asset_base)
+        .copied()
+        .or_else(|| read::asset_state(Some(parent_chain), finalized_state, asset_base))
 }

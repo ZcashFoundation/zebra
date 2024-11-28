@@ -11,7 +11,7 @@ use zebra_chain::{
     block::{self, Block},
     history_tree::HistoryTree,
     orchard,
-    orchard_zsa::{IssuedAssets, IssuedAssetsChange},
+    orchard_zsa::{AssetBase, IssuedAssets, IssuedAssetsChange},
     parallel::tree::NoteCommitmentTrees,
     sapling,
     serialization::SerializationError,
@@ -1122,6 +1122,17 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
+
+    #[cfg(feature = "tx-v6")]
+    /// Returns [`ReadResponse::AssetState`] with an [`AssetState`](zebra_chain::orchard_zsa::AssetState)
+    /// of the provided [`AssetBase`] if it exists for the best chain tip or finalized chain tip (depending
+    /// on the `include_non_finalized` flag).
+    AssetState {
+        /// The [`AssetBase`] to return the asset state for.
+        asset_base: AssetBase,
+        /// Whether to include the issued asset state changes in the non-finalized state.
+        include_non_finalized: bool,
+    },
 }
 
 impl ReadRequest {
@@ -1159,6 +1170,8 @@ impl ReadRequest {
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => "tip_block_size",
+            #[cfg(feature = "tx-v6")]
+            ReadRequest::AssetState { .. } => "asset_state",
         }
     }
 

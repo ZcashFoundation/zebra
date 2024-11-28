@@ -5,7 +5,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
-    orchard, sapling,
+    orchard,
+    orchard_zsa::AssetState,
+    sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
@@ -233,6 +235,10 @@ pub enum ReadResponse {
     #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
+
+    #[cfg(feature = "tx-v6")]
+    /// Response to [`ReadRequest::AssetState`]
+    AssetState(Option<AssetState>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -322,6 +328,9 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ChainInfo(_) | ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            #[cfg(feature = "tx-v6")]
+            ReadResponse::AssetState(_) => Err("there is no corresponding Response for this ReadResponse"),
         }
     }
 }
