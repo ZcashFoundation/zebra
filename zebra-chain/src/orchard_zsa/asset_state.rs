@@ -12,6 +12,11 @@ use crate::transaction::Transaction;
 
 use super::BurnItem;
 
+// TODO:
+// - Add state request/response variants for querying asset states
+// - Add RPC method for querying asset states
+// - Resolve new FIXMEs related to issued asset states
+
 /// The circulating supply and whether that supply has been finalized.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct AssetState {
