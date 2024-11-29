@@ -525,9 +525,6 @@ pub fn consensus_branch_id(
 ) -> Result<(), TransactionError> {
     if let Some(tx_nu) = tx.network_upgrade() {
         if tx_nu != NetworkUpgrade::current(network, height) {
-            let nu = NetworkUpgrade::current(network, height);
-            println!("tx_nu: {tx_nu}");
-            println!("cu_nu: {nu}");
             return Err(TransactionError::WrongConsensusBranchId);
         }
     }
