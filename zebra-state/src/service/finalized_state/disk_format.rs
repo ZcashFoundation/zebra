@@ -68,7 +68,7 @@ pub trait FromDisk: Sized {
 
 // Generic serialization impls
 
-impl<'a, T> IntoDisk for &'a T
+impl<T> IntoDisk for &T
 where
     T: IntoDisk,
 {
