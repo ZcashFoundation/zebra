@@ -6,13 +6,14 @@
 use std::future::Future;
 
 use futures::future::{Either, FutureExt};
+
 use jsonrpc_core::{
     middleware::Middleware,
     types::{Call, Failure, Output, Response},
-    BoxFuture, ErrorCode, Metadata, MethodCall, Notification,
+    BoxFuture, Metadata, MethodCall, Notification,
 };
 
-use crate::constants::{INVALID_PARAMETERS_ERROR_CODE, MAX_PARAMS_LOG_LENGTH};
+use crate::server;
 
 /// JSON-RPC [`Middleware`] with compatibility workarounds.
 ///
@@ -57,13 +58,20 @@ impl<M: Metadata> Middleware<M> for FixRpcResponseMiddleware {
 }
 
 impl FixRpcResponseMiddleware {
-    /// Replace [`jsonrpc_core`] server error codes in `output` with the `zcashd` equivalents.
+    /// Replaces [`jsonrpc_core::ErrorCode`]s in the [`Output`] with their `zcashd` equivalents.
+    ///
+    /// ## Replaced Codes
+    ///
+    /// 1. [`jsonrpc_core::ErrorCode::InvalidParams`] -> [`server::error::LegacyCode::Misc`]
+    ///    Rationale:
+    ///    The `node-stratum-pool` mining pool library expects error code `-1` to detect available RPC methods:
+    ///    <https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L459>
     fn fix_error_codes(output: &mut Option<Output>) {
         if let Some(Output::Failure(Failure { ref mut error, .. })) = output {
-            if matches!(error.code, ErrorCode::InvalidParams) {
+            if matches!(error.code, jsonrpc_core::ErrorCode::InvalidParams) {
                 let original_code = error.code.clone();
 
-                error.code = INVALID_PARAMETERS_ERROR_CODE;
+                error.code = server::error::LegacyCode::Misc.into();
                 tracing::debug!("Replacing RPC error: {original_code:?} with {error}");
             }
         }
@@ -73,6 +81,8 @@ impl FixRpcResponseMiddleware {
     ///
     /// Prints out only the method name and the received parameters.
     fn call_description(call: &Call) -> String {
+        const MAX_PARAMS_LOG_LENGTH: usize = 100;
+
         match call {
             Call::MethodCall(MethodCall { method, params, .. }) => {
                 let mut params = format!("{params:?}");

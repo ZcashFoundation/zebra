@@ -6,7 +6,7 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{collections::HashSet, fmt::Debug};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, FutureExt, StreamExt, TryFutureExt};
@@ -34,18 +34,18 @@ use zebra_chain::{
     },
 };
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, MinedTx, OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
 
 use crate::{
-    constants::{INVALID_PARAMETERS_ERROR_CODE, MISSING_BLOCK_ERROR_CODE},
     methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
     queue::Queue,
+    server::{
+        self,
+        error::{MapError, OkOrError},
+    },
 };
 
-mod errors;
 pub mod hex_data;
-
-use errors::{MapServerError, OkOrServerError};
 
 // We don't use a types/ module here, because it is redundant.
 pub mod trees;
@@ -279,7 +279,7 @@ pub trait Rpc {
     #[rpc(name = "getrawtransaction")]
     fn get_raw_transaction(
         &self,
-        txid_hex: String,
+        txid: HexData,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>>;
 
@@ -552,7 +552,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error(server::error::LegacyCode::default())?;
 
             let zebra_state::ReadResponse::TipPoolValues {
                 tip_height,
@@ -568,7 +568,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error(server::error::LegacyCode::default())?;
 
             let zebra_state::ReadResponse::BlockHeader { header, .. } = response else {
                 unreachable!("unmatched response to a BlockHeader request")
@@ -659,7 +659,10 @@ where
             let valid_addresses = address_strings.valid_addresses()?;
 
             let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
-            let response = state.oneshot(request).await.map_server_error()?;
+            let response = state
+                .oneshot(request)
+                .await
+                .map_error(server::error::LegacyCode::default())?;
 
             match response {
                 zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
@@ -680,11 +683,12 @@ where
         let queue_sender = self.queue_sender.clone();
 
         async move {
-            let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex).map_err(|_| {
-                Error::invalid_params("raw transaction is not specified as a hex string")
-            })?;
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L1259-L1260>
+            let raw_transaction_bytes = Vec::from_hex(raw_transaction_hex)
+                .map_error(server::error::LegacyCode::Deserialization)?;
             let raw_transaction = Transaction::zcash_deserialize(&*raw_transaction_bytes)
-                .map_err(|_| Error::invalid_params("raw transaction is structurally invalid"))?;
+                .map_error(server::error::LegacyCode::Deserialization)?;
 
             let transaction_hash = raw_transaction.hash();
 
@@ -695,7 +699,10 @@ where
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);
 
-            let response = mempool.oneshot(request).await.map_server_error()?;
+            let response = mempool
+                .oneshot(request)
+                .await
+                .map_error(server::error::LegacyCode::default())?;
 
             let mut queue_results = match response {
                 mempool::Response::Queued(results) => results,
@@ -712,15 +719,21 @@ where
                 .pop()
                 .expect("there should be exactly one item in Vec")
                 .inspect_err(|err| tracing::debug!("sent transaction to mempool: {:?}", &err))
-                .map_server_error()?
-                .await;
+                .map_error(server::error::LegacyCode::default())?
+                .await
+                .map_error(server::error::LegacyCode::default())?;
 
             tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
 
             queue_result
-                .map_server_error()?
                 .map(|_| SentTransactionHash(transaction_hash))
-                .map_server_error()
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L1290-L1301>
+                // Note that this error code might not exactly match the one returned by zcashd
+                // since zcashd's error code selection logic is more granular. We'd need to
+                // propagate the error coming from the verifier to be able to return more specific
+                // error codes.
+                .map_error(server::error::LegacyCode::Verify)
         }
         .boxed()
     }
@@ -733,200 +746,212 @@ where
         hash_or_height: String,
         verbosity: Option<u8>,
     ) -> BoxFuture<Result<GetBlock>> {
-        // From <https://zcash.github.io/rpc/getblock.html>
-        const DEFAULT_GETBLOCK_VERBOSITY: u8 = 1;
-
         let mut state = self.state.clone();
-        let verbosity = verbosity.unwrap_or(DEFAULT_GETBLOCK_VERBOSITY);
 
         async move {
-            let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
+            let hash_or_height: HashOrHeight = hash_or_height
+                .parse()
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-            if verbosity == 0 {
-                // # Performance
-                //
-                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                // so it needs to load block data very efficiently.
-                let request = zebra_state::ReadRequest::Block(hash_or_height);
-                let response = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_server_error()?;
+            match verbosity.unwrap_or(1) {
+                0 => {
+                    // # Performance
+                    //
+                    // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
+                    // so it needs to load block data very efficiently.
+                    let request = zebra_state::ReadRequest::Block(hash_or_height);
+                    let response = state
+                        .ready()
+                        .and_then(|service| service.call(request))
+                        .await
+                        .map_error(server::error::LegacyCode::default())?;
 
-                match response {
-                    zebra_state::ReadResponse::Block(Some(block)) => {
-                        Ok(GetBlock::Raw(block.into()))
-                    }
-                    zebra_state::ReadResponse::Block(None) => Err(Error {
-                        code: MISSING_BLOCK_ERROR_CODE,
-                        message: "Block not found".to_string(),
-                        data: None,
-                    }),
-                    _ => unreachable!("unmatched response to a block request"),
-                }
-            } else if verbosity == 1 || verbosity == 2 {
-                // # Performance
-                //
-                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                // so it needs to load all its fields very efficiently.
-                //
-                // Currently, we get the block hash and transaction IDs from indexes,
-                // which is much more efficient than loading all the block data,
-                // then hashing the block header and all the transactions.
-
-                // Get the block hash from the height -> hash index, if needed
-                //
-                // # Concurrency
-                //
-                // For consistency, this lookup must be performed first, then all the other
-                // lookups must be based on the hash.
-                //
-                // All possible responses are valid, even if the best chain changes. Clients
-                // must be able to handle chain forks, including a hash for a block that is
-                // later discovered to be on a side chain.
-
-                let should_read_block_header = verbosity == 2;
-
-                let hash = match hash_or_height {
-                    HashOrHeight::Hash(hash) => hash,
-                    HashOrHeight::Height(height) => {
-                        let request = zebra_state::ReadRequest::BestChainBlockHash(height);
-                        let response = state
-                            .ready()
-                            .and_then(|service| service.call(request))
-                            .await
-                            .map_server_error()?;
-
-                        match response {
-                            zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
-                            zebra_state::ReadResponse::BlockHash(None) => {
-                                return Err(Error {
-                                    code: MISSING_BLOCK_ERROR_CODE,
-                                    message: "block height not in best chain".to_string(),
-                                    data: None,
-                                })
-                            }
-                            _ => unreachable!("unmatched response to a block hash request"),
+                    match response {
+                        zebra_state::ReadResponse::Block(Some(block)) => {
+                            Ok(GetBlock::Raw(block.into()))
                         }
+                        zebra_state::ReadResponse::Block(None) => Err("Block not found")
+                            // `lightwalletd` expects error code `-8` when a block is not found:
+                            // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
+                            // This is because `lightwalletd` requests blocks by height, and
+                            // `zcashd` returns `-8` for invalid heights:
+                            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                            .map_error(server::error::LegacyCode::InvalidParameter),
+                        _ => unreachable!("unmatched response to a block request"),
                     }
-                };
+                }
+                verbosity @ 1 | verbosity @ 2 => {
+                    // # Performance
+                    //
+                    // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
+                    // so it needs to load all its fields very efficiently.
+                    //
+                    // Currently, we get the block hash and transaction IDs from indexes,
+                    // which is much more efficient than loading all the block data,
+                    // then hashing the block header and all the transactions.
 
-                // # Concurrency
-                //
-                // We look up by block hash so the hash, transaction IDs, and confirmations
-                // are consistent.
-                let mut requests = vec![
-                    // Get transaction IDs from the transaction index by block hash
+                    // Get the block hash from the height -> hash index, if needed
                     //
                     // # Concurrency
                     //
-                    // A block's transaction IDs are never modified, so all possible responses are
-                    // valid. Clients that query block heights must be able to handle chain forks,
-                    // including getting transaction IDs from any chain fork.
-                    zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
-                    // Sapling trees
-                    zebra_state::ReadRequest::SaplingTree(hash.into()),
-                    // Orchard trees
-                    zebra_state::ReadRequest::OrchardTree(hash.into()),
-                    // Get block confirmations from the block height index
+                    // For consistency, this lookup must be performed first, then all the other
+                    // lookups must be based on the hash.
                     //
+                    // All possible responses are valid, even if the best chain changes. Clients
+                    // must be able to handle chain forks, including a hash for a block that is
+                    // later discovered to be on a side chain.
+
+                    let should_read_block_header = verbosity == 2;
+
+                    let hash = match hash_or_height {
+                        HashOrHeight::Hash(hash) => hash,
+                        HashOrHeight::Height(height) => {
+                            let request = zebra_state::ReadRequest::BestChainBlockHash(height);
+                            let response = state
+                                .ready()
+                                .and_then(|service| service.call(request))
+                                .await
+                                .map_error(server::error::LegacyCode::default())?;
+
+                            match response {
+                                zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
+                                zebra_state::ReadResponse::BlockHash(None) => {
+                                    return Err("block height not in best chain")
+                                        // `lightwalletd` expects error code `-8` when a block is not found:
+                                        // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
+                                        // This is because `lightwalletd` requests blocks by height, and
+                                        // `zcashd` returns `-8` for invalid heights:
+                                        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                                        .map_error(server::error::LegacyCode::InvalidParameter);
+                                }
+                                _ => unreachable!("unmatched response to a block hash request"),
+                            }
+                        }
+                    };
+
                     // # Concurrency
                     //
-                    // All possible responses are valid, even if a block is added to the chain, or
-                    // the best chain changes. Clients must be able to handle chain forks, including
-                    // different confirmation values before or after added blocks, and switching
-                    // between -1 and multiple different confirmation values.
-                    zebra_state::ReadRequest::Depth(hash),
-                ];
+                    // We look up by block hash so the hash, transaction IDs, and confirmations
+                    // are consistent.
+                    let mut requests = vec![
+                        // Get transaction IDs from the transaction index by block hash
+                        //
+                        // # Concurrency
+                        //
+                        // A block's transaction IDs are never modified, so all possible responses are
+                        // valid. Clients that query block heights must be able to handle chain forks,
+                        // including getting transaction IDs from any chain fork.
+                        zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
+                        // Sapling trees
+                        zebra_state::ReadRequest::SaplingTree(hash.into()),
+                        // Orchard trees
+                        zebra_state::ReadRequest::OrchardTree(hash.into()),
+                        // Get block confirmations from the block height index
+                        //
+                        // # Concurrency
+                        //
+                        // All possible responses are valid, even if a block is added to the chain, or
+                        // the best chain changes. Clients must be able to handle chain forks, including
+                        // different confirmation values before or after added blocks, and switching
+                        // between -1 and multiple different confirmation values.
+                        zebra_state::ReadRequest::Depth(hash),
+                    ];
 
-                if should_read_block_header {
-                    // Block header
-                    requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
-                }
+                    if should_read_block_header {
+                        // Block header
+                        requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
+                    }
 
-                let mut futs = FuturesOrdered::new();
+                    let mut futs = FuturesOrdered::new();
 
-                for request in requests {
-                    futs.push_back(state.clone().oneshot(request));
-                }
+                    for request in requests {
+                        futs.push_back(state.clone().oneshot(request));
+                    }
 
-                let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-                let tx = match tx_ids_response.map_server_error()? {
-                    zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
-                        .ok_or_server_error("Block not found")?
-                        .iter()
-                        .map(|tx_id| tx_id.encode_hex())
-                        .collect(),
-                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
-                };
+                    let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
+                    let tx = match tx_ids_response.map_error(server::error::LegacyCode::default())?
+                    {
+                        zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
+                            .ok_or_error(server::error::LegacyCode::default(), "Block not found")?
+                            .iter()
+                            .map(|tx_id| tx_id.encode_hex())
+                            .collect(),
+                        _ => unreachable!(
+                            "unmatched response to a transaction_ids_for_block request"
+                        ),
+                    };
 
-                let sapling_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let sapling_note_commitment_tree_count =
-                    match sapling_tree_response.map_server_error()? {
+                    let sapling_tree_response =
+                        futs.next().await.expect("`futs` should not be empty");
+                    let sapling_note_commitment_tree_count = match sapling_tree_response
+                        .map_error(server::error::LegacyCode::default())?
+                    {
                         zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
                         zebra_state::ReadResponse::SaplingTree(None) => 0,
                         _ => unreachable!("unmatched response to a SaplingTree request"),
                     };
 
-                let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
-                let orchard_note_commitment_tree_count =
-                    match orchard_tree_response.map_server_error()? {
+                    let orchard_tree_response =
+                        futs.next().await.expect("`futs` should not be empty");
+                    let orchard_note_commitment_tree_count = match orchard_tree_response
+                        .map_error(server::error::LegacyCode::default())?
+                    {
                         zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
                         zebra_state::ReadResponse::OrchardTree(None) => 0,
                         _ => unreachable!("unmatched response to a OrchardTree request"),
                     };
 
-                // From <https://zcash.github.io/rpc/getblock.html>
-                const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
+                    // From <https://zcash.github.io/rpc/getblock.html>
+                    const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
 
-                let depth_response = futs.next().await.expect("`futs` should not be empty");
-                let confirmations = match depth_response.map_server_error()? {
-                    // Confirmations are one more than the depth.
-                    // Depth is limited by height, so it will never overflow an i64.
-                    zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
-                    zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
-                    _ => unreachable!("unmatched response to a depth request"),
-                };
+                    let depth_response = futs.next().await.expect("`futs` should not be empty");
+                    let confirmations = match depth_response
+                        .map_error(server::error::LegacyCode::default())?
+                    {
+                        // Confirmations are one more than the depth.
+                        // Depth is limited by height, so it will never overflow an i64.
+                        zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
+                        zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
+                        _ => unreachable!("unmatched response to a depth request"),
+                    };
 
-                let (time, height) = if should_read_block_header {
-                    let block_header_response =
-                        futs.next().await.expect("`futs` should not be empty");
+                    let (time, height) = if should_read_block_header {
+                        let block_header_response =
+                            futs.next().await.expect("`futs` should not be empty");
 
-                    match block_header_response.map_server_error()? {
-                        zebra_state::ReadResponse::BlockHeader { header, height, .. } => {
-                            (Some(header.time.timestamp()), Some(height))
+                        match block_header_response.map_error(server::error::LegacyCode::Misc)? {
+                            zebra_state::ReadResponse::BlockHeader { header, height, .. } => {
+                                (Some(header.time.timestamp()), Some(height))
+                            }
+                            _ => unreachable!("unmatched response to a BlockHeader request"),
                         }
-                        _ => unreachable!("unmatched response to a BlockHeader request"),
-                    }
-                } else {
-                    (None, hash_or_height.height())
-                };
+                    } else {
+                        (None, hash_or_height.height())
+                    };
 
-                let sapling = SaplingTrees {
-                    size: sapling_note_commitment_tree_count,
-                };
+                    let sapling = SaplingTrees {
+                        size: sapling_note_commitment_tree_count,
+                    };
 
-                let orchard = OrchardTrees {
-                    size: orchard_note_commitment_tree_count,
-                };
+                    let orchard = OrchardTrees {
+                        size: orchard_note_commitment_tree_count,
+                    };
 
-                let trees = GetBlockTrees { sapling, orchard };
+                    let trees = GetBlockTrees { sapling, orchard };
 
-                Ok(GetBlock::Object {
-                    hash: GetBlockHash(hash),
-                    confirmations,
-                    height,
-                    time,
-                    tx,
-                    trees,
-                })
-            } else {
-                Err(Error {
-                    code: ErrorCode::InvalidParams,
-                    message: "Invalid verbosity value".to_string(),
-                    data: None,
-                })
+                    Ok(GetBlock::Object {
+                        hash: GetBlockHash(hash),
+                        confirmations,
+                        height,
+                        time,
+                        tx,
+                        trees,
+                    })
+                }
+                _ => Err("Verbosity must be in range from 0 to 2".to_string())
+                    .map_error(server::error::LegacyCode::InvalidParameter),
             }
         }
         .boxed()
@@ -942,7 +967,9 @@ where
         let network = self.network.clone();
 
         async move {
-            let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
+            let hash_or_height: HashOrHeight = hash_or_height
+                .parse()
+                .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
             let zebra_state::ReadResponse::BlockHeader {
                 header,
                 hash,
@@ -952,32 +979,38 @@ where
                 .clone()
                 .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
                 .await
-                .map_server_error()?
+                .map_error(server::error::LegacyCode::Misc)?
             else {
                 panic!("unexpected response to BlockHeader request")
             };
 
             let response = if !verbose {
-                GetBlockHeader::Raw(HexData(header.zcash_serialize_to_vec().map_server_error()?))
+                GetBlockHeader::Raw(HexData(
+                    header
+                        .zcash_serialize_to_vec()
+                        .map_error(server::error::LegacyCode::Misc)?,
+                ))
             } else {
                 let zebra_state::ReadResponse::SaplingTree(sapling_tree) = state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::SaplingTree(hash_or_height))
                     .await
-                    .map_server_error()?
+                    .map_error(server::error::LegacyCode::Misc)?
                 else {
                     panic!("unexpected response to SaplingTree request")
                 };
 
                 // This could be `None` if there's a chain reorg between state queries.
-                let sapling_tree =
-                    sapling_tree.ok_or_server_error("missing sapling tree for block")?;
+                let sapling_tree = sapling_tree.ok_or_error(
+                    server::error::LegacyCode::Misc,
+                    "missing sapling tree for block",
+                )?;
 
                 let zebra_state::ReadResponse::Depth(depth) = state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::Depth(hash))
                     .await
-                    .map_server_error()?
+                    .map_error(server::error::LegacyCode::Misc)?
                 else {
                     panic!("unexpected response to SaplingTree request")
                 };
@@ -1033,14 +1066,14 @@ where
         self.latest_chain_tip
             .best_tip_hash()
             .map(GetBlockHash)
-            .ok_or_server_error("No blocks in state")
+            .ok_or_error(server::error::LegacyCode::default(), "No blocks in state")
     }
 
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash> {
         self.latest_chain_tip
             .best_tip_height_and_hash()
             .map(|(height, hash)| GetBlockHeightAndHash { height, hash })
-            .ok_or_server_error("No blocks in state")
+            .ok_or_error(server::error::LegacyCode::default(), "No blocks in state")
     }
 
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
@@ -1069,7 +1102,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error(server::error::LegacyCode::default())?;
 
             match response {
                 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -1116,73 +1149,80 @@ where
         .boxed()
     }
 
-    // TODO: use HexData or SentTransactionHash to handle the transaction ID
     fn get_raw_transaction(
         &self,
-        txid_hex: String,
+        HexData(txid): HexData,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>> {
         let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
-        let verbose = verbose.unwrap_or(0);
-        let verbose = verbose != 0;
+        let verbose = verbose.unwrap_or(0) != 0;
 
         async move {
-            let txid = transaction::Hash::from_hex(txid_hex).map_err(|_| {
-                Error::invalid_params("transaction ID is not specified as a hex string")
-            })?;
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L544>
+            let txid = transaction::Hash::from_bytes_in_display_order(
+                &txid
+                    .try_into()
+                    .map_err(|_| "invalid TXID length")
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)?,
+            );
 
             // Check the mempool first.
-            //
-            // # Correctness
-            //
-            // Transactions are removed from the mempool after they are mined into blocks,
-            // so the transaction could be just in the mempool, just in the state, or in both.
-            // (And the mempool and state transactions could have different authorising data.)
-            // But it doesn't matter which transaction we choose, because the effects are the same.
-            let mut txid_set = HashSet::new();
-            txid_set.insert(txid);
-            let request = mempool::Request::TransactionsByMinedId(txid_set);
-
-            let response = mempool
+            match mempool
                 .ready()
-                .and_then(|service| service.call(request))
+                .and_then(|service| {
+                    service.call(mempool::Request::TransactionsByMinedId([txid].into()))
+                })
                 .await
-                .map_server_error()?;
+                .map_error(server::error::LegacyCode::default())?
+            {
+                mempool::Response::Transactions(txns) => {
+                    if let Some(tx) = txns.first() {
+                        let hex = tx.transaction.clone().into();
 
-            match response {
-                mempool::Response::Transactions(unmined_transactions) => {
-                    if !unmined_transactions.is_empty() {
-                        let tx = unmined_transactions[0].transaction.clone();
-                        return Ok(GetRawTransaction::from_transaction(tx, None, 0, verbose));
+                        return Ok(if verbose {
+                            GetRawTransaction::Object {
+                                hex,
+                                height: None,
+                                confirmations: None,
+                            }
+                        } else {
+                            GetRawTransaction::Raw(hex)
+                        });
                     }
                 }
-                _ => unreachable!("unmatched response to a transactionids request"),
+
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
             };
 
-            // Now check the state
-            let request = zebra_state::ReadRequest::Transaction(txid);
-            let response = state
+            // If the tx wasn't in the mempool, check the state.
+            match state
                 .ready()
-                .and_then(|service| service.call(request))
+                .and_then(|service| service.call(zebra_state::ReadRequest::Transaction(txid)))
                 .await
-                .map_server_error()?;
+                .map_error(server::error::LegacyCode::default())?
+            {
+                zebra_state::ReadResponse::Transaction(Some(tx)) => {
+                    let hex = tx.tx.into();
 
-            match response {
-                zebra_state::ReadResponse::Transaction(Some(MinedTx {
-                    tx,
-                    height,
-                    confirmations,
-                })) => Ok(GetRawTransaction::from_transaction(
-                    tx,
-                    Some(height),
-                    confirmations,
-                    verbose,
-                )),
-                zebra_state::ReadResponse::Transaction(None) => {
-                    Err("Transaction not found").map_server_error()
+                    Ok(if verbose {
+                        GetRawTransaction::Object {
+                            hex,
+                            height: Some(tx.height.0),
+                            confirmations: Some(tx.confirmations),
+                        }
+                    } else {
+                        GetRawTransaction::Raw(hex)
+                    })
                 }
-                _ => unreachable!("unmatched response to a transaction request"),
+
+                zebra_state::ReadResponse::Transaction(None) => {
+                    Err("No such mempool or main chain transaction")
+                        .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+                }
+
+                _ => unreachable!("unmatched response to a `Transaction` read request"),
             }
         }
         .boxed()
@@ -1196,8 +1236,11 @@ where
         let network = self.network.clone();
 
         async move {
-            // Convert the [`hash_or_height`] string into an actual hash or height.
-            let hash_or_height = hash_or_height.parse().map_server_error()?;
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+            let hash_or_height = hash_or_height
+                .parse()
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
             // Fetch the block referenced by [`hash_or_height`] from the state.
             //
@@ -1211,15 +1254,14 @@ where
                 .ready()
                 .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
                 .await
-                .map_server_error()?
+                .map_error(server::error::LegacyCode::default())?
             {
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
-                    return Err(Error {
-                        code: MISSING_BLOCK_ERROR_CODE,
-                        message: "the requested block was not found".to_string(),
-                        data: None,
-                    })
+                    // Reference for the legacy error code:
+                    // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                    return Err("the requested block is not in the main chain")
+                        .map_error(server::error::LegacyCode::InvalidParameter);
                 }
                 _ => unreachable!("unmatched response to a block request"),
             };
@@ -1243,7 +1285,7 @@ where
                         service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
                     })
                     .await
-                    .map_server_error()?
+                    .map_error(server::error::LegacyCode::default())?
                 {
                     zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to a Sapling tree request"),
@@ -1260,7 +1302,7 @@ where
                         service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
                     })
                     .await
-                    .map_server_error()?
+                    .map_error(server::error::LegacyCode::default())?
                 {
                     zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to an Orchard tree request"),
@@ -1293,7 +1335,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_server_error()?;
+                    .map_error(server::error::LegacyCode::default())?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
@@ -1319,7 +1361,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_server_error()?;
+                    .map_error(server::error::LegacyCode::default())?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
@@ -1341,7 +1383,7 @@ where
                 })
             } else {
                 Err(Error {
-                    code: INVALID_PARAMETERS_ERROR_CODE,
+                    code: server::error::LegacyCode::Misc.into(),
                     message: format!("invalid pool name, must be one of: {:?}", POOL_LIST),
                     data: None,
                 })
@@ -1379,7 +1421,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error(server::error::LegacyCode::default())?;
 
             let hashes = match response {
                 zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
@@ -1426,7 +1468,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_server_error()?;
+                .map_error(server::error::LegacyCode::default())?;
             let utxos = match response {
                 zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
@@ -1504,7 +1546,7 @@ where
 {
     latest_chain_tip
         .best_tip_height()
-        .ok_or_server_error("No blocks in state")
+        .ok_or_error(server::error::LegacyCode::default(), "No blocks in state")
 }
 
 /// Response to a `getinfo` RPC request.
@@ -1598,13 +1640,15 @@ impl AddressStrings {
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
     pub fn valid_addresses(self) -> Result<HashSet<Address>> {
+        // Reference for the legacy error code:
+        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
         let valid_addresses: HashSet<Address> = self
             .addresses
             .into_iter()
             .map(|address| {
-                address.parse().map_err(|error| {
-                    Error::invalid_params(format!("invalid address {address:?}: {error}"))
-                })
+                address
+                    .parse()
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
             })
             .collect::<Result<_>>()?;
 
@@ -1922,12 +1966,14 @@ pub enum GetRawTransaction {
         /// The raw transaction, encoded as hex bytes.
         #[serde(with = "hex")]
         hex: SerializedTransaction,
-        /// The height of the block in the best chain that contains the transaction, or -1 if
-        /// the transaction is in the mempool.
-        height: i32,
-        /// The confirmations of the block in the best chain that contains the transaction,
-        /// or 0 if the transaction is in the mempool.
-        confirmations: u32,
+        /// The height of the block in the best chain that contains the tx or `None` if the tx is in
+        /// the mempool.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        height: Option<u32>,
+        /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
+        /// if the tx is in the mempool.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        confirmations: Option<u32>,
     },
 }
 
@@ -1937,8 +1983,8 @@ impl Default for GetRawTransaction {
             hex: SerializedTransaction::from(
                 [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
             ),
-            height: i32::default(),
-            confirmations: u32::default(),
+            height: Option::default(),
+            confirmations: Option::default(),
         }
     }
 }
@@ -1999,33 +2045,6 @@ pub struct GetAddressTxIdsRequest {
     start: u32,
     // The height to end looking for transactions.
     end: u32,
-}
-
-impl GetRawTransaction {
-    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
-    #[allow(clippy::unwrap_in_result)]
-    fn from_transaction(
-        tx: Arc<Transaction>,
-        height: Option<block::Height>,
-        confirmations: u32,
-        verbose: bool,
-    ) -> Self {
-        if verbose {
-            GetRawTransaction::Object {
-                hex: tx.into(),
-                height: match height {
-                    Some(height) => height
-                        .0
-                        .try_into()
-                        .expect("valid block heights are limited to i32::MAX"),
-                    None => -1,
-                },
-                confirmations,
-            }
-        } else {
-            GetRawTransaction::Raw(tx.into())
-        }
-    }
 }
 
 /// Information about the sapling and orchard note commitment trees if any.

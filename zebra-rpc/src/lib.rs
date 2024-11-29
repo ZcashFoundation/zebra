@@ -5,7 +5,6 @@
 #![doc(html_root_url = "https://docs.rs/zebra_rpc")]
 
 pub mod config;
-pub mod constants;
 pub mod methods;
 pub mod queue;
 pub mod server;
