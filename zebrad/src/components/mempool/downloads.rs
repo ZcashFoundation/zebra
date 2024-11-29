@@ -121,7 +121,7 @@ pub enum TransactionDownloadVerifyError {
     #[error("transaction download / verification was cancelled")]
     Cancelled,
 
-    #[error("transaction did not pass consensus validation, error: {0}")]
+    #[error("transaction did not pass consensus validation, error: {0:?}")]
     Invalid(#[from] zebra_consensus::error::TransactionError),
 }
 
