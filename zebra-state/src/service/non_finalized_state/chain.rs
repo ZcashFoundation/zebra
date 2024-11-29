@@ -1272,7 +1272,7 @@ impl Chain {
     pub fn partial_transparent_indexes<'a>(
         &'a self,
         addresses: &'a HashSet<transparent::Address>,
-    ) -> impl Iterator<Item = &TransparentTransfers> {
+    ) -> impl Iterator<Item = &'a TransparentTransfers> {
         addresses
             .iter()
             .flat_map(|address| self.partial_transparent_transfers.get(address))

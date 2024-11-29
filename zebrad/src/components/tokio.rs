@@ -7,6 +7,8 @@
 //! The rayon thread pool is used for:
 //! - long-running CPU-bound tasks like cryptography, via [`rayon::spawn_fifo`].
 
+#![allow(non_local_definitions)]
+
 use std::{future::Future, time::Duration};
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
