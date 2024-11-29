@@ -6,6 +6,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
+use futures::TryFutureExt;
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use tower::{buffer::Buffer, service_fn, ServiceExt};
 
@@ -2566,6 +2567,83 @@ fn v5_with_duplicate_orchard_action() {
             ))
         );
     });
+}
+
+/// Checks that the tx verifier handles consensus branch ids in V5 txs correctly.
+#[tokio::test]
+async fn v5_consensus_branch_ids() {
+    let state = service_fn(|_| async { unreachable!("state service should not be called") });
+
+    for network in Network::iter() {
+        let verifier = Buffer::new(Verifier::new_for_tests(&network, state), 10);
+
+        let (input, output, known_utxos) = mock_transparent_transfer(
+            Height(1),
+            true,
+            0,
+            Amount::try_from(1).expect("valid amount"),
+        );
+
+        let known_utxos = Arc::new(known_utxos);
+
+        let verify = |tx, nu: NetworkUpgrade| {
+            verifier
+                .clone()
+                .oneshot(Request::Block {
+                    transaction: Arc::new(tx),
+                    known_utxos: known_utxos.clone(),
+                    height: nu
+                        .activation_height(&network)
+                        .expect("network upgrade activation height"),
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .map_err(|err| {
+                    *err.downcast()
+                        .expect("error type should be `TransactionError`")
+                })
+        };
+
+        // NU5 is the first network upgrade that supports V5 txs.
+        let mut network_upgrade = NetworkUpgrade::Nu5;
+
+        let mut tx = Transaction::V5 {
+            inputs: vec![input],
+            outputs: vec![output],
+            lock_time: LockTime::unlocked(),
+            expiry_height: Height::MAX_EXPIRY_HEIGHT,
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            network_upgrade,
+        };
+
+        while let Some(next_nu) = network_upgrade.next_upgrade() {
+            // Check an outdated network upgrade.
+            assert_eq!(
+                verify(tx.clone(), next_nu).await,
+                Err(TransactionError::WrongConsensusBranchId)
+            );
+
+            // Check the currently supported network upgrade.
+            assert_eq!(
+                verify(tx.clone(), network_upgrade)
+                    .await
+                    .expect("successful verification")
+                    .tx_id(),
+                tx.unmined_id()
+            );
+
+            // Check a network upgrade that Zebra doesn't support yet.
+            tx.update_network_upgrade(next_nu)
+                .expect("V5 txs support updating NUs");
+
+            assert_eq!(
+                verify(tx.clone(), network_upgrade).await,
+                Err(TransactionError::WrongConsensusBranchId)
+            );
+
+            network_upgrade = next_nu;
+        }
+    }
 }
 
 // Utility functions
