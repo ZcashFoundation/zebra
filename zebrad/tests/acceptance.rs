@@ -3545,9 +3545,15 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     Ok(())
 }
 
-/// Checks that the finalized state has the spending transaction ids for every
+/// Checks that the cached finalized state has the spending transaction ids for every
 /// spent outpoint and revealed nullifier in the last 100 blocks of a cached state.
-#[tokio::test]
+//
+// Note: This test is meant to be run locally with a prepared finalized state that
+//       has spending transaction ids. This can be done by starting Zebra with the
+//       `indexer` feature and waiting until the db format upgrade is complete. It
+//       can be undone (removing the indexes) by starting Zebra without the feature
+//       and waiting until the db format downgrade is complete.
+#[tokio::test(flavor = "multi_thread")]
 #[ignore]
 #[cfg(feature = "indexer")]
 async fn has_spending_transaction_ids() -> Result<()> {
