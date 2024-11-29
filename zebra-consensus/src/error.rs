@@ -239,9 +239,6 @@ pub enum TransactionError {
     #[error("failed to verify ZIP-317 transaction rules, transaction was not inserted to mempool")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Zip317(#[from] zebra_chain::transaction::zip317::Error),
-
-    #[error("failed to validate asset issuance and/or burns")]
-    InvalidAssetIssuanceOrBurn,
 }
 
 impl From<ValidateContextError> for TransactionError {

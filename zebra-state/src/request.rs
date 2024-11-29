@@ -164,9 +164,6 @@ pub struct SemanticallyVerifiedBlock {
     pub transaction_hashes: Arc<[transaction::Hash]>,
     /// This block's contribution to the deferred pool.
     pub deferred_balance: Option<Amount<NonNegative>>,
-    /// A precomputed list of the [`IssuedAssetsChange`]s for the transactions in this block,
-    /// in the same order as `block.transactions`.
-    pub issued_assets_changes: Arc<[IssuedAssetsChange]>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -301,10 +298,9 @@ pub struct FinalizedBlock {
     pub(super) treestate: Treestate,
     /// This block's contribution to the deferred pool.
     pub(super) deferred_balance: Option<Amount<NonNegative>>,
-    /// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
-    /// updates asset states to be inserted into the finalized state, replacing the previous
+    /// Updated asset states to be inserted into the finalized state, replacing the previous
     /// asset states for those asset bases.
-    pub issued_assets: IssuedAssetsOrChange,
+    pub issued_assets: Option<IssuedAssets>,
 }
 
 /// Either changes to be applied to the previous `issued_assets` map for the finalized tip, or
@@ -319,18 +315,6 @@ pub enum IssuedAssetsOrChange {
     Change(IssuedAssetsChange),
 }
 
-impl From<Arc<[IssuedAssetsChange]>> for IssuedAssetsOrChange {
-    fn from(change: Arc<[IssuedAssetsChange]>) -> Self {
-        Self::Change(
-            change
-                .iter()
-                .cloned()
-                .reduce(|a, b| a + b)
-                .unwrap_or_default(),
-        )
-    }
-}
-
 impl From<IssuedAssets> for IssuedAssetsOrChange {
     fn from(updated_issued_assets: IssuedAssets) -> Self {
         Self::Updated(updated_issued_assets)
@@ -340,13 +324,7 @@ impl From<IssuedAssets> for IssuedAssetsOrChange {
 impl FinalizedBlock {
     /// Constructs [`FinalizedBlock`] from [`CheckpointVerifiedBlock`] and its [`Treestate`].
     pub fn from_checkpoint_verified(block: CheckpointVerifiedBlock, treestate: Treestate) -> Self {
-        let issued_assets = block.issued_assets_changes.clone().into();
-
-        Self::from_semantically_verified(
-            SemanticallyVerifiedBlock::from(block),
-            treestate,
-            issued_assets,
-        )
+        Self::from_semantically_verified(SemanticallyVerifiedBlock::from(block), treestate, None)
     }
 
     /// Constructs [`FinalizedBlock`] from [`ContextuallyVerifiedBlock`] and its [`Treestate`].
@@ -354,7 +332,7 @@ impl FinalizedBlock {
         block: ContextuallyVerifiedBlock,
         treestate: Treestate,
     ) -> Self {
-        let issued_assets = block.issued_assets.clone().into();
+        let issued_assets = Some(block.issued_assets.clone());
         Self::from_semantically_verified(
             SemanticallyVerifiedBlock::from(block),
             treestate,
@@ -366,7 +344,7 @@ impl FinalizedBlock {
     fn from_semantically_verified(
         block: SemanticallyVerifiedBlock,
         treestate: Treestate,
-        issued_assets: IssuedAssetsOrChange,
+        issued_assets: Option<IssuedAssets>,
     ) -> Self {
         Self {
             block: block.block,
@@ -451,7 +429,6 @@ impl ContextuallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance,
-            issued_assets_changes: _,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -483,12 +460,10 @@ impl CheckpointVerifiedBlock {
         block: Arc<Block>,
         hash: Option<block::Hash>,
         deferred_balance: Option<Amount<NonNegative>>,
-    ) -> Option<Self> {
-        let issued_assets_change = IssuedAssetsChange::from_transactions(&block.transactions)?;
+    ) -> Self {
         let mut block = Self::with_hash(block.clone(), hash.unwrap_or(block.hash()));
         block.deferred_balance = deferred_balance;
-        block.issued_assets_changes = issued_assets_change;
-        Some(block)
+        block
     }
 
     /// Creates a block that's ready to be committed to the finalized state,
@@ -517,7 +492,6 @@ impl SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
-            issued_assets_changes: Arc::new([]),
         }
     }
 
@@ -550,7 +524,6 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             new_outputs,
             transaction_hashes,
             deferred_balance: None,
-            issued_assets_changes: Arc::new([]),
         }
     }
 }
@@ -570,7 +543,6 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
                     .constrain::<NonNegative>()
                     .expect("deferred balance in a block must me non-negative"),
             ),
-            issued_assets_changes: Arc::new([]),
         }
     }
 }

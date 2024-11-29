@@ -20,7 +20,6 @@ use zebra_chain::{
         },
         Block, Height,
     },
-    orchard_zsa::IssuedAssetsChange,
     parameters::Network::{self, *},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transparent::new_ordered_outputs_with_height,
@@ -130,9 +129,6 @@ fn test_block_db_round_trip_with(
                 .collect();
             let new_outputs =
                 new_ordered_outputs_with_height(&original_block, Height(0), &transaction_hashes);
-            let issued_assets_changes =
-                IssuedAssetsChange::from_transactions(&original_block.transactions)
-                    .expect("issued assets should be valid");
 
             CheckpointVerifiedBlock(SemanticallyVerifiedBlock {
                 block: original_block.clone(),
@@ -141,7 +137,6 @@ fn test_block_db_round_trip_with(
                 new_outputs,
                 transaction_hashes,
                 deferred_balance: None,
-                issued_assets_changes,
             })
         };
 

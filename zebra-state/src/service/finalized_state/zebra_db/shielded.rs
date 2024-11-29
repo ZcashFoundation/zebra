@@ -20,7 +20,7 @@ use std::{
 use zebra_chain::{
     block::Height,
     orchard::{self},
-    orchard_zsa::{AssetBase, AssetState},
+    orchard_zsa::{AssetBase, AssetState, IssuedAssetsChange},
     parallel::tree::NoteCommitmentTrees,
     sapling, sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -34,7 +34,7 @@ use crate::{
         disk_format::RawBytes,
         zebra_db::ZebraDb,
     },
-    BoxError, IssuedAssetsOrChange, TypedColumnFamily,
+    BoxError, TypedColumnFamily,
 };
 
 // Doc-only items
@@ -470,7 +470,7 @@ impl DiskWriteBatch {
             self.prepare_nullifier_batch(&zebra_db.db, transaction)?;
         }
 
-        self.prepare_issued_assets_batch(zebra_db, &finalized.issued_assets)?;
+        self.prepare_issued_assets_batch(zebra_db, finalized)?;
 
         Ok(())
     }
@@ -515,18 +515,23 @@ impl DiskWriteBatch {
     pub fn prepare_issued_assets_batch(
         &mut self,
         zebra_db: &ZebraDb,
-        issued_assets_or_changes: &IssuedAssetsOrChange,
+        finalized: &FinalizedBlock,
     ) -> Result<(), BoxError> {
         let mut batch = zebra_db.issued_assets_cf().with_batch_for_writing(self);
 
-        let updated_issued_assets = match issued_assets_or_changes.clone() {
-            IssuedAssetsOrChange::Updated(issued_assets) => issued_assets,
-            IssuedAssetsOrChange::Change(issued_assets_change) => issued_assets_change
-                .apply_with(|asset_base| zebra_db.issued_asset(&asset_base).unwrap_or_default()),
-        };
+        let updated_issued_assets =
+            if let Some(updated_issued_assets) = finalized.issued_assets.as_ref() {
+                updated_issued_assets
+            } else {
+                &IssuedAssetsChange::from(
+                    IssuedAssetsChange::from_transactions(&finalized.block.transactions)
+                        .ok_or(BoxError::from("invalid issued assets changes"))?,
+                )
+                .apply_with(|asset_base| zebra_db.issued_asset(&asset_base).unwrap_or_default())
+            };
 
-        for (asset_base, updated_issued_asset_state) in updated_issued_assets {
-            batch = batch.zs_insert(&asset_base, &updated_issued_asset_state);
+        for (asset_base, updated_issued_asset_state) in updated_issued_assets.iter() {
+            batch = batch.zs_insert(asset_base, updated_issued_asset_state);
         }
 
         Ok(())

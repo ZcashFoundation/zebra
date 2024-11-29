@@ -372,6 +372,17 @@ impl std::ops::Add for IssuedAssetsChange {
         }
     }
 }
+
+impl From<Arc<[IssuedAssetsChange]>> for IssuedAssetsChange {
+    fn from(change: Arc<[IssuedAssetsChange]>) -> Self {
+        change
+            .iter()
+            .cloned()
+            .reduce(|a, b| a + b)
+            .unwrap_or_default()
+    }
+}
+
 /// Used in snapshot test for `getassetstate` RPC method.
 // TODO: Replace with `AssetBase::random()` or a known value.
 pub trait RandomAssetBase {

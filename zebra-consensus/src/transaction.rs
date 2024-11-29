@@ -19,7 +19,6 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block, orchard,
-    orchard_zsa::IssuedAssetsChange,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -144,10 +143,6 @@ pub enum Response {
         /// The number of legacy signature operations in this transaction's
         /// transparent inputs and outputs.
         legacy_sigop_count: u64,
-
-        /// The changes to the issued assets map that should be applied for
-        /// this transaction.
-        issued_assets_change: IssuedAssetsChange,
     },
 
     /// A response to a mempool transaction verification request.
@@ -485,7 +480,6 @@ where
                     tx_id,
                     miner_fee,
                     legacy_sigop_count,
-                    issued_assets_change: IssuedAssetsChange::from_transaction(&tx).ok_or(TransactionError::InvalidAssetIssuanceOrBurn)?,
                 },
                 Request::Mempool { transaction, .. } => {
                     let transaction = VerifiedUnminedTx::new(

@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssets};
+use zebra_chain::orchard_zsa::{AssetBase, AssetState, IssuedAssets, IssuedAssetsChange};
 
 use crate::{service::read, SemanticallyVerifiedBlock, ValidateContextError, ZebraDb};
 
@@ -17,11 +17,10 @@ pub fn valid_burns_and_issuance(
 
     // Burns need to be checked and asset state changes need to be applied per tranaction, in case
     // the asset being burned was also issued in an earlier transaction in the same block.
-    for (issued_assets_change, transaction) in semantically_verified
-        .issued_assets_changes
-        .iter()
-        .zip(&semantically_verified.block.transactions)
-    {
+    for transaction in &semantically_verified.block.transactions {
+        let issued_assets_change = IssuedAssetsChange::from_transaction(transaction)
+            .ok_or(ValidateContextError::InvalidIssuance)?;
+
         // Check that no burn item attempts to burn more than the issued supply for an asset
         for burn in transaction.orchard_burns() {
             let asset_base = burn.asset();

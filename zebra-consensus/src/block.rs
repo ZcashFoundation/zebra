@@ -15,7 +15,7 @@ use std::{
 };
 
 use chrono::Utc;
-use futures::stream::FuturesOrdered;
+use futures::stream::FuturesUnordered;
 use futures_util::FutureExt;
 use thiserror::Error;
 use tower::{Service, ServiceExt};
@@ -226,7 +226,7 @@ where
             tx::check::coinbase_outputs_are_decryptable(&coinbase_tx, &network, height)?;
 
             // Send transactions to the transaction verifier to be checked
-            let mut async_checks = FuturesOrdered::new();
+            let mut async_checks = FuturesUnordered::new();
 
             let known_utxos = Arc::new(transparent::new_ordered_outputs(
                 &block,
@@ -243,7 +243,7 @@ where
                         height,
                         time: block.header.time,
                     });
-                async_checks.push_back(rsp);
+                async_checks.push(rsp);
             }
             tracing::trace!(len = async_checks.len(), "built async tx checks");
 
@@ -252,7 +252,6 @@ where
             // Sum up some block totals from the transaction responses.
             let mut legacy_sigop_count = 0;
             let mut block_miner_fees = Ok(Amount::zero());
-            let mut issued_assets_changes = Vec::new();
 
             use futures::StreamExt;
             while let Some(result) = async_checks.next().await {
@@ -261,7 +260,6 @@ where
                     tx_id: _,
                     miner_fee,
                     legacy_sigop_count: tx_legacy_sigop_count,
-                    issued_assets_change,
                 } = result
                     .map_err(Into::into)
                     .map_err(VerifyBlockError::Transaction)?
@@ -276,8 +274,6 @@ where
                 if let Some(miner_fee) = miner_fee {
                     block_miner_fees += miner_fee;
                 }
-
-                issued_assets_changes.push(issued_assets_change);
             }
 
             // Check the summed block totals
@@ -327,7 +323,6 @@ where
                 new_outputs,
                 transaction_hashes,
                 deferred_balance: Some(expected_deferred_amount),
-                issued_assets_changes: issued_assets_changes.into(),
             };
 
             // Return early for proposal requests when getblocktemplate-rpcs feature is enabled
