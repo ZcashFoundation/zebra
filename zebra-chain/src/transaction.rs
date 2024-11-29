@@ -471,6 +471,29 @@ impl Transaction {
         }
     }
 
+    /// Updates the [`NetworkUpgrade`] for this transaction.
+    ///
+    /// ## Notes
+    ///
+    /// - Updating the network upgrade for V1, V2, V3 and V4 transactions is not possible.
+    pub fn update_network_upgrade(&mut self, nu: NetworkUpgrade) -> Result<(), &str> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => Err(
+                "Updating the network upgrade for V1, V2, V3 and V4 transactions is not possible.",
+            ),
+            Transaction::V5 {
+                ref mut network_upgrade,
+                ..
+            } => {
+                *network_upgrade = nu;
+                Ok(())
+            }
+        }
+    }
+
     // transparent
 
     /// Access the transparent inputs of this transaction, regardless of version.
