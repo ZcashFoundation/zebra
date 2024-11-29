@@ -889,7 +889,7 @@ impl ZcashDeserialize for Transaction {
                 // Convert it to a NetworkUpgrade
                 let network_upgrade =
                     NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
-                        .ok_or_else(|| {
+                        .ok_or({
                             SerializationError::Parse(
                                 "expected a valid network upgrade from the consensus branch id",
                             )

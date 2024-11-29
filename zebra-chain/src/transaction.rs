@@ -231,7 +231,7 @@ impl Transaction {
         &'a self,
         branch_id: ConsensusBranchId,
         all_previous_outputs: &'a [transparent::Output],
-    ) -> sighash::SigHasher {
+    ) -> sighash::SigHasher<'a> {
         sighash::SigHasher::new(self, branch_id, all_previous_outputs)
     }
 
