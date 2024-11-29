@@ -12,9 +12,6 @@ use crate::{serialization::ZcashSerialize, transaction::Transaction};
 
 use super::BurnItem;
 
-// TODO:
-// - Resolve new FIXMEs related to issued asset states
-
 /// The circulating supply and whether that supply has been finalized.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub struct AssetState {
@@ -31,8 +28,7 @@ pub struct AssetState {
 pub struct AssetStateChange {
     /// Whether the asset should be finalized such that no more of it can be issued.
     pub should_finalize: bool,
-    // FIXME: is this a correct comment?
-    /// Whether the asset should be finalized such that no more of it can be issued.
+    /// Whether the asset has been issued in this change.
     pub includes_issuance: bool,
     /// The change in supply from newly issued assets or burned assets, if any.
     pub supply_change: SupplyChange,
@@ -214,7 +210,6 @@ impl AssetStateChange {
             })
             .unwrap_or_default()
             .into_iter()
-            // FIXME: We use 0 as a value - is that correct?
             .map(|asset_base| Self::new(asset_base, SupplyChange::Issuance(0), true));
 
         supply_changes.chain(finalize_changes)
