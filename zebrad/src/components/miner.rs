@@ -35,7 +35,7 @@ use zebra_rpc::{
             GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
         },
         hex_data::HexData,
-        GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+        GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
     },
 };
 use zebra_state::WatchReceiver;

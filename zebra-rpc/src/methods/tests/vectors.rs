@@ -2,6 +2,7 @@
 
 use std::ops::RangeInclusive;
 
+use futures::FutureExt;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
@@ -340,7 +341,7 @@ async fn rpc_getblock_missing_error() {
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
     // https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290
-    let block_future = tokio::spawn(rpc.get_block("0".to_string(), Some(0u8)));
+    let block_future = tokio::spawn(async move { rpc.get_block("0".to_string(), Some(0u8)).await });
 
     // Make the mock service respond with no block
     let response_handler = state
@@ -352,7 +353,7 @@ async fn rpc_getblock_missing_error() {
     let block_response = block_response
         .expect("unexpected panic in spawned request future")
         .expect_err("unexpected success from missing block state response");
-    assert_eq!(block_response.code, ErrorCode::ServerError(-8),);
+    assert_eq!(block_response.code(), ErrorCode::ServerError(-8).code());
 
     // Now check the error string the way `lightwalletd` checks it
     assert_eq!(
@@ -737,7 +738,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .await
         .unwrap_err();
     assert_eq!(
-        error.message,
+        error.message(),
         format!(
             "invalid address \"{}\": parse error: t-addr decoding error",
             address.clone()
@@ -760,7 +761,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .await
         .unwrap_err();
     assert_eq!(
-        error.message,
+        error.message(),
         "start Height(2) must be less than or equal to end Height(1)".to_string()
     );
 
@@ -776,7 +777,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .await
         .unwrap_err();
     assert_eq!(
-        error.message,
+        error.message(),
         "start Height(0) and end Height(1) must both be greater than zero".to_string()
     );
 
@@ -792,7 +793,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         .await
         .unwrap_err();
     assert_eq!(
-        error.message,
+        error.message(),
         "start Height(1) and end Height(11) must both be less than or equal to the chain tip Height(10)".to_string()
     );
 
@@ -940,7 +941,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         .await
         .unwrap_err();
     assert_eq!(
-        error.message,
+        error.message(),
         format!("invalid address \"{address}\": parse error: t-addr decoding error")
     );
 
@@ -1099,7 +1100,10 @@ async fn rpc_getblockcount_empty_state() {
     assert!(get_block_count.is_err());
 
     // Check the error we got is the correct one
-    assert_eq!(get_block_count.err().unwrap().message, "No blocks in state");
+    assert_eq!(
+        get_block_count.err().unwrap().message(),
+        "No blocks in state"
+    );
 
     mempool.expect_no_requests().await;
 }
@@ -1542,8 +1546,8 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .expect_err("needs an error when estimated distance to network chain tip is far");
 
     assert_eq!(
-        get_block_template_sync_error.code,
-        ErrorCode::ServerError(-10)
+        get_block_template_sync_error.code(),
+        ErrorCode::ServerError(-10).code()
     );
 
     mock_sync_status.set_is_close_to_tip(false);
@@ -1555,8 +1559,8 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .expect_err("needs an error when syncer is not close to tip");
 
     assert_eq!(
-        get_block_template_sync_error.code,
-        ErrorCode::ServerError(-10)
+        get_block_template_sync_error.code(),
+        ErrorCode::ServerError(-10).code()
     );
 
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(200));
@@ -1566,8 +1570,8 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .expect_err("needs an error when syncer is not close to tip or estimated distance to network chain tip is far");
 
     assert_eq!(
-        get_block_template_sync_error.code,
-        ErrorCode::ServerError(-10)
+        get_block_template_sync_error.code(),
+        ErrorCode::ServerError(-10).code()
     );
 
     let get_block_template_sync_error = get_block_template_rpc
@@ -1578,7 +1582,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .await
         .expect_err("needs an error when called in proposal mode without data");
 
-    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+    assert_eq!(
+        get_block_template_sync_error.code(),
+        ErrorCode::InvalidParams.code()
+    );
 
     let get_block_template_sync_error = get_block_template_rpc
         .get_block_template(Some(get_block_template::JsonParameters {
@@ -1588,7 +1595,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .await
         .expect_err("needs an error when passing in block data in template mode");
 
-    assert_eq!(get_block_template_sync_error.code, ErrorCode::InvalidParams);
+    assert_eq!(
+        get_block_template_sync_error.code(),
+        ErrorCode::InvalidParams.code()
+    );
 
     // The long poll id is valid, so it returns a state error instead
     let get_block_template_sync_error = get_block_template_rpc
@@ -1606,8 +1616,8 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         .expect_err("needs an error when the state is empty");
 
     assert_eq!(
-        get_block_template_sync_error.code,
-        ErrorCode::ServerError(-10)
+        get_block_template_sync_error.code(),
+        ErrorCode::ServerError(-10).code()
     );
 
     // Try getting mempool transactions with a different tip hash

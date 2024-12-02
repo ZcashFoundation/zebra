@@ -44,7 +44,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     info!("starting regtest submit_blocks test");
 
     let network = Network::new_regtest(None, None);
-    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    let mut config = os_assigned_rpc_port_config(&network)?;
     config.mempool.debug_enable_at_height = Some(0);
 
     let mut zebrad = testdir()?
@@ -162,8 +162,8 @@ impl MiningRpcMethods for RpcRequestClient {
             }
             Err(err)
                 if err
-                    .downcast_ref::<jsonrpc_core::Error>()
-                    .is_some_and(|err| err.code == MISSING_BLOCK_ERROR_CODE) =>
+                    .downcast_ref::<jsonrpsee_types::ErrorObject>()
+                    .is_some_and(|err| err.code() == MISSING_BLOCK_ERROR_CODE.code()) =>
             {
                 Ok(None)
             }

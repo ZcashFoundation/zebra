@@ -108,12 +108,13 @@ impl RpcRequestClient {
     fn json_result_from_response_text<T: serde::de::DeserializeOwned>(
         response_text: &str,
     ) -> std::result::Result<T, BoxError> {
-        use jsonrpc_core::Output;
-
-        let output: Output = serde_json::from_str(response_text)?;
-        match output {
-            Output::Success(success) => Ok(serde_json::from_value(success.result)?),
-            Output::Failure(failure) => Err(failure.error.into()),
+        let output: jsonrpsee_types::Response<serde_json::Value> =
+            serde_json::from_str(response_text)?;
+        match output.payload {
+            jsonrpsee_types::ResponsePayload::Success(success) => {
+                Ok(serde_json::from_value(success.into_owned())?)
+            }
+            jsonrpsee_types::ResponsePayload::Error(failure) => Err(failure.to_string().into()),
         }
     }
 }

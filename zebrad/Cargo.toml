@@ -254,7 +254,7 @@ tonic-build = { version = "0.12.3", optional = true }
 abscissa_core = { version = "0.7.0", features = ["testing"] }
 hex = "0.4.3"
 hex-literal = "0.4.1"
-jsonrpc-core = "18.0.0"
+jsonrpsee-types = "0.24.7"
 once_cell = "1.20.2"
 regex = "1.11.0"
 insta = { version = "1.40.0", features = ["json"] }

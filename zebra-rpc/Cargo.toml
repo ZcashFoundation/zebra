@@ -59,9 +59,11 @@ chrono = { version = "0.4.38", default-features = false, features = [
 ] }
 futures = "0.3.31"
 
-jsonrpc-core = "18.0.0"
-jsonrpc-derive = "18.0.0"
-jsonrpc-http-server = "18.0.0"
+jsonrpsee = { version = "0.24.7", features = ["server"] }
+jsonrpsee-types = "0.24.7"
+jsonrpsee-proc-macros = "0.24.7"
+hyper = "1.5.0"
+http-body-util = "0.1.2"
 
 # zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
 serde_json = { version = "1.0.132", features = ["preserve_order"] }

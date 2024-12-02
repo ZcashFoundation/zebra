@@ -382,8 +382,8 @@ impl SyncerRpcMethods for RpcRequestClient {
             }
             Err(err)
                 if err
-                    .downcast_ref::<jsonrpc_core::Error>()
-                    .is_some_and(|err| err.code == MISSING_BLOCK_ERROR_CODE) =>
+                    .downcast_ref::<jsonrpsee_types::ErrorCode>()
+                    .is_some_and(|err| *err == MISSING_BLOCK_ERROR_CODE) =>
             {
                 Ok(None)
             }

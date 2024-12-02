@@ -1584,7 +1584,7 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = os_assigned_rpc_port_config(parallel_cpu_threads, &Mainnet)?;
+    let mut config = os_assigned_rpc_port_config(&Mainnet)?;
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1640,7 +1640,7 @@ async fn rpc_endpoint_client_content_type() -> Result<()> {
 
     // Write a configuration that has RPC listen_addr set
     // [Note on port conflict](#Note on port conflict)
-    let mut config = random_known_rpc_port_config(true, &Mainnet)?;
+    let mut config = random_known_rpc_port_config(&Mainnet)?;
 
     let dir = testdir()?.with_config(&mut config)?;
     let mut child = dir.spawn_child(args!["start"])?;
@@ -1722,7 +1722,7 @@ fn non_blocking_logger() -> Result<()> {
     let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
         let _init_guard = zebra_test::init();
 
-        let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
+        let mut config = os_assigned_rpc_port_config(&Mainnet)?;
         config.tracing.filter = Some("trace".to_string());
         config.tracing.buffer_limit = 100;
 
@@ -2251,7 +2251,7 @@ fn zebra_rpc_conflict() -> Result<()> {
     // [Note on port conflict](#Note on port conflict)
     //
     // This is the required setting to detect port conflicts.
-    let mut config = random_known_rpc_port_config(false, &Mainnet)?;
+    let mut config = random_known_rpc_port_config(&Mainnet)?;
 
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(
@@ -2983,7 +2983,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
+    let mut config = os_assigned_rpc_port_config(&Network::new_regtest(None, None))?;
     config.state.ephemeral = false;
     let network = config.network.network.clone();
 
@@ -3195,7 +3195,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     output.assert_failure()?;
 
-    let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
+    let mut config = random_known_rpc_port_config(&Network::Mainnet)?;
     config.state.ephemeral = false;
     let rpc_address = config.rpc.listen_addr.unwrap();
 
@@ -3270,7 +3270,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             types::submit_block,
         },
         hex_data::HexData,
-        GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+        GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
     };
     use zebra_test::mock_service::MockService;
     let _init_guard = zebra_test::init();

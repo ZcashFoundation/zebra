@@ -12,7 +12,7 @@ use std::{
 
 use hex::FromHex;
 use insta::Settings;
-use jsonrpc_core::Result;
+use jsonrpsee::core::RpcResult as Result;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
@@ -47,7 +47,7 @@ use crate::methods::{
     },
     hex_data::HexData,
     tests::{snapshot::EXCESSIVE_BLOCK_HEIGHT, utils::fake_history_tree},
-    GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+    GetBlockHash, GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
 };
 
 pub async fn test_responses<State, ReadState>(
@@ -487,20 +487,18 @@ pub async fn test_responses<State, ReadState>(
     // `z_listunifiedreceivers`
 
     let ua1 = String::from("u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf");
-    let z_list_unified_receivers =
-        tokio::spawn(get_block_template_rpc.z_list_unified_receivers(ua1))
-            .await
-            .expect("unexpected panic in z_list_unified_receivers RPC task")
-            .expect("unexpected error in z_list_unified_receivers RPC call");
+    let z_list_unified_receivers = get_block_template_rpc
+        .z_list_unified_receivers(ua1)
+        .await
+        .expect("unexpected error in z_list_unified_receivers RPC call");
 
     snapshot_rpc_z_listunifiedreceivers("ua1", z_list_unified_receivers, &settings);
 
     let ua2 = String::from("u1uf4qsmh037x2jp6k042h9d2w22wfp39y9cqdf8kcg0gqnkma2gf4g80nucnfeyde8ev7a6kf0029gnwqsgadvaye9740gzzpmr67nfkjjvzef7rkwqunqga4u4jges4tgptcju5ysd0");
-    let z_list_unified_receivers =
-        tokio::spawn(get_block_template_rpc.z_list_unified_receivers(ua2))
-            .await
-            .expect("unexpected panic in z_list_unified_receivers RPC task")
-            .expect("unexpected error in z_list_unified_receivers RPC call");
+    let z_list_unified_receivers = get_block_template_rpc
+        .z_list_unified_receivers(ua2)
+        .await
+        .expect("unexpected error in z_list_unified_receivers RPC call");
 
     snapshot_rpc_z_listunifiedreceivers("ua2", z_list_unified_receivers, &settings);
 }

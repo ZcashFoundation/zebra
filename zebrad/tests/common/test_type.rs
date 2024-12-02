@@ -181,7 +181,7 @@ impl TestType {
     ) -> Option<Result<ZebradConfig>> {
         let config = if self.needs_zebra_rpc_server() {
             // This is what we recommend our users configure.
-            random_known_rpc_port_config(true, network)
+            random_known_rpc_port_config(network)
         } else {
             default_test_config(network)
         };
@@ -190,12 +190,6 @@ impl TestType {
             Ok(config) => config,
             Err(error) => return Some(Err(error)),
         };
-
-        // We want to run multi-threaded RPCs, if we're using them
-        if self.launches_lightwalletd() {
-            // Automatically runs one thread per available CPU core
-            config.rpc.parallel_cpu_threads = 0;
-        }
 
         if !use_internet_connection {
             config.network.initial_mainnet_peers = IndexSet::new();

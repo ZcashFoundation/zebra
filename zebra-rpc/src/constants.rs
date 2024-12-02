@@ -1,6 +1,6 @@
 //! Constants for RPC methods and server responses.
 
-use jsonrpc_core::{Error, ErrorCode};
+use jsonrpsee_types::{ErrorCode, ErrorObject};
 
 /// The RPC error code used by `zcashd` for incorrect RPC parameters.
 ///
@@ -28,12 +28,15 @@ pub const NO_BLOCKS_IN_STATE_ERROR_CODE: ErrorCode = ErrorCode::ServerError(0);
 //
 // TODO: find the source code that expects or generates this error text, if there is any
 //       replace literal Error { ... } with this error
-pub fn no_blocks_in_state_error() -> Error {
-    Error {
-        code: NO_BLOCKS_IN_STATE_ERROR_CODE,
-        message: "No blocks in state".to_string(),
-        data: None,
-    }
+pub fn no_blocks_in_state_error() -> ErrorCode {
+    ErrorCode::ServerError(
+        ErrorObject::borrowed(
+            NO_BLOCKS_IN_STATE_ERROR_CODE.code(),
+            "No blocks in state",
+            None,
+        )
+        .code(),
+    )
 }
 
 /// When logging parameter data, only log this much data.

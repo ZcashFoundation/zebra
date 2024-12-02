@@ -2,7 +2,8 @@
 
 use std::{collections::HashMap, iter, sync::Arc};
 
-use jsonrpc_core::{Error, ErrorCode, Result};
+use jsonrpsee::core::RpcResult;
+use jsonrpsee_types::{ErrorCode, ErrorObject};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
@@ -40,7 +41,7 @@ pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
 /// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
 ///
 /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
-pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
+pub fn check_parameters(parameters: &Option<JsonParameters>) -> RpcResult<()> {
     let Some(parameters) = parameters else {
         return Ok(());
     };
@@ -61,38 +62,36 @@ pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: None,
             ..
-        } => Err(Error {
-            code: ErrorCode::InvalidParams,
-            message: "\"data\" parameter must be \
-                          provided in \"proposal\" mode"
-                .to_string(),
-            data: None,
-        }),
+        } => Err(ErrorObject::borrowed(
+            ErrorCode::InvalidParams.code(),
+            "\"data\" parameter must be \
+                provided in \"proposal\" mode",
+            None,
+        )),
 
         JsonParameters {
             mode: GetBlockTemplateRequestMode::Template,
             data: Some(_),
             ..
-        } => Err(Error {
-            code: ErrorCode::InvalidParams,
-            message: "\"data\" parameter must be \
-                          omitted in \"template\" mode"
-                .to_string(),
-            data: None,
-        }),
+        } => Err(ErrorObject::borrowed(
+            ErrorCode::InvalidParams.code(),
+            "\"data\" parameter must be \
+                omitted in \"template\" mode",
+            None,
+        )),
     }
 }
 
 /// Returns the miner address, or an error if it is invalid.
 pub fn check_miner_address(
     miner_address: Option<transparent::Address>,
-) -> Result<transparent::Address> {
-    miner_address.ok_or_else(|| Error {
-        code: ErrorCode::ServerError(0),
-        message: "configure mining.miner_address in zebrad.toml \
-                  with a transparent address"
-            .to_string(),
-        data: None,
+) -> RpcResult<transparent::Address> {
+    miner_address.ok_or_else(|| {
+        ErrorObject::borrowed(
+            0,
+            "configure mining.miner_address in zebrad.toml with a transparent address",
+            None,
+        )
     })
 }
 
@@ -106,7 +105,7 @@ pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
     network: Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
-) -> Result<Response>
+) -> RpcResult<Response>
 where
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -135,10 +134,12 @@ where
     let block_verifier_router_response = block_verifier_router
         .ready()
         .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
+        .map_err(|error| {
+            ErrorObject::owned(
+                ErrorCode::ServerError(0).code(),
+                error.to_string(),
+                None::<()>,
+            )
         })?
         .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
         .await;
@@ -165,7 +166,7 @@ pub fn check_synced_to_tip<Tip, SyncStatus>(
     network: &Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
-) -> Result<()>
+) -> RpcResult<()>
 where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
@@ -193,16 +194,14 @@ where
              Hint: check your network connection, clock, and time zone settings."
         );
 
-        return Err(Error {
-            code: NOT_SYNCED_ERROR_CODE,
-            message: format!(
-                "Zebra has not synced to the chain tip, \
+        return Err(ErrorObject::borrowed(
+            NOT_SYNCED_ERROR_CODE.code(),
+            "Zebra has not synced to the chain tip, \
                  estimated distance: {estimated_distance_to_chain_tip:?}, \
                  local tip: {local_tip_height:?}. \
-                 Hint: check your network connection, clock, and time zone settings."
-            ),
-            data: None,
-        });
+                 Hint: check your network connection, clock, and time zone settings.",
+            None,
+        ));
     }
 
     Ok(())
@@ -216,7 +215,7 @@ where
 /// If the state does not have enough blocks, returns an error.
 pub async fn fetch_state_tip_and_local_time<State>(
     state: State,
-) -> Result<GetBlockTemplateChainInfo>
+) -> RpcResult<GetBlockTemplateChainInfo>
 where
     State: Service<
             zebra_state::ReadRequest,
@@ -228,14 +227,13 @@ where
         + 'static,
 {
     let request = zebra_state::ReadRequest::ChainInfo;
-    let response = state
-        .oneshot(request.clone())
-        .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
-        })?;
+    let response = state.oneshot(request.clone()).await.map_err(|error| {
+        ErrorObject::owned(
+            ErrorCode::ServerError(0).code(),
+            error.to_string(),
+            None::<()>,
+        )
+    })?;
 
     let chain_info = match response {
         zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
@@ -253,7 +251,7 @@ where
 pub async fn fetch_mempool_transactions<Mempool>(
     mempool: Mempool,
     chain_tip_hash: block::Hash,
-) -> Result<Option<(Vec<VerifiedUnminedTx>, TransactionDependencies)>>
+) -> RpcResult<Option<(Vec<VerifiedUnminedTx>, TransactionDependencies)>>
 where
     Mempool: Service<
             mempool::Request,
@@ -265,10 +263,12 @@ where
     let response = mempool
         .oneshot(mempool::Request::FullTransactions)
         .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
+        .map_err(|error| {
+            ErrorObject::owned(
+                ErrorCode::ServerError(0).code(),
+                error.to_string(),
+                None::<()>,
+            )
         })?;
 
     // TODO: Order transactions in block templates based on their dependencies

@@ -243,20 +243,27 @@ impl StartCmd {
         }
 
         // Launch RPC server
-        info!("spawning RPC server");
-        let (rpc_task_handle, rpc_tx_queue_task_handle, rpc_server) = RpcServer::spawn(
-            config.rpc.clone(),
-            config.mining.clone(),
-            build_version(),
-            user_agent(),
-            mempool.clone(),
-            read_only_state_service.clone(),
-            block_verifier_router.clone(),
-            sync_status.clone(),
-            address_book.clone(),
-            latest_chain_tip.clone(),
-            config.network.network.clone(),
-        );
+        let rpc_task_handle = if let Some(listen_addr) = config.rpc.listen_addr {
+            info!("spawning RPC server");
+            info!("Trying to open RPC endpoint at {}...", listen_addr,);
+            let rpc_task_handle = RpcServer::spawn(
+                config.rpc.clone(),
+                config.mining.clone(),
+                build_version(),
+                user_agent(),
+                mempool.clone(),
+                read_only_state_service.clone(),
+                block_verifier_router.clone(),
+                sync_status.clone(),
+                address_book.clone(),
+                latest_chain_tip.clone(),
+                config.network.network.clone(),
+            );
+            rpc_task_handle.await.unwrap()
+        } else {
+            warn!("configure an listen_addr to start the RPC server");
+            tokio::spawn(std::future::pending().in_current_span())
+        };
 
         // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
         //       any related unit tests sometimes crash with memory errors
@@ -399,7 +406,7 @@ impl StartCmd {
         // ongoing tasks
         pin!(rpc_task_handle);
         pin!(indexer_rpc_task_handle);
-        pin!(rpc_tx_queue_task_handle);
+        //pin!(rpc_tx_queue_task_handle);
         pin!(syncer_task_handle);
         pin!(block_gossip_task_handle);
         pin!(mempool_crawler_task_handle);
@@ -425,26 +432,28 @@ impl StartCmd {
             let mut exit_when_task_finishes = true;
 
             let result = select! {
-                rpc_result = &mut rpc_task_handle => {
-                    rpc_result
-                        .expect("unexpected panic in the rpc task");
-                    info!("rpc task exited");
-                    Ok(())
+                    rpc_join_result = &mut rpc_task_handle => {
+                        let rpc_server_result = rpc_join_result
+                            .expect("unexpected panic in the rpc task");
+                        info!(?rpc_server_result, "rpc task exited");
+                        Ok(())
                 }
 
                 indexer_rpc_join_result = &mut indexer_rpc_task_handle => {
                     let indexer_rpc_server_result = indexer_rpc_join_result
-                        .expect("unexpected panic in the rpc task");
+                        .expect("unexpected panic in the indexer task");
                     info!(?indexer_rpc_server_result, "indexer rpc task exited");
                     Ok(())
                 }
 
+                /*
                 rpc_tx_queue_result = &mut rpc_tx_queue_task_handle => {
                     rpc_tx_queue_result
                         .expect("unexpected panic in the rpc transaction queue task");
                     info!("rpc transaction queue task exited");
                     Ok(())
                 }
+                */
 
                 sync_result = &mut syncer_task_handle => sync_result
                     .expect("unexpected panic in the syncer task")
@@ -522,7 +531,7 @@ impl StartCmd {
 
         // ongoing tasks
         rpc_task_handle.abort();
-        rpc_tx_queue_task_handle.abort();
+        //rpc_tx_queue_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();
@@ -535,15 +544,6 @@ impl StartCmd {
         // startup tasks
         state_checkpoint_verify_handle.abort();
         old_databases_task_handle.abort();
-
-        // Wait until the RPC server shuts down.
-        // This can take around 150 seconds.
-        //
-        // Without this shutdown, Zebra's RPC unit tests sometimes crashed with memory errors.
-        if let Some(rpc_server) = rpc_server {
-            info!("waiting for RPC server to shut down");
-            rpc_server.shutdown_blocking();
-        }
 
         info!("exiting Zebra: all tasks have been asked to stop, waiting for remaining tasks to finish");
 

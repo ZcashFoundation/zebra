@@ -48,26 +48,12 @@ pub struct Config {
     /// anyone on the internet can query your node's state.
     pub indexer_listen_addr: Option<SocketAddr>,
 
-    /// The number of threads used to process RPC requests and responses.
+    /// The number of threads to use for parallel CPU processing.
     ///
-    /// Zebra's RPC server has a separate thread pool and a `tokio` executor for each thread.
-    /// State queries are run concurrently using the shared thread pool controlled by
-    /// the [`SyncSection.parallel_cpu_threads`](https://docs.rs/zebrad/latest/zebrad/components/sync/struct.Config.html#structfield.parallel_cpu_threads) config.
-    ///
-    /// If the number of threads is not configured or zero, Zebra uses the number of logical cores.
-    /// If the number of logical cores can't be detected, Zebra uses one thread.
-    ///
-    /// Set to `1` to run all RPC queries on a single thread, and detect RPC port conflicts from
-    /// multiple Zebra or `zcashd` instances.
-    ///
-    /// For details, see [the `jsonrpc_http_server` documentation](https://docs.rs/jsonrpc-http-server/latest/jsonrpc_http_server/struct.ServerBuilder.html#method.threads).
-    ///
-    /// ## Warning
-    ///
-    /// The default config uses multiple threads, which disables RPC port conflict detection.
-    /// This can allow multiple Zebra instances to share the same RPC port.
-    ///
-    /// If some of those instances are outdated or failed, RPC queries can be slow or inconsistent.
+    /// This field is deprecated and could be removed in a future release.
+    /// We keep it just for backward compatibility but it actually do nothing.
+    /// It was something configurable when the RPC server was based in the jsonrpc-core crate,
+    /// not anymore since we migrated to jsonrpsee.
     pub parallel_cpu_threads: usize,
 
     /// Test-only option that makes Zebra say it is at the chain tip,
@@ -92,12 +78,7 @@ impl Default for Config {
             // Disable indexer RPCs by default.
             indexer_listen_addr: None,
 
-            // Use a single thread, so we can detect RPC port conflicts.
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            parallel_cpu_threads: 1,
-
-            // Use multiple threads, because we pause requests during getblocktemplate long polling
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            // The default number of parallel CPU threads is 0.
             parallel_cpu_threads: 0,
 
             // Debug options are always off by default.
