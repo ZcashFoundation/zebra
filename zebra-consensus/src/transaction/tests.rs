@@ -1006,45 +1006,43 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 fn v5_transaction_is_accepted_after_nu5_activation() {
     let _init_guard = zebra_test::init();
 
-    for network in [Network::Mainnet, Network::new_default_testnet()] {
-        zebra_test::MULTI_THREADED_RUNTIME.block_on(test(network));
-    }
+    for network in Network::iter() {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+            let nu5_activation_height = NetworkUpgrade::Nu5
+                .activation_height(&network)
+                .expect("NU5 activation height is specified");
 
-    async fn test(network: Network) {
-        let nu5_activation_height = NetworkUpgrade::Nu5
-            .activation_height(&network)
-            .expect("NU5 activation height is specified");
+            let state = service_fn(|_| async { unreachable!("Service should not be called") });
 
-        let state = service_fn(|_| async { unreachable!("Service should not be called") });
+            let mut tx = fake_v5_transactions_for_network(&network, network.block_iter())
+                .next_back()
+                .expect("At least one fake V5 transaction in the test vectors");
 
-        let mut tx = fake_v5_transactions_for_network(&network, network.block_iter())
-            .next_back()
-            .expect("At least one fake V5 transaction in the test vectors");
+            if tx.expiry_height().expect("V5 must have expiry_height") < nu5_activation_height {
+                *tx.expiry_height_mut() = nu5_activation_height;
+                tx.update_network_upgrade(NetworkUpgrade::Nu5)
+                    .expect("updating the network upgrade for a V5 tx should succeed");
+            }
 
-        if tx.expiry_height().expect("V5 must have expiry_height") < nu5_activation_height {
-            *tx.expiry_height_mut() = nu5_activation_height;
-            tx.update_network_upgrade(NetworkUpgrade::Nu5)
-                .expect("updating the network upgrade for a V5 tx should succeed");
-        }
+            let expected_hash = tx.unmined_id();
+            let expiry_height = tx.expiry_height().expect("V5 must have expiry_height");
 
-        let expected_hash = tx.unmined_id();
-        let expiry_height = tx.expiry_height().expect("V5 must have expiry_height");
+            let verification_result = Verifier::new_for_tests(&network, state)
+                .oneshot(Request::Block {
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height: expiry_height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await;
 
-        let verification_result = Verifier::new_for_tests(&network, state)
-            .oneshot(Request::Block {
-                transaction: Arc::new(tx),
-                known_utxos: Arc::new(HashMap::new()),
-                height: expiry_height,
-                time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
-
-        assert_eq!(
-            verification_result
-                .expect("successful verification")
-                .tx_id(),
-            expected_hash
-        );
+            assert_eq!(
+                verification_result
+                    .expect("successful verification")
+                    .tx_id(),
+                expected_hash
+            );
+        });
     }
 }
 
@@ -2103,11 +2101,7 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 /// Test if V5 transaction with an internal double spend of transparent funds is rejected.
 #[tokio::test]
 async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
-    for network in [Network::Mainnet, Network::new_default_testnet()] {
-        test(network).await;
-    }
-
-    async fn test(network: Network) {
+    for network in Network::iter() {
         let canopy_activation_height = NetworkUpgrade::Canopy
             .activation_height(&network)
             .expect("Canopy activation height is specified");
