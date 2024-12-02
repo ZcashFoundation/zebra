@@ -17,11 +17,11 @@ categories = ["algorithms", "asynchronous"]
 
 [dependencies]
 pin-project = "1.1.6"
-tower = "0.4.13"
+tower = "0.5.1"
 futures-core = "0.3.28"
-tracing = "0.1.39"
+tracing = "0.1.41"
 
 [dev-dependencies]
-tokio = { version = "1.41.0", features = ["full", "tracing", "test-util"] }
+tokio = { version = "1.41.1", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.42" }

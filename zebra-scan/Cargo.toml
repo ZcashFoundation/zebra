@@ -61,13 +61,13 @@ results-reader = [
 [dependencies]
 
 color-eyre = "0.6.3"
-indexmap = { version = "2.6.0", features = ["serde"] }
+indexmap = { version = "2.7.0", features = ["serde"] }
 itertools = "0.13.0"
 semver = "1.0.23"
-serde = { version = "1.0.211", features = ["serde_derive"] }
-tokio = { version = "1.41.0", features = ["time"] }
-tower = "0.4.13"
-tracing = "0.1.39"
+serde = { version = "1.0.215", features = ["serde_derive"] }
+tokio = { version = "1.41.1", features = ["time"] }
+tower = "0.5.1"
+tracing = "0.1.41"
 futures = "0.3.31"
 
 # ECC dependencies.
@@ -102,7 +102,7 @@ zebra-test = { path = "../zebra-test", version = "1.0.0-beta.42", optional = tru
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 structopt = "0.3.26"
 lazy_static = "1.4.0"
-serde_json = "1.0.132"
+serde_json = "1.0.133"
 
 jsonrpc = { version = "0.18.0", optional = true }
 hex = { version = "0.4.3", optional = true }
@@ -110,8 +110,8 @@ hex = { version = "0.4.3", optional = true }
 zebrad = { path = "../zebrad", version = "2.0.1" }
 
 [dev-dependencies]
-insta = { version = "1.40.0", features = ["ron", "redactions"] }
-tokio = { version = "1.41.0", features = ["test-util"] }
+insta = { version = "1.41.1", features = ["ron", "redactions"] }
+tokio = { version = "1.41.1", features = ["test-util"] }
 
 proptest = "1.4.0"
 proptest-derive = "0.5.0"
@@ -120,7 +120,7 @@ ff = "0.13.0"
 group = "0.13.0"
 jubjub = "0.10.0"
 rand = "0.8.5"
-tempfile = "3.13.0"
+tempfile = "3.14.0"
 zcash_note_encryption = "0.4.0"
 toml = "0.8.19"
 tonic = "0.12.3"
