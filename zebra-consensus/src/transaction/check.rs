@@ -504,7 +504,6 @@ pub fn tx_transparent_coinbase_spends_maturity(
 ///
 /// > 1. [**NU5** only, pre-**NU6**] All transactions **MUST** use the **NU5** consensus branch ID
 /// >    `0xF919A198` as defined in [ZIP-252].
-/// >
 /// > 2. [**NU6** only] All transactions **MUST** use the **NU6** consensus branch ID `0xC8E71055`
 /// >    as defined in [ZIP-253].
 ///
