@@ -335,6 +335,20 @@ impl Transaction {
         }
     }
 
+    /// Returns `effectiveVersion` as described in [§ 7.1 Transaction Encoding and Consensus]:
+    ///
+    /// > `effectiveVersion` [...] is equal to `min(2, version)` when `fOverwintered = 0` and to
+    /// > `version` otherwise.
+    ///
+    /// [§ 7.1 Transaction Encoding and Consensus]: <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
+    pub fn effective_version(&self) -> u32 {
+        if self.is_overwintered() {
+            self.version()
+        } else {
+            std::cmp::min(2, self.version())
+        }
+    }
+
     /// Get this transaction's lock time.
     pub fn lock_time(&self) -> Option<LockTime> {
         let lock_time = match self {
