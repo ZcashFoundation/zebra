@@ -718,7 +718,7 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         .ok()
         .expect("send should succeed");
 
-    let height = NetworkUpgrade::Canopy
+    let height = NetworkUpgrade::Nu6
         .activation_height(&Network::Mainnet)
         .expect("Canopy activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
@@ -730,13 +730,14 @@ async fn skips_verification_of_block_transactions_in_mempool() {
     );
 
     // Create a non-coinbase V4 tx with the last valid expiry height.
-    let tx = Transaction::V4 {
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu5,
         inputs: vec![input],
         outputs: vec![output],
         lock_time: LockTime::min_lock_time_timestamp(),
         expiry_height: height,
-        joinsplit_data: None,
         sapling_shielded_data: None,
+        orchard_shielded_data: None,
     };
 
     let tx_hash = tx.hash();
