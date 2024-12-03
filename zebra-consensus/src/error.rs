@@ -240,7 +240,7 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Zip317(#[from] zebra_chain::transaction::zip317::Error),
 
-    #[error("the transaction uses an incorrect consensus branch id")]
+    #[error("transaction uses an incorrect consensus branch id")]
     WrongConsensusBranchId,
 
     #[error("wrong tx format: tx version is ≥ 5, but `nConsensusBranchId` is missing")]
