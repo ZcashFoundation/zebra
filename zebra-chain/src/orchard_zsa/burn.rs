@@ -4,8 +4,9 @@ use std::io;
 
 use halo2::pasta::pallas;
 
+use group::prime::PrimeCurveAffine;
+
 use crate::{
-    amount::Amount,
     block::MAX_BLOCK_BYTES,
     orchard::ValueCommitment,
     serialization::{
@@ -125,8 +126,7 @@ pub struct NoBurn;
 
 impl From<NoBurn> for ValueCommitment {
     fn from(_burn: NoBurn) -> ValueCommitment {
-        // FIXME: is there a simpler way to get zero ValueCommitment?
-        ValueCommitment::new(pallas::Scalar::zero(), Amount::zero())
+        ValueCommitment(pallas::Affine::identity())
     }
 }
 
@@ -164,15 +164,7 @@ impl From<Burn> for ValueCommitment {
         burn.0
             .into_iter()
             .map(|BurnItem(asset, amount)| {
-                ValueCommitment::with_asset(
-                    pallas::Scalar::zero(),
-                    // FIXME: consider to use TryFrom and return an error instead of using "expect"
-                    amount
-                        .inner()
-                        .try_into()
-                        .expect("should convert Burn amount to i64"),
-                    &asset,
-                )
+                ValueCommitment::with_asset(pallas::Scalar::zero(), amount, &asset)
             })
             .sum()
     }
