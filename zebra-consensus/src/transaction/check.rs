@@ -517,14 +517,18 @@ pub fn consensus_branch_id(
     height: Height,
     network: &Network,
 ) -> Result<(), TransactionError> {
-    if tx.effective_version() >= 5 {
-        let Some(tx_nu) = tx.network_upgrade() else {
-            return Err(TransactionError::MissingConsensusBranchId);
-        };
+    let current_nu = NetworkUpgrade::current(network, height);
 
-        if tx_nu != NetworkUpgrade::current(network, height) {
-            return Err(TransactionError::WrongConsensusBranchId);
-        }
+    if current_nu < NetworkUpgrade::Nu5 || tx.effective_version() < 5 {
+        return Ok(());
+    }
+
+    let Some(tx_nu) = tx.network_upgrade() else {
+        return Err(TransactionError::MissingConsensusBranchId);
+    };
+
+    if tx_nu != current_nu {
+        return Err(TransactionError::WrongConsensusBranchId);
     }
 
     Ok(())
