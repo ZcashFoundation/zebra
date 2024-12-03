@@ -54,7 +54,10 @@ use zebra_network as zn;
 use zebra_node_services::mempool::Gossip;
 use zebra_state::{self as zs, CloneError};
 
-use crate::components::sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT};
+use crate::components::{
+    mempool::crawler::RATE_LIMIT_DELAY,
+    sync::{BLOCK_DOWNLOAD_TIMEOUT, BLOCK_VERIFY_TIMEOUT},
+};
 
 use super::MempoolError;
 
@@ -152,16 +155,20 @@ where
     /// A list of pending transaction download and verify tasks.
     #[pin]
     pending: FuturesUnordered<
-        JoinHandle<
+        JoinHandle<(
             Result<
-                (
-                    VerifiedUnminedTx,
-                    Vec<transparent::OutPoint>,
-                    Option<Height>,
-                ),
-                (TransactionDownloadVerifyError, UnminedTxId),
+                Result<
+                    (
+                        VerifiedUnminedTx,
+                        Vec<transparent::OutPoint>,
+                        Option<Height>,
+                    ),
+                    (TransactionDownloadVerifyError, UnminedTxId),
+                >,
+                tokio::time::error::Elapsed,
             >,
-        >,
+            Option<oneshot::Sender<Result<(), BoxError>>>,
+        )>,
     >,
 
     /// A list of channels that can be used to cancel pending transaction download and
@@ -178,14 +185,20 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = Result<
-        (
-            VerifiedUnminedTx,
-            Vec<transparent::OutPoint>,
-            Option<Height>,
-        ),
-        (UnminedTxId, TransactionDownloadVerifyError),
-    >;
+    type Item = (
+        Result<
+            Result<
+                (
+                    VerifiedUnminedTx,
+                    Vec<transparent::OutPoint>,
+                    Option<Height>,
+                ),
+                (UnminedTxId, TransactionDownloadVerifyError),
+            >,
+            tokio::time::error::Elapsed,
+        >,
+        Option<oneshot::Sender<Result<(), BoxError>>>,
+    );
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -198,20 +211,28 @@ where
         // task is scheduled for wakeup when the next task becomes ready.
         //
         // TODO: this would be cleaner with poll_map (#2693)
-        if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            match join_result.expect("transaction download and verify tasks must not panic") {
-                Ok((tx, spent_mempool_outpoints, tip_height)) => {
+        let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
+            let (result, rsp_tx) =
+                join_result.expect("transaction download and verify tasks must not panic");
+
+            let result = match result {
+                Ok(Ok((tx, spent_mempool_outpoints, tip_height))) => {
                     this.cancel_handles.remove(&tx.transaction.id);
-                    Poll::Ready(Some(Ok((tx, spent_mempool_outpoints, tip_height))))
+                    Ok(Ok((tx, spent_mempool_outpoints, tip_height)))
                 }
-                Err((e, hash)) => {
+                Ok(Err((e, hash))) => {
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err((hash, e))))
+                    Ok(Err((hash, e)))
                 }
-            }
+                Err(elapsed) => Err(elapsed),
+            };
+
+            Some((result, rsp_tx))
         } else {
-            Poll::Ready(None)
-        }
+            None
+        };
+
+        Poll::Ready(item)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
@@ -255,7 +276,7 @@ where
     pub fn download_if_needed_and_verify(
         &mut self,
         gossiped_tx: Gossip,
-        rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
+        mut rsp_tx: Option<oneshot::Sender<Result<(), BoxError>>>,
     ) -> Result<(), MempoolError> {
         let txid = gossiped_tx.id();
 
@@ -381,37 +402,51 @@ where
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
         .map_err(move |e| (e, txid))
-            .inspect(move |result| {
-                // Hide the transaction data to avoid filling the logs
-                let result = result.as_ref().map(|_tx| txid);
-                debug!("mempool transaction result: {result:?}");
-            })
+        .inspect(move |result| {
+            // Hide the transaction data to avoid filling the logs
+            let result = result.as_ref().map(|_tx| txid);
+            debug!("mempool transaction result: {result:?}");
+        })
         .in_current_span();
 
         let task = tokio::spawn(async move {
+            let fut = tokio::time::timeout(RATE_LIMIT_DELAY, fut);
+
             // Prefer the cancel handle if both are ready.
             let result = tokio::select! {
                 biased;
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
                     metrics::counter!("mempool.cancelled.verify.tasks.total").increment(1);
-                    Err((TransactionDownloadVerifyError::Cancelled, txid))
+                    if let Some(rsp_tx) = rsp_tx.take() {
+                        let _ = rsp_tx.send(Err("verification cancelled".into()));
+                    }
+
+                    Ok(Err((TransactionDownloadVerifyError::Cancelled, txid)))
                 }
-                verification = fut => verification,
+                verification = fut => {
+                    verification
+                        .inspect_err(|_elapsed| {
+                            if let Some(rsp_tx) = rsp_tx.take() {
+                                let _ = rsp_tx.send(Err("timeout waiting for verification result".into()));
+                            }
+                        })
+                        .inspect(|inner_result| {
+                            let _ = inner_result
+                                .as_ref()
+                                .inspect_err(|(tx_verifier_error, tx_id)| {
+                                    if let Some(rsp_tx) = rsp_tx.take() {
+                                        let error_msg = format!(
+                                            "failed to validate tx: {tx_id}, error: {tx_verifier_error}"
+                                        );
+                                        let _ = rsp_tx.send(Err(error_msg.into()));
+                                    }
+                                });
+                        })
+                },
             };
 
-            // Send the result to responder channel if one was provided.
-            // TODO: Wait until transactions are added to the verified set before sending an Ok to `rsp_tx`.
-            if let Some(rsp_tx) = rsp_tx {
-                let _ = rsp_tx.send(
-                    result
-                        .as_ref()
-                        .map(|_| ())
-                        .map_err(|(err, _)| err.clone().into()),
-                );
-            }
-
-            result
+            (result, rsp_tx)
         });
 
         self.pending.push(task);
