@@ -155,20 +155,20 @@ where
     /// A list of pending transaction download and verify tasks.
     #[pin]
     pending: FuturesUnordered<
-        JoinHandle<(
+        JoinHandle<
             Result<
                 Result<
                     (
                         VerifiedUnminedTx,
                         Vec<transparent::OutPoint>,
                         Option<Height>,
+                        Option<oneshot::Sender<Result<(), BoxError>>>,
                     ),
                     (TransactionDownloadVerifyError, UnminedTxId),
                 >,
                 tokio::time::error::Elapsed,
             >,
-            Option<oneshot::Sender<Result<(), BoxError>>>,
-        )>,
+        >,
     >,
 
     /// A list of channels that can be used to cancel pending transaction download and
@@ -185,20 +185,18 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = (
+    type Item = Result<
         Result<
-            Result<
-                (
-                    VerifiedUnminedTx,
-                    Vec<transparent::OutPoint>,
-                    Option<Height>,
-                ),
-                (UnminedTxId, TransactionDownloadVerifyError),
-            >,
-            tokio::time::error::Elapsed,
+            (
+                VerifiedUnminedTx,
+                Vec<transparent::OutPoint>,
+                Option<Height>,
+                Option<oneshot::Sender<Result<(), BoxError>>>,
+            ),
+            (UnminedTxId, TransactionDownloadVerifyError),
         >,
-        Option<oneshot::Sender<Result<(), BoxError>>>,
-    );
+        tokio::time::error::Elapsed,
+    >;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -212,13 +210,11 @@ where
         //
         // TODO: this would be cleaner with poll_map (#2693)
         let item = if let Some(join_result) = ready!(this.pending.poll_next(cx)) {
-            let (result, rsp_tx) =
-                join_result.expect("transaction download and verify tasks must not panic");
-
+            let result = join_result.expect("transaction download and verify tasks must not panic");
             let result = match result {
-                Ok(Ok((tx, spent_mempool_outpoints, tip_height))) => {
+                Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx))) => {
                     this.cancel_handles.remove(&tx.transaction.id);
-                    Ok(Ok((tx, spent_mempool_outpoints, tip_height)))
+                    Ok(Ok((tx, spent_mempool_outpoints, tip_height, rsp_tx)))
                 }
                 Ok(Err((e, hash))) => {
                     this.cancel_handles.remove(&hash);
@@ -227,7 +223,7 @@ where
                 Err(elapsed) => Err(elapsed),
             };
 
-            Some((result, rsp_tx))
+            Some(result)
         } else {
             None
         };
@@ -431,22 +427,25 @@ where
                                 let _ = rsp_tx.send(Err("timeout waiting for verification result".into()));
                             }
                         })
-                        .inspect(|inner_result| {
-                            let _ = inner_result
-                                .as_ref()
-                                .inspect_err(|(tx_verifier_error, tx_id)| {
+                        .map(|inner_result| {
+                            match inner_result {
+                                Ok((transaction, spent_mempool_outpoints, tip_height)) => Ok((transaction, spent_mempool_outpoints, tip_height, rsp_tx)),
+                                Err((tx_verifier_error, tx_id)) => {
                                     if let Some(rsp_tx) = rsp_tx.take() {
                                         let error_msg = format!(
                                             "failed to validate tx: {tx_id}, error: {tx_verifier_error}"
                                         );
                                         let _ = rsp_tx.send(Err(error_msg.into()));
-                                    }
-                                });
+                                    };
+
+                                    Err((tx_verifier_error, tx_id))
+                                }
+                            }
                         })
                 },
             };
 
-            (result, rsp_tx)
+            result
         });
 
         self.pending.push(task);

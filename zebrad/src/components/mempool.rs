@@ -585,9 +585,9 @@ impl Service<Request> for Mempool {
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
             // Clean up completed download tasks and add to mempool if successful.
-            while let Poll::Ready(Some((result, rsp_tx))) = pin!(&mut *tx_downloads).poll_next(cx) {
+            while let Poll::Ready(Some(result)) = pin!(&mut *tx_downloads).poll_next(cx) {
                 match result {
-                    Ok(Ok((tx, spent_mempool_outpoints, expected_tip_height))) => {
+                    Ok(Ok((tx, spent_mempool_outpoints, expected_tip_height, rsp_tx))) => {
                         // # Correctness:
                         //
                         // It's okay to use tip height here instead of the tip hash since
@@ -627,18 +627,13 @@ impl Service<Request> for Mempool {
 
                         storage.reject_if_needed(tx_id, error);
                     }
-                    Err(elapsed) => {
+                    Err(_elapsed) => {
                         // A timeout happens when the stream hangs waiting for another service,
                         // so there is no specific transaction ID.
 
                         tracing::info!("mempool transaction failed to verify due to timeout");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
-
-                        // Send the result to responder channel if one was provided.
-                        if let Some(rsp_tx) = rsp_tx {
-                            let _ = rsp_tx.send(Err(elapsed.into()));
-                        }
                     }
                 };
             }
