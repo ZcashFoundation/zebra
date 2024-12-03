@@ -1516,6 +1516,18 @@ impl Default for GetInfo {
     }
 }
 
+impl GetInfo {
+    /// Constructs [`GetInfo`] from its constituent parts.
+    pub fn from_parts(build: String, subversion: String) -> Self {
+        Self { build, subversion }
+    }
+
+    /// Returns the contents of ['GetInfo'].
+    pub fn into_parts(self) -> (String, String) {
+        (self.build, self.subversion)
+    }
+}
+
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
@@ -1562,6 +1574,68 @@ impl Default for GetBlockChainInfo {
                 next_block: ConsensusBranchIdHex(ConsensusBranchId::default()),
             },
         }
+    }
+}
+
+impl GetBlockChainInfo {
+    /// Creates a new [`GetBlockChainInfo`] instance.
+    pub fn new(
+        chain: String,
+        blocks: Height,
+        best_block_hash: block::Hash,
+        estimated_height: Height,
+        value_pools: [types::ValuePoolBalance; 5],
+        upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
+        consensus: TipConsensusBranch,
+    ) -> Self {
+        Self {
+            chain,
+            blocks,
+            best_block_hash,
+            estimated_height,
+            value_pools,
+            upgrades,
+            consensus,
+        }
+    }
+
+    /// Returns the current network name as defined in BIP70 (main, test, regtest).
+    pub fn chain(&self) -> String {
+        self.chain.clone()
+    }
+
+    /// Returns the current number of blocks processed in the server.
+    pub fn blocks(&self) -> Height {
+        self.blocks
+    }
+
+    /// Returns the hash of the currently best block, in big-endian order, hex-encoded.
+    pub fn best_block_hash(&self) -> &block::Hash {
+        &self.best_block_hash
+    }
+
+    /// Returns the estimated height of the chain.
+    ///
+    /// If syncing, the estimated height of the chain, else the current best height, numeric.
+    ///
+    /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
+    pub fn estimated_height(&self) -> Height {
+        self.estimated_height
+    }
+
+    /// Returns the value pool balances.
+    pub fn value_pools(&self) -> &[types::ValuePoolBalance; 5] {
+        &self.value_pools
+    }
+
+    /// Returns the network upgrades.
+    pub fn upgrades(&self) -> &IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo> {
+        &self.upgrades
+    }
+
+    /// Returns the Branch IDs of the current and upcoming consensus rules.
+    pub fn consensus(&self) -> &TipConsensusBranch {
+        &self.consensus
     }
 }
 
