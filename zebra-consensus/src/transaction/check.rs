@@ -502,34 +502,26 @@ pub fn tx_transparent_coinbase_spends_maturity(
 ///
 /// ## [7.1.2 Transaction Consensus Rules]
 ///
-/// > [N​U​5 onward] If effectiveVersion ≥ 5, the nConsensusBranchId field MUST match the consensus branch ID
-///    used for SIGHASH transaction hashes, as specified in [ZIP-244].
-///
-/// ## [4.10 SIGHASH Transaction Hashing]
-///
-/// > 1. [**NU5** only, pre-**NU6**] All transactions **MUST** use the **NU5** consensus branch ID
-/// >    `0xF919A198` as defined in [ZIP-252].
-/// > 2. [**NU6** only] All transactions **MUST** use the **NU6** consensus branch ID `0xC8E71055`
-/// >    as defined in [ZIP-253].
+/// > [**NU5** onward] If `effectiveVersion` ≥ 5, the `nConsensusBranchId` field **MUST** match the
+/// > consensus branch ID used for SIGHASH transaction hashes, as specified in [ZIP-244].
 ///
 /// ### Notes
 ///
-/// 1. At the time of writing this check, the `nConsensusBranchId` field is present only in
-///    [`Transaction::V5`].
-/// 2. When deserializing a transaction, Zebra converts the `nConsensusBranchId` into
-///    [`NetworkUpgrade`] and stores it in [`Transaction::V5::network_upgrade`].
+/// - When deserializing transactions, Zebra converts the `nConsensusBranchId` into
+///   [`NetworkUpgrade`].
 ///
 /// [ZIP-244]: <https://zips.z.cash/zip-0244>
-/// [ZIP-252]: <https://zips.z.cash/zip-0252>
-/// [ZIP-253]: <https://zips.z.cash/zip-0253>
-/// [4.10 SIGHASH Transaction Hashing]: <https://zips.z.cash/protocol/protocol.pdf#sighash>
 /// [7.1.2 Transaction Consensus Rules]: <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn consensus_branch_id(
     tx: &Transaction,
     height: Height,
     network: &Network,
 ) -> Result<(), TransactionError> {
-    if let Some(tx_nu) = tx.network_upgrade() {
+    if tx.effective_version() >= 5 {
+        let Some(tx_nu) = tx.network_upgrade() else {
+            return Err(TransactionError::MissingConsensusBranchId);
+        };
+
         if tx_nu != NetworkUpgrade::current(network, height) {
             return Err(TransactionError::WrongConsensusBranchId);
         }

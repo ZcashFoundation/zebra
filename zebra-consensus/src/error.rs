@@ -242,6 +242,9 @@ pub enum TransactionError {
 
     #[error("the transaction uses an incorrect consensus branch id")]
     WrongConsensusBranchId,
+
+    #[error("wrong tx format: tx version is ≥ 5, but `nConsensusBranchId` is missing")]
+    MissingConsensusBranchId,
 }
 
 impl From<ValidateContextError> for TransactionError {
