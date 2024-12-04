@@ -324,7 +324,17 @@ impl Transaction {
         }
     }
 
-    /// Return the version of this transaction.
+    /// Returns the version of this transaction.
+    ///
+    /// Note that the returned version is equal to `effectiveVersion`, described in [§ 7.1
+    /// Transaction Encoding and Consensus]:
+    ///
+    /// > `effectiveVersion` [...] is equal to `min(2, version)` when `fOverwintered = 0` and to
+    /// > `version` otherwise.
+    ///
+    /// Zebra handles the `fOverwintered` flag via the [`Self::is_overwintered`] method.
+    ///
+    /// [§ 7.1 Transaction Encoding and Consensus]: <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
     pub fn version(&self) -> u32 {
         match self {
             Transaction::V1 { .. } => 1,
@@ -332,20 +342,6 @@ impl Transaction {
             Transaction::V3 { .. } => 3,
             Transaction::V4 { .. } => 4,
             Transaction::V5 { .. } => 5,
-        }
-    }
-
-    /// Returns `effectiveVersion` as described in [§ 7.1 Transaction Encoding and Consensus]:
-    ///
-    /// > `effectiveVersion` [...] is equal to `min(2, version)` when `fOverwintered = 0` and to
-    /// > `version` otherwise.
-    ///
-    /// [§ 7.1 Transaction Encoding and Consensus]: <https://zips.z.cash/protocol/protocol.pdf#txnencoding>
-    pub fn effective_version(&self) -> u32 {
-        if self.is_overwintered() {
-            self.version()
-        } else {
-            std::cmp::min(2, self.version())
         }
     }
 

@@ -510,6 +510,9 @@ pub fn tx_transparent_coinbase_spends_maturity(
 /// - When deserializing transactions, Zebra converts the `nConsensusBranchId` into
 ///   [`NetworkUpgrade`].
 ///
+/// - The values returned by [`Transaction::version`] match `effectiveVersion` so we use them in
+///   place of `effectiveVersion`. More details in [`Transaction::version`].
+///
 /// [ZIP-244]: <https://zips.z.cash/zip-0244>
 /// [7.1.2 Transaction Consensus Rules]: <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 pub fn consensus_branch_id(
@@ -519,7 +522,7 @@ pub fn consensus_branch_id(
 ) -> Result<(), TransactionError> {
     let current_nu = NetworkUpgrade::current(network, height);
 
-    if current_nu < NetworkUpgrade::Nu5 || tx.effective_version() < 5 {
+    if current_nu < NetworkUpgrade::Nu5 || tx.version() < 5 {
         return Ok(());
     }
 
