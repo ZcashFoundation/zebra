@@ -1971,7 +1971,7 @@ pub struct GetBlockHeaderObject {
 
     /// The Equihash solution in the requested block header.
     #[serde(with = "hex")]
-    solution: Solution,
+    pub solution: Solution,
 
     /// The difficulty threshold of the requested block header displayed in compact form.
     #[serde(with = "hex")]
