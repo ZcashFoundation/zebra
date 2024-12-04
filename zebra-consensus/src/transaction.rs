@@ -549,17 +549,17 @@ where
                     )?;
 
                     if let Some(mut mempool) = mempool {
-                        if !transaction.transaction.transaction.outputs().is_empty() {
-                            tokio::spawn(async move {
-                                tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
-                                let _ = mempool
-                                    .ready()
-                                    .await
-                                    .expect("mempool poll_ready() method should not return an error")
-                                    .call(mempool::Request::CheckForVerifiedTransactions)
-                                    .await;
-                            });
-                        }
+                        tokio::spawn(async move {
+                            // Best-effort poll of the mempool to provide a timely response to 
+                            // `sendrawtransaction` RPC calls or `AwaitOutput` mempool calls.
+                            tokio::time::sleep(POLL_MEMPOOL_DELAY).await;
+                            let _ = mempool
+                                .ready()
+                                .await
+                                .expect("mempool poll_ready() method should not return an error")
+                                .call(mempool::Request::CheckForVerifiedTransactions)
+                                .await;
+                        });
                     }
 
                     Response::Mempool { transaction, spent_mempool_outpoints }

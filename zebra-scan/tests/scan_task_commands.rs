@@ -5,7 +5,7 @@
 //!
 //! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
 //! cargo test scan_task_commands --features="shielded-scan" -- --ignored --nocapture
-#![allow(dead_code)]
+#![allow(dead_code, non_local_definitions)]
 
 use std::{fs, time::Duration};
 
@@ -26,6 +26,7 @@ use zebra_scan::{
 
 use zebra_state::{ChainTipChange, LatestChainTip};
 
+/// Boxed state service.
 pub type BoxStateService =
     BoxService<zebra_state::Request, zebra_state::Response, zebra_state::BoxError>;
 
@@ -162,6 +163,7 @@ pub(crate) async fn run() -> Result<()> {
     Ok(())
 }
 
+/// Starts the state service with the provided cache directory.
 pub async fn start_state_service_with_cache_dir(
     network: &Network,
     cache_dir: impl Into<std::path::PathBuf>,

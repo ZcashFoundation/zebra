@@ -93,7 +93,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.5.1
+        uses: docker/metadata-action@v5.6.1
         with:
           # list of Docker images to use as base name for tags
           # We only publish images to DockerHub if a release is not a pre-release
@@ -161,7 +161,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v6.9.0
+        uses: docker/build-push-action@v6.10.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
@@ -193,7 +193,7 @@ jobs:
         # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@v1.15.0
+        uses: docker/scout-action@v1.15.1
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.

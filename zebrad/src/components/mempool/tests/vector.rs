@@ -978,21 +978,21 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     let result_rx = results.remove(0).expect("should pass initial checks");
     assert!(results.is_empty(), "should have 1 result for 1 queued tx");
 
+    // Wait for post-verification steps in mempool's Downloads
+    tokio::time::sleep(Duration::from_secs(1)).await;
+
+    // Note: Buffered services shouldn't be polled without being called.
+    //       See `mempool::Request::CheckForVerifiedTransactions` for more details.
+    mempool
+        .ready()
+        .await
+        .expect("polling mempool should succeed");
+
     tokio::time::timeout(Duration::from_secs(10), result_rx)
         .await
         .expect("should not time out")
         .expect("mempool tx verification result channel should not be closed")
         .expect("mocked verification should be successful");
-
-    // Wait for next steps in mempool's Downloads to finish
-    // TODO: Move this and the `ready().await` below above waiting for the mempool verification result above after
-    //       waiting to respond with a transaction's verification result until after it's been inserted into the mempool.
-    tokio::time::sleep(Duration::from_secs(1)).await;
-
-    mempool
-        .ready()
-        .await
-        .expect("polling mempool should succeed");
 
     assert_eq!(
         mempool.storage().transaction_count(),
