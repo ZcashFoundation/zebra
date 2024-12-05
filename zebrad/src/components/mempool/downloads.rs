@@ -115,10 +115,10 @@ pub enum TransactionDownloadVerifyError {
     #[error("transaction is already in state")]
     InState,
 
-    #[error("error in state service")]
+    #[error("error in state service: {0}")]
     StateError(#[source] CloneError),
 
-    #[error("error downloading transaction")]
+    #[error("error downloading transaction: {0}")]
     DownloadFailed(#[source] CloneError),
 
     #[error("transaction download / verification was cancelled")]
