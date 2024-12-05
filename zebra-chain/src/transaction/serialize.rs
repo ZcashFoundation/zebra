@@ -1105,7 +1105,8 @@ pub const MIN_TRANSPARENT_TX_V5_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4 + 4;
 
 /// The minimum transaction size for v6 transactions.
 ///
-/// FIXME: uncomment this and specify a proper value and description.
+#[allow(clippy::empty_line_after_doc_comments)]
+/// FIXME: remove "clippy" line above, uncomment line below and specify a proper value and description.
 //pub const MIN_TRANSPARENT_TX_V6_SIZE: u64 = MIN_TRANSPARENT_TX_V5_SIZE;
 
 /// No valid Zcash message contains more transactions than can fit in a single block
