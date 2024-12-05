@@ -495,3 +495,44 @@ pub fn tx_transparent_coinbase_spends_maturity(
 
     Ok(())
 }
+
+/// Checks the `nConsensusBranchId` field.
+///
+/// # Consensus
+///
+/// ## [7.1.2 Transaction Consensus Rules]
+///
+/// > [**NU5** onward] If `effectiveVersion` ≥ 5, the `nConsensusBranchId` field **MUST** match the
+/// > consensus branch ID used for SIGHASH transaction hashes, as specified in [ZIP-244].
+///
+/// ### Notes
+///
+/// - When deserializing transactions, Zebra converts the `nConsensusBranchId` into
+///   [`NetworkUpgrade`].
+///
+/// - The values returned by [`Transaction::version`] match `effectiveVersion` so we use them in
+///   place of `effectiveVersion`. More details in [`Transaction::version`].
+///
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
+/// [7.1.2 Transaction Consensus Rules]: <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+pub fn consensus_branch_id(
+    tx: &Transaction,
+    height: Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    let current_nu = NetworkUpgrade::current(network, height);
+
+    if current_nu < NetworkUpgrade::Nu5 || tx.version() < 5 {
+        return Ok(());
+    }
+
+    let Some(tx_nu) = tx.network_upgrade() else {
+        return Err(TransactionError::MissingConsensusBranchId);
+    };
+
+    if tx_nu != current_nu {
+        return Err(TransactionError::WrongConsensusBranchId);
+    }
+
+    Ok(())
+}
