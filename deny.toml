@@ -114,8 +114,8 @@ skip-tree = [
     { name = "f4jumble", version = "=0.1.0" },
     { name = "incrementalmerkletree", version = "=0.6.0" },
     { name = "zcash_address", version = "=0.4.0" },
-    { name = "zcash_keys", version = "=0.3.0" },
-    { name = "zcash_primitives", version = "=0.16.0" },
+    { name = "zcash_keys", version = "=0.4.0" },
+    { name = "zcash_primitives", version = "=0.19.0" },
     { name = "zcash_protocol", version = "=0.2.0" }
 ]
 
