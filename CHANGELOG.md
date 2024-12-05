@@ -5,6 +5,38 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 2.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.1.0) - 2024-12-06
+
+This release adds a check to verify that V5 transactions in the mempool have the correct consensus branch id. It also bumps
+Zebra's initial minimum protocol version such that this release of Zebra will always reject connections with peers advertising
+a network protocol version below 170,120 on Mainnet and 170,110 on Testnet instead of accepting those connections until Zebra's
+chain state reaches the NU6 activation height.
+
+### Breaking Changes
+
+- Upgrade minimum protocol versions for all Zcash networks ([#9058](https://github.com/ZcashFoundation/zebra/pull/9058))
+
+### Added
+
+- `getblockheader` RPC method ([#8967](https://github.com/ZcashFoundation/zebra/pull/8967))
+- `rust-toolchain.toml` file ([#8985](https://github.com/ZcashFoundation/zebra/pull/8985))
+
+### Changed
+
+- Updated `getblock` RPC to more closely match zcashd ([#9006](https://github.com/ZcashFoundation/zebra/pull/9006))
+- Updated error messages to include inner error types (notably for the transaction verifier) ([#9066](https://github.com/ZcashFoundation/zebra/pull/9066))
+
+### Fixed
+
+- Validate consensus branch ids of mempool transactions ([#9063](https://github.com/ZcashFoundation/zebra/pull/9063))
+- Verify mempool transactions with unmined inputs if those inputs are in the mempool to support TEX transactions ([#8857](https://github.com/ZcashFoundation/zebra/pull/8857))
+- Wait until transactions have been added to the mempool before returning success response from `sendrawtransaction` RPC ([#9067](https://github.com/ZcashFoundation/zebra/pull/9067))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@arya2, @conradoplg, @cypherpepe, @gustavovalverde, @idky137, @oxarbitrage, @pinglanlu and @upbqdn
+
 ## [Zebra 2.0.1](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.1) - 2024-10-30
 
 - Zebra now supports NU6 on Mainnet. This patch release updates dependencies
