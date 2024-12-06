@@ -49,6 +49,11 @@ impl BurnItem {
         self.0
     }
 
+    /// Returns the amount being burned.
+    pub fn amount(&self) -> NoteValue {
+        self.1
+    }
+
     /// Returns the raw [`u64`] amount being burned.
     pub fn raw_amount(&self) -> u64 {
         self.1.inner()
