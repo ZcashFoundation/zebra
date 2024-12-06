@@ -73,7 +73,7 @@ futures = "0.3.31"
 # ECC dependencies.
 zcash_client_backend.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
-zcash_primitives.workspace = true
+zcash_primitives = "0.20.0"
 zcash_address.workspace = true
 sapling-crypto.workspace = true
 

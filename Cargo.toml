@@ -26,13 +26,13 @@ incrementalmerkletree = { version = "0.7.0", features = ["legacy-api"] }
 orchard = "0.10.0"
 sapling-crypto = "0.3.0"
 zcash_address = "0.6.0"
-zcash_client_backend = "0.14.0"
+zcash_client_backend = "0.15.0"
 zcash_encoding = "0.2.1"
 zcash_history = "0.4.0"
 zcash_keys = "0.4.0"
 zcash_primitives = "0.19.0"
 zcash_proofs = "0.19.0"
-zcash_protocol = "0.4.0"
+zcash_protocol = "0.4.1"
 
 [workspace.metadata.release]
 
