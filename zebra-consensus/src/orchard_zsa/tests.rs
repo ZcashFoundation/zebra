@@ -80,7 +80,12 @@ fn calc_asset_supply_info<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
 ) -> Result<SupplyInfo, IssuanceError> {
     blocks
         .into_iter()
-        .flat_map(|(Request::Commit(block), _)| &block.transactions)
+        .filter_map(|(request, _)| match request {
+            Request::Commit(block) => Some(&block.transactions),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            Request::CheckProposal(_) => None,
+        })
+        .flatten()
         .try_fold(SupplyInfo::new(), |mut supply_info, tx| {
             process_burns(&mut supply_info, tx.orchard_burns().iter())?;
             process_issue_actions(&mut supply_info, tx.orchard_issue_actions())?;
