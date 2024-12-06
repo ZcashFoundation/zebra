@@ -24,7 +24,7 @@ use zebra_state::{ReadRequest, ReadResponse, ReadStateService};
 
 use zebra_test::{
     transcript::{ExpectedTranscriptError, Transcript},
-    vectors::ZSA_WORKFLOW_BLOCKS,
+    vectors::ORCHARD_ZSA_WORKFLOW_BLOCKS,
 };
 
 use crate::{block::Request, Config};
@@ -128,7 +128,8 @@ async fn check_zsa_workflow() -> Result<(), Report> {
     let (block_verifier_router, _tx_verifier, _groth16_download_handle, _max_checkpoint_height) =
         crate::router::init(Config::default(), &network, state_service.clone()).await;
 
-    let transcript_data = create_transcript_data(ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();
+    let transcript_data =
+        create_transcript_data(ORCHARD_ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();
 
     let asset_supply_info =
         calc_asset_supply_info(&transcript_data).expect("should calculate asset_supply_info");
