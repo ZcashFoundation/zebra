@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 2.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.1.0) - 2024-12-06
 
-This release adds a check to verify that V5 transactions in the mempool have the correct consensus branch id. It also bumps
+This release adds a check to verify that V5 transactions in the mempool have the correct consensus branch ID; 
+Zebra would previously accept those and return a transaction ID (indicating success) even though they would
+be eventually rejected by the block consensus checks. Similarly, Zebra also now returns an error when trying
+to submit transactions that would eventually fail some consensus checks (e.g. double spends) but would also 
+return a transaction ID indicating success.  The release also bumps
 Zebra's initial minimum protocol version such that this release of Zebra will always reject connections with peers advertising
 a network protocol version below 170,120 on Mainnet and 170,110 on Testnet instead of accepting those connections until Zebra's
 chain state reaches the NU6 activation height.
+The `getblock` RPC method has been updated and now returns some additional information
+such as the block height (even if you provide a block hash) and other fields as supported
+by the `getblockheader` RPC call.
 
 ### Breaking Changes
 
