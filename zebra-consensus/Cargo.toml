@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.42"
+version = "1.0.0-beta.43"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Implementation of Zcash consensus checks"
 license = "MIT OR Apache-2.0"
@@ -63,13 +63,13 @@ orchard.workspace = true
 zcash_proofs = { workspace = true, features = ["multicore" ] }
 wagyu-zcash-parameters = "0.2.0"
 
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.18" }
-tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.18" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.19" }
+tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.19" }
 
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.42" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.42" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.42" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.42" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.43" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.43" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.43" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.43" }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
@@ -94,6 +94,6 @@ tokio = { version = "1.41.0", features = ["full", "tracing", "test-util"] }
 tracing-error = "0.2.0"
 tracing-subscriber = "0.3.18"
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.42", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.42", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.42" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.43", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.43", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.43" }
