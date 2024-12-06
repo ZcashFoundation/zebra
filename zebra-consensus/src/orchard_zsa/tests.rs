@@ -140,7 +140,7 @@ async fn check_zsa_workflow() -> Result<(), Report> {
         calc_asset_supply_info(&transcript_data).expect("should calculate asset_supply_info");
 
     // Before applying the blocks, ensure that none of the assets exist in the state.
-    for (&asset_base, _asset_supply) in &asset_supply_info.assets {
+    for &asset_base in asset_supply_info.assets.keys() {
         assert!(
             request_asset_state(&read_state_service, asset_base)
                 .await
