@@ -6367,7 +6367,7 @@ dependencies = [
  "zcash_client_backend",
  "zcash_keys 0.4.0",
  "zcash_note_encryption",
- "zcash_primitives 0.19.0",
+ "zcash_primitives 0.20.0",
  "zebra-chain",
  "zebra-grpc",
  "zebra-node-services",
