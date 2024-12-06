@@ -121,7 +121,7 @@ pub enum TransactionError {
         transaction_hash: zebra_chain::transaction::Hash,
     },
 
-    #[error("coinbase transaction failed subsidy validation")]
+    #[error("coinbase transaction failed subsidy validation: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Subsidy(#[from] SubsidyError),
 
@@ -140,7 +140,7 @@ pub enum TransactionError {
     #[error("if there are no Spends or Outputs, the value balance MUST be 0.")]
     BadBalance,
 
-    #[error("could not verify a transparent script")]
+    #[error("could not verify a transparent script: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Script(#[from] zebra_script::Error),
 
@@ -149,29 +149,29 @@ pub enum TransactionError {
 
     // TODO: the underlying error is bellman::VerificationError, but it does not implement
     // Arbitrary as required here.
-    #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig")]
+    #[error("spend proof MUST be valid given a primary input formed from the other fields except spendAuthSig: {0}")]
     Groth16(String),
 
     // TODO: the underlying error is io::Error, but it does not implement Clone as required here.
-    #[error("Groth16 proof is malformed")]
+    #[error("Groth16 proof is malformed: {0}")]
     MalformedGroth16(String),
 
     #[error(
-        "Sprout joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned"
+        "Sprout joinSplitSig MUST represent a valid signature under joinSplitPubKey of dataToBeSigned: {0}"
     )]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Ed25519(#[from] zebra_chain::primitives::ed25519::Error),
 
-    #[error("Sapling bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    #[error("Sapling bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RedJubjub(zebra_chain::primitives::redjubjub::Error),
 
-    #[error("Orchard bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash")]
+    #[error("Orchard bindingSig MUST represent a valid signature under the transaction binding validating key bvk of SigHash: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     RedPallas(zebra_chain::primitives::reddsa::Error),
 
     // temporary error type until #1186 is fixed
-    #[error("Downcast from BoxError to redjubjub::Error failed")]
+    #[error("Downcast from BoxError to redjubjub::Error failed: {0}")]
     InternalDowncastError(String),
 
     #[error("either vpub_old or vpub_new must be zero")]
@@ -201,12 +201,12 @@ pub enum TransactionError {
     #[error("could not find a mempool transaction input UTXO in the best chain")]
     TransparentInputNotFound,
 
-    #[error("could not validate nullifiers and anchors on best chain")]
+    #[error("could not validate nullifiers and anchors on best chain: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // This error variant is at least 128 bytes
     ValidateContextError(Box<ValidateContextError>),
 
-    #[error("could not validate mempool transaction lock time on best chain")]
+    #[error("could not validate mempool transaction lock time on best chain: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // TODO: turn this into a typed error
     ValidateMempoolLockTimeError(String),
@@ -236,9 +236,17 @@ pub enum TransactionError {
         min_spend_height: block::Height,
     },
 
-    #[error("failed to verify ZIP-317 transaction rules, transaction was not inserted to mempool")]
+    #[error(
+        "failed to verify ZIP-317 transaction rules, transaction was not inserted to mempool: {0}"
+    )]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     Zip317(#[from] zebra_chain::transaction::zip317::Error),
+
+    #[error("transaction uses an incorrect consensus branch id")]
+    WrongConsensusBranchId,
+
+    #[error("wrong tx format: tx version is ≥ 5, but `nConsensusBranchId` is missing")]
+    MissingConsensusBranchId,
 }
 
 impl From<ValidateContextError> for TransactionError {
