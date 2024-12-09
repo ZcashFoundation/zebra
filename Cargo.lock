@@ -12,7 +12,7 @@ dependencies = [
  "arc-swap",
  "backtrace",
  "canonical-path",
- "clap 4.5.21",
+ "clap 4.5.23",
  "color-eyre",
  "fs-err",
  "once_cell",
@@ -741,9 +741,9 @@ dependencies = [
 
 [[package]]
 name = "chrono"
-version = "0.4.38"
+version = "0.4.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a21f936df1771bf62b77f047b726c4625ff2e8aa607c01ec06e5a05bd8463401"
+checksum = "7e36cc9d416881d2e24f9a963be5fb1cd90966419ac844274161d10488b3e825"
 dependencies = [
  "android-tzdata",
  "iana-time-zone",
@@ -818,9 +818,9 @@ dependencies = [
 
 [[package]]
 name = "clap"
-version = "4.5.21"
+version = "4.5.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb3b4b9e5a7c7514dfa52869339ee98b3156b0bfb4e8a77c4ff4babb64b1604f"
+checksum = "3135e7ec2ef7b10c6ed8950f0f792ed96ee093fa088608f1c76e569722700c84"
 dependencies = [
  "clap_builder",
  "clap_derive",
@@ -828,9 +828,9 @@ dependencies = [
 
 [[package]]
 name = "clap_builder"
-version = "4.5.21"
+version = "4.5.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b17a95aa67cc7b5ebd32aa5370189aa0d79069ef1c64ce893bd30fb24bff20ec"
+checksum = "30582fc632330df2bd26877bde0c1f4470d57c582bbc070376afcd04d8cb4838"
 dependencies = [
  "anstream",
  "anstyle",
@@ -852,9 +852,9 @@ dependencies = [
 
 [[package]]
 name = "clap_lex"
-version = "0.7.2"
+version = "0.7.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1462739cb27611015575c0c11df5df7601141071f07518d56fcc1be504cbec97"
+checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
 name = "color-eyre"
@@ -987,7 +987,7 @@ dependencies = [
  "anes",
  "cast",
  "ciborium",
- "clap 4.5.21",
+ "clap 4.5.23",
  "criterion-plot",
  "is-terminal",
  "itertools 0.10.5",
@@ -1621,7 +1621,7 @@ dependencies = [
  "indexmap 2.7.0",
  "slab",
  "tokio",
- "tokio-util 0.7.12",
+ "tokio-util 0.7.13",
  "tracing",
 ]
 
@@ -2029,9 +2029,9 @@ dependencies = [
 
 [[package]]
 name = "impl-codec"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba6a270039626615617f3f36d15fc827041df3b78c439da2cadfa47455a77f2f"
+checksum = "b67aa010c1e3da95bf151bd8b4c059b2ed7e75387cdb969b4f8f2723a43f9941"
 dependencies = [
  "parity-scale-codec",
 ]
@@ -3109,8 +3109,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b34d9fd68ae0b74a41b21c03c2f62847aa0ffea044eee893b4c140b37e244e2"
 dependencies = [
  "fixed-hash",
- "impl-codec",
  "uint 0.9.5",
+]
+
+[[package]]
+name = "primitive-types"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d15600a7d856470b7d278b3fe0e311fe28c2526348549f8ef2ff7db3299c87f5"
+dependencies = [
+ "fixed-hash",
+ "impl-codec",
+ "uint 0.10.0",
 ]
 
 [[package]]
@@ -3197,9 +3207,9 @@ dependencies = [
 
 [[package]]
 name = "prost"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b0487d90e047de87f984913713b85c601c05609aad5b0df4b4573fbf69aa13f"
+checksum = "2c0fef6c4230e4ccf618a35c59d7ede15dea37de8427500f50aff708806e42ec"
 dependencies = [
  "bytes",
  "prost-derive",
@@ -3228,9 +3238,9 @@ dependencies = [
 
 [[package]]
 name = "prost-derive"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e9552f850d5f0964a4e4d0bf306459ac29323ddfbae05e35a7c0d35cb0803cc5"
+checksum = "157c5a9d7ea5c2ed2d9fb8f495b64759f7816c7eaea54ba3978f0d63000162e3"
 dependencies = [
  "anyhow",
  "itertools 0.13.0",
@@ -3613,7 +3623,7 @@ dependencies = [
  "sync_wrapper 1.0.1",
  "tokio",
  "tokio-rustls",
- "tokio-util 0.7.12",
+ "tokio-util 0.7.13",
  "tower-service",
  "url",
  "wasm-bindgen",
@@ -4361,11 +4371,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.3"
+version = "2.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c006c85c7651b3cf2ada4584faa36773bd07bac24acfb39f3c431b36d7e667aa"
+checksum = "8fec2a1820ebd077e2b90c4df007bebf344cd394098a13c563957d0afc83ea47"
 dependencies = [
- "thiserror-impl 2.0.3",
+ "thiserror-impl 2.0.6",
 ]
 
 [[package]]
@@ -4381,9 +4391,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.3"
+version = "2.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f077553d607adc1caf65430528a576c757a71ed73944b66ebb58ef2bbd243568"
+checksum = "d65750cab40f4ff1929fb1ba509e9914eb756131cef4210da8d5d700d26f6312"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4474,9 +4484,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.41.1"
+version = "1.42.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22cfb5bee7a6a52939ca9224d6ac897bb669134078daa8735560897f69de4d33"
+checksum = "5cec9b21b0450273377fc97bd4c33a8acffc8c996c987a7c5b319a0083707551"
 dependencies = [
  "backtrace",
  "bytes",
@@ -4515,14 +4525,14 @@ dependencies = [
 
 [[package]]
 name = "tokio-stream"
-version = "0.1.16"
+version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f4e6ce100d0eb49a2734f8c0812bcd324cf357d21810932c5df6b96ef2b86f1"
+checksum = "eca58d7bba4a75707817a2c44174253f9236b2d5fbd055602e9d5c07c139a047"
 dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
- "tokio-util 0.7.12",
+ "tokio-util 0.7.13",
 ]
 
 [[package]]
@@ -4554,9 +4564,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.12"
+version = "0.7.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61e7c3654c13bcd040d4a03abee2c75b1d14a37b423cf5a813ceae1cc903ec6a"
+checksum = "d7fcaa8d55a2bdd6b83ace262b016eca0d79ee02818c5c1bcdf0305114081078"
 dependencies = [
  "bytes",
  "futures-core",
@@ -4673,14 +4683,13 @@ checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
 dependencies = [
  "futures-core",
  "futures-util",
- "hdrhistogram",
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
  "rand 0.8.5",
  "slab",
  "tokio",
- "tokio-util 0.7.12",
+ "tokio-util 0.7.13",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -4694,10 +4703,14 @@ checksum = "2873938d487c3cfb9aed7546dc9f2711d867c9f90c46b889989a2cb84eba6b4f"
 dependencies = [
  "futures-core",
  "futures-util",
+ "hdrhistogram",
  "pin-project-lite",
  "sync_wrapper 0.1.2",
+ "tokio",
+ "tokio-util 0.7.13",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -4714,8 +4727,8 @@ dependencies = [
  "tinyvec",
  "tokio",
  "tokio-test",
- "tokio-util 0.7.12",
- "tower 0.4.13",
+ "tokio-util 0.7.13",
+ "tower 0.5.1",
  "tower-fallback",
  "tower-test",
  "tracing",
@@ -4730,7 +4743,7 @@ dependencies = [
  "futures-core",
  "pin-project",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "zebra-test",
 ]
@@ -4767,7 +4780,6 @@ version = "0.1.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
 dependencies = [
- "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -4872,9 +4884,9 @@ dependencies = [
 
 [[package]]
 name = "tracing-subscriber"
-version = "0.3.18"
+version = "0.3.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad0f048c97dbd9faa9b7df56362b8ebcaa52adb06b498c050d2f4e32f90a7a8b"
+checksum = "e8189decb5ac0fa7bc8b96b7cb9b2701d60d48805aca84a238004d665fcc4008"
 dependencies = [
  "matchers",
  "nu-ansi-term",
@@ -5665,7 +5677,7 @@ checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
- "primitive-types",
+ "primitive-types 0.12.2",
 ]
 
 [[package]]
@@ -5827,7 +5839,7 @@ dependencies = [
  "lazy_static",
  "num-integer",
  "orchard",
- "primitive-types",
+ "primitive-types 0.13.1",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -5847,7 +5859,7 @@ dependencies = [
  "spandoc",
  "static_assertions",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "tinyvec",
  "tokio",
  "tracing",
@@ -5890,10 +5902,10 @@ dependencies = [
  "sapling-crypto",
  "serde",
  "spandoc",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tower-batch-control",
  "tower-fallback",
  "tracing",
@@ -5923,7 +5935,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.4.13",
+ "tower 0.5.1",
  "zcash_primitives",
  "zebra-chain",
  "zebra-node-services",
@@ -5959,12 +5971,12 @@ dependencies = [
  "serde",
  "static_assertions",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "tokio",
  "tokio-stream",
- "tokio-util 0.7.12",
+ "tokio-util 0.7.13",
  "toml 0.8.19",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-error",
  "tracing-futures",
@@ -6005,13 +6017,13 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "tokio",
  "tokio-stream",
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "zcash_address",
  "zcash_primitives",
@@ -6053,7 +6065,7 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
  "tonic",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-subscriber",
  "zcash_address",
@@ -6076,7 +6088,7 @@ version = "1.0.0-beta.43"
 dependencies = [
  "hex",
  "lazy_static",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "zcash_script",
  "zebra-chain",
  "zebra-test",
@@ -6118,10 +6130,10 @@ dependencies = [
  "serde_json",
  "spandoc",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "zebra-chain",
  "zebra-test",
@@ -6146,10 +6158,10 @@ dependencies = [
  "regex",
  "spandoc",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
@@ -6173,7 +6185,7 @@ dependencies = [
  "serde_yml",
  "structopt",
  "syn 2.0.90",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "tinyvec",
  "tokio",
  "tracing-error",
@@ -6194,7 +6206,7 @@ dependencies = [
  "atty",
  "bytes",
  "chrono",
- "clap 4.5.21",
+ "clap 4.5.23",
  "color-eyre",
  "console-subscriber",
  "dirs",
@@ -6229,7 +6241,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.3",
+ "thiserror 2.0.6",
  "thread-priority",
  "tinyvec",
  "tokio",
@@ -6237,7 +6249,7 @@ dependencies = [
  "toml 0.8.19",
  "tonic",
  "tonic-build",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-appender",
  "tracing-error",
