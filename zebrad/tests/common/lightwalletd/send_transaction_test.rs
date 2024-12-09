@@ -16,7 +16,7 @@
 //! were obtained. This is to ensure that zebra does not reject the transactions because they have
 //! already been seen in a block.
 
-use std::{cmp::min, sync::Arc};
+use std::{cmp::min, collections::HashSet, sync::Arc};
 use tower::BoxError;
 
 use color_eyre::eyre::{eyre, Result};
@@ -180,13 +180,18 @@ pub async fn run() -> Result<()> {
         .await?
         .into_inner();
 
+    let mut transaction_hashes = HashSet::new();
     let mut has_tx_with_shielded_elements = false;
     let mut counter = 0;
 
     for block in blocks {
-        let (has_shielded_elements, count) =
-            send_transactions_from_block(&mut rpc_client, &zebrad_rpc_client, block.clone())
-                .await?;
+        let (has_shielded_elements, count) = send_transactions_from_block(
+            &mut rpc_client,
+            &zebrad_rpc_client,
+            block.clone(),
+            &mut transaction_hashes,
+        )
+        .await?;
 
         has_tx_with_shielded_elements |= has_shielded_elements;
         counter += count;
@@ -220,6 +225,7 @@ async fn send_transactions_from_block(
     rpc_client: &mut CompactTxStreamerClient<tonic::transport::Channel>,
     zebrad_rpc_client: &RpcRequestClient,
     block: Block,
+    transaction_hashes: &mut HashSet<transaction::Hash>,
 ) -> Result<(bool, usize)> {
     // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call:
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L482>
@@ -238,8 +244,7 @@ async fn send_transactions_from_block(
         return Ok((false, 0));
     }
 
-    let transaction_hashes: Vec<transaction::Hash> =
-        transactions.iter().map(|tx| tx.hash()).collect();
+    transaction_hashes.extend(transactions.iter().map(|tx| tx.hash()));
 
     tracing::info!(
         transaction_count = ?transactions.len(),
@@ -303,7 +308,6 @@ async fn send_transactions_from_block(
         counter += 1;
     }
 
-    // TODO: GetMempoolStream: make sure at least one of the transactions were inserted into the mempool.
     tracing::info!("calling GetMempoolStream gRPC to fetch transactions...");
     let mut transaction_stream = rpc_client.get_mempool_stream(Empty {}).await?.into_inner();
 
