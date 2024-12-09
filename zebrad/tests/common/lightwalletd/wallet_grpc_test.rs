@@ -37,11 +37,14 @@ use color_eyre::eyre::Result;
 use hex_literal::hex;
 
 use zebra_chain::{
-    block::Block,
-    parameters::Network,
-    parameters::NetworkUpgrade::{Nu5, Sapling},
+    block::{Block, Height},
+    parameters::{
+        Network,
+        NetworkUpgrade::{Nu5, Sapling},
+    },
     serialization::ZcashDeserializeInto,
 };
+use zebra_consensus::funding_stream_address;
 use zebra_state::state_database_format_version_in_code;
 
 use crate::common::{
@@ -291,60 +294,58 @@ pub async fn run() -> Result<()> {
     // For the provided address in the first 10 blocks there are 10 transactions in the mainnet
     assert_eq!(10, counter);
 
-    // Call `GetTaddressBalance` with the ZF funding stream address
-    let balance = rpc_client
-        .get_taddress_balance(AddressList {
-            addresses: vec!["t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string()],
-        })
-        .await?
-        .into_inner();
+    let lwd_tip_height: Height = u32::try_from(block_tip.height)
+        .expect("should be below max block height")
+        .try_into()
+        .expect("should be below max block height");
 
-    // With ZFND or Major Grants funding stream address, the balance will always be greater than zero,
-    // because new coins are created in each block
-    assert!(balance.value_zat > 0);
+    let mut all_stream_addresses = Vec::new();
+    let mut all_balance_streams = Vec::new();
+    for &fs_receiver in network.funding_streams(lwd_tip_height).recipients().keys() {
+        let Some(fs_address) = funding_stream_address(lwd_tip_height, &network, fs_receiver) else {
+            // Skip if the lightwalletd tip height is above the funding stream end height.
+            continue;
+        };
 
-    // Call `GetTaddressBalanceStream` with the ZF funding stream address as a stream argument
-    let zf_stream_address = Address {
-        address: "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1".to_string(),
-    };
+        tracing::info!(?fs_address, "getting balance for active fs address");
 
-    let balance_zf = rpc_client
-        .get_taddress_balance_stream(tokio_stream::iter(vec![zf_stream_address.clone()]))
-        .await?
-        .into_inner();
+        // Call `GetTaddressBalance` with the active funding stream address.
+        let balance = rpc_client
+            .get_taddress_balance(AddressList {
+                addresses: vec![fs_address.to_string()],
+            })
+            .await?
+            .into_inner();
 
-    // With ZFND funding stream address, the balance will always be greater than zero,
-    // because new coins are created in each block
-    assert!(balance_zf.value_zat > 0);
+        // Call `GetTaddressBalanceStream` with the active funding stream address as a stream argument.
+        let stream_address = Address {
+            address: fs_address.to_string(),
+        };
 
-    // Call `GetTaddressBalanceStream` with the MG funding stream address as a stream argument
-    let mg_stream_address = Address {
-        address: "t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym".to_string(),
-    };
+        let balance_stream = rpc_client
+            .get_taddress_balance_stream(tokio_stream::iter(vec![stream_address.clone()]))
+            .await?
+            .into_inner();
 
-    let balance_mg = rpc_client
-        .get_taddress_balance_stream(tokio_stream::iter(vec![mg_stream_address.clone()]))
-        .await?
-        .into_inner();
+        // With any active funding stream address, the balance will always be greater than zero for blocks
+        // below the funding stream end height because new coins are created in each block.
+        assert!(balance.value_zat > 0);
+        assert!(balance_stream.value_zat > 0);
 
-    // With Major Grants funding stream address, the balance will always be greater than zero,
-    // because new coins are created in each block
-    assert!(balance_mg.value_zat > 0);
+        all_stream_addresses.push(stream_address);
+        all_balance_streams.push(balance_stream.value_zat);
+    }
 
-    // Call `GetTaddressBalanceStream` with both, the ZFND and the MG funding stream addresses as a stream argument
-    let balance_both = rpc_client
-        .get_taddress_balance_stream(tokio_stream::iter(vec![
-            zf_stream_address,
-            mg_stream_address,
-        ]))
-        .await?
-        .into_inner();
+    if let Some(expected_total_balance) = all_balance_streams.into_iter().reduce(|a, b| a + b) {
+        // Call `GetTaddressBalanceStream` for all active funding stream addresses as a stream argument.
+        let total_balance = rpc_client
+            .get_taddress_balance_stream(tokio_stream::iter(all_stream_addresses))
+            .await?
+            .into_inner();
 
-    // The result is the sum of the values in both addresses
-    assert_eq!(
-        balance_both.value_zat,
-        balance_zf.value_zat + balance_mg.value_zat
-    );
+        // The result should be the sum of the values in all active funding stream addresses.
+        assert_eq!(total_balance.value_zat, expected_total_balance);
+    }
 
     let sapling_treestate_init_height = sapling_activation_height + 1;
 
