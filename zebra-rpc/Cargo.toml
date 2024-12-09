@@ -53,7 +53,7 @@ proptest-impl = [
 ]
 
 [dependencies]
-chrono = { version = "0.4.38", default-features = false, features = [
+chrono = { version = "0.4.39", default-features = false, features = [
     "clock",
     "std",
 ] }
@@ -74,19 +74,19 @@ rand = "0.8.5"
 # Error handling
 color-eyre = "0.6.3"
 
-tokio = { version = "1.41.1", features = [
+tokio = { version = "1.42.0", features = [
     "time",
     "rt-multi-thread",
     "macros",
     "tracing",
 ] }
-tower = "0.4.13"
+tower = "0.5.1"
 
 # indexer-rpcs dependencies
 tonic = { version = "0.12.3", optional = true }
 tonic-reflection = { version = "0.12.3", optional = true }
-prost = { version = "0.13.3", optional = true }
-tokio-stream = { version = "0.1.16", optional = true }
+prost = { version = "0.13.4", optional = true }
+tokio-stream = { version = "0.1.17", optional = true }
 
 tracing = "0.1.41"
 
@@ -123,8 +123,8 @@ insta = { version = "1.41.1", features = ["redactions", "json", "ron"] }
 
 proptest = "1.4.0"
 
-thiserror = "2.0.3"
-tokio = { version = "1.41.1", features = ["full", "tracing", "test-util"] }
+thiserror = "2.0.6"
+tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.43", features = [
     "proptest-impl",

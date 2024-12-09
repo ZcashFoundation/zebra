@@ -65,8 +65,8 @@ indexmap = { version = "2.7.0", features = ["serde"] }
 itertools = "0.13.0"
 semver = "1.0.23"
 serde = { version = "1.0.215", features = ["serde_derive"] }
-tokio = { version = "1.41.1", features = ["time"] }
-tower = "0.4.13"
+tokio = { version = "1.42.0", features = ["time"] }
+tower = "0.5.1"
 tracing = "0.1.41"
 futures = "0.3.31"
 
@@ -83,7 +83,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.4
 zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.10" }
 zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.43" }
 
-chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { version = "0.4.39", default-features = false, features = ["clock", "std", "serde"] }
 
 # test feature proptest-impl
 proptest = { version = "1.4.0", optional = true }
@@ -99,7 +99,7 @@ zcash_note_encryption = { version = "0.4.0", optional = true }
 zebra-test = { path = "../zebra-test", version = "1.0.0-beta.43", optional = true }
 
 # zebra-scanner binary dependencies
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 structopt = "0.3.26"
 lazy_static = "1.4.0"
 serde_json = "1.0.133"
@@ -111,7 +111,7 @@ zebrad = { path = "../zebrad", version = "2.1.0" }
 
 [dev-dependencies]
 insta = { version = "1.41.1", features = ["ron", "redactions"] }
-tokio = { version = "1.41.1", features = ["test-util"] }
+tokio = { version = "1.42.0", features = ["test-util"] }
 
 proptest = "1.4.0"
 proptest-derive = "0.5.0"
