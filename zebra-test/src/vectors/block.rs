@@ -180,6 +180,13 @@ lazy_static! {
             (1_046_400, SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES.as_ref().try_into().unwrap()),
             (1_046_401, SAPLING_FINAL_ROOT_MAINNET_1046401_BYTES.as_ref().try_into().unwrap()),
             (1_180_900, SAPLING_FINAL_ROOT_MAINNET_1180900_BYTES.as_ref().try_into().unwrap()),
+            // NU5
+            (1_687_106, SAPLING_FINAL_ROOT_MAINNET_1687106_BYTES.as_ref().try_into().unwrap()),
+            (1_687_107, SAPLING_FINAL_ROOT_MAINNET_1687107_BYTES.as_ref().try_into().unwrap()),
+            (1_687_108, SAPLING_FINAL_ROOT_MAINNET_1687108_BYTES.as_ref().try_into().unwrap()),
+            (1_687_113, SAPLING_FINAL_ROOT_MAINNET_1687113_BYTES.as_ref().try_into().unwrap()),
+            (1_687_118, SAPLING_FINAL_ROOT_MAINNET_1687118_BYTES.as_ref().try_into().unwrap()),
+            (1_687_121, SAPLING_FINAL_ROOT_MAINNET_1687121_BYTES.as_ref().try_into().unwrap()),
         ].iter().cloned().collect();
 
     /// Testnet blocks, indexed by height
@@ -574,21 +581,39 @@ lazy_static! {
     pub static ref BLOCK_MAINNET_1687106_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-1-687-106.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687106_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("41f3adfe94f336b6581923c9d20e07bccab0c47cd57ecb66cb9f35bb3e62066f")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_MAINNET_1687107_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-1-687-107.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687107_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("4b013ee86a4a7b19871aa9b7a1dff0b29e0a737812c8970356c18340752957c7")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_MAINNET_1687108_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-1-687-108.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687108_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("174d81c4d858ab7932c424ee44f5e47ceafc50fcc44fb39bfaf74258570eb9b2")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_MAINNET_1687113_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-1-687-113.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687113_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("53189fd8855fb8d8f49a4cf505669ce6fd95e28abfe8f3def7c2493b1ae4fc1f")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_MAINNET_1687118_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-1-687-118.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687118_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("50f2481034cb80ec7e3e56177981ab47739e5a0c650638b2ac29909468c5f225")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_MAINNET_1687121_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-main-1-687-121.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_MAINNET_1687121_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("39e29473df7f0692ab6072d65389f6626611fea9f00aea14c0d80add9e9ef6e5")
+        .expect("final root bytes are in valid hex representation").rev();
 
     // Testnet
 
