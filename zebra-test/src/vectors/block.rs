@@ -113,6 +113,26 @@ lazy_static! {
             (1_046_400, BLOCK_MAINNET_1046400_BYTES.as_ref()),
             (1_046_401, BLOCK_MAINNET_1046401_BYTES.as_ref()),
             (1_180_900, BLOCK_MAINNET_1180900_BYTES.as_ref()),
+
+            // NU5
+            //
+            // Contains:
+            //
+            // - First Sapling to Sapling V5 txs.
+            // - First Sapling to Sapling V4 tx after NU5.
+            (1_687_106, BLOCK_MAINNET_1687106_BYTES.as_ref()),
+            // - First transparent to Sapling V5 tx.
+            // - First Sapling to Orchard tx.
+            (1_687_107, BLOCK_MAINNET_1687107_BYTES.as_ref()),
+            // - First transparent V5 txs.
+            // - First Sapling to transparent V5 txs.
+            (1_687_108, BLOCK_MAINNET_1687108_BYTES.as_ref()),
+            // - First transparent to (transparent + Sapling) V5 tx.
+            (1_687_113, BLOCK_MAINNET_1687113_BYTES.as_ref()),
+            // - First Sapling to (Sapling + Orchard) tx.
+            (1_687_118, BLOCK_MAINNET_1687118_BYTES.as_ref()),
+            // - First Orchard to Orchard tx.
+            (1_687_121, BLOCK_MAINNET_1687121_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Mainnet final Sprout roots, indexed by height.
@@ -549,6 +569,26 @@ lazy_static! {
     pub static ref SAPLING_FINAL_ROOT_MAINNET_1180900_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("4a51c1b879f49637873ac4b261e9c625e16d9400b22d8aa4f27cd6fd1138ddda")
         .expect("final root bytes are in valid hex representation").rev();
+
+    // NU5
+    pub static ref BLOCK_MAINNET_1687106_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-106.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_1687107_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-107.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_1687108_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-108.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_1687113_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-113.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_1687118_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-118.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_MAINNET_1687121_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-main-1-687-121.txt").trim())
+        .expect("Block bytes are in valid hex representation");
 
     // Testnet
 
