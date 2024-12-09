@@ -58,16 +58,21 @@ impl From<LegacyCode> for jsonrpc_core::ErrorCode {
 }
 
 /// A trait for mapping errors to [`jsonrpc_core::Error`].
-pub(crate) trait MapError<T> {
+pub(crate) trait MapError<T>: Sized {
     /// Maps errors to [`jsonrpc_core::Error`] with a specific error code.
     fn map_error(
         self,
         code: impl Into<jsonrpc_core::ErrorCode>,
     ) -> std::result::Result<T, jsonrpc_core::Error>;
+
+    /// Maps errors to [`jsonrpc_core::Error`] with a [`LegacyCode::Misc`] error code.
+    fn map_misc_error(self) -> std::result::Result<T, jsonrpc_core::Error> {
+        self.map_error(LegacyCode::Misc)
+    }
 }
 
 /// A trait for conditionally converting a value into a `Result<T, jsonrpc_core::Error>`.
-pub(crate) trait OkOrError<T> {
+pub(crate) trait OkOrError<T>: Sized {
     /// Converts the implementing type to `Result<T, jsonrpc_core::Error>`, using an error code and
     /// message if conversion is to `Err`.
     fn ok_or_error(
@@ -75,6 +80,14 @@ pub(crate) trait OkOrError<T> {
         code: impl Into<jsonrpc_core::ErrorCode>,
         message: impl ToString,
     ) -> std::result::Result<T, jsonrpc_core::Error>;
+
+    /// Converts the implementing type to `Result<T, jsonrpc_core::Error>`, using a [`LegacyCode::Misc`] error code.
+    fn ok_or_misc_error(
+        self,
+        message: impl ToString,
+    ) -> std::result::Result<T, jsonrpc_core::Error> {
+        self.ok_or_error(LegacyCode::Misc, message)
+    }
 }
 
 impl<T, E> MapError<T> for Result<T, E>
