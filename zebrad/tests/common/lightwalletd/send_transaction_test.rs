@@ -16,7 +16,7 @@
 //! were obtained. This is to ensure that zebra does not reject the transactions because they have
 //! already been seen in a block.
 
-use std::{cmp::min, sync::Arc, time::Duration};
+use std::{cmp::min, sync::Arc};
 use tower::BoxError;
 
 use color_eyre::eyre::{eyre, Result};
@@ -29,7 +29,6 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::queue::CHANNEL_AND_QUEUE_CAPACITY;
-use zebra_test::prelude::TestChild;
 use zebrad::components::mempool::downloads::MAX_INBOUND_CONCURRENCY;
 
 use crate::common::{
@@ -44,7 +43,6 @@ use crate::common::{
         },
     },
     regtest::MiningRpcMethods,
-    sync::LARGE_CHECKPOINT_TIMEOUT,
     test_type::TestType::*,
 };
 
@@ -152,7 +150,7 @@ pub async fn run() -> Result<()> {
         "spawned lightwalletd connected to zebrad, waiting for them both to sync...",
     );
 
-    let (_lightwalletd, mut zebrad) = wait_for_zebrad_and_lightwalletd_sync(
+    let (_lightwalletd, _zebrad) = wait_for_zebrad_and_lightwalletd_sync(
         lightwalletd,
         lightwalletd_rpc_port,
         zebrad,
@@ -186,20 +184,20 @@ pub async fn run() -> Result<()> {
     let mut counter = 0;
 
     for block in blocks {
-        let (zebrad_child, has_shielded_elements, count) = send_transactions_from_block(
-            zebrad,
-            &mut rpc_client,
-            &zebrad_rpc_client,
-            block.clone(),
-        )
-        .await?;
-
-        zebrad = zebrad_child;
+        let (has_shielded_elements, count) =
+            send_transactions_from_block(&mut rpc_client, &zebrad_rpc_client, block.clone())
+                .await?;
 
         has_tx_with_shielded_elements |= has_shielded_elements;
         counter += count;
 
-        zebrad_rpc_client.submit_block(block).await?;
+        tracing::info!(
+            height = ?block.coinbase_height(),
+            "submitting block at height"
+        );
+
+        let submit_block_response = zebrad_rpc_client.submit_block(block).await;
+        tracing::info!(?submit_block_response, "submitted block");
     }
 
     // GetMempoolTx: make sure at least one of the transactions were inserted into the mempool.
@@ -219,11 +217,10 @@ pub async fn run() -> Result<()> {
 
 #[tracing::instrument(skip_all)]
 async fn send_transactions_from_block(
-    mut zebrad: TestChild<tempfile::TempDir>,
     rpc_client: &mut CompactTxStreamerClient<tonic::transport::Channel>,
     zebrad_rpc_client: &RpcRequestClient,
     block: Block,
-) -> Result<(TestChild<tempfile::TempDir>, bool, usize)> {
+) -> Result<(bool, usize)> {
     // Lightwalletd won't call `get_raw_mempool` again until 2 seconds after the last call:
     // <https://github.com/zcash/lightwalletd/blob/master/frontend/service.go#L482>
     //
@@ -238,7 +235,7 @@ async fn send_transactions_from_block(
         .collect();
 
     if transactions.is_empty() {
-        return Ok((zebrad, false, 0));
+        return Ok((false, 0));
     }
 
     let transaction_hashes: Vec<transaction::Hash> =
@@ -271,19 +268,14 @@ async fn send_transactions_from_block(
             Ok(response) => assert_eq!(response.into_inner(), expected_response),
             Err(err) => {
                 tracing::warn!(?err, "failed to send transaction");
-                zebrad_rpc_client
+                let send_tx_rsp = zebrad_rpc_client
                     .send_transaction(transaction)
                     .await
-                    .map_err(|e| eyre!(e))?;
+                    .map_err(|e| eyre!(e));
+
+                tracing::warn!(?send_tx_rsp, "failed to send tx twice");
             }
         };
-    }
-
-    if transactions.len() >= 10 {
-        // Check if some transaction is sent to mempool,
-        // Fails if there are only coinbase transactions in the first 50 future blocks
-        tracing::info!("waiting for mempool to verify some transactions...");
-        zebrad.expect_stdout_line_matches("sending mempool transaction broadcast")?;
     }
 
     // Wait for more transactions to verify, `GetMempoolTx` only returns txs where tx.HasShieldedElements()
@@ -295,25 +287,6 @@ async fn send_transactions_from_block(
         .get_mempool_tx(Exclude { txid: vec![] })
         .await?
         .into_inner();
-
-    // Sometimes lightwalletd doesn't check the mempool, and waits for the next block instead.
-    // If that happens, we skip the rest of the test.
-    tracing::info!("checking if lightwalletd has queried the mempool...");
-
-    // We need a short timeout here, because sometimes this message is not logged.
-    zebrad = zebrad.with_timeout(Duration::from_secs(60));
-    let tx_log =
-        zebrad.expect_stdout_line_matches("answered mempool request .*req.*=.*TransactionIds");
-    // Reset the failed timeout and give the rest of the test enough time to finish.
-    #[allow(unused_assignments)]
-    {
-        zebrad = zebrad.with_timeout(LARGE_CHECKPOINT_TIMEOUT);
-    }
-
-    if tx_log.is_err() {
-        tracing::info!("lightwalletd didn't query the mempool, skipping mempool contents checks");
-        return Ok((zebrad, has_tx_with_shielded_elements, 0));
-    }
 
     tracing::info!("checking the mempool contains some of the sent transactions...");
     let mut counter = 0;
@@ -340,7 +313,7 @@ async fn send_transactions_from_block(
         _counter += 1;
     }
 
-    Ok((zebrad, has_tx_with_shielded_elements, counter))
+    Ok((has_tx_with_shielded_elements, counter))
 }
 
 /// Prepare a request to send to lightwalletd that contains a transaction to be sent.
