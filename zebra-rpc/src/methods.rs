@@ -562,7 +562,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_error(server::error::LegacyCode::default())?;
+                .map_misc_error()?;
 
             let zebra_state::ReadResponse::TipPoolValues {
                 tip_height,
@@ -578,7 +578,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_error(server::error::LegacyCode::default())?;
+                .map_misc_error()?;
 
             let zebra_state::ReadResponse::BlockHeader { header, .. } = response else {
                 unreachable!("unmatched response to a BlockHeader request")
@@ -669,10 +669,7 @@ where
             let valid_addresses = address_strings.valid_addresses()?;
 
             let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
-            let response = state
-                .oneshot(request)
-                .await
-                .map_error(server::error::LegacyCode::default())?;
+            let response = state.oneshot(request).await.map_misc_error()?;
 
             match response {
                 zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
@@ -709,10 +706,7 @@ where
             let transaction_parameter = mempool::Gossip::Tx(raw_transaction.into());
             let request = mempool::Request::Queue(vec![transaction_parameter]);
 
-            let response = mempool
-                .oneshot(request)
-                .await
-                .map_error(server::error::LegacyCode::default())?;
+            let response = mempool.oneshot(request).await.map_misc_error()?;
 
             let mut queue_results = match response {
                 mempool::Response::Queued(results) => results,
@@ -729,9 +723,9 @@ where
                 .pop()
                 .expect("there should be exactly one item in Vec")
                 .inspect_err(|err| tracing::debug!("sent transaction to mempool: {:?}", &err))
-                .map_error(server::error::LegacyCode::default())?
+                .map_misc_error()?
                 .await
-                .map_error(server::error::LegacyCode::default())?;
+                .map_misc_error()?;
 
             tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
 
@@ -785,7 +779,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_error(server::error::LegacyCode::default())?;
+                    .map_misc_error()?;
 
                 match response {
                     zebra_state::ReadResponse::Block(Some(block)) => {
@@ -844,9 +838,9 @@ where
                 }
 
                 let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-                let tx = match tx_ids_response.map_error(server::error::LegacyCode::default())? {
+                let tx = match tx_ids_response.map_misc_error()? {
                     zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
-                        .ok_or_error(server::error::LegacyCode::default(), "block not found")?
+                        .ok_or_misc_error("block not found")?
                         .iter()
                         .map(|tx_id| tx_id.encode_hex())
                         .collect(),
@@ -863,8 +857,7 @@ where
                 let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
 
                 // This could be `None` if there's a chain reorg between state queries.
-                let orchard_tree =
-                    orchard_tree.ok_or_misc_error("missing orchard tree for block")?;
+                let orchard_tree = orchard_tree.ok_or_misc_error("missing Orchard tree")?;
 
                 let final_orchard_root = match nu5_activation {
                     Some(activation_height) if height >= activation_height => {
@@ -933,50 +926,42 @@ where
                 .clone()
                 .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
                 .await
-                .map_err(|_| Error {
+                .map_err(|_| "block height not in best chain")
+                .map_error(
                     // ## Compatibility with `zcashd`.
                     //
                     // Since this function is reused by getblock(), we return the errors
                     // expected by it (they differ whether a hash or a height was passed).
-                    code: if hash_or_height.hash().is_some() {
-                        server::error::LegacyCode::InvalidAddressOrKey.into()
+                    if hash_or_height.hash().is_some() {
+                        server::error::LegacyCode::InvalidAddressOrKey
                     } else {
-                        server::error::LegacyCode::InvalidParameter.into()
+                        server::error::LegacyCode::InvalidParameter
                     },
-                    message: "block height not in best chain".to_owned(),
-                    data: None,
-                })?
+                )?
             else {
                 panic!("unexpected response to BlockHeader request")
             };
 
             let response = if !verbose {
-                GetBlockHeader::Raw(HexData(
-                    header
-                        .zcash_serialize_to_vec()
-                        .map_error(server::error::LegacyCode::Misc)?,
-                ))
+                GetBlockHeader::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
             } else {
                 let zebra_state::ReadResponse::SaplingTree(sapling_tree) = state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::SaplingTree(hash_or_height))
                     .await
-                    .map_error(server::error::LegacyCode::Misc)?
+                    .map_misc_error()?
                 else {
                     panic!("unexpected response to SaplingTree request")
                 };
 
                 // This could be `None` if there's a chain reorg between state queries.
-                let sapling_tree = sapling_tree.ok_or_error(
-                    server::error::LegacyCode::Misc,
-                    "missing sapling tree for block",
-                )?;
+                let sapling_tree = sapling_tree.ok_or_misc_error("missing Sapling tree")?;
 
                 let zebra_state::ReadResponse::Depth(depth) = state
                     .clone()
                     .oneshot(zebra_state::ReadRequest::Depth(hash))
                     .await
-                    .map_error(server::error::LegacyCode::Misc)?
+                    .map_misc_error()?
                 else {
                     panic!("unexpected response to SaplingTree request")
                 };
@@ -1036,14 +1021,14 @@ where
         self.latest_chain_tip
             .best_tip_hash()
             .map(GetBlockHash)
-            .ok_or_error(server::error::LegacyCode::default(), "No blocks in state")
+            .ok_or_misc_error("No blocks in state")
     }
 
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash> {
         self.latest_chain_tip
             .best_tip_height_and_hash()
             .map(|(height, hash)| GetBlockHeightAndHash { height, hash })
-            .ok_or_error(server::error::LegacyCode::default(), "No blocks in state")
+            .ok_or_misc_error("No blocks in state")
     }
 
     fn get_raw_mempool(&self) -> BoxFuture<Result<Vec<String>>> {
@@ -1072,7 +1057,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_error(server::error::LegacyCode::default())?;
+                .map_misc_error()?;
 
             match response {
                 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -1136,7 +1121,7 @@ where
                     service.call(mempool::Request::TransactionsByMinedId([txid].into()))
                 })
                 .await
-                .map_error(server::error::LegacyCode::default())?
+                .map_misc_error()?
             {
                 mempool::Response::Transactions(txns) => {
                     if let Some(tx) = txns.first() {
@@ -1162,7 +1147,7 @@ where
                 .ready()
                 .and_then(|service| service.call(zebra_state::ReadRequest::Transaction(txid)))
                 .await
-                .map_error(server::error::LegacyCode::default())?
+                .map_misc_error()?
             {
                 zebra_state::ReadResponse::Transaction(Some(tx)) => {
                     let hex = tx.tx.into();
@@ -1215,7 +1200,7 @@ where
                 .ready()
                 .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
                 .await
-                .map_error(server::error::LegacyCode::default())?
+                .map_misc_error()?
             {
                 zebra_state::ReadResponse::Block(Some(block)) => block,
                 zebra_state::ReadResponse::Block(None) => {
@@ -1246,7 +1231,7 @@ where
                         service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
                     })
                     .await
-                    .map_error(server::error::LegacyCode::default())?
+                    .map_misc_error()?
                 {
                     zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to a Sapling tree request"),
@@ -1263,7 +1248,7 @@ where
                         service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
                     })
                     .await
-                    .map_error(server::error::LegacyCode::default())?
+                    .map_misc_error()?
                 {
                     zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| t.to_rpc_bytes()),
                     _ => unreachable!("unmatched response to an Orchard tree request"),
@@ -1296,7 +1281,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_error(server::error::LegacyCode::default())?;
+                    .map_misc_error()?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::SaplingSubtrees(subtrees) => subtrees,
@@ -1322,7 +1307,7 @@ where
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
-                    .map_error(server::error::LegacyCode::default())?;
+                    .map_misc_error()?;
 
                 let subtrees = match response {
                     zebra_state::ReadResponse::OrchardSubtrees(subtrees) => subtrees,
@@ -1382,7 +1367,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_error(server::error::LegacyCode::default())?;
+                .map_misc_error()?;
 
             let hashes = match response {
                 zebra_state::ReadResponse::AddressesTransactionIds(hashes) => {
@@ -1429,7 +1414,7 @@ where
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
-                .map_error(server::error::LegacyCode::default())?;
+                .map_misc_error()?;
             let utxos = match response {
                 zebra_state::ReadResponse::AddressUtxos(utxos) => utxos,
                 _ => unreachable!("unmatched response to a UtxosByAddresses request"),
@@ -1507,7 +1492,7 @@ where
 {
     latest_chain_tip
         .best_tip_height()
-        .ok_or_error(server::error::LegacyCode::default(), "No blocks in state")
+        .ok_or_misc_error("No blocks in state")
 }
 
 /// Response to a `getinfo` RPC request.
