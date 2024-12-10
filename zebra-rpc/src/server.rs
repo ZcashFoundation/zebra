@@ -36,6 +36,7 @@ use crate::{
 use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
 
 pub mod cookie;
+pub mod error;
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
 

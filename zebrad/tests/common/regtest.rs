@@ -17,7 +17,6 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    constants::MISSING_BLOCK_ERROR_CODE,
     methods::{
         get_block_template_rpcs::{
             get_block_template::{
@@ -27,7 +26,7 @@ use zebra_rpc::{
         },
         hex_data::HexData,
     },
-    server::OPENED_RPC_ENDPOINT_MSG,
+    server::{self, OPENED_RPC_ENDPOINT_MSG},
 };
 use zebra_test::args;
 
@@ -163,7 +162,9 @@ impl MiningRpcMethods for RpcRequestClient {
             Err(err)
                 if err
                     .downcast_ref::<jsonrpc_core::Error>()
-                    .is_some_and(|err| err.code == MISSING_BLOCK_ERROR_CODE) =>
+                    .is_some_and(|err| {
+                        err.code == server::error::LegacyCode::InvalidParameter.into()
+                    }) =>
             {
                 Ok(None)
             }
