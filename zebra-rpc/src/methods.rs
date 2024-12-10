@@ -745,7 +745,7 @@ where
     // # Performance
     //
     // `lightwalletd` calls this RPC with verosity 1 for its initial sync of 2 million blocks, the
-    // performace of this RPC with verbosity 1 significantly affects `lightwalletd`s sync time.
+    // performance of this RPC with verbosity 1 significantly affects `lightwalletd`s sync time.
     //
     // TODO:
     // - use `height_from_signed_int()` to handle negative heights
