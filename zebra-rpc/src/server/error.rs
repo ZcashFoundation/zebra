@@ -2,7 +2,7 @@
 
 /// Bitcoin RPC error codes
 ///
-/// Drawn from <https://github.com/zcash/zcash/blob/master/src/rpc/protocol.h#L32-L80>.
+/// Drawn from <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/protocol.h#L32-L80>.
 ///
 /// ## Notes
 ///
