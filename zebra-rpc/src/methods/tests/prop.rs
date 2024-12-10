@@ -25,7 +25,7 @@ use zebra_state::BoxError;
 
 use zebra_test::mock_service::MockService;
 
-use crate::methods::{self, hex_data::HexData};
+use crate::methods;
 
 use super::super::{
     AddressBalance, AddressStrings, NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash,
@@ -299,18 +299,10 @@ proptest! {
         })?;
     }
 
-    /// Calls `get_raw_transaction` with:
-    ///
-    /// 1. an invalid TXID that won't deserialize due to wrong length;
-    /// 2. a valid TXID that is not in the mempool nor in the state;
-    ///
+    /// Calls `get_raw_transaction` with a valid TXID that is not in the mempool nor in the state,
     /// and checks that the RPC returns the right error code.
     #[test]
-    fn check_err_for_get_raw_transaction(
-        invalid_txid in vec(any::<u8>(), 0..31),
-        unknown_txid: [u8; 32],
-        network in any::<Network>()
-    ) {
+    fn check_err_for_get_raw_transaction(txid: transaction::Hash, network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -319,16 +311,6 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let rpc_query = rpc.get_raw_transaction(HexData(invalid_txid), Some(1));
-
-            check_err_code(rpc_query.await, ErrorCode::ServerError(-5))?;
-
-            // Check that no further requests were made.
-            mempool.expect_no_requests().await?;
-            state.expect_no_requests().await?;
-
-            let txid = transaction::Hash::from_bytes_in_display_order(&unknown_txid);
-
             let mempool_query = mempool
                 .expect_request(mempool::Request::TransactionsByMinedId([txid].into()))
                 .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
@@ -337,7 +319,7 @@ proptest! {
                 .expect_request(zebra_state::ReadRequest::Transaction(txid))
                 .map_ok(|r| r.respond(zebra_state::ReadResponse::Transaction(None)));
 
-            let rpc_query = rpc.get_raw_transaction(HexData(unknown_txid.to_vec()), Some(1));
+            let rpc_query = rpc.get_raw_transaction(txid, Some(1));
 
             let (rsp, _, _) =  tokio::join!(rpc_query, mempool_query, state_query);
 

@@ -289,7 +289,7 @@ pub trait Rpc {
     #[rpc(name = "getrawtransaction")]
     fn get_raw_transaction(
         &self,
-        txid: HexData,
+        txid: transaction::Hash,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>>;
 
@@ -791,7 +791,7 @@ where
                     zebra_state::ReadResponse::Block(Some(block)) => {
                         Ok(GetBlock::Raw(block.into()))
                     }
-                    zebra_state::ReadResponse::Block(None) => Err("block not found")
+                    zebra_state::ReadResponse::Block(None) => Err("Block not found")
                         .map_error(server::error::LegacyCode::InvalidParameter),
                     _ => unreachable!("unmatched response to a block request"),
                 }
@@ -1121,7 +1121,7 @@ where
 
     fn get_raw_transaction(
         &self,
-        HexData(txid): HexData,
+        txid: transaction::Hash,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>> {
         let mut state = self.state.clone();
@@ -1129,15 +1129,6 @@ where
         let verbose = verbose.unwrap_or(0) != 0;
 
         async move {
-            // Reference for the legacy error code:
-            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L544>
-            let txid = transaction::Hash::from_bytes_in_display_order(
-                &txid
-                    .try_into()
-                    .map_err(|_| "invalid TXID length")
-                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)?,
-            );
-
             // Check the mempool first.
             match mempool
                 .ready()
