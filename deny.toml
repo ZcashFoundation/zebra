@@ -107,7 +107,11 @@ skip-tree = [
 
     # wait for zebra to update tower
     { name = "tower", version = "=0.4.13" },
-    { name = "hashbrown", version = "=0.12.3" },
+    { name = "hashbrown", version = "=0.14.5" },
+
+    # wait for zebra to update vergen
+    { name = "thiserror", version = "=1.0.69" },
+    { name = "thiserror-impl", version = "=1.0.69" },
 
     # Remove after release candicate period is over and the ECC crates are not patched anymore
     { name = "equihash", version = "=0.2.0" },

@@ -145,7 +145,8 @@ pub trait Rpc {
 
     /// Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
     /// If the block is not in Zebra's state, returns
-    /// [error code `-8`.](https://github.com/zcash/zcash/issues/5758)
+    /// [error code `-8`.](https://github.com/zcash/zcash/issues/5758) if a height was
+    /// passed or -5 if a hash was passed.
     ///
     /// zcashd reference: [`getblock`](https://zcash.github.io/rpc/getblock.html)
     /// method: post
@@ -158,12 +159,14 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// With verbosity=1, [`lightwalletd` only reads the `tx` field of the
-    /// result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152),
-    /// and other clients only read the `hash` and `confirmations` fields,
-    /// so we only return a few fields for now.
+    /// Zebra previously partially supported verbosity=1 by returning only the
+    /// fields required by lightwalletd ([`lightwalletd` only reads the `tx`
+    /// field of the result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152)).
+    /// That verbosity level was migrated to "3"; so while lightwalletd will
+    /// still work by using verbosity=1, it will sync faster if it is changed to
+    /// use verbosity=3.
     ///
-    /// `lightwalletd` and mining clients also do not use verbosity=2, so we don't support it.
+    /// The undocumented `chainwork` field is not returned.
     #[rpc(name = "getblock")]
     fn get_block(
         &self,
@@ -172,6 +175,9 @@ pub trait Rpc {
     ) -> BoxFuture<Result<GetBlock>>;
 
     /// Returns the requested block header by hash or height, as a [`GetBlockHeader`] JSON string.
+    /// If the block is not in Zebra's state,
+    /// returns [error code `-8`.](https://github.com/zcash/zcash/issues/5758)
+    /// if a height was passed or -5 if a hash was passed.
     ///
     /// zcashd reference: [`getblockheader`](https://zcash.github.io/rpc/getblockheader.html)
     /// method: post
@@ -181,6 +187,10 @@ pub trait Rpc {
     ///
     /// - `hash_or_height`: (string, required, example="1") The hash or height for the block to be returned.
     /// - `verbose`: (bool, optional, default=false, example=true) false for hex encoded data, true for a json object
+    ///
+    /// # Notes
+    ///
+    /// The undocumented `chainwork` field is not returned.
     #[rpc(name = "getblockheader")]
     fn get_block_header(
         &self,
@@ -747,6 +757,16 @@ where
         verbosity: Option<u8>,
     ) -> BoxFuture<Result<GetBlock>> {
         let mut state = self.state.clone();
+        let verbosity = verbosity.unwrap_or(1);
+        let network = self.network.clone();
+        let original_hash_or_height = hash_or_height.clone();
+
+        // If verbosity requires a call to `get_block_header`, resolve it here
+        let get_block_header_future = if matches!(verbosity, 1 | 2) {
+            Some(self.get_block_header(original_hash_or_height.clone(), Some(true)))
+        } else {
+            None
+        };
 
         async move {
             let hash_or_height: HashOrHeight = hash_or_height
@@ -755,203 +775,137 @@ where
                 // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
-            match verbosity.unwrap_or(1) {
-                0 => {
-                    // # Performance
-                    //
-                    // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                    // so it needs to load block data very efficiently.
-                    let request = zebra_state::ReadRequest::Block(hash_or_height);
-                    let response = state
-                        .ready()
-                        .and_then(|service| service.call(request))
-                        .await
-                        .map_error(server::error::LegacyCode::default())?;
+            if verbosity == 0 {
+                // # Performance
+                //
+                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
+                // so it needs to load block data very efficiently.
+                let request = zebra_state::ReadRequest::Block(hash_or_height);
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_error(server::error::LegacyCode::default())?;
 
-                    match response {
-                        zebra_state::ReadResponse::Block(Some(block)) => {
-                            Ok(GetBlock::Raw(block.into()))
-                        }
-                        zebra_state::ReadResponse::Block(None) => Err("Block not found")
-                            // `lightwalletd` expects error code `-8` when a block is not found:
-                            // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
-                            // This is because `lightwalletd` requests blocks by height, and
-                            // `zcashd` returns `-8` for invalid heights:
-                            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                            .map_error(server::error::LegacyCode::InvalidParameter),
-                        _ => unreachable!("unmatched response to a block request"),
+                match response {
+                    zebra_state::ReadResponse::Block(Some(block)) => {
+                        Ok(GetBlock::Raw(block.into()))
                     }
+                    zebra_state::ReadResponse::Block(None) => Err("block not found")
+                        .map_error(server::error::LegacyCode::InvalidParameter),
+                    _ => unreachable!("unmatched response to a block request"),
                 }
-                verbosity @ 1 | verbosity @ 2 => {
-                    // # Performance
-                    //
-                    // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                    // so it needs to load all its fields very efficiently.
-                    //
-                    // Currently, we get the block hash and transaction IDs from indexes,
-                    // which is much more efficient than loading all the block data,
-                    // then hashing the block header and all the transactions.
+            } else if let Some(get_block_header_future) = get_block_header_future {
+                let get_block_header_result: Result<GetBlockHeader> = get_block_header_future.await;
 
-                    // Get the block hash from the height -> hash index, if needed
+                let GetBlockHeader::Object(block_header) = get_block_header_result? else {
+                    panic!("must return Object")
+                };
+
+                let GetBlockHeaderObject {
+                    hash,
+                    confirmations,
+                    height,
+                    version,
+                    merkle_root,
+                    final_sapling_root,
+                    sapling_tree_size,
+                    time,
+                    nonce,
+                    solution,
+                    bits,
+                    difficulty,
+                    previous_block_hash,
+                    next_block_hash,
+                } = *block_header;
+
+                // # Concurrency
+                //
+                // We look up by block hash so the hash, transaction IDs, and confirmations
+                // are consistent.
+                let hash_or_height = hash.0.into();
+                let requests = vec![
+                    // Get transaction IDs from the transaction index by block hash
                     //
                     // # Concurrency
                     //
-                    // For consistency, this lookup must be performed first, then all the other
-                    // lookups must be based on the hash.
-                    //
-                    // All possible responses are valid, even if the best chain changes. Clients
-                    // must be able to handle chain forks, including a hash for a block that is
-                    // later discovered to be on a side chain.
+                    // A block's transaction IDs are never modified, so all possible responses are
+                    // valid. Clients that query block heights must be able to handle chain forks,
+                    // including getting transaction IDs from any chain fork.
+                    zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
+                    // Orchard trees
+                    zebra_state::ReadRequest::OrchardTree(hash_or_height),
+                ];
 
-                    let should_read_block_header = verbosity == 2;
+                let mut futs = FuturesOrdered::new();
 
-                    let hash = match hash_or_height {
-                        HashOrHeight::Hash(hash) => hash,
-                        HashOrHeight::Height(height) => {
-                            let request = zebra_state::ReadRequest::BestChainBlockHash(height);
-                            let response = state
-                                .ready()
-                                .and_then(|service| service.call(request))
-                                .await
-                                .map_error(server::error::LegacyCode::default())?;
-
-                            match response {
-                                zebra_state::ReadResponse::BlockHash(Some(hash)) => hash,
-                                zebra_state::ReadResponse::BlockHash(None) => {
-                                    return Err("block height not in best chain")
-                                        // `lightwalletd` expects error code `-8` when a block is not found:
-                                        // <https://github.com/zcash/lightwalletd/blob/v0.4.16/common/common.go#L287-L290>
-                                        // This is because `lightwalletd` requests blocks by height, and
-                                        // `zcashd` returns `-8` for invalid heights:
-                                        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-                                        .map_error(server::error::LegacyCode::InvalidParameter);
-                                }
-                                _ => unreachable!("unmatched response to a block hash request"),
-                            }
-                        }
-                    };
-
-                    // # Concurrency
-                    //
-                    // We look up by block hash so the hash, transaction IDs, and confirmations
-                    // are consistent.
-                    let mut requests = vec![
-                        // Get transaction IDs from the transaction index by block hash
-                        //
-                        // # Concurrency
-                        //
-                        // A block's transaction IDs are never modified, so all possible responses are
-                        // valid. Clients that query block heights must be able to handle chain forks,
-                        // including getting transaction IDs from any chain fork.
-                        zebra_state::ReadRequest::TransactionIdsForBlock(hash.into()),
-                        // Sapling trees
-                        zebra_state::ReadRequest::SaplingTree(hash.into()),
-                        // Orchard trees
-                        zebra_state::ReadRequest::OrchardTree(hash.into()),
-                        // Get block confirmations from the block height index
-                        //
-                        // # Concurrency
-                        //
-                        // All possible responses are valid, even if a block is added to the chain, or
-                        // the best chain changes. Clients must be able to handle chain forks, including
-                        // different confirmation values before or after added blocks, and switching
-                        // between -1 and multiple different confirmation values.
-                        zebra_state::ReadRequest::Depth(hash),
-                    ];
-
-                    if should_read_block_header {
-                        // Block header
-                        requests.push(zebra_state::ReadRequest::BlockHeader(hash.into()))
-                    }
-
-                    let mut futs = FuturesOrdered::new();
-
-                    for request in requests {
-                        futs.push_back(state.clone().oneshot(request));
-                    }
-
-                    let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-                    let tx = match tx_ids_response.map_error(server::error::LegacyCode::default())?
-                    {
-                        zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
-                            .ok_or_error(server::error::LegacyCode::default(), "Block not found")?
-                            .iter()
-                            .map(|tx_id| tx_id.encode_hex())
-                            .collect(),
-                        _ => unreachable!(
-                            "unmatched response to a transaction_ids_for_block request"
-                        ),
-                    };
-
-                    let sapling_tree_response =
-                        futs.next().await.expect("`futs` should not be empty");
-                    let sapling_note_commitment_tree_count = match sapling_tree_response
-                        .map_error(server::error::LegacyCode::default())?
-                    {
-                        zebra_state::ReadResponse::SaplingTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::SaplingTree(None) => 0,
-                        _ => unreachable!("unmatched response to a SaplingTree request"),
-                    };
-
-                    let orchard_tree_response =
-                        futs.next().await.expect("`futs` should not be empty");
-                    let orchard_note_commitment_tree_count = match orchard_tree_response
-                        .map_error(server::error::LegacyCode::default())?
-                    {
-                        zebra_state::ReadResponse::OrchardTree(Some(nct)) => nct.count(),
-                        zebra_state::ReadResponse::OrchardTree(None) => 0,
-                        _ => unreachable!("unmatched response to a OrchardTree request"),
-                    };
-
-                    // From <https://zcash.github.io/rpc/getblock.html>
-                    const NOT_IN_BEST_CHAIN_CONFIRMATIONS: i64 = -1;
-
-                    let depth_response = futs.next().await.expect("`futs` should not be empty");
-                    let confirmations = match depth_response
-                        .map_error(server::error::LegacyCode::default())?
-                    {
-                        // Confirmations are one more than the depth.
-                        // Depth is limited by height, so it will never overflow an i64.
-                        zebra_state::ReadResponse::Depth(Some(depth)) => i64::from(depth) + 1,
-                        zebra_state::ReadResponse::Depth(None) => NOT_IN_BEST_CHAIN_CONFIRMATIONS,
-                        _ => unreachable!("unmatched response to a depth request"),
-                    };
-
-                    let (time, height) = if should_read_block_header {
-                        let block_header_response =
-                            futs.next().await.expect("`futs` should not be empty");
-
-                        match block_header_response.map_error(server::error::LegacyCode::Misc)? {
-                            zebra_state::ReadResponse::BlockHeader { header, height, .. } => {
-                                (Some(header.time.timestamp()), Some(height))
-                            }
-                            _ => unreachable!("unmatched response to a BlockHeader request"),
-                        }
-                    } else {
-                        (None, hash_or_height.height())
-                    };
-
-                    let sapling = SaplingTrees {
-                        size: sapling_note_commitment_tree_count,
-                    };
-
-                    let orchard = OrchardTrees {
-                        size: orchard_note_commitment_tree_count,
-                    };
-
-                    let trees = GetBlockTrees { sapling, orchard };
-
-                    Ok(GetBlock::Object {
-                        hash: GetBlockHash(hash),
-                        confirmations,
-                        height,
-                        time,
-                        tx,
-                        trees,
-                    })
+                for request in requests {
+                    futs.push_back(state.clone().oneshot(request));
                 }
-                _ => Err("Verbosity must be in range from 0 to 2".to_string())
-                    .map_error(server::error::LegacyCode::InvalidParameter),
+
+                let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
+                let tx = match tx_ids_response.map_error(server::error::LegacyCode::default())? {
+                    zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
+                        .ok_or_error(server::error::LegacyCode::default(), "block not found")?
+                        .iter()
+                        .map(|tx_id| tx_id.encode_hex())
+                        .collect(),
+                    _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
+                };
+
+                let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
+                let zebra_state::ReadResponse::OrchardTree(orchard_tree) =
+                    orchard_tree_response.map_misc_error()?
+                else {
+                    unreachable!("unmatched response to a OrchardTree request");
+                };
+
+                let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
+
+                // This could be `None` if there's a chain reorg between state queries.
+                let orchard_tree =
+                    orchard_tree.ok_or_misc_error("missing orchard tree for block")?;
+
+                let final_orchard_root = match nu5_activation {
+                    Some(activation_height) if height >= activation_height => {
+                        Some(orchard_tree.root().into())
+                    }
+                    _other => None,
+                };
+
+                let sapling = SaplingTrees {
+                    size: sapling_tree_size,
+                };
+
+                let orchard_tree_size = orchard_tree.count();
+                let orchard = OrchardTrees {
+                    size: orchard_tree_size,
+                };
+
+                let trees = GetBlockTrees { sapling, orchard };
+
+                Ok(GetBlock::Object {
+                    hash,
+                    confirmations,
+                    height: Some(height),
+                    version: Some(version),
+                    merkle_root: Some(merkle_root),
+                    time: Some(time),
+                    nonce: Some(nonce),
+                    solution: Some(solution),
+                    bits: Some(bits),
+                    difficulty: Some(difficulty),
+                    tx,
+                    trees,
+                    size: None,
+                    final_sapling_root: Some(final_sapling_root),
+                    final_orchard_root,
+                    previous_block_hash: Some(previous_block_hash),
+                    next_block_hash,
+                })
+            } else {
+                Err("invalid verbosity value")
+                    .map_error(server::error::LegacyCode::InvalidParameter)
             }
         }
         .boxed()
@@ -979,7 +933,19 @@ where
                 .clone()
                 .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
                 .await
-                .map_error(server::error::LegacyCode::Misc)?
+                .map_err(|_| Error {
+                    // ## Compatibility with `zcashd`.
+                    //
+                    // Since this function is reused by getblock(), we return the errors
+                    // expected by it (they differ whether a hash or a height was passed).
+                    code: if hash_or_height.hash().is_some() {
+                        server::error::LegacyCode::InvalidAddressOrKey.into()
+                    } else {
+                        server::error::LegacyCode::InvalidParameter.into()
+                    },
+                    message: "block height not in best chain".to_owned(),
+                    data: None,
+                })?
             else {
                 panic!("unexpected response to BlockHeader request")
             };
@@ -1028,13 +994,16 @@ where
                 let mut nonce = *header.nonce;
                 nonce.reverse();
 
-                let final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
-                    let mut root: [u8; 32] = sapling_tree.root().into();
-                    root.reverse();
-                    root
-                } else {
-                    [0; 32]
-                };
+                let sapling_activation = NetworkUpgrade::Sapling.activation_height(&network);
+                let sapling_tree_size = sapling_tree.count();
+                let final_sapling_root: [u8; 32] =
+                    if sapling_activation.is_some() && height >= sapling_activation.unwrap() {
+                        let mut root: [u8; 32] = sapling_tree.root().into();
+                        root.reverse();
+                        root
+                    } else {
+                        [0; 32]
+                    };
 
                 let difficulty = header.difficulty_threshold.relative_to_network(&network);
 
@@ -1045,6 +1014,7 @@ where
                     version: header.version,
                     merkle_root: header.merkle_root,
                     final_sapling_root,
+                    sapling_tree_size,
                     time: header.time.timestamp(),
                     nonce,
                     solution: header.solution,
@@ -1780,8 +1750,9 @@ impl Default for SentTransactionHash {
 /// Response to a `getblock` RPC request.
 ///
 /// See the notes for the [`Rpc::get_block`] method.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
+#[allow(clippy::large_enum_variant)] //TODO: create a struct for the Object and Box it
 pub enum GetBlock {
     /// The request block, hex-encoded.
     Raw(#[serde(with = "hex")] SerializedBlock),
@@ -1794,21 +1765,84 @@ pub enum GetBlock {
         /// or -1 if it is not in the best chain.
         confirmations: i64,
 
+        /// The block size. TODO: fill it
+        #[serde(skip_serializing_if = "Option::is_none")]
+        size: Option<i64>,
+
         /// The height of the requested block.
         #[serde(skip_serializing_if = "Option::is_none")]
         height: Option<Height>,
+
+        /// The version field of the requested block.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        version: Option<u32>,
+
+        /// The merkle root of the requested block.
+        #[serde(with = "opthex", rename = "merkleroot")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        merkle_root: Option<block::merkle::Root>,
+
+        // `blockcommitments` would be here. Undocumented. TODO: decide if we want to support it
+        // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
+        //
+        /// The root of the Sapling commitment tree after applying this block.
+        #[serde(with = "opthex", rename = "finalsaplingroot")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        final_sapling_root: Option<[u8; 32]>,
+
+        /// The root of the Orchard commitment tree after applying this block.
+        #[serde(with = "opthex", rename = "finalorchardroot")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        final_orchard_root: Option<[u8; 32]>,
+
+        // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
+        //
+        /// List of transaction IDs in block order, hex-encoded.
+        //
+        // TODO: use a typed Vec<transaction::Hash> here
+        // TODO: support Objects
+        tx: Vec<String>,
 
         /// The height of the requested block.
         #[serde(skip_serializing_if = "Option::is_none")]
         time: Option<i64>,
 
-        /// List of transaction IDs in block order, hex-encoded.
-        //
-        // TODO: use a typed Vec<transaction::Hash> here
-        tx: Vec<String>,
+        /// The nonce of the requested block header.
+        #[serde(with = "opthex")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        nonce: Option<[u8; 32]>,
 
+        /// The Equihash solution in the requested block header.
+        /// Note: presence of this field in getblock is not documented in zcashd.
+        #[serde(with = "opthex")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        solution: Option<Solution>,
+
+        /// The difficulty threshold of the requested block header displayed in compact form.
+        #[serde(with = "opthex")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bits: Option<CompactDifficulty>,
+
+        /// Floating point number that represents the difficulty limit for this block as a multiple
+        /// of the minimum difficulty for the network.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        difficulty: Option<f64>,
+
+        // `chainwork` would be here, but we don't plan on supporting it
+        // `anchor` would be here. Undocumented. TODO: decide if we want to support it
+        // `chainSupply` would be here, TODO: implement
+        // `valuePools` would be here, TODO: implement
+        //
         /// Information about the note commitment trees.
         trees: GetBlockTrees,
+
+        /// The previous block hash of the requested block header.
+        #[serde(rename = "previousblockhash", skip_serializing_if = "Option::is_none")]
+        previous_block_hash: Option<GetBlockHash>,
+
+        /// The next block hash after the requested block header.
+        #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
+        next_block_hash: Option<GetBlockHash>,
     },
 }
 
@@ -1821,6 +1855,17 @@ impl Default for GetBlock {
             time: None,
             tx: Vec::new(),
             trees: GetBlockTrees::default(),
+            size: None,
+            version: None,
+            merkle_root: None,
+            final_sapling_root: None,
+            final_orchard_root: None,
+            nonce: None,
+            bits: None,
+            difficulty: None,
+            previous_block_hash: None,
+            next_block_hash: None,
+            solution: None,
         }
     }
 }
@@ -1863,6 +1908,11 @@ pub struct GetBlockHeaderObject {
     /// The root of the Sapling commitment tree after applying this block.
     #[serde(with = "hex", rename = "finalsaplingroot")]
     pub final_sapling_root: [u8; 32],
+
+    /// The number of Sapling notes in the Sapling note commitment tree
+    /// after applying this block. Used by the `getblock` RPC method.
+    #[serde(skip)]
+    pub sapling_tree_size: u64,
 
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.
     pub time: i64,
@@ -1909,6 +1959,7 @@ impl Default for GetBlockHeaderObject {
             version: 4,
             merkle_root: block::merkle::Root([0; 32]),
             final_sapling_root: Default::default(),
+            sapling_tree_size: Default::default(),
             time: 0,
             nonce: [0; 32],
             solution: Solution::for_proposal(),
@@ -2173,5 +2224,25 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
         };
 
         Ok(Height(sanitized_height))
+    }
+}
+
+/// A helper module to serialize `Option<T: ToHex>` as a hex string.
+mod opthex {
+    use hex::ToHex;
+    use serde::Serializer;
+
+    pub fn serialize<S, T>(data: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: ToHex,
+    {
+        match data {
+            Some(data) => {
+                let s = data.encode_hex::<String>();
+                serializer.serialize_str(&s)
+            }
+            None => serializer.serialize_none(),
+        }
     }
 }

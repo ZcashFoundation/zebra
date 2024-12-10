@@ -57,6 +57,37 @@ async fn rpc_getinfo() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
+// Helper function that returns the nonce and final sapling root of a given
+// Block.
+async fn get_block_data(
+    read_state: &ReadStateService,
+    block: Arc<Block>,
+    height: usize,
+) -> ([u8; 32], [u8; 32]) {
+    let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
+        .clone()
+        .oneshot(zebra_state::ReadRequest::SaplingTree(HashOrHeight::Height(
+            (height as u32).try_into().unwrap(),
+        )))
+        .await
+        .expect("should have sapling tree for block hash")
+    else {
+        panic!("unexpected response to SaplingTree request")
+    };
+
+    let mut expected_nonce = *block.header.nonce;
+    expected_nonce.reverse();
+    let sapling_tree = sapling_tree.expect("should always have sapling root");
+    let expected_final_sapling_root: [u8; 32] = if sapling_tree.position().is_some() {
+        let mut root: [u8; 32] = sapling_tree.root().into();
+        root.reverse();
+        root
+    } else {
+        [0; 32]
+    };
+    (expected_nonce, expected_final_sapling_root)
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblock() {
     let _init_guard = zebra_test::init();
@@ -80,7 +111,7 @@ async fn rpc_getblock() {
         false,
         true,
         Buffer::new(mempool.clone(), 1),
-        read_state,
+        read_state.clone(),
         latest_chain_tip,
     );
 
@@ -134,53 +165,8 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        assert_eq!(
-            get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: Some(Height(i.try_into().expect("valid u32"))),
-                time: None,
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.hash().encode_hex())
-                    .collect(),
-                trees,
-            }
-        );
-    }
-
-    // Make hash calls with verbosity=1 and check response
-    for (i, block) in blocks.iter().enumerate() {
-        let get_block = rpc
-            .get_block(blocks[i].hash().to_string(), Some(1u8))
-            .await
-            .expect("We should have a GetBlock struct");
-
-        assert_eq!(
-            get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: None,
-                time: None,
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| tx.hash().encode_hex())
-                    .collect(),
-                trees,
-            }
-        );
-    }
-
-    // Make height calls with verbosity=2 and check response
-    for (i, block) in blocks.iter().enumerate() {
-        let get_block = rpc
-            .get_block(i.to_string(), Some(2u8))
-            .await
-            .expect("We should have a GetBlock struct");
+        let (expected_nonce, expected_final_sapling_root) =
+            get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
             get_block,
@@ -195,6 +181,108 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                size: None,
+                version: Some(block.header.version),
+                merkle_root: Some(block.header.merkle_root),
+                final_sapling_root: Some(expected_final_sapling_root),
+                final_orchard_root: None,
+                nonce: Some(expected_nonce),
+                bits: Some(block.header.difficulty_threshold),
+                difficulty: Some(
+                    block
+                        .header
+                        .difficulty_threshold
+                        .relative_to_network(&Mainnet)
+                ),
+                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
+                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                solution: Some(block.header.solution),
+            }
+        );
+    }
+
+    // Make hash calls with verbosity=1 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(blocks[i].hash().to_string(), Some(1u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        let (expected_nonce, expected_final_sapling_root) =
+            get_block_data(&read_state, block.clone(), i).await;
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                height: Some(Height(i.try_into().expect("valid u32"))),
+                time: Some(block.header.time.timestamp()),
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
+                trees,
+                size: None,
+                version: Some(block.header.version),
+                merkle_root: Some(block.header.merkle_root),
+                final_sapling_root: Some(expected_final_sapling_root),
+                final_orchard_root: None,
+                nonce: Some(expected_nonce),
+                bits: Some(block.header.difficulty_threshold),
+                difficulty: Some(
+                    block
+                        .header
+                        .difficulty_threshold
+                        .relative_to_network(&Mainnet)
+                ),
+                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
+                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                solution: Some(block.header.solution),
+            }
+        );
+    }
+
+    // Make height calls with verbosity=2 and check response
+    for (i, block) in blocks.iter().enumerate() {
+        let get_block = rpc
+            .get_block(i.to_string(), Some(2u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        let (expected_nonce, expected_final_sapling_root) =
+            get_block_data(&read_state, block.clone(), i).await;
+
+        assert_eq!(
+            get_block,
+            GetBlock::Object {
+                hash: GetBlockHash(block.hash()),
+                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
+                height: Some(Height(i.try_into().expect("valid u32"))),
+                time: Some(block.header.time.timestamp()),
+                tx: block
+                    .transactions
+                    .iter()
+                    .map(|tx| tx.hash().encode_hex())
+                    .collect(),
+                trees,
+                size: None,
+                version: Some(block.header.version),
+                merkle_root: Some(block.header.merkle_root),
+                final_sapling_root: Some(expected_final_sapling_root),
+                final_orchard_root: None,
+                nonce: Some(expected_nonce),
+                bits: Some(block.header.difficulty_threshold),
+                difficulty: Some(
+                    block
+                        .header
+                        .difficulty_threshold
+                        .relative_to_network(&Mainnet)
+                ),
+                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
+                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                solution: Some(block.header.solution),
             }
         );
     }
@@ -205,6 +293,9 @@ async fn rpc_getblock() {
             .get_block(blocks[i].hash().to_string(), Some(2u8))
             .await
             .expect("We should have a GetBlock struct");
+
+        let (expected_nonce, expected_final_sapling_root) =
+            get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
             get_block,
@@ -219,6 +310,22 @@ async fn rpc_getblock() {
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                size: None,
+                version: Some(block.header.version),
+                merkle_root: Some(block.header.merkle_root),
+                final_sapling_root: Some(expected_final_sapling_root),
+                final_orchard_root: None,
+                nonce: Some(expected_nonce),
+                bits: Some(block.header.difficulty_threshold),
+                difficulty: Some(
+                    block
+                        .header
+                        .difficulty_threshold
+                        .relative_to_network(&Mainnet)
+                ),
+                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
+                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                solution: Some(block.header.solution),
             }
         );
     }
@@ -230,19 +337,38 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
+        let (expected_nonce, expected_final_sapling_root) =
+            get_block_data(&read_state, block.clone(), i).await;
+
         assert_eq!(
             get_block,
             GetBlock::Object {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
-                time: None,
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                size: None,
+                version: Some(block.header.version),
+                merkle_root: Some(block.header.merkle_root),
+                final_sapling_root: Some(expected_final_sapling_root),
+                final_orchard_root: None,
+                nonce: Some(expected_nonce),
+                bits: Some(block.header.difficulty_threshold),
+                difficulty: Some(
+                    block
+                        .header
+                        .difficulty_threshold
+                        .relative_to_network(&Mainnet)
+                ),
+                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
+                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                solution: Some(block.header.solution),
             }
         );
     }
@@ -254,19 +380,38 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
+        let (expected_nonce, expected_final_sapling_root) =
+            get_block_data(&read_state, block.clone(), i).await;
+
         assert_eq!(
             get_block,
             GetBlock::Object {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: None,
-                time: None,
+                height: Some(Height(i.try_into().expect("valid u32"))),
+                time: Some(block.header.time.timestamp()),
                 tx: block
                     .transactions
                     .iter()
                     .map(|tx| tx.hash().encode_hex())
                     .collect(),
                 trees,
+                size: None,
+                version: Some(block.header.version),
+                merkle_root: Some(block.header.merkle_root),
+                final_sapling_root: Some(expected_final_sapling_root),
+                final_orchard_root: None,
+                nonce: Some(expected_nonce),
+                bits: Some(block.header.difficulty_threshold),
+                difficulty: Some(
+                    block
+                        .header
+                        .difficulty_threshold
+                        .relative_to_network(&Mainnet)
+                ),
+                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
+                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                solution: Some(block.header.solution),
             }
         );
     }
@@ -451,6 +596,7 @@ async fn rpc_getblockheader() {
             version: 4,
             merkle_root: block.header.merkle_root,
             final_sapling_root: expected_final_sapling_root,
+            sapling_tree_size: sapling_tree.count(),
             time: block.header.time.timestamp(),
             nonce: expected_nonce,
             solution: block.header.solution,

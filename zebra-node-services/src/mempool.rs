@@ -16,12 +16,9 @@ use zebra_chain::transaction::VerifiedUnminedTx;
 use crate::BoxError;
 
 mod gossip;
-
 mod transaction_dependencies;
 
-pub use transaction_dependencies::TransactionDependencies;
-
-pub use self::gossip::Gossip;
+pub use self::{gossip::Gossip, transaction_dependencies::TransactionDependencies};
 
 /// A mempool service request.
 ///

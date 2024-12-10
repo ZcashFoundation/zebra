@@ -1,5 +1,7 @@
 //! An HTTP endpoint for dynamically setting tracing filters.
 
+#![allow(non_local_definitions)]
+
 use std::net::SocketAddr;
 
 use abscissa_core::{Component, FrameworkError};
