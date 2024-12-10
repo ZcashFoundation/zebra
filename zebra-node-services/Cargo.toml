@@ -48,7 +48,7 @@ jsonrpc-core = { version = "18.0.0", optional = true }
 reqwest = { version = "0.12.9", default-features = false, features = ["rustls-tls"], optional = true }
 serde = { version = "1.0.215", optional = true }
 serde_json = { version = "1.0.133", optional = true }
-tokio = { version = "1.41.1", features = ["time", "sync"] }
+tokio = { version = "1.42.0", features = ["time", "sync"] }
 
 [dev-dependencies]
 

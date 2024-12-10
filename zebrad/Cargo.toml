@@ -168,8 +168,8 @@ zebra-state = { path = "../zebra-state", version = "1.0.0-beta.43" }
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.43", optional = true }
 
 abscissa_core = "0.7.0"
-clap = { version = "4.5.21", features = ["cargo"] }
-chrono = { version = "0.4.38", default-features = false, features = ["clock", "std"] }
+clap = { version = "4.5.23", features = ["cargo"] }
+chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
 humantime-serde = "1.1.1"
 indexmap = "2.7.0"
 lazy_static = "1.4.0"
@@ -179,8 +179,8 @@ toml = "0.8.19"
 
 futures = "0.3.31"
 rayon = "1.10.0"
-tokio = { version = "1.41.1", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
-tokio-stream = { version = "0.1.16", features = ["time"] }
+tokio = { version = "1.42.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
+tokio-stream = { version = "0.1.17", features = ["time"] }
 tower = { version = "0.4.13", features = ["hedge", "limit"] }
 pin-project = "1.1.6"
 
@@ -189,9 +189,9 @@ color-eyre = { version = "0.6.3", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.8.0", features = ["rustc_1_55"] }
 
-thiserror = "2.0.3"
+thiserror = "2.0.6"
 
-tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tracing-appender = "0.2.3"
 tracing-error = "0.2.1"
 tracing-futures = "0.2.5"
@@ -266,11 +266,11 @@ tempfile = "3.14.0"
 hyper = { version = "1.5.1", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
-tokio = { version = "1.41.1", features = ["full", "tracing", "test-util"] }
-tokio-stream = "0.1.16"
+tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
+tokio-stream = "0.1.17"
 
 # test feature lightwalletd-grpc-tests
-prost = "0.13.3"
+prost = "0.13.4"
 tonic = "0.12.3"
 
 proptest = "1.4.0"
