@@ -742,6 +742,11 @@ where
         .boxed()
     }
 
+    // # Performance
+    //
+    // `lightwalletd` calls this RPC with verosity 1 for its initial sync of 2 million blocks, the
+    // performace of this RPC with verbosity 1 significantly affects `lightwalletd`s sync time.
+    //
     // TODO:
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
@@ -770,10 +775,6 @@ where
                 .map_error(server::error::LegacyCode::InvalidParameter)?;
 
             if verbosity == 0 {
-                // # Performance
-                //
-                // This RPC is used in `lightwalletd`'s initial sync of 2 million blocks,
-                // so it needs to load block data very efficiently.
                 let request = zebra_state::ReadRequest::Block(hash_or_height);
                 let response = state
                     .ready()
