@@ -69,7 +69,7 @@ thiserror = "2.0.6"
 
 rayon = "1.10.0"
 tokio = { version = "1.42.0", features = ["rt-multi-thread", "sync", "tracing"] }
-tower = { version = "0.5.1", features = ["buffer", "util"] }
+tower = { version = "0.4.13", features = ["buffer", "util"] }
 tracing = "0.1.41"
 
 # elasticsearch specific dependencies.
