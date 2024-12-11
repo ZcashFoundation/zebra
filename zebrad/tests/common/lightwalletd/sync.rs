@@ -32,7 +32,7 @@ pub fn wait_for_zebrad_and_lightwalletd_sync<
     wait_for_zebrad_mempool: bool,
     wait_for_zebrad_tip: bool,
 ) -> Result<(TestChild<TempDir>, TestChild<P>)> {
-    let is_zebrad_finished = AtomicBool::new(false);
+    let is_zebrad_finished = AtomicBool::new(!wait_for_zebrad_tip);
     let is_lightwalletd_finished = AtomicBool::new(false);
 
     let is_zebrad_finished = &is_zebrad_finished;
