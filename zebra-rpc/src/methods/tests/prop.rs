@@ -3,7 +3,7 @@
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
-use hex::ToHex;
+use hex::{FromHex, ToHex};
 use jsonrpc_core::{Error, ErrorCode};
 use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
@@ -299,10 +299,16 @@ proptest! {
         })?;
     }
 
-    /// Calls `get_raw_transaction` with a valid TXID that is not in the mempool nor in the state,
+    /// Calls `get_raw_transaction` with:
+    ///
+    /// 1. an invalid TXID that won't deserialize;
+    /// 2. a valid TXID that is not in the mempool nor in the state;
+    ///
     /// and checks that the RPC returns the right error code.
     #[test]
-    fn check_err_for_get_raw_transaction(txid: transaction::Hash, network in any::<Network>()) {
+    fn check_err_for_get_raw_transaction(unknown_txid: transaction::Hash,
+                                         invalid_txid in invalid_txid(),
+                                         network: Network) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -311,19 +317,29 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
+            // Check the invalid TXID first.
+            let rpc_rsp = rpc.get_raw_transaction(invalid_txid, Some(1)).await;
+
+            check_err_code(rpc_rsp, ErrorCode::ServerError(-5))?;
+
+            // Check that no further requests were made.
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+
+            // Now check the unknown TXID.
             let mempool_query = mempool
-                .expect_request(mempool::Request::TransactionsByMinedId([txid].into()))
+                .expect_request(mempool::Request::TransactionsByMinedId([unknown_txid].into()))
                 .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
 
             let state_query = state
-                .expect_request(zebra_state::ReadRequest::Transaction(txid))
+                .expect_request(zebra_state::ReadRequest::Transaction(unknown_txid))
                 .map_ok(|r| r.respond(zebra_state::ReadResponse::Transaction(None)));
 
-            let rpc_query = rpc.get_raw_transaction(txid, Some(1));
+            let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(1));
 
-            let (rsp, _, _) =  tokio::join!(rpc_query, mempool_query, state_query);
+            let (rpc_rsp, _, _) =  tokio::join!(rpc_query, mempool_query, state_query);
 
-            check_err_code(rsp, ErrorCode::ServerError(-5))?;
+            check_err_code(rpc_rsp, ErrorCode::ServerError(-5))?;
 
             // The queue task should continue without errors or panics
             prop_assert!(mempool_tx_queue.now_or_never().is_none());
@@ -739,6 +755,17 @@ proptest! {
 #[derive(Clone, Copy, Debug, Error)]
 #[error("a dummy error type")]
 pub struct DummyError;
+
+// Helper functions
+
+/// Creates [`String`]s that won't deserialize into [`transaction::Hash`].
+fn invalid_txid() -> BoxedStrategy<String> {
+    any::<String>()
+        .prop_filter("string must not deserialize into TXID", |s| {
+            transaction::Hash::from_hex(s).is_err()
+        })
+        .boxed()
+}
 
 /// Checks that the given RPC response contains the given error code.
 fn check_err_code<T>(rsp: Result<T, Error>, error_code: ErrorCode) -> Result<(), TestCaseError> {
