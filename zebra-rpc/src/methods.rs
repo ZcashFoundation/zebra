@@ -836,7 +836,7 @@ where
                 }
 
                 let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-                let tx = match tx_ids_response.map_server_error()? {
+                let tx: Vec<_> = match tx_ids_response.map_server_error()? {
                     zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
                         .ok_or_server_error("Block not found")?
                         .iter()
@@ -847,13 +847,18 @@ where
 
                 let tx = if verbosity >= 2 {
                     let mut tx_obj_vec = vec![];
+                    let mut tx_futs = FuturesOrdered::new();
+                    let tx_len = tx.len();
                     for txid in tx {
                         let GetBlockTransaction::Hash(txid) = txid else {
                             unreachable!("must be a Hash")
                         };
-                        let get_tx_result: Result<GetRawTransaction> = self_clone
-                            .get_raw_transaction(txid.encode_hex(), Some(1))
-                            .await;
+                        tx_futs
+                            .push_back(self_clone.get_raw_transaction(txid.encode_hex(), Some(1)));
+                    }
+                    for _ in 0..tx_len {
+                        let get_tx_result =
+                            tx_futs.next().await.expect("`tx_futs` should not be empty");
                         let GetRawTransaction::Object(tx_obj) = get_tx_result? else {
                             unreachable!("must return Object");
                         };
