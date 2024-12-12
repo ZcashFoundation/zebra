@@ -289,7 +289,7 @@ pub trait Rpc {
     #[rpc(name = "getrawtransaction")]
     fn get_raw_transaction(
         &self,
-        txid: transaction::Hash,
+        txid: String,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>>;
 
@@ -1107,7 +1107,7 @@ where
 
     fn get_raw_transaction(
         &self,
-        txid: transaction::Hash,
+        txid: String,
         verbose: Option<u8>,
     ) -> BoxFuture<Result<GetRawTransaction>> {
         let mut state = self.state.clone();
@@ -1115,6 +1115,11 @@ where
         let verbose = verbose.unwrap_or(0) != 0;
 
         async move {
+            // Reference for the legacy error code:
+            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L544>
+            let txid = transaction::Hash::from_hex(txid)
+                .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+
             // Check the mempool first.
             match mempool
                 .ready()

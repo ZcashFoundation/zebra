@@ -416,9 +416,9 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             responder.respond(mempool::Response::Transactions(vec![]));
         });
 
-    let txid = first_block_first_tx.hash();
+    let txid = first_block_first_tx.hash().encode_hex::<String>();
 
-    let rpc_req = rpc.get_raw_transaction(txid, Some(0u8));
+    let rpc_req = rpc.get_raw_transaction(txid.clone(), Some(0u8));
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_verbosity=0"), rsp));
     mempool.expect_no_requests().await;
@@ -446,7 +446,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             responder.respond(mempool::Response::Transactions(vec![]));
         });
 
-    let rpc_req = rpc.get_raw_transaction([0; 32].into(), Some(1));
+    let rpc_req = rpc.get_raw_transaction(transaction::Hash::from([0; 32]).encode_hex(), Some(1));
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_unknown_txid"), rsp));
     mempool.expect_no_requests().await;

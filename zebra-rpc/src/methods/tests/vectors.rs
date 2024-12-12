@@ -725,7 +725,7 @@ async fn rpc_getrawtransaction() {
                     }]));
                 });
 
-            let rpc_req = rpc.get_raw_transaction(tx.hash(), Some(0u8));
+            let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
 
             let (rsp, _) = futures::join!(rpc_req, mempool_req);
             let get_tx = rsp.expect("We should have a ");
@@ -758,9 +758,10 @@ async fn rpc_getrawtransaction() {
     let run_state_test_case = |block_idx: usize, block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
         let txid = tx.hash();
+        let hex_txid = txid.encode_hex::<String>();
 
-        let get_tx_verbose_0_req = rpc.get_raw_transaction(txid, Some(0u8));
-        let get_tx_verbose_1_req = rpc.get_raw_transaction(txid, Some(1u8));
+        let get_tx_verbose_0_req = rpc.get_raw_transaction(hex_txid.clone(), Some(0u8));
+        let get_tx_verbose_1_req = rpc.get_raw_transaction(hex_txid, Some(1u8));
 
         async move {
             let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(txid));
