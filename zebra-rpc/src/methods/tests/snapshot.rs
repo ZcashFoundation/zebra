@@ -451,6 +451,13 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_unknown_txid"), rsp));
     mempool.expect_no_requests().await;
 
+    // `getrawtransaction` with an invalid TXID
+    let rsp = rpc
+        .get_raw_transaction("aBadC0de".to_owned(), Some(1))
+        .await;
+    settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_invalid_txid"), rsp));
+    mempool.expect_no_requests().await;
+
     // `getaddresstxids`
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {

@@ -728,7 +728,7 @@ async fn rpc_getrawtransaction() {
             let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
 
             let (rsp, _) = futures::join!(rpc_req, mempool_req);
-            let get_tx = rsp.expect("We should have a ");
+            let get_tx = rsp.expect("we should have a `GetRawTransaction` struct");
 
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
