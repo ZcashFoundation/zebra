@@ -242,12 +242,31 @@ async fn rpc_getblock() {
         );
     }
 
+    // With verbosity=2, the RPC calls getrawtransaction which queries the
+    // mempool, which we need to mock since we used a MockService for it. This
+    // function returns a future that mocks that query. This is similar to what
+    // we use in the getrawtransaction test, but here we don't bother checking
+    // if the request is correct.
+    let make_mempool_req = || {
+        let mut mempool = mempool.clone();
+        async move {
+            mempool
+                .expect_request_that(|_request| true)
+                .await
+                .respond(mempool::Response::Transactions(vec![]));
+        }
+    };
+
     // Make height calls with verbosity=2 and check response
     for (i, block) in blocks.iter().enumerate() {
-        let get_block = rpc
-            .get_block(i.to_string(), Some(2u8))
-            .await
-            .expect("We should have a GetBlock struct");
+        let get_block_req = rpc.get_block(i.to_string(), Some(2u8));
+
+        // Run both the getblock request and the mocked mempool request.
+        // This assumes a single mempool query, i.e. that there is a single
+        // transaction the block. If the test vectors changes and the block
+        // has more than one transaction, this will need to be adjusted.
+        let (response, _) = futures::join!(get_block_req, make_mempool_req());
+        let get_block = response.expect("We should have a GetBlock struct");
 
         let (expected_nonce, expected_final_sapling_root) =
             get_block_data(&read_state, block.clone(), i).await;
@@ -262,7 +281,11 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                    .map(|tx| GetBlockTransaction::Object(TransactionObject {
+                        hex: (*tx).clone().into(),
+                        height: i.try_into().expect("valid u32"),
+                        confirmations: (blocks.len() - i).try_into().expect("valid i64")
+                    }))
                     .collect(),
                 trees,
                 size: None,
@@ -287,10 +310,10 @@ async fn rpc_getblock() {
 
     // Make hash calls with verbosity=2 and check response
     for (i, block) in blocks.iter().enumerate() {
-        let get_block = rpc
-            .get_block(blocks[i].hash().to_string(), Some(2u8))
-            .await
-            .expect("We should have a GetBlock struct");
+        let get_block_req = rpc.get_block(blocks[i].hash().to_string(), Some(2u8));
+
+        let (response, _) = futures::join!(get_block_req, make_mempool_req());
+        let get_block = response.expect("We should have a GetBlock struct");
 
         let (expected_nonce, expected_final_sapling_root) =
             get_block_data(&read_state, block.clone(), i).await;
@@ -305,7 +328,11 @@ async fn rpc_getblock() {
                 tx: block
                     .transactions
                     .iter()
-                    .map(|tx| GetBlockTransaction::Hash(tx.hash()))
+                    .map(|tx| GetBlockTransaction::Object(TransactionObject {
+                        hex: (*tx).clone().into(),
+                        height: i.try_into().expect("valid u32"),
+                        confirmations: (blocks.len() - i).try_into().expect("valid i64")
+                    }))
                     .collect(),
                 trees,
                 size: None,
