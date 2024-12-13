@@ -307,7 +307,7 @@ impl Transaction {
         spend_height: block::Height,
     ) -> CoinbaseSpendRestriction {
         // TODO: Replace `is_regtest()` with a check for a field.
-        if self.outputs().is_empty() || network.is_regtest() {
+        if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
             // we know this transaction must have shielded outputs,
             // because of other consensus rules
             OnlyShieldedOutputs { spend_height }

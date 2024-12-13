@@ -232,6 +232,9 @@ pub struct ParametersBuilder {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// Whether to allow transactions with transparent outputs that spend coinbase inputs,
+    /// similar to `fCoinbaseMustBeShielded` in zcashd.
+    should_allow_unshielded_coinbase_spends: bool,
     /// The pre-Blossom halving interval for this network
     pre_blossom_halving_interval: HeightDiff,
     /// The post-Blossom halving interval for this network
@@ -271,6 +274,7 @@ impl Default for ParametersBuilder {
             should_lock_funding_stream_address_period: false,
             pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
             post_blossom_halving_interval: POST_BLOSSOM_HALVING_INTERVAL,
+            should_allow_unshielded_coinbase_spends: false,
         }
     }
 }
@@ -439,6 +443,15 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the `disable_pow` flag to be used in the [`Parameters`] being built.
+    pub fn with_unshielded_coinbase_spends(
+        mut self,
+        should_allow_unshielded_coinbase_spends: bool,
+    ) -> Self {
+        self.should_allow_unshielded_coinbase_spends = should_allow_unshielded_coinbase_spends;
+        self
+    }
+
     /// Sets the pre and post Blosssom halving intervals to be used in the [`Parameters`] being built.
     pub fn with_halving_interval(mut self, pre_blossom_halving_interval: HeightDiff) -> Self {
         if self.should_lock_funding_stream_address_period {
@@ -464,6 +477,7 @@ impl ParametersBuilder {
             should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
             disable_pow,
+            should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
         } = self;
@@ -478,6 +492,7 @@ impl ParametersBuilder {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
         }
@@ -516,6 +531,7 @@ impl ParametersBuilder {
             should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
             disable_pow,
+            should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
         } = Self::default();
@@ -528,6 +544,8 @@ impl ParametersBuilder {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
+            && self.should_allow_unshielded_coinbase_spends
+                == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
     }
@@ -560,6 +578,9 @@ pub struct Parameters {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
+    /// Whether to allow transactions with transparent outputs that spend coinbase inputs,
+    /// similar to `fCoinbaseMustBeShielded` in zcashd.
+    should_allow_unshielded_coinbase_spends: bool,
     /// Pre-Blossom halving interval for this network
     pre_blossom_halving_interval: HeightDiff,
     /// Post-Blossom halving interval for this network
@@ -597,6 +618,7 @@ impl Parameters {
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
             .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
             .with_disable_pow(true)
+            .with_unshielded_coinbase_spends(true)
             .with_slow_start_interval(Height::MIN)
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
@@ -645,6 +667,7 @@ impl Parameters {
             post_nu6_funding_streams,
             target_difficulty_limit,
             disable_pow,
+            should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
         } = Self::new_regtest(None, None);
@@ -657,6 +680,8 @@ impl Parameters {
             && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
+            && self.should_allow_unshielded_coinbase_spends
+                == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
     }
@@ -709,6 +734,12 @@ impl Parameters {
     /// Returns true if proof-of-work validation should be disabled for this network
     pub fn disable_pow(&self) -> bool {
         self.disable_pow
+    }
+
+    /// Returns true if this network should allow transactions with transparent outputs
+    /// that spend coinbase inputs
+    pub fn should_allow_unshielded_coinbase_spends(&self) -> bool {
+        self.should_allow_unshielded_coinbase_spends
     }
 
     /// Returns the pre-Blossom halving interval for this network
@@ -784,6 +815,16 @@ impl Network {
             self.pre_nu6_funding_streams()
         } else {
             self.post_nu6_funding_streams()
+        }
+    }
+
+    /// Returns true if this network should allow transactions with transparent outputs
+    /// that spend coinbase inputs
+    pub fn should_allow_unshielded_coinbase_spends(&self) -> bool {
+        if let Self::Testnet(params) = self {
+            params.should_allow_unshielded_coinbase_spends()
+        } else {
+            false
         }
     }
 }
