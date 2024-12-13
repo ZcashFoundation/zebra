@@ -852,15 +852,20 @@ where
                         .transactions
                         .iter()
                         .map(|tx| {
-                            TransactionObject::new(
-                                tx.clone(),
-                                height,
-                                confirmations
-                                    .try_into()
-                                    .expect("should be less than max block height, i32::MAX"),
-                            )
+                            let GetRawTransaction::Object(tx_obj) =
+                                GetRawTransaction::from_transaction(
+                                    tx.clone(),
+                                    Some(height),
+                                    confirmations
+                                        .try_into()
+                                        .expect("should be less than max block height, i32::MAX"),
+                                    true,
+                                )
+                            else {
+                                unreachable!("an Object must be returned when verbose is true");
+                            };
+                            GetBlockTransaction::Object(tx_obj)
                         })
-                        .map(GetBlockTransaction::Object)
                         .collect(),
                     _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
                 };
@@ -2039,20 +2044,6 @@ pub struct TransactionObject {
     /// or 0 if the transaction is in the mempool.
     pub confirmations: u32,
     // TODO: many fields not yet supported
-}
-
-impl TransactionObject {
-    /// Creates a new [`TransactionObject`].
-    fn new(tx: Arc<Transaction>, height: block::Height, confirmations: u32) -> Self {
-        TransactionObject {
-            hex: tx.into(),
-            height: height
-                .0
-                .try_into()
-                .expect("valid block heights are limited to i32::MAX"),
-            confirmations,
-        }
-    }
 }
 
 impl Default for TransactionObject {
