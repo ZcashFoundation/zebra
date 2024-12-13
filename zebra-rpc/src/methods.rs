@@ -760,7 +760,6 @@ where
             None
         };
 
-        let self_clone = self.clone();
         async move {
             let hash_or_height: HashOrHeight = hash_or_height.parse().map_server_error()?;
 
@@ -811,6 +810,12 @@ where
                     next_block_hash,
                 } = *block_header;
 
+                let transactions_request = match verbosity {
+                    1 => zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
+                    2 => zebra_state::ReadRequest::Block(hash_or_height),
+                    _other => panic!("get_block_header_fut should be none"),
+                };
+
                 // # Concurrency
                 //
                 // We look up by block hash so the hash, transaction IDs, and confirmations
@@ -824,7 +829,7 @@ where
                     // A block's transaction IDs are never modified, so all possible responses are
                     // valid. Clients that query block heights must be able to handle chain forks,
                     // including getting transaction IDs from any chain fork.
-                    zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
+                    transactions_request,
                     // Orchard trees
                     zebra_state::ReadRequest::OrchardTree(hash_or_height),
                 ];
@@ -842,31 +847,27 @@ where
                         .iter()
                         .map(|tx_id| GetBlockTransaction::Hash(*tx_id))
                         .collect(),
+                    zebra_state::ReadResponse::Block(block) => block
+                        .ok_or_server_error("Block not found")?
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            let GetRawTransaction::Object(tx_obj) =
+                                GetRawTransaction::from_transaction(
+                                    tx.clone(),
+                                    Some(height),
+                                    confirmations
+                                        .try_into()
+                                        .expect("should be less than max block height, i32::MAX"),
+                                    true,
+                                )
+                            else {
+                                unreachable!("an Object must be returned when verbose is true");
+                            };
+                            GetBlockTransaction::Object(tx_obj)
+                        })
+                        .collect(),
                     _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
-                };
-
-                let tx = if verbosity >= 2 {
-                    let mut tx_obj_vec = vec![];
-                    let mut tx_futs = FuturesOrdered::new();
-                    let tx_len = tx.len();
-                    for txid in tx {
-                        let GetBlockTransaction::Hash(txid) = txid else {
-                            unreachable!("must be a Hash")
-                        };
-                        tx_futs
-                            .push_back(self_clone.get_raw_transaction(txid.encode_hex(), Some(1)));
-                    }
-                    for _ in 0..tx_len {
-                        let get_tx_result =
-                            tx_futs.next().await.expect("`tx_futs` should not be empty");
-                        let GetRawTransaction::Object(tx_obj) = get_tx_result? else {
-                            unreachable!("must return Object");
-                        };
-                        tx_obj_vec.push(GetBlockTransaction::Object(tx_obj));
-                    }
-                    tx_obj_vec
-                } else {
-                    tx
                 };
 
                 let orchard_tree_response = futs.next().await.expect("`futs` should not be empty");
