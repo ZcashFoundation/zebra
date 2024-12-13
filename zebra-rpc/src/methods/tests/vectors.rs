@@ -1,15 +1,17 @@
 //! Fixed test vectors for RPC methods.
 
 use std::ops::RangeInclusive;
+use std::sync::Arc;
 
 use tower::buffer::Buffer;
 
+use zebra_chain::serialization::ZcashSerialize;
 use zebra_chain::{
     amount::Amount,
     block::Block,
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::Network::*,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
+    serialization::ZcashDeserializeInto,
     transaction::UnminedTxId,
 };
 use zebra_node_services::BoxError;
@@ -264,8 +266,8 @@ async fn rpc_getblock() {
                     .iter()
                     .map(|tx| GetBlockTransaction::Object(TransactionObject {
                         hex: (*tx).clone().into(),
-                        height: i.try_into().expect("valid u32"),
-                        confirmations: (blocks.len() - i).try_into().expect("valid i64")
+                        height: Some(i.try_into().expect("valid u32")),
+                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64"))
                     }))
                     .collect(),
                 trees,
@@ -311,8 +313,8 @@ async fn rpc_getblock() {
                     .iter()
                     .map(|tx| GetBlockTransaction::Object(TransactionObject {
                         hex: (*tx).clone().into(),
-                        height: i.try_into().expect("valid u32"),
-                        confirmations: (blocks.len() - i).try_into().expect("valid i64")
+                        height: Some(i.try_into().expect("valid u32")),
+                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64"))
                     }))
                     .collect(),
                 trees,
@@ -730,9 +732,12 @@ async fn rpc_getrawtransaction() {
                         conventional_fee: Amount::zero(),
                     }]));
                 });
-            let get_tx_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
-            let (response, _) = futures::join!(get_tx_req, mempool_req);
-            let get_tx = response.expect("We should have a GetRawTransaction struct");
+
+            let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
+
+            let (rsp, _) = futures::join!(rpc_req, mempool_req);
+            let get_tx = rsp.expect("we should have a `GetRawTransaction` struct");
+
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
@@ -760,12 +765,14 @@ async fn rpc_getrawtransaction() {
 
     let run_state_test_case = |block_idx: usize, block: Arc<Block>, tx: Arc<Transaction>| {
         let read_state = read_state.clone();
-        let tx_hash = tx.hash();
-        let get_tx_verbose_0_req = rpc.get_raw_transaction(tx_hash.encode_hex(), Some(0u8));
-        let get_tx_verbose_1_req = rpc.get_raw_transaction(tx_hash.encode_hex(), Some(1u8));
+        let txid = tx.hash();
+        let hex_txid = txid.encode_hex::<String>();
+
+        let get_tx_verbose_0_req = rpc.get_raw_transaction(hex_txid.clone(), Some(0u8));
+        let get_tx_verbose_1_req = rpc.get_raw_transaction(hex_txid, Some(1u8));
 
         async move {
-            let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(tx_hash));
+            let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(txid));
             let get_tx = response.expect("We should have a GetRawTransaction struct");
             if let GetRawTransaction::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
@@ -773,7 +780,8 @@ async fn rpc_getrawtransaction() {
                 unreachable!("Should return a Raw enum")
             }
 
-            let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(tx_hash));
+            let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(txid));
+
             let GetRawTransaction::Object(TransactionObject {
                 hex,
                 height,
@@ -783,8 +791,11 @@ async fn rpc_getrawtransaction() {
                 unreachable!("Should return a Raw enum")
             };
 
+            let height = height.expect("state requests should have height");
+            let confirmations = confirmations.expect("state requests should have confirmations");
+
             assert_eq!(hex.as_ref(), tx.zcash_serialize_to_vec().unwrap());
-            assert_eq!(height, block_idx as i32);
+            assert_eq!(height, block_idx as u32);
 
             let depth_response = read_state
                 .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
@@ -878,25 +889,18 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     );
 
     // call the method with an invalid address string
-    let address = "11111111".to_string();
-    let addresses = vec![address.clone()];
-    let start: u32 = 1;
-    let end: u32 = 2;
-    let error = rpc
+    let rpc_rsp = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start,
-            end,
+            addresses: vec!["t1invalidaddress".to_owned()],
+            start: 1,
+            end: 2,
         })
         .await
         .unwrap_err();
-    assert_eq!(
-        error.message,
-        format!(
-            "invalid address \"{}\": parse error: t-addr decoding error",
-            address.clone()
-        )
-    );
+
+    assert_eq!(rpc_rsp.code, ErrorCode::ServerError(-5));
+
+    mempool.expect_no_requests().await;
 
     // create a valid address
     let address = "t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd".to_string();
@@ -1086,17 +1090,13 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     );
 
     // call the method with an invalid address string
-    let address = "11111111".to_string();
-    let addresses = vec![address.clone()];
     let error = rpc
         .0
-        .get_address_utxos(AddressStrings::new(addresses))
+        .get_address_utxos(AddressStrings::new(vec!["t1invalidaddress".to_owned()]))
         .await
         .unwrap_err();
-    assert_eq!(
-        error.message,
-        format!("invalid address \"{address}\": parse error: t-addr decoding error")
-    );
+
+    assert_eq!(error.code, ErrorCode::ServerError(-5));
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;

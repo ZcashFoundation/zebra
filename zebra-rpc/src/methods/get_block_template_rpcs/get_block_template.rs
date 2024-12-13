@@ -25,12 +25,12 @@ use zebra_consensus::{
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
-use crate::methods::{
-    errors::OkOrServerError,
-    get_block_template_rpcs::{
+use crate::{
+    methods::get_block_template_rpcs::{
         constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
         types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
     },
+    server::error::OkOrError,
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -87,13 +87,9 @@ pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
 pub fn check_miner_address(
     miner_address: Option<transparent::Address>,
 ) -> Result<transparent::Address> {
-    miner_address.ok_or_else(|| Error {
-        code: ErrorCode::ServerError(0),
-        message: "configure mining.miner_address in zebrad.toml \
-                  with a transparent address"
-            .to_string(),
-        data: None,
-    })
+    miner_address.ok_or_misc_error(
+        "set `mining.miner_address` in `zebrad.toml` to a transparent address".to_string(),
+    )
 }
 
 /// Attempts to validate block proposal against all of the server's
@@ -181,7 +177,7 @@ where
     // but this is ok for an estimate
     let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
         .estimate_distance_to_network_chain_tip(network)
-        .ok_or_server_error("no chain tip available yet")?;
+        .ok_or_misc_error("no chain tip available yet")?;
 
     if !sync_status.is_close_to_tip()
         || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP
