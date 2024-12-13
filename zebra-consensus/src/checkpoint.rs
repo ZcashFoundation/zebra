@@ -992,9 +992,9 @@ pub enum VerifyCheckpointError {
     CheckpointList(BoxError),
     #[error(transparent)]
     VerifyBlock(VerifyBlockError),
-    #[error("invalid block subsidy")]
+    #[error("invalid block subsidy: {0}")]
     SubsidyError(#[from] SubsidyError),
-    #[error("invalid amount")]
+    #[error("invalid amount: {0}")]
     AmountError(#[from] amount::Error),
     #[error("too many queued blocks at this height")]
     QueuedLimit,

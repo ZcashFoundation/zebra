@@ -10,16 +10,11 @@ merge_queue:
 # Provides a means to set configuration values that act as fallbacks
 # for queue_rules and pull_request_rules
 defaults:
-  actions:
-    squash:
-      # TODO: Adapt our PR template to use title+body
-      commit_message: all-commits
-
+  # Define our default queue rules
   queue_rule:
     # Allow to update/rebase the original pull request if possible to check its mergeability,
     # and it does not create a draft PR if not needed
     allow_inplace_checks: True
-    batch_size: 20
     # Wait for about 10% of the time it takes Rust PRs to run CI (~1h)
     batch_max_wait_time: "10 minutes"
     queue_conditions:
@@ -27,73 +22,48 @@ defaults:
       # which are the same as the GitHub main branch protection rules
       # https://docs.mergify.com/conditions/#about-branch-protection
       - base=main
+      # is not in draft
+      - -draft
+      # does not include the do-not-merge label
+      - label!=do-not-merge
+      # has at least one approving reviewer
+      - "#approved-reviews-by >= 1"
+
 
 # Allows to define the rules that reign over our merge queues
 queue_rules:
   - name: urgent
-    batch_size: 8
+    batch_size: 5
     # Wait a short time to embark hotfixes together in a merge train
     batch_max_wait_time: "2 minutes"
+    queue_conditions:
+      # is labeled with Critical priority
+      - 'label~=^P-Critical'
 
   - name: batched
+    batch_size: 20
+
+pull_request_rules:
+  - name: move to any queue if GitHub Rulesets are satisfied
+    conditions: []
+    actions:
+      queue:
 
 # Rules that will determine which priority a pull request has when entering
 # our merge queue
 #
 # These rules are checked in order, the first one to be satisfied applies
 priority_rules:
-  - name: move to urgent queue when CI passes with multiple reviews
+  - name: urgent
     conditions:
-      # This queue handles a PR if it:
-      # has multiple approving reviewers
-      - "#approved-reviews-by>=2"
       # is labeled with Critical priority
       - 'label~=^P-Critical'
-      # and satisfies the standard merge conditions:
-      # targets main
-      - base=main
-      # is not in draft
-      - -draft
-      # does not include the do-not-merge label
-      - label!=do-not-merge
     allow_checks_interruption: true
     priority: high
 
-  - name: move to urgent queue when CI passes with 1 review
+  - name: low
     conditions:
-      # This queue handles a PR if it:
-      # has at least one approving reviewer (branch protection rule)
-      # does not need extra reviews
-      - 'label!=extra-reviews'
-      # is labeled with Critical priority
-      - 'label~=^P-Critical'
-      # and satisfies the standard merge conditions:
-      - base=main
-      - -draft
-      - label!=do-not-merge
-    priority: high
-
-  - name: move to medium queue when CI passes with multiple reviews
-    conditions:
-      # This queue handles a PR if it:
-      # has multiple approving reviewers
-      - "#approved-reviews-by>=2"
-      # is labeled with any other priority (rules are checked in order)
-      # and satisfies the standard merge conditions:
-      - base=main
-      - -draft
-      - label!=do-not-merge
-    priority: medium
-
-  - name: move to low queue when CI passes with 1 review
-    conditions:
-      # This queue handles a PR if it:
-      # has at least one approving reviewer (branch protection rule)
-      # does not need extra reviews
-      - 'label!=extra-reviews'
-      # is labeled with any other priority (rules are checked in order)
-      # and satisfies the standard merge conditions:
-      - base=main
-      - -draft
-      - label!=do-not-merge
+      # is labeled with Optional or Low priority
+      - 'label~=^P-(Optional|Low)'
+    allow_checks_interruption: true
     priority: low

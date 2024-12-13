@@ -121,7 +121,7 @@ jobs:
   # workflow or repository variable is configured differently. Testnet jobs change that config to
   # testnet when running the image.
   build:
-    name: Build images
+    name: Build CI Docker
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     uses: ./.github/workflows/sub-build-docker-image.yml

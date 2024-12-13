@@ -63,7 +63,7 @@ where
     batch: Batch,
 }
 
-impl<'cf, Key, Value> Debug for TypedColumnFamily<'cf, Key, Value>
+impl<Key, Value> Debug for TypedColumnFamily<'_, Key, Value>
 where
     Key: IntoDisk + FromDisk + Debug,
     Value: IntoDisk + FromDisk,
@@ -80,7 +80,7 @@ where
     }
 }
 
-impl<'cf, Key, Value> PartialEq for TypedColumnFamily<'cf, Key, Value>
+impl<Key, Value> PartialEq for TypedColumnFamily<'_, Key, Value>
 where
     Key: IntoDisk + FromDisk + Debug,
     Value: IntoDisk + FromDisk,
@@ -90,7 +90,7 @@ where
     }
 }
 
-impl<'cf, Key, Value> Eq for TypedColumnFamily<'cf, Key, Value>
+impl<Key, Value> Eq for TypedColumnFamily<'_, Key, Value>
 where
     Key: IntoDisk + FromDisk + Debug,
     Value: IntoDisk + FromDisk,
@@ -243,7 +243,7 @@ where
     }
 }
 
-impl<'cf, Key, Value> TypedColumnFamily<'cf, Key, Value>
+impl<Key, Value> TypedColumnFamily<'_, Key, Value>
 where
     Key: IntoDisk + FromDisk + Debug + Ord,
     Value: IntoDisk + FromDisk,
@@ -259,7 +259,7 @@ where
     }
 }
 
-impl<'cf, Key, Value> TypedColumnFamily<'cf, Key, Value>
+impl<Key, Value> TypedColumnFamily<'_, Key, Value>
 where
     Key: IntoDisk + FromDisk + Debug + Hash + Eq,
     Value: IntoDisk + FromDisk,
@@ -275,7 +275,7 @@ where
     }
 }
 
-impl<'cf, Key, Value, Batch> WriteTypedBatch<'cf, Key, Value, Batch>
+impl<Key, Value, Batch> WriteTypedBatch<'_, Key, Value, Batch>
 where
     Key: IntoDisk + FromDisk + Debug,
     Value: IntoDisk + FromDisk,
@@ -312,7 +312,7 @@ where
 }
 
 // Writing a batch to the database requires an owned batch.
-impl<'cf, Key, Value> WriteTypedBatch<'cf, Key, Value, DiskWriteBatch>
+impl<Key, Value> WriteTypedBatch<'_, Key, Value, DiskWriteBatch>
 where
     Key: IntoDisk + FromDisk + Debug,
     Value: IntoDisk + FromDisk,

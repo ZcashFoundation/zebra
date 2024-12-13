@@ -74,19 +74,19 @@ pub enum VerifyBlockError {
     #[error(transparent)]
     Time(zebra_chain::block::BlockTimeError),
 
-    #[error("unable to commit block after semantic verification")]
+    #[error("unable to commit block after semantic verification: {0}")]
     // TODO: make this into a concrete type, and add it to is_duplicate_request() (#2908)
     Commit(#[source] BoxError),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals)")]
+    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals): {0}")]
     // TODO: make this into a concrete type (see #5732)
     ValidateProposal(#[source] BoxError),
 
-    #[error("invalid transaction")]
+    #[error("invalid transaction: {0}")]
     Transaction(#[from] TransactionError),
 
-    #[error("invalid block subsidy")]
+    #[error("invalid block subsidy: {0}")]
     Subsidy(#[from] SubsidyError),
 }
 
