@@ -20,11 +20,11 @@ fi
 # We use the same commands as the [release drafter](https://github.com/ZcashFoundation/zebra/blob/main/.github/PULL_REQUEST_TEMPLATE/release-checklist.md#update-crate-versions)
 # with an extra `--no-confirm` argument for non-interactive testing.
 # Update everything except for alpha crates and zebrad:
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc patch
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
 
 # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-scan 0.1.0-alpha.11
-cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-grpc 0.1.0-alpha.9
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-scan 0.1.0-alpha.13
+cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebra-grpc 0.1.0-alpha.11
 
 # Update zebrad:
 cargo release version --verbose --execute --no-confirm --allow-branch '*' --package zebrad patch

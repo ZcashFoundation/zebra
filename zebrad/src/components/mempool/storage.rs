@@ -55,7 +55,7 @@ pub(crate) const MAX_EVICTION_MEMORY_ENTRIES: usize = 40_000;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(dead_code)]
 pub enum ExactTipRejectionError {
-    #[error("transaction did not pass consensus validation")]
+    #[error("transaction did not pass consensus validation: {0}")]
     FailedVerification(#[from] zebra_consensus::error::TransactionError),
 }
 

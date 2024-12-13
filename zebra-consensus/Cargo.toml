@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.42"
+version = "1.0.0-beta.43"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Implementation of Zcash consensus checks"
 license = "MIT OR Apache-2.0"
@@ -43,18 +43,18 @@ jubjub = "0.10.0"
 rand = "0.8.5"
 rayon = "1.10.0"
 
-chrono = { version = "0.4.38", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
 lazy_static = "1.4.0"
 once_cell = "1.20.2"
-serde = { version = "1.0.211", features = ["serde_derive"] }
+serde = { version = "1.0.215", features = ["serde_derive"] }
 
 futures = "0.3.31"
 futures-util = "0.3.28"
-metrics = "0.24.0"
-thiserror = "1.0.64"
-tokio = { version = "1.41.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
+metrics = "0.24.1"
+thiserror = "2.0.6"
+tokio = { version = "1.42.0", features = ["time", "sync", "tracing", "rt-multi-thread"] }
 tower = { version = "0.4.13", features = ["timeout", "util", "buffer"] }
-tracing = "0.1.39"
+tracing = "0.1.41"
 tracing-futures = "0.2.5"
 
 sapling-crypto.workspace = true
@@ -63,13 +63,13 @@ orchard.workspace = true
 zcash_proofs = { workspace = true, features = ["multicore" ] }
 wagyu-zcash-parameters = "0.2.0"
 
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.18" }
-tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.18" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.19" }
+tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.19" }
 
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.42" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.42" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.42" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.42" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.43" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.43" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.43" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.43" }
 
 # prod feature progress-bar
 howudoin = { version = "0.1.2", optional = true }
@@ -90,10 +90,10 @@ proptest = "1.4.0"
 proptest-derive = "0.5.0"
 spandoc = "0.2.2"
 
-tokio = { version = "1.41.0", features = ["full", "tracing", "test-util"] }
-tracing-error = "0.2.0"
-tracing-subscriber = "0.3.18"
+tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
+tracing-error = "0.2.1"
+tracing-subscriber = "0.3.19"
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.42", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.42", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.42" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.43", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.43", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.43" }

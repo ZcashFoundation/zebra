@@ -220,13 +220,13 @@ pub enum ValidateContextError {
         height: Option<block::Height>,
     },
 
-    #[error("error updating a note commitment tree")]
+    #[error("error updating a note commitment tree: {0}")]
     NoteCommitmentTreeError(#[from] zebra_chain::parallel::tree::NoteCommitmentTreeError),
 
-    #[error("error building the history tree")]
+    #[error("error building the history tree: {0}")]
     HistoryTreeError(#[from] Arc<HistoryTreeError>),
 
-    #[error("block contains an invalid commitment")]
+    #[error("block contains an invalid commitment: {0}")]
     InvalidBlockCommitment(#[from] block::CommitmentError),
 
     #[error(

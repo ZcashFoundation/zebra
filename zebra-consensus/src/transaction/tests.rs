@@ -9,6 +9,7 @@ use std::{
 
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
+use futures::{FutureExt, TryFutureExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use tower::{buffer::Buffer, service_fn, ServiceExt};
 
@@ -1174,60 +1175,49 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 }
 
 #[test]
-fn v5_transaction_is_accepted_after_nu5_activation_mainnet() {
-    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::Mainnet)
-}
-
-#[test]
-fn v5_transaction_is_accepted_after_nu5_activation_testnet() {
-    v5_transaction_is_accepted_after_nu5_activation_for_network(Network::new_default_testnet())
-}
-
-fn v5_transaction_is_accepted_after_nu5_activation_for_network(network: Network) {
+fn v5_transaction_is_accepted_after_nu5_activation() {
     let _init_guard = zebra_test::init();
-    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
-        let nu5 = NetworkUpgrade::Nu5;
-        let nu5_activation_height = nu5
-            .activation_height(&network)
-            .expect("NU5 activation height is specified");
-        let blocks = network.block_iter();
 
-        let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
+    for network in Network::iter() {
+        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
+            let nu5_activation_height = NetworkUpgrade::Nu5
+                .activation_height(&network)
+                .expect("NU5 activation height is specified");
 
-        let mut transaction = fake_v5_transactions_for_network(&network, blocks)
-            .next_back()
-            .expect("At least one fake V5 transaction in the test vectors");
-        if transaction
-            .expiry_height()
-            .expect("V5 must have expiry_height")
-            < nu5_activation_height
-        {
-            let expiry_height = transaction.expiry_height_mut();
-            *expiry_height = nu5_activation_height;
-        }
+            let state = service_fn(|_| async { unreachable!("Service should not be called") });
 
-        let expected_hash = transaction.unmined_id();
-        let expiry_height = transaction
-            .expiry_height()
-            .expect("V5 must have expiry_height");
+            let mut tx = fake_v5_transactions_for_network(&network, network.block_iter())
+                .next_back()
+                .expect("At least one fake V5 transaction in the test vectors");
 
-        let result = verifier
-            .oneshot(Request::Block {
-                transaction_hash: transaction.hash(),
-                transaction: Arc::new(transaction),
-                known_utxos: Arc::new(HashMap::new()),
-                known_outpoint_hashes: Arc::new(HashSet::new()),
-                height: expiry_height,
-                time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
+            if tx.expiry_height().expect("V5 must have expiry_height") < nu5_activation_height {
+                *tx.expiry_height_mut() = nu5_activation_height;
+                tx.update_network_upgrade(NetworkUpgrade::Nu5)
+                    .expect("updating the network upgrade for a V5 tx should succeed");
+            }
 
-        assert_eq!(
-            result.expect("unexpected error response").tx_id(),
-            expected_hash
-        );
-    })
+            let expected_hash = tx.unmined_id();
+            let expiry_height = tx.expiry_height().expect("V5 must have expiry_height");
+
+            let verification_result = Verifier::new_for_tests(&network, state)
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    height: expiry_height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await;
+
+            assert_eq!(
+                verification_result
+                    .expect("successful verification")
+                    .tx_id(),
+                expected_hash
+            );
+        });
+    }
 }
 
 /// Test if V4 transaction with transparent funds is accepted.
@@ -2078,7 +2068,13 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     *new_transaction.expiry_height_mut() = new_expiry_height;
 
-    let result = verifier
+    // Setting the new expiry height as the block height will activate NU6, so we need to set NU6
+    // for the tx as well.
+    new_transaction
+        .update_network_upgrade(NetworkUpgrade::Nu6)
+        .expect("updating the network upgrade for a V5 tx should succeed");
+
+    let verification_result = verifier
         .clone()
         .oneshot(Request::Block {
             transaction_hash: transaction.hash(),
@@ -2091,7 +2087,9 @@ async fn v5_coinbase_transaction_expiry_height() {
         .await;
 
     assert_eq!(
-        result.expect("unexpected error response").tx_id(),
+        verification_result
+            .expect("successful verification")
+            .tx_id(),
         new_transaction.unmined_id()
     );
 }
@@ -2151,22 +2149,18 @@ async fn v5_transaction_with_too_low_expiry_height() {
     );
 }
 
-/// Tests if a non-coinbase V5 transaction with an expiry height exceeding the
-/// maximum is rejected.
+/// Tests if a non-coinbase V5 transaction with an expiry height exceeding the maximum is rejected.
 #[tokio::test]
 async fn v5_transaction_with_exceeding_expiry_height() {
-    let state_service =
-        service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state_service);
+    let state = service_fn(|_| async { unreachable!("State service should not be called") });
 
-    let block_height = block::Height::MAX;
+    let height_max = block::Height::MAX;
 
-    let fund_height = (block_height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
-        fund_height,
+        height_max.previous().expect("valid height"),
         true,
         0,
-        Amount::try_from(1).expect("invalid value"),
+        Amount::try_from(1).expect("valid amount"),
     );
 
     // This expiry height exceeds the maximum defined by the specification.
@@ -2180,27 +2174,29 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         expiry_height,
         sapling_shielded_data: None,
         orchard_shielded_data: None,
-        network_upgrade: NetworkUpgrade::Nu5,
+        network_upgrade: NetworkUpgrade::Nu6,
     };
 
-    let result = verifier
+    let transaction_hash = transaction.hash();
+
+    let verification_result = Verifier::new_for_tests(&Network::Mainnet, state)
         .oneshot(Request::Block {
             transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
             known_outpoint_hashes: Arc::new(HashSet::new()),
-            height: block_height,
+            height: height_max,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
 
     assert_eq!(
-        result,
+        verification_result,
         Err(TransactionError::MaximumExpiryHeight {
             expiry_height,
             is_coinbase: false,
-            block_height,
-            transaction_hash: transaction.hash(),
+            block_height: height_max,
+            transaction_hash,
         })
     );
 }
@@ -2321,61 +2317,51 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 /// Test if V5 transaction with an internal double spend of transparent funds is rejected.
 #[tokio::test]
 async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
-    let network = Network::Mainnet;
-    let network_upgrade = NetworkUpgrade::Nu5;
+    for network in Network::iter() {
+        let canopy_activation_height = NetworkUpgrade::Canopy
+            .activation_height(&network)
+            .expect("Canopy activation height is specified");
 
-    let canopy_activation_height = NetworkUpgrade::Canopy
-        .activation_height(&network)
-        .expect("Canopy activation height is specified");
+        let height = (canopy_activation_height + 10).expect("valid height");
 
-    let transaction_block_height =
-        (canopy_activation_height + 10).expect("transaction block height is too large");
+        // Create a fake transparent transfer that should succeed
+        let (input, output, known_utxos) = mock_transparent_transfer(
+            height.previous().expect("valid height"),
+            true,
+            0,
+            Amount::try_from(1).expect("valid amount"),
+        );
 
-    let fake_source_fund_height =
-        (transaction_block_height - 1).expect("fake source fund block height is too small");
+        let transaction = Transaction::V5 {
+            inputs: vec![input.clone(), input.clone()],
+            outputs: vec![output],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: height.next().expect("valid height"),
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            network_upgrade: NetworkUpgrade::Canopy,
+        };
 
-    // Create a fake transparent transfer that should succeed
-    let (input, output, known_utxos) = mock_transparent_transfer(
-        fake_source_fund_height,
-        true,
-        0,
-        Amount::try_from(1).expect("invalid value"),
-    );
+        let state = service_fn(|_| async { unreachable!("State service should not be called") });
 
-    // Create a V4 transaction
-    let transaction = Transaction::V5 {
-        inputs: vec![input.clone(), input.clone()],
-        outputs: vec![output],
-        lock_time: LockTime::Height(block::Height(0)),
-        expiry_height: (transaction_block_height + 1).expect("expiry height is too large"),
-        sapling_shielded_data: None,
-        orchard_shielded_data: None,
-        network_upgrade,
-    };
+        let verification_result = Verifier::new_for_tests(&network, state)
+            .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
+                transaction: Arc::new(transaction),
+                known_utxos: Arc::new(known_utxos),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
+                height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
 
-    let state_service =
-        service_fn(|_| async { unreachable!("State service should not be called") });
-    let verifier = Verifier::new_for_tests(&network, state_service);
-
-    let result = verifier
-        .oneshot(Request::Block {
-            transaction_hash: transaction.hash(),
-            transaction: Arc::new(transaction),
-            known_utxos: Arc::new(known_utxos),
-            known_outpoint_hashes: Arc::new(HashSet::new()),
-            height: transaction_block_height,
-            time: DateTime::<Utc>::MAX_UTC,
-        })
-        .await;
-
-    let expected_outpoint = input.outpoint().expect("Input should have an outpoint");
-
-    assert_eq!(
-        result,
-        Err(TransactionError::DuplicateTransparentSpend(
-            expected_outpoint
-        ))
-    );
+        assert_eq!(
+            verification_result,
+            Err(TransactionError::DuplicateTransparentSpend(
+                input.outpoint().expect("Input should have an outpoint")
+            ))
+        );
+    }
 }
 
 /// Test if signed V4 transaction with a dummy [`sprout::JoinSplit`] is accepted.
@@ -2809,6 +2795,167 @@ fn v5_with_duplicate_orchard_action() {
             ))
         );
     });
+}
+
+/// Checks that the tx verifier handles consensus branch ids in V5 txs correctly.
+#[tokio::test]
+async fn v5_consensus_branch_ids() {
+    let mut state = MockService::build().for_unit_tests();
+
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        Height(1),
+        true,
+        0,
+        Amount::try_from(10001).expect("valid amount"),
+    );
+
+    let known_utxos = Arc::new(known_utxos);
+
+    // NU5 is the first network upgrade that supports V5 txs.
+    let mut network_upgrade = NetworkUpgrade::Nu5;
+
+    let mut tx = Transaction::V5 {
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::unlocked(),
+        expiry_height: Height::MAX_EXPIRY_HEIGHT,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+        network_upgrade,
+    };
+
+    let outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    for network in Network::iter() {
+        let verifier = Buffer::new(Verifier::new_for_tests(&network, state.clone()), 10);
+
+        while let Some(next_nu) = network_upgrade.next_upgrade() {
+            // Check an outdated network upgrade.
+            let height = next_nu.activation_height(&network).expect("height");
+
+            let block_req = verifier
+                .clone()
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx.clone()),
+                    known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    // The consensus branch ID of the tx is outdated for this height.
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let mempool_req = verifier
+                .clone()
+                .oneshot(Request::Mempool {
+                    transaction: tx.clone().into(),
+                    // The consensus branch ID of the tx is outdated for this height.
+                    height,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let (block_rsp, mempool_rsp) = futures::join!(block_req, mempool_req);
+
+            assert_eq!(block_rsp, Err(TransactionError::WrongConsensusBranchId));
+            assert_eq!(mempool_rsp, Err(TransactionError::WrongConsensusBranchId));
+
+            // Check the currently supported network upgrade.
+            let height = network_upgrade.activation_height(&network).expect("height");
+
+            let block_req = verifier
+                .clone()
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx.clone()),
+                    known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    // The consensus branch ID of the tx is supported by this height.
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .map_ok(|rsp| rsp.tx_id())
+                .map_err(|e| format!("{e}"));
+
+            let mempool_req = verifier
+                .clone()
+                .oneshot(Request::Mempool {
+                    transaction: tx.clone().into(),
+                    // The consensus branch ID of the tx is supported by this height.
+                    height,
+                })
+                .map_ok(|rsp| rsp.tx_id())
+                .map_err(|e| format!("{e}"));
+
+            let state_req = async {
+                state
+                    .expect_request(zebra_state::Request::UnspentBestChainUtxo(outpoint))
+                    .map(|r| {
+                        r.respond(zebra_state::Response::UnspentBestChainUtxo(
+                            known_utxos.get(&outpoint).map(|utxo| utxo.utxo.clone()),
+                        ))
+                    })
+                    .await;
+
+                state
+                    .expect_request_that(|req| {
+                        matches!(
+                            req,
+                            zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                        )
+                    })
+                    .map(|r| {
+                        r.respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors)
+                    })
+                    .await;
+            };
+
+            let (block_rsp, mempool_rsp, _) = futures::join!(block_req, mempool_req, state_req);
+            let txid = tx.unmined_id();
+
+            assert_eq!(block_rsp, Ok(txid));
+            assert_eq!(mempool_rsp, Ok(txid));
+
+            // Check a network upgrade that Zebra doesn't support yet.
+            tx.update_network_upgrade(next_nu)
+                .expect("V5 txs support updating NUs");
+
+            let height = network_upgrade.activation_height(&network).expect("height");
+
+            let block_req = verifier
+                .clone()
+                .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
+                    transaction: Arc::new(tx.clone()),
+                    known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
+                    // The consensus branch ID of the tx is not supported by this height.
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let mempool_req = verifier
+                .clone()
+                .oneshot(Request::Mempool {
+                    transaction: tx.clone().into(),
+                    // The consensus branch ID of the tx is not supported by this height.
+                    height,
+                })
+                .map_err(|err| *err.downcast().expect("`TransactionError` type"));
+
+            let (block_rsp, mempool_rsp) = futures::join!(block_req, mempool_req);
+
+            assert_eq!(block_rsp, Err(TransactionError::WrongConsensusBranchId));
+            assert_eq!(mempool_rsp, Err(TransactionError::WrongConsensusBranchId));
+
+            // Shift the network upgrade for the next loop iteration.
+            network_upgrade = next_nu;
+        }
+    }
 }
 
 // Utility functions
