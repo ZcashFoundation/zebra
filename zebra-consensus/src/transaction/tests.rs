@@ -732,7 +732,7 @@ async fn skips_verification_of_block_transactions_in_mempool() {
 
     // Create a non-coinbase V4 tx with the last valid expiry height.
     let tx = Transaction::V5 {
-        network_upgrade: NetworkUpgrade::Nu5,
+        network_upgrade: NetworkUpgrade::Nu6,
         inputs: vec![input],
         outputs: vec![output],
         lock_time: LockTime::min_lock_time_timestamp(),
