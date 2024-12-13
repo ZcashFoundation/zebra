@@ -739,7 +739,7 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
     };
 
-    let spend_restriction = tx.coinbase_spend_restriction(height);
+    let spend_restriction = tx.coinbase_spend_restriction(&Network::Mainnet, height);
 
     let coinbase_spend_height = Height(5);
 

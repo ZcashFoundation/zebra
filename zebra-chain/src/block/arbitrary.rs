@@ -568,7 +568,7 @@ where
         + Copy
         + 'static,
 {
-    let mut spend_restriction = transaction.coinbase_spend_restriction(height);
+    let mut spend_restriction = transaction.coinbase_spend_restriction(&Network::Mainnet, height);
     let mut new_inputs = Vec::new();
     let mut spent_outputs = HashMap::new();
 
