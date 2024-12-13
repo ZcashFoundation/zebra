@@ -92,15 +92,14 @@ pub async fn run() -> Result<()> {
     );
 
     let mut count = 0;
-    let blocks: Vec<Block> =
-        get_future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
-            .await?
-            .into_iter()
-            .take_while(|block| {
-                count += block.transactions.len() - 1;
-                count <= max_sent_transactions()
-            })
-            .collect();
+    let blocks: Vec<Block> = future_blocks(&network, test_type, test_name, MAX_NUM_FUTURE_BLOCKS)
+        .await?
+        .into_iter()
+        .take_while(|block| {
+            count += block.transactions.len() - 1;
+            count <= max_sent_transactions()
+        })
+        .collect();
 
     tracing::info!(
         blocks_count = ?blocks.len(),
