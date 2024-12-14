@@ -737,6 +737,24 @@ impl Service<Request> for Mempool {
 
                     async move { Ok(Response::Transactions(res)) }.boxed()
                 }
+                Request::TransactionWithDepsByMinedId(tx_id) => {
+                    trace!(?req, "got mempool request");
+
+                    let res = if let Some((transaction, dependencies)) =
+                        storage.transaction_with_deps(tx_id)
+                    {
+                        Ok(Response::TransactionWithDeps {
+                            transaction,
+                            dependencies,
+                        })
+                    } else {
+                        Err("transaction not found in mempool".into())
+                    };
+
+                    trace!(?req, ?res, "answered mempool request");
+
+                    async move { res }.boxed()
+                }
 
                 Request::AwaitOutput(outpoint) => {
                     trace!(?req, "got mempool request");
@@ -832,7 +850,7 @@ impl Service<Request> for Mempool {
 
                     Request::TransactionsById(_) => Response::Transactions(Default::default()),
                     Request::TransactionsByMinedId(_) => Response::Transactions(Default::default()),
-                    Request::AwaitOutput(_) => {
+                    Request::TransactionWithDepsByMinedId(_) | Request::AwaitOutput(_) => {
                         return async move {
                             Err("mempool is not active: wait for Zebra to sync to the tip".into())
                         }

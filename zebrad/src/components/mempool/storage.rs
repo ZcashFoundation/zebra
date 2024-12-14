@@ -513,6 +513,23 @@ impl Storage {
             .map(|(_, tx)| &tx.transaction)
     }
 
+    /// Returns a transaction and the transaction ids of its dependencies, if it is in the verified set.
+    pub fn transaction_with_deps(
+        &self,
+        tx_id: transaction::Hash,
+    ) -> Option<(VerifiedUnminedTx, HashSet<transaction::Hash>)> {
+        let tx = self.verified.transactions().get(&tx_id).cloned()?;
+        let deps = self
+            .verified
+            .transaction_dependencies()
+            .dependencies()
+            .get(&tx_id)
+            .cloned()
+            .unwrap_or_default();
+
+        Some((tx, deps))
+    }
+
     /// Returns `true` if a transaction exactly matching an [`UnminedTxId`] is in
     /// the mempool.
     ///
