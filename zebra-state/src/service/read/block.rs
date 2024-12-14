@@ -30,6 +30,9 @@ use crate::{
     HashOrHeight,
 };
 
+#[cfg(feature = "indexer")]
+use crate::request::Spend;
+
 /// Returns the [`Block`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block<C>(chain: Option<C>, db: &ZebraDb, hash_or_height: HashOrHeight) -> Option<Arc<Block>>
@@ -176,9 +179,27 @@ where
     C: AsRef<Chain>,
 {
     match chain {
-        Some(chain) if chain.as_ref().spent_utxos.contains(&outpoint) => None,
+        Some(chain) if chain.as_ref().spent_utxos.contains_key(&outpoint) => None,
         chain => utxo(chain, db, outpoint),
     }
+}
+
+/// Returns the [`Hash`](transaction::Hash) of the transaction that spent an output at
+/// the provided [`transparent::OutPoint`] or revealed the provided nullifier, if it exists
+/// and is spent or revealed in the non-finalized `chain` or finalized `db` and its
+/// spending transaction hash has been indexed.
+#[cfg(feature = "indexer")]
+pub fn spending_transaction_hash<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    spend: Spend,
+) -> Option<transaction::Hash>
+where
+    C: AsRef<Chain>,
+{
+    chain
+        .and_then(|chain| chain.as_ref().spending_transaction_hash(&spend))
+        .or_else(|| db.spending_transaction_hash(&spend))
 }
 
 /// Returns the [`Utxo`] for [`transparent::OutPoint`], if it exists in any chain

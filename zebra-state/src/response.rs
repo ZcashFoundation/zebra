@@ -175,6 +175,12 @@ pub enum ReadResponse {
     /// or `None` if the block was not found.
     TransactionIdsForBlock(Option<Arc<[transaction::Hash]>>),
 
+    /// Response to [`ReadRequest::SpendingTransactionId`],
+    /// with an list of transaction hashes in block order,
+    /// or `None` if the block was not found.
+    #[cfg(feature = "indexer")]
+    TransactionId(Option<transaction::Hash>),
+
     /// Response to [`ReadRequest::BlockLocator`] with a block locator object.
     BlockLocator(Vec<block::Hash>),
 
@@ -342,6 +348,9 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressUtxos(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
+
+            #[cfg(feature = "indexer")]
+            ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
