@@ -57,7 +57,7 @@ pub mod types;
 pub mod get_block_template_rpcs;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-pub use get_block_template_rpcs::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+pub use get_block_template_rpcs::{GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer};
 
 #[cfg(test)]
 mod tests;
