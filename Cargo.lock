@@ -463,18 +463,18 @@ dependencies = [
 
 [[package]]
 name = "bit-set"
-version = "0.5.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
+checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
 dependencies = [
  "bit-vec",
 ]
 
 [[package]]
 name = "bit-vec"
-version = "0.6.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
+checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
 
 [[package]]
 name = "bitflags"
@@ -1919,9 +1919,9 @@ dependencies = [
 
 [[package]]
 name = "hyper"
-version = "1.5.1"
+version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97818827ef4f364230e16705d4706e2897df2bb60617d6ca15d598025a3c481f"
+checksum = "256fb8d4bd6413123cc9d91832d78325c48ff41677595be797d90f42969beae0"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -1946,7 +1946,7 @@ checksum = "08afdbb5c31130e3034af566421053ab03787c640246a446327f550d11bcb333"
 dependencies = [
  "futures-util",
  "http 1.1.0",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-util",
  "rustls",
  "rustls-pki-types",
@@ -1962,7 +1962,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3203a961e5c83b6f5498933e78b6b263e208c197b63e9c6c53cc82ffd3f63793"
 dependencies = [
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-util",
  "pin-project-lite",
  "tokio",
@@ -1980,7 +1980,7 @@ dependencies = [
  "futures-util",
  "http 1.1.0",
  "http-body 1.0.1",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "pin-project-lite",
  "socket2",
  "tokio",
@@ -2029,9 +2029,9 @@ dependencies = [
 
 [[package]]
 name = "impl-codec"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba6a270039626615617f3f36d15fc827041df3b78c439da2cadfa47455a77f2f"
+checksum = "b67aa010c1e3da95bf151bd8b4c059b2ed7e75387cdb969b4f8f2723a43f9941"
 dependencies = [
  "parity-scale-codec",
 ]
@@ -2514,7 +2514,7 @@ checksum = "85b6f8152da6d7892ff1b7a1c0fa3f435e92b5918ad67035c3bb432111d9a29b"
 dependencies = [
  "base64 0.22.1",
  "http-body-util",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-util",
  "indexmap 2.7.0",
  "ipnet",
@@ -2694,7 +2694,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
- "libm",
 ]
 
 [[package]]
@@ -3109,8 +3108,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b34d9fd68ae0b74a41b21c03c2f62847aa0ffea044eee893b4c140b37e244e2"
 dependencies = [
  "fixed-hash",
- "impl-codec",
  "uint 0.9.5",
+]
+
+[[package]]
+name = "primitive-types"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d15600a7d856470b7d278b3fe0e311fe28c2526348549f8ef2ff7db3299c87f5"
+dependencies = [
+ "fixed-hash",
+ "impl-codec",
+ "uint 0.10.0",
 ]
 
 [[package]]
@@ -3166,9 +3175,9 @@ dependencies = [
 
 [[package]]
 name = "proptest"
-version = "1.5.0"
+version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4c2511913b88df1637da85cc8d96ec8e43a3f8bb8ccb71ee1ac240d6f3df58d"
+checksum = "14cae93065090804185d3b75f0bf93b8eeda30c7a9b4a33d3bdb3988d6229e50"
 dependencies = [
  "bit-set",
  "bit-vec",
@@ -3186,9 +3195,9 @@ dependencies = [
 
 [[package]]
 name = "proptest-derive"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6ff7ff745a347b87471d859a377a9a404361e7efc2a971d73424a6d183c0fc77"
+checksum = "4ee1c9ac207483d5e7db4940700de86a9aae46ef90c48b57f99fe7edb8345e49"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3593,7 +3602,7 @@ dependencies = [
  "http 1.1.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-rustls",
  "hyper-util",
  "ipnet",
@@ -3875,9 +3884,9 @@ dependencies = [
 
 [[package]]
 name = "semver"
-version = "1.0.23"
+version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61697e0a1c7e512e84a621326239844a24d8207b4669b41bc18b32ea5cbf988b"
+checksum = "3cb6eb87a131f756572d7fb904f6e7b68633f09cca868c5df1c4b8d1a694bbba"
 dependencies = [
  "serde",
 ]
@@ -3970,9 +3979,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.215"
+version = "1.0.216"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6513c1ad0b11a9376da888e3e0baa0077f1aed55c17f50e7b2397136129fb88f"
+checksum = "0b9781016e935a97e8beecf0c933758c97a5520d32930e460142b4cd80c6338e"
 dependencies = [
  "serde_derive",
 ]
@@ -3988,9 +3997,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.215"
+version = "1.0.216"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad1e866f866923f252f05c889987993144fb74e722403468a4ebd70c3cd756c0"
+checksum = "46f859dbbf73865c6627ed570e78961cd3ac92407a2d117204c49232485da55e"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4361,11 +4370,11 @@ dependencies = [
 
 [[package]]
 name = "thiserror"
-version = "2.0.6"
+version = "2.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8fec2a1820ebd077e2b90c4df007bebf344cd394098a13c563957d0afc83ea47"
+checksum = "93605438cbd668185516ab499d589afb7ee1859ea3d5fc8f6b0755e1c7443767"
 dependencies = [
- "thiserror-impl 2.0.6",
+ "thiserror-impl 2.0.7",
 ]
 
 [[package]]
@@ -4381,9 +4390,9 @@ dependencies = [
 
 [[package]]
 name = "thiserror-impl"
-version = "2.0.6"
+version = "2.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d65750cab40f4ff1929fb1ba509e9914eb756131cef4210da8d5d700d26f6312"
+checksum = "e1d8749b4531af2117677a5fcd12b1348a3fe2b81e36e61ffeac5c4aa3273e36"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4623,7 +4632,7 @@ dependencies = [
  "http 1.1.0",
  "http-body 1.0.1",
  "http-body-util",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-timeout",
  "hyper-util",
  "percent-encoding",
@@ -4673,7 +4682,6 @@ checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
 dependencies = [
  "futures-core",
  "futures-util",
- "hdrhistogram",
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
@@ -4694,10 +4702,14 @@ checksum = "2873938d487c3cfb9aed7546dc9f2711d867c9f90c46b889989a2cb84eba6b4f"
 dependencies = [
  "futures-core",
  "futures-util",
+ "hdrhistogram",
  "pin-project-lite",
  "sync_wrapper 0.1.2",
+ "tokio",
+ "tokio-util 0.7.13",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -4715,7 +4727,7 @@ dependencies = [
  "tokio",
  "tokio-test",
  "tokio-util 0.7.13",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tower-fallback",
  "tower-test",
  "tracing",
@@ -4730,7 +4742,7 @@ dependencies = [
  "futures-core",
  "pin-project",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "zebra-test",
 ]
@@ -4767,7 +4779,6 @@ version = "0.1.41"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "784e0ac535deb450455cbfa28a6f0df145ea1bb7ae51b821cf5e7927fdcfbdd0"
 dependencies = [
- "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -5665,7 +5676,7 @@ checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
- "primitive-types",
+ "primitive-types 0.12.2",
 ]
 
 [[package]]
@@ -5827,7 +5838,7 @@ dependencies = [
  "lazy_static",
  "num-integer",
  "orchard",
- "primitive-types",
+ "primitive-types 0.13.1",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -5847,7 +5858,7 @@ dependencies = [
  "spandoc",
  "static_assertions",
  "tempfile",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "tinyvec",
  "tokio",
  "tracing",
@@ -5890,10 +5901,10 @@ dependencies = [
  "sapling-crypto",
  "serde",
  "spandoc",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tower-batch-control",
  "tower-fallback",
  "tracing",
@@ -5923,7 +5934,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.4.13",
+ "tower 0.5.1",
  "zcash_primitives",
  "zebra-chain",
  "zebra-node-services",
@@ -5959,12 +5970,12 @@ dependencies = [
  "serde",
  "static_assertions",
  "tempfile",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "tokio",
  "tokio-stream",
  "tokio-util 0.7.13",
  "toml 0.8.19",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-error",
  "tracing-futures",
@@ -6005,13 +6016,13 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "serde_json",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "tokio",
  "tokio-stream",
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "zcash_address",
  "zcash_primitives",
@@ -6053,7 +6064,7 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
  "tonic",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-subscriber",
  "zcash_address",
@@ -6076,7 +6087,7 @@ version = "1.0.0-beta.43"
 dependencies = [
  "hex",
  "lazy_static",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "zcash_script",
  "zebra-chain",
  "zebra-test",
@@ -6118,10 +6129,10 @@ dependencies = [
  "serde_json",
  "spandoc",
  "tempfile",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "zebra-chain",
  "zebra-test",
@@ -6146,10 +6157,10 @@ dependencies = [
  "regex",
  "spandoc",
  "tempfile",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
@@ -6173,7 +6184,7 @@ dependencies = [
  "serde_yml",
  "structopt",
  "syn 2.0.90",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "tinyvec",
  "tokio",
  "tracing-error",
@@ -6204,7 +6215,7 @@ dependencies = [
  "howudoin",
  "http-body-util",
  "humantime-serde",
- "hyper 1.5.1",
+ "hyper 1.5.2",
  "hyper-util",
  "indexmap 2.7.0",
  "indicatif",
@@ -6229,7 +6240,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "thiserror 2.0.6",
+ "thiserror 2.0.7",
  "thread-priority",
  "tinyvec",
  "tokio",
@@ -6237,7 +6248,7 @@ dependencies = [
  "toml 0.8.19",
  "tonic",
  "tonic-build",
- "tower 0.4.13",
+ "tower 0.5.1",
  "tracing",
  "tracing-appender",
  "tracing-error",
