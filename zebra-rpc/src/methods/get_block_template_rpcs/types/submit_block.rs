@@ -2,7 +2,7 @@
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
-use crate::methods::get_block_template_rpcs::GetBlockTemplateRpc;
+use crate::methods::get_block_template_rpcs::GetBlockTemplate;
 
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
