@@ -6,7 +6,7 @@ use std::future::Future;
 
 use std::pin::Pin;
 
-use futures::{FutureExt, TryFutureExt};
+use futures::{future, FutureExt, TryFutureExt};
 use http_body_util::BodyExt;
 use hyper::{body::Bytes, header};
 use jsonrpsee::{
@@ -195,7 +195,8 @@ where
         // Check if the request is authenticated
         if !self.check_credentials(request.headers_mut()) {
             let error = ErrorObject::borrowed(401, "unauthenticated method", None);
-            return Box::pin(async move { Err(BoxError::from(error.to_string())) });
+            // TODO: Error object is not being returned to the user but an empty response.
+            return future::err(BoxError::from(error)).boxed();
         }
 
         // Fix the request headers.
