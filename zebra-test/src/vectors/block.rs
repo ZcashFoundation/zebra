@@ -264,6 +264,34 @@ lazy_static! {
             (1_116_000, BLOCK_TESTNET_1116000_BYTES.as_ref()),
             (1_116_001, BLOCK_TESTNET_1116001_BYTES.as_ref()),
             (1_326_100, BLOCK_TESTNET_1326100_BYTES.as_ref()),
+
+            // NU5
+            //
+            // Contains:
+
+            // First V5 tx with:
+            //
+            // - 4 Sapling spends, and
+            // - 2 Orchard actions.
+            (1_842_421, BLOCK_TESTNET_1842421_BYTES.as_ref()),
+            // First V5 tx with:
+            //
+            // - 50 transparent inputs, and
+            // - 1 Sapling output.
+            (1_842_432, BLOCK_TESTNET_1842432_BYTES.as_ref()),
+            // First V5 tx with:
+            //
+            // - 2 transparent inputs, and
+            // - 2 Orchard actions.
+            (1_842_462, BLOCK_TESTNET_1842462_BYTES.as_ref()),
+            // First V5 tx with two Orchard actions and no other transfers.
+            (1_842_467, BLOCK_TESTNET_1842467_BYTES.as_ref()),
+            // First V5 tx with:
+            //
+            // - 1 transparent input,
+            // - 1 Sapling output, and
+            // - 2 Orchard actions.
+            (1_842_468, BLOCK_TESTNET_1842468_BYTES.as_ref()),
         ].iter().cloned().collect();
 
     /// Testnet final Sprout roots, indexed by height.
@@ -946,6 +974,22 @@ lazy_static! {
     pub static ref SAPLING_FINAL_ROOT_TESTNET_1326100_BYTES: [u8; 32] =
         <[u8; 32]>::from_hex("2b30b19f4254709fe365bd0b381b2e3d9d0c933eb4dba4dd1d07f0f6e196a183")
         .expect("final root bytes are in valid hex representation").rev();
+
+    pub static ref BLOCK_TESTNET_1842421_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-421.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1842432_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-432.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1842462_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-462.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1842467_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-467.txt").trim())
+        .expect("Block bytes are in valid hex representation");
+    pub static ref BLOCK_TESTNET_1842468_BYTES: Vec<u8> =
+        <Vec<u8>>::from_hex(include_str!("block-test-1-842-468.txt").trim())
+        .expect("Block bytes are in valid hex representation");
 
     // Sapling note commitment tree.
     pub static ref SAPLING_TREESTATE_MAINNET_419201_STRING: String =
