@@ -1,4 +1,5 @@
 //! RPC error codes & their handling.
+use jsonrpsee_types::{ErrorCode, ErrorObject, ErrorObjectOwned};
 
 /// Bitcoin RPC error codes
 ///
@@ -51,22 +52,25 @@ pub enum LegacyCode {
     ClientInvalidIpOrSubnet = -30,
 }
 
-impl From<LegacyCode> for jsonrpc_core::ErrorCode {
+impl From<LegacyCode> for ErrorCode {
     fn from(code: LegacyCode) -> Self {
-        Self::ServerError(code as i64)
+        Self::ServerError(code as i32)
+    }
+}
+
+impl From<LegacyCode> for i32 {
+    fn from(code: LegacyCode) -> Self {
+        code as i32
     }
 }
 
 /// A trait for mapping errors to [`jsonrpc_core::Error`].
 pub(crate) trait MapError<T>: Sized {
     /// Maps errors to [`jsonrpc_core::Error`] with a specific error code.
-    fn map_error(
-        self,
-        code: impl Into<jsonrpc_core::ErrorCode>,
-    ) -> std::result::Result<T, jsonrpc_core::Error>;
+    fn map_error(self, code: impl Into<ErrorCode>) -> std::result::Result<T, ErrorObjectOwned>;
 
     /// Maps errors to [`jsonrpc_core::Error`] with a [`LegacyCode::Misc`] error code.
-    fn map_misc_error(self) -> std::result::Result<T, jsonrpc_core::Error> {
+    fn map_misc_error(self) -> std::result::Result<T, ErrorObjectOwned> {
         self.map_error(LegacyCode::Misc)
     }
 }
@@ -77,15 +81,12 @@ pub(crate) trait OkOrError<T>: Sized {
     /// message if conversion is to `Err`.
     fn ok_or_error(
         self,
-        code: impl Into<jsonrpc_core::ErrorCode>,
+        code: impl Into<ErrorCode>,
         message: impl ToString,
-    ) -> std::result::Result<T, jsonrpc_core::Error>;
+    ) -> std::result::Result<T, ErrorObjectOwned>;
 
     /// Converts the implementing type to `Result<T, jsonrpc_core::Error>`, using a [`LegacyCode::Misc`] error code.
-    fn ok_or_misc_error(
-        self,
-        message: impl ToString,
-    ) -> std::result::Result<T, jsonrpc_core::Error> {
+    fn ok_or_misc_error(self, message: impl ToString) -> std::result::Result<T, ErrorObjectOwned> {
         self.ok_or_error(LegacyCode::Misc, message)
     }
 }
@@ -94,25 +95,21 @@ impl<T, E> MapError<T> for Result<T, E>
 where
     E: ToString,
 {
-    fn map_error(self, code: impl Into<jsonrpc_core::ErrorCode>) -> Result<T, jsonrpc_core::Error> {
-        self.map_err(|error| jsonrpc_core::Error {
-            code: code.into(),
-            message: error.to_string(),
-            data: None,
-        })
+    fn map_error(self, code: impl Into<ErrorCode>) -> Result<T, ErrorObjectOwned> {
+        self.map_err(|error| ErrorObject::owned(code.into().code(), &error.to_string(), None::<()>))
     }
 }
 
 impl<T> OkOrError<T> for Option<T> {
     fn ok_or_error(
         self,
-        code: impl Into<jsonrpc_core::ErrorCode>,
+        code: impl Into<ErrorCode>,
         message: impl ToString,
-    ) -> Result<T, jsonrpc_core::Error> {
-        self.ok_or(jsonrpc_core::Error {
-            code: code.into(),
-            message: message.to_string(),
-            data: None,
-        })
+    ) -> Result<T, ErrorObjectOwned> {
+        self.ok_or(ErrorObject::owned(
+            code.into().code(),
+            &message.to_string(),
+            None::<()>,
+        ))
     }
 }

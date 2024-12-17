@@ -194,7 +194,7 @@ pub trait GetBlockTemplateRpc {
         num_blocks: Option<i32>,
         height: Option<i32>,
     ) -> Result<u64> {
-        self.get_network_sol_ps(num_blocks, height)
+        self.get_network_sol_ps(num_blocks, height).await
     }
 
     /// Returns data about each connected network node.
@@ -621,7 +621,7 @@ where
                 latest_chain_tip,
                 sync_status,
             )
-            .boxed();
+            .await;
         }
 
         // To implement long polling correctly, we split this RPC into multiple phases.

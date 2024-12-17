@@ -9,7 +9,7 @@
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use chrono::Utc;
-use futures::{stream::FuturesOrdered, FutureExt, StreamExt, TryFutureExt};
+use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use hex_data::HexData;
 use indexmap::IndexMap;
