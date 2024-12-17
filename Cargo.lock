@@ -6130,7 +6130,7 @@ dependencies = [
  "indicatif",
  "inferno",
  "insta",
- "jsonrpc-core",
+ "jsonrpsee-types",
  "lazy_static",
  "log",
  "metrics",
