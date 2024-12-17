@@ -7,7 +7,9 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use futures::FutureExt;
 use insta::dynamic_redaction;
+use jsonrpsee::core::RpcResult as Result;
 use tower::buffer::Buffer;
 
 use zebra_chain::{
