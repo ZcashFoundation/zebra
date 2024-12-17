@@ -3,10 +3,6 @@
 //! These fixes are applied at the JSON-RPC call level,
 //! after the RPC request is parsed and split into calls.
 
-use std::future::Future;
-
-use futures::future::{Either, FutureExt};
-
 use jsonrpsee::{
     server::middleware::rpc::{layer::ResponseFuture, RpcService, RpcServiceT},
     MethodResponse,

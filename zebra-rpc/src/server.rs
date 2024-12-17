@@ -7,10 +7,9 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::{fmt, panic, thread::available_parallelism};
+use std::{fmt, panic};
 
 use cookie::Cookie;
-use http_request_compatibility::With;
 use jsonrpsee::server::middleware::rpc::RpcServiceBuilder;
 use jsonrpsee::server::{Server, ServerHandle};
 use tokio::task::JoinHandle;

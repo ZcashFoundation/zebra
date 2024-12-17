@@ -2,7 +2,7 @@
 
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
-use futures::{future::OptionFuture, FutureExt, TryFutureExt};
+use futures::{future::OptionFuture, TryFutureExt};
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::ErrorObject;
