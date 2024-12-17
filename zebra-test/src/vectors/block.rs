@@ -673,6 +673,10 @@ lazy_static! {
         <[u8; 32]>::from_hex("09b17d8907236adea12b83ed69054f4996686d7c4ca76db25c4c48b90e272b0f")
         .expect("final root bytes are in valid hex representation").rev();
 
+    // Sapling treestate.
+    pub static ref SAPLING_TREESTATE_MAINNET_419201_STRING: String =
+        String::from(include_str!("sapling-treestate-main-0-419-201.txt"));
+
     // Testnet
 
     // Genesis/BeforeOverwinter
@@ -990,10 +994,6 @@ lazy_static! {
     pub static ref BLOCK_TESTNET_1842468_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-842-468.txt").trim())
         .expect("Block bytes are in valid hex representation");
-
-    // Sapling note commitment tree.
-    pub static ref SAPLING_TREESTATE_MAINNET_419201_STRING: String =
-        String::from(include_str!("sapling-treestate-main-0-419-201.txt"));
 }
 
 #[cfg(test)]
