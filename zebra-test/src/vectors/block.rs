@@ -345,6 +345,25 @@ lazy_static! {
             (1_116_000, SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES.as_ref().try_into().unwrap()),
             (1_116_001, SAPLING_FINAL_ROOT_TESTNET_1116001_BYTES.as_ref().try_into().unwrap()),
             (1_326_100, SAPLING_FINAL_ROOT_TESTNET_1326100_BYTES.as_ref().try_into().unwrap()),
+            // NU5
+            (1_842_421, SAPLING_FINAL_ROOT_TESTNET_1842421_BYTES.as_ref().try_into().unwrap()),
+            (1_842_432, SAPLING_FINAL_ROOT_TESTNET_1842432_BYTES.as_ref().try_into().unwrap()),
+            (1_842_462, SAPLING_FINAL_ROOT_TESTNET_1842462_BYTES.as_ref().try_into().unwrap()),
+            (1_842_467, SAPLING_FINAL_ROOT_TESTNET_1842467_BYTES.as_ref().try_into().unwrap()),
+            (1_842_468, SAPLING_FINAL_ROOT_TESTNET_1842468_BYTES.as_ref().try_into().unwrap()),
+        ].iter().cloned().collect();
+
+    /// Testnet final Orchard roots (anchors), indexed by height.
+    ///
+    /// Pre-Orchard anchors are all-zeroes. If there are no Orchard actions in a block, the anchor
+    /// is the same as the one for the previous block.
+    pub static ref TESTNET_FINAL_ORCHARD_ROOTS: BTreeMap<u32, &'static [u8; 32]> = [
+            // NU5
+            (1_842_421, ORCHARD_FINAL_ROOT_TESTNET_1842421_BYTES.as_ref().try_into().unwrap()),
+            (1_842_432, ORCHARD_FINAL_ROOT_TESTNET_1842432_BYTES.as_ref().try_into().unwrap()),
+            (1_842_462, ORCHARD_FINAL_ROOT_TESTNET_1842462_BYTES.as_ref().try_into().unwrap()),
+            (1_842_467, ORCHARD_FINAL_ROOT_TESTNET_1842467_BYTES.as_ref().try_into().unwrap()),
+            (1_842_468, ORCHARD_FINAL_ROOT_TESTNET_1842468_BYTES.as_ref().try_into().unwrap()),
         ].iter().cloned().collect();
 
     // Mainnet
@@ -979,21 +998,52 @@ lazy_static! {
         <[u8; 32]>::from_hex("2b30b19f4254709fe365bd0b381b2e3d9d0c933eb4dba4dd1d07f0f6e196a183")
         .expect("final root bytes are in valid hex representation").rev();
 
+    // NU5
     pub static ref BLOCK_TESTNET_1842421_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-842-421.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842421_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("5cad695f17ae06cc165e01938fe95cac3ea0fbd236dc9c806f3411e0929309a6")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842421_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("28dfaa94b74670863beb1088ee3d97b38960c6c297c9dcf3d57d5a9259616523")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_TESTNET_1842432_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-842-432.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842432_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("68626c76ad774e3982450c20900415fd85b33d820627565d588c0c22437d8c62")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842432_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("28dfaa94b74670863beb1088ee3d97b38960c6c297c9dcf3d57d5a9259616523")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_TESTNET_1842462_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-842-462.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842462_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("4c06beb18bb0cb22879f04c2c80aa33450d8e02ddd3d2cbc441f40f8cd8ea0a8")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842462_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("7750114ca6b95e44197e30ec98cadfb0dec1f1fb1a416eb4ef87f1dffb0f5937")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_TESTNET_1842467_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-842-467.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842467_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("13a33099eb9b8dafc031271938f35b627eb0811f124847abbfb43b587c6e11ae")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842467_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("580aceb586f30a5801a23414464aa8482add97b6d55c06483b4ffb725e0e793b")
+        .expect("final root bytes are in valid hex representation").rev();
     pub static ref BLOCK_TESTNET_1842468_BYTES: Vec<u8> =
         <Vec<u8>>::from_hex(include_str!("block-test-1-842-468.txt").trim())
         .expect("Block bytes are in valid hex representation");
+    pub static ref SAPLING_FINAL_ROOT_TESTNET_1842468_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("555af4b0b2fa18162d6280c942fae6cdc846b9c4a3126df682821db250dc2bb3")
+        .expect("final root bytes are in valid hex representation").rev();
+    pub static ref ORCHARD_FINAL_ROOT_TESTNET_1842468_BYTES: [u8; 32] =
+        <[u8; 32]>::from_hex("66c47f2160474363948150cbb5d53f3c17efa7456bd843dd9b851ddbcb6fb002")
+        .expect("final root bytes are in valid hex representation").rev();
 }
 
 #[cfg(test)]
