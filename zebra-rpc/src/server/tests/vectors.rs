@@ -129,7 +129,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
     block_verifier_router.expect_no_requests().await;
 
     if do_shutdown {
-        rpc_server_task_handle.abort();
+        rpc_server_task_handle.0.abort();
     }
 }
 

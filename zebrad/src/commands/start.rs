@@ -243,27 +243,31 @@ impl StartCmd {
         }
 
         // Launch RPC server
-        let rpc_task_handle = if let Some(listen_addr) = config.rpc.listen_addr {
-            info!("spawning RPC server");
-            info!("Trying to open RPC endpoint at {}...", listen_addr,);
-            let rpc_task_handle = RpcServer::spawn(
-                config.rpc.clone(),
-                config.mining.clone(),
-                build_version(),
-                user_agent(),
-                mempool.clone(),
-                read_only_state_service.clone(),
-                block_verifier_router.clone(),
-                sync_status.clone(),
-                address_book.clone(),
-                latest_chain_tip.clone(),
-                config.network.network.clone(),
-            );
-            rpc_task_handle.await.unwrap()
-        } else {
-            warn!("configure an listen_addr to start the RPC server");
-            tokio::spawn(std::future::pending().in_current_span())
-        };
+        let (rpc_task_handle, mut rpc_tx_queue_task_handle) =
+            if let Some(listen_addr) = config.rpc.listen_addr {
+                info!("spawning RPC server");
+                info!("Trying to open RPC endpoint at {}...", listen_addr,);
+                let rpc_task_handle = RpcServer::spawn(
+                    config.rpc.clone(),
+                    config.mining.clone(),
+                    build_version(),
+                    user_agent(),
+                    mempool.clone(),
+                    read_only_state_service.clone(),
+                    block_verifier_router.clone(),
+                    sync_status.clone(),
+                    address_book.clone(),
+                    latest_chain_tip.clone(),
+                    config.network.network.clone(),
+                );
+                rpc_task_handle.await.unwrap()
+            } else {
+                warn!("configure an listen_addr to start the RPC server");
+                (
+                    tokio::spawn(std::future::pending().in_current_span()),
+                    tokio::spawn(std::future::pending().in_current_span()),
+                )
+            };
 
         // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
         //       any related unit tests sometimes crash with memory errors
@@ -438,6 +442,13 @@ impl StartCmd {
                     Ok(())
                 }
 
+                rpc_tx_queue_result = &mut rpc_tx_queue_task_handle => {
+                    rpc_tx_queue_result
+                        .expect("unexpected panic in the rpc transaction queue task");
+                    info!("rpc transaction queue task exited");
+                    Ok(())
+                }
+
                 indexer_rpc_join_result = &mut indexer_rpc_task_handle => {
                     let indexer_rpc_server_result = indexer_rpc_join_result
                         .expect("unexpected panic in the indexer task");
@@ -521,6 +532,7 @@ impl StartCmd {
 
         // ongoing tasks
         rpc_task_handle.abort();
+        rpc_tx_queue_task_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();

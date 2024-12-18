@@ -32,7 +32,6 @@ use super::super::{
 };
 
 proptest! {
-    /*
     /// Test that when sending a raw transaction, it is received by the mempool service.
     #[test]
     fn mempool_receives_raw_tx(transaction in any::<Transaction>(), network in any::<Network>()) {
@@ -50,7 +49,7 @@ proptest! {
 
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = rpc.send_raw_transaction(transaction_hex);
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
@@ -65,7 +64,7 @@ proptest! {
 
             state.expect_no_requests().await?;
 
-            let result = send_task.await;
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
             prop_assert_eq!(result, Ok(hash));
 
@@ -92,7 +91,9 @@ proptest! {
             let transaction_bytes = transaction.zcash_serialize_to_vec()?;
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = rpc.send_raw_transaction(transaction_hex.clone());
+            let _rpc = rpc.clone();
+            let _transaction_hex = transaction_hex.clone();
+            let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
@@ -104,11 +105,11 @@ proptest! {
 
             state.expect_no_requests().await?;
 
-            let result = send_task.await;
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
             check_err_code(result, ErrorCode::ServerError(-1))?;
 
-            let send_task = rpc.send_raw_transaction(transaction_hex);
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex.clone()).await });
 
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
@@ -119,7 +120,7 @@ proptest! {
                 .await?
                 .respond(Ok::<_, BoxError>(mempool::Response::Queued(vec![Ok(rsp_rx)])));
 
-            let result = send_task.await;
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
             check_err_code(result, ErrorCode::ServerError(-25))?;
 
@@ -129,7 +130,6 @@ proptest! {
             Ok(())
         })?;
     }
-    */
 
     /// Test that when the mempool rejects a transaction the caller receives an error.
     #[test]
@@ -591,7 +591,6 @@ proptest! {
         })?;
     }
 
-    /*
     /// Test the queue functionality using `send_raw_transaction`
     #[test]
     fn rpc_queue_main_loop(tx in any::<Transaction>(), network in any::<Network>()) {
@@ -606,7 +605,7 @@ proptest! {
             let transaction_hash = tx.hash();
             let tx_bytes = tx.zcash_serialize_to_vec()?;
             let tx_hex = hex::encode(&tx_bytes);
-            let send_task = rpc.send_raw_transaction(tx_hex);
+            let send_task = tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex).await });
 
             let tx_unmined = UnminedTx::from(tx);
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
@@ -681,10 +680,11 @@ proptest! {
         runtime.block_on(async move {
             let mut transactions_hash_set = HashSet::new();
             for tx in txs.clone() {
+                let rpc_clone = rpc.clone();
                 // send a transaction
                 let tx_bytes = tx.zcash_serialize_to_vec()?;
                 let tx_hex = hex::encode(&tx_bytes);
-                let send_task = rpc.send_raw_transaction(tx_hex);
+                let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex).await });
 
                 let tx_unmined = UnminedTx::from(tx.clone());
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
@@ -753,7 +753,6 @@ proptest! {
             Ok(())
         })?;
     }
-    */
 }
 
 #[derive(Clone, Copy, Debug, Error)]

@@ -116,7 +116,7 @@ impl RpcServer {
         address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> Result<ServerTask, tower::BoxError>
+    ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
     where
         VersionString: ToString + Clone + Send + 'static,
         UserAgentString: ToString + Clone + Send + 'static,
@@ -169,7 +169,7 @@ impl RpcServer {
         );
 
         // Initialize the rpc methods with the zebra version
-        let (rpc_impl, _rpc_tx_queue_task_handle) = RpcImpl::new(
+        let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
             build_version.clone(),
             user_agent,
             network.clone(),
@@ -223,7 +223,7 @@ impl RpcServer {
             server_instance.start(rpc_module).stopped().await;
             Ok(())
         });
-        Ok(server_task)
+        Ok((server_task, rpc_tx_queue_task_handle))
     }
 
     /// Shut down this RPC server, blocking the current thread.

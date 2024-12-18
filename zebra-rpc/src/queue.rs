@@ -180,6 +180,9 @@ impl Runner {
                 };
 
                 self.queue.insert(tx.clone());
+                if self.receiver.is_empty() {
+                    break;
+                }
             }
 
             // skip some work if stored tip height is the same as the one arriving
