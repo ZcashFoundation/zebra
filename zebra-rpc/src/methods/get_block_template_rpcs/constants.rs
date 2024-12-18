@@ -1,6 +1,6 @@
 //! Constant values used in mining rpcs methods.
 
-use jsonrpc_core::ErrorCode;
+use jsonrpsee_types::ErrorCode;
 
 use zebra_chain::{
     block,

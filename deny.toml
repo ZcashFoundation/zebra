@@ -78,19 +78,8 @@ skip-tree = [
     { name = "base64", version = "=0.21.7" },
     { name = "sync_wrapper", version = "0.1.2" },
 
-    # wait for jsonrpc-http-server to update hyper or for Zebra to replace jsonrpc (#8682)
-    { name = "h2", version = "=0.3.26" },
-    { name = "http", version = "=0.2.12" },
-    { name = "http-body", version = "=0.4.6" },
-    { name = "hyper", version = "=0.14.31" },
-    { name = "hyper-rustls", version = "=0.24.2" },
-
-    { name = "reqwest", version = "=0.11.27" },
-    { name = "rustls", version = "=0.21.12" },
-    { name = "rustls-pemfile", version = "=1.0.4" },
-    { name = "rustls-webpki", version = "=0.101.7" },
-    { name = "tokio-rustls", version = "=0.24.1" },
-    { name = "webpki-roots", version = "=0.25.4" },
+    # wait for abscissa_core to update toml
+    { name = "toml", version = "=0.5.11" },
 
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },

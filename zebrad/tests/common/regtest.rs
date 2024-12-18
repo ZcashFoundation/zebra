@@ -161,9 +161,10 @@ impl MiningRpcMethods for RpcRequestClient {
             }
             Err(err)
                 if err
-                    .downcast_ref::<jsonrpc_core::Error>()
+                    .downcast_ref::<jsonrpsee_types::ErrorObject>()
                     .is_some_and(|err| {
-                        err.code == server::error::LegacyCode::InvalidParameter.into()
+                        let error: i32 = server::error::LegacyCode::InvalidParameter.into();
+                        err.code() == error
                     }) =>
             {
                 Ok(None)

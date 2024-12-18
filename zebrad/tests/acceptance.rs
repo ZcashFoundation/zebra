@@ -3270,7 +3270,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             types::submit_block,
         },
         hex_data::HexData,
-        GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+        GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
     };
     use zebra_test::mock_service::MockService;
     let _init_guard = zebra_test::init();

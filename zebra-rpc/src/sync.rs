@@ -382,9 +382,10 @@ impl SyncerRpcMethods for RpcRequestClient {
             }
             Err(err)
                 if err
-                    .downcast_ref::<jsonrpc_core::Error>()
+                    .downcast_ref::<jsonrpsee_types::ErrorCode>()
                     .is_some_and(|err| {
-                        err.code == server::error::LegacyCode::InvalidParameter.into()
+                        let code: i32 = server::error::LegacyCode::InvalidParameter.into();
+                        err.code() == code
                     }) =>
             {
                 Ok(None)
