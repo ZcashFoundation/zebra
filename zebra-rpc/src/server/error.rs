@@ -64,12 +64,12 @@ impl From<LegacyCode> for i32 {
     }
 }
 
-/// A trait for mapping errors to [`jsonrpc_core::Error`].
+/// A trait for mapping errors to [`jsonrpsee_types::ErrorObjectOwned`].
 pub(crate) trait MapError<T>: Sized {
-    /// Maps errors to [`jsonrpc_core::Error`] with a specific error code.
+    /// Maps errors to [`jsonrpsee_types::ErrorObjectOwned`] with a specific error code.
     fn map_error(self, code: impl Into<ErrorCode>) -> std::result::Result<T, ErrorObjectOwned>;
 
-    /// Maps errors to [`jsonrpc_core::Error`] with a [`LegacyCode::Misc`] error code.
+    /// Maps errors to [`jsonrpsee_types::ErrorObjectOwned`] with a [`LegacyCode::Misc`] error code.
     fn map_misc_error(self) -> std::result::Result<T, ErrorObjectOwned> {
         self.map_error(LegacyCode::Misc)
     }
