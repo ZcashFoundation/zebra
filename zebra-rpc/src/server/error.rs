@@ -96,7 +96,7 @@ where
     E: ToString,
 {
     fn map_error(self, code: impl Into<ErrorCode>) -> Result<T, ErrorObjectOwned> {
-        self.map_err(|error| ErrorObject::owned(code.into().code(), &error.to_string(), None::<()>))
+        self.map_err(|error| ErrorObject::owned(code.into().code(), error.to_string(), None::<()>))
     }
 }
 
@@ -108,7 +108,7 @@ impl<T> OkOrError<T> for Option<T> {
     ) -> Result<T, ErrorObjectOwned> {
         self.ok_or(ErrorObject::owned(
             code.into().code(),
-            &message.to_string(),
+            message.to_string(),
             None::<()>,
         ))
     }
