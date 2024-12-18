@@ -6,7 +6,7 @@ use crate::methods::get_block_template_rpcs::GetBlockTemplate;
 
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
-/// See notes for [`GetBlockTemplateRpc::submit_block`] method
+/// See notes for [`crate::methods::GetBlockTemplateRpcServer::submit_block`] method
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct JsonParameters {
     /// The workid for the block template. Currently unused.

@@ -1540,8 +1540,8 @@ impl Default for GetBlockChainInfo {
 
 /// A wrapper type with a list of transparent address strings.
 ///
-/// This is used for the input parameter of [`Rpc::get_address_balance`],
-/// [`Rpc::get_address_tx_ids`] and [`Rpc::get_address_utxos`].
+/// This is used for the input parameter of [`RpcServer::get_address_balance`],
+/// [`RpcServer::get_address_tx_ids`] and [`RpcServer::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
 pub struct AddressStrings {
     /// A list of transparent address strings.
@@ -1698,7 +1698,7 @@ impl Default for SentTransactionHash {
 
 /// Response to a `getblock` RPC request.
 ///
-/// See the notes for the [`Rpc::get_block`] method.
+/// See the notes for the [`RpcServer::get_block`] method.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)] //TODO: create a struct for the Object and Box it
@@ -1830,7 +1830,7 @@ pub enum GetBlockTransaction {
 
 /// Response to a `getblockheader` RPC request.
 ///
-/// See the notes for the [`Rpc::get_block_header`] method.
+/// See the notes for the [`RpcServer::get_block_header`] method.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetBlockHeader {
@@ -1844,7 +1844,7 @@ pub enum GetBlockHeader {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 /// Verbose response to a `getblockheader` RPC request.
 ///
-/// See the notes for the [`Rpc::get_block_header`] method.
+/// See the notes for the [`RpcServer::get_block_header`] method.
 pub struct GetBlockHeaderObject {
     /// The hash of the requested block.
     pub hash: GetBlockHash,
@@ -1933,7 +1933,7 @@ impl Default for GetBlockHeaderObject {
 ///
 /// Contains the hex-encoded hash of the requested block.
 ///
-/// Also see the notes for the [`Rpc::get_best_block_hash`] and `get_block_hash` methods.
+/// Also see the notes for the [`RpcServer::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(transparent)]
 pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);

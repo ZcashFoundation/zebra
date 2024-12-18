@@ -9,17 +9,17 @@ use jsonrpsee::{
 };
 use jsonrpsee_types::ErrorObject;
 
-/// JSON-RPC [`Middleware`] with compatibility workarounds.
+/// JSON-RPC [`FixRpcResponseMiddleware`] with compatibility workarounds.
 ///
 /// This middleware makes the following changes to JSON-RPC calls:
 ///
 /// ## Make RPC framework response codes match `zcashd`
 ///
-/// [`jsonrpc_core`] returns specific error codes while parsing requests:
+/// [`jsonrpsee_types`] returns specific error codes while parsing requests:
 /// <https://docs.rs/jsonrpsee-types/latest/jsonrpsee_types/error/enum.ErrorCode.html>
 ///
 /// But these codes are different from `zcashd`, and some RPC clients rely on the exact code.
-/// Specifically, the [`INVALID_PARAMETERS_ERROR_CODE`] is different:
+/// Specifically, the [`jsonrpsee_types::error::INVALID_PARAMS_CODE`] is different:
 /// <https://docs.rs/jsonrpsee-types/latest/jsonrpsee_types/error/constant.INVALID_PARAMS_CODE.html>
 pub struct FixRpcResponseMiddleware {
     service: RpcService,

@@ -20,7 +20,7 @@ use super::cookie::Cookie;
 
 use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 
-/// HTTP [`RequestMiddleware`] with compatibility workarounds.
+/// HTTP [`HttpRequestMiddleware`] with compatibility workarounds.
 ///
 /// This middleware makes the following changes to HTTP requests:
 ///
@@ -34,7 +34,7 @@ use base64::{engine::general_purpose::URL_SAFE, Engine as _};
 /// ### Add missing `content-type` HTTP header
 ///
 /// Some RPC clients don't include a `content-type` HTTP header.
-/// But unlike web browsers, [`jsonrpc_http_server`] does not do content sniffing.
+/// But unlike web browsers, [`jsonrpsee`] does not do content sniffing.
 ///
 /// If there is no `content-type` header, we assume the content is JSON,
 /// and let the parser error if we are incorrect.
