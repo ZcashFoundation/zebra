@@ -476,6 +476,7 @@ fn validate_expiry_height_mined(
 /// Returns `Ok(())` if spent transparent coinbase outputs are
 /// valid for the block height, or a [`Err(TransactionError)`](TransactionError)
 pub fn tx_transparent_coinbase_spends_maturity(
+    network: &Network,
     tx: Arc<Transaction>,
     height: Height,
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
@@ -488,7 +489,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
             .or_else(|| spent_utxos.get(&spend).cloned())
             .expect("load_spent_utxos_fut.await should return an error if a utxo is missing");
 
-        let spend_restriction = tx.coinbase_spend_restriction(height);
+        let spend_restriction = tx.coinbase_spend_restriction(network, height);
 
         zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
     }

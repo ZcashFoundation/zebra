@@ -72,8 +72,10 @@ pub fn transparent_spend(
             // We don't want to use UTXOs from invalid pending blocks,
             // so we check transparent coinbase maturity and shielding
             // using known valid UTXOs during non-finalized chain validation.
-            let spend_restriction =
-                transaction.coinbase_spend_restriction(semantically_verified.height);
+            let spend_restriction = transaction.coinbase_spend_restriction(
+                &finalized_state.network(),
+                semantically_verified.height,
+            );
             transparent_coinbase_spend(spend, spend_restriction, utxo.as_ref())?;
 
             // We don't delete the UTXOs until the block is committed,
