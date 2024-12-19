@@ -126,10 +126,14 @@ impl OrderedUtxo {
 )]
 pub enum CoinbaseSpendRestriction {
     /// The UTXO is spent in a transaction with one or more transparent outputs
-    SomeTransparentOutputs,
+    /// on a network where coinbase outputs must not be spent by transactions
+    /// with transparent outputs.
+    DisallowCoinbaseSpend,
 
-    /// The UTXO is spent in a transaction which only has shielded outputs
-    OnlyShieldedOutputs {
+    /// The UTXO is spent in a transaction which only has shielded outputs, or
+    /// transactions spending coinbase outputs may have transparent outputs on
+    /// this network.
+    CheckCoinbaseMaturity {
         /// The height at which the UTXO is spent
         spend_height: block::Height,
     },
