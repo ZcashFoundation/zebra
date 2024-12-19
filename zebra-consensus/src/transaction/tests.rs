@@ -21,8 +21,8 @@ use zebra_chain::{
     sprout,
     transaction::{
         arbitrary::{
-            fake_v5_transactions_for_network, insert_fake_orchard_shielded_data, test_transactions,
-            transactions_from_blocks,
+            insert_fake_orchard_shielded_data, test_transactions, transactions_from_blocks,
+            v5_transactions,
         },
         zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
@@ -45,7 +45,7 @@ fn v5_fake_transactions() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     for network in Network::iter() {
-        for transaction in fake_v5_transactions_for_network(&network, network.block_iter()) {
+        for transaction in v5_transactions(network.block_iter()) {
             match check::has_inputs_and_outputs(&transaction) {
                 Ok(()) => (),
                 Err(TransactionError::NoInputs) | Err(TransactionError::NoOutputs) => (),
@@ -63,19 +63,16 @@ fn v5_fake_transactions() -> Result<(), Report> {
 #[test]
 fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     // Find a transaction with no inputs or outputs to use as base
-    let mut transaction = fake_v5_transactions_for_network(
-        &Network::Mainnet,
-        zebra_test::vectors::MAINNET_BLOCKS.iter(),
-    )
-    .rev()
-    .find(|transaction| {
-        transaction.inputs().is_empty()
-            && transaction.outputs().is_empty()
-            && transaction.sapling_spends_per_anchor().next().is_none()
-            && transaction.sapling_outputs().next().is_none()
-            && transaction.joinsplit_count() == 0
-    })
-    .expect("At least one fake V5 transaction with no inputs and no outputs");
+    let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .rev()
+        .find(|transaction| {
+            transaction.inputs().is_empty()
+                && transaction.outputs().is_empty()
+                && transaction.sapling_spends_per_anchor().next().is_none()
+                && transaction.sapling_outputs().next().is_none()
+                && transaction.joinsplit_count() == 0
+        })
+        .expect("At least one fake V5 transaction with no inputs and no outputs");
 
     // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
     // guaranteed structurally by `orchard::ShieldedData`)
@@ -117,19 +114,16 @@ fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
 #[test]
 fn fake_v5_transaction_with_orchard_actions_has_flags() {
     // Find a transaction with no inputs or outputs to use as base
-    let mut transaction = fake_v5_transactions_for_network(
-        &Network::Mainnet,
-        zebra_test::vectors::MAINNET_BLOCKS.iter(),
-    )
-    .rev()
-    .find(|transaction| {
-        transaction.inputs().is_empty()
-            && transaction.outputs().is_empty()
-            && transaction.sapling_spends_per_anchor().next().is_none()
-            && transaction.sapling_outputs().next().is_none()
-            && transaction.joinsplit_count() == 0
-    })
-    .expect("At least one fake V5 transaction with no inputs and no outputs");
+    let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .rev()
+        .find(|transaction| {
+            transaction.inputs().is_empty()
+                && transaction.outputs().is_empty()
+                && transaction.sapling_spends_per_anchor().next().is_none()
+                && transaction.sapling_outputs().next().is_none()
+                && transaction.joinsplit_count() == 0
+        })
+        .expect("At least one fake V5 transaction with no inputs and no outputs");
 
     // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
     // guaranteed structurally by `orchard::ShieldedData`)
@@ -160,19 +154,17 @@ fn fake_v5_transaction_with_orchard_actions_has_flags() {
 
 #[test]
 fn v5_transaction_with_no_inputs_fails_validation() {
-    let transaction = fake_v5_transactions_for_network(
-        &Network::Mainnet,
-        zebra_test::vectors::MAINNET_BLOCKS.iter(),
-    )
-    .rev()
-    .find(|transaction| {
-        transaction.inputs().is_empty()
-            && transaction.sapling_spends_per_anchor().next().is_none()
-            && transaction.orchard_actions().next().is_none()
-            && transaction.joinsplit_count() == 0
-            && (!transaction.outputs().is_empty() || transaction.sapling_outputs().next().is_some())
-    })
-    .expect("At least one fake v5 transaction with no inputs in the test vectors");
+    let transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .rev()
+        .find(|transaction| {
+            transaction.inputs().is_empty()
+                && transaction.sapling_spends_per_anchor().next().is_none()
+                && transaction.orchard_actions().next().is_none()
+                && transaction.joinsplit_count() == 0
+                && (!transaction.outputs().is_empty()
+                    || transaction.sapling_outputs().next().is_some())
+        })
+        .expect("At least one fake v5 transaction with no inputs in the test vectors");
 
     assert_eq!(
         check::has_inputs_and_outputs(&transaction),
@@ -911,20 +903,17 @@ async fn state_error_converted_correctly() {
 
 #[test]
 fn v5_transaction_with_no_outputs_fails_validation() {
-    let transaction = fake_v5_transactions_for_network(
-        &Network::Mainnet,
-        zebra_test::vectors::MAINNET_BLOCKS.iter(),
-    )
-    .rev()
-    .find(|transaction| {
-        transaction.outputs().is_empty()
-            && transaction.sapling_outputs().next().is_none()
-            && transaction.orchard_actions().next().is_none()
-            && transaction.joinsplit_count() == 0
-            && (!transaction.inputs().is_empty()
-                || transaction.sapling_spends_per_anchor().next().is_some())
-    })
-    .expect("At least one fake v5 transaction with no outputs in the test vectors");
+    let transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .rev()
+        .find(|transaction| {
+            transaction.outputs().is_empty()
+                && transaction.sapling_outputs().next().is_none()
+                && transaction.orchard_actions().next().is_none()
+                && transaction.joinsplit_count() == 0
+                && (!transaction.inputs().is_empty()
+                    || transaction.sapling_spends_per_anchor().next().is_some())
+        })
+        .expect("At least one fake v5 transaction with no outputs in the test vectors");
 
     assert_eq!(
         check::has_inputs_and_outputs(&transaction),
@@ -934,13 +923,10 @@ fn v5_transaction_with_no_outputs_fails_validation() {
 
 #[test]
 fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
-    let mut transaction = fake_v5_transactions_for_network(
-        &Network::Mainnet,
-        zebra_test::vectors::MAINNET_BLOCKS.iter(),
-    )
-    .rev()
-    .find(|transaction| transaction.is_coinbase())
-    .expect("At least one fake V5 coinbase transaction in the test vectors");
+    let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .rev()
+        .find(|transaction| transaction.is_coinbase())
+        .expect("At least one fake V5 coinbase transaction in the test vectors");
 
     insert_fake_orchard_shielded_data(&mut transaction);
 
@@ -949,13 +935,10 @@ fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
 
 #[test]
 fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
-    let mut transaction = fake_v5_transactions_for_network(
-        &Network::Mainnet,
-        zebra_test::vectors::MAINNET_BLOCKS.iter(),
-    )
-    .rev()
-    .find(|transaction| transaction.is_coinbase())
-    .expect("At least one fake V5 coinbase transaction in the test vectors");
+    let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+        .rev()
+        .find(|transaction| transaction.is_coinbase())
+        .expect("At least one fake V5 coinbase transaction in the test vectors");
 
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
 
@@ -977,7 +960,7 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
         let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
         let verifier = Verifier::new_for_tests(&network, state_service);
 
-        let transaction = fake_v5_transactions_for_network(&network, network.block_iter())
+        let transaction = v5_transactions(network.block_iter())
             .next_back()
             .expect("At least one fake V5 transaction in the test vectors");
 
@@ -1014,7 +997,7 @@ fn v5_transaction_is_accepted_after_nu5_activation() {
 
             let state = service_fn(|_| async { unreachable!("Service should not be called") });
 
-            let mut tx = fake_v5_transactions_for_network(&network, network.block_iter())
+            let mut tx = v5_transactions(network.block_iter())
                 .next_back()
                 .expect("At least one fake V5 transaction in the test vectors");
 
@@ -2416,16 +2399,15 @@ fn v5_with_sapling_spends() {
         let network = Network::Mainnet;
         let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
 
-        let transaction =
-            fake_v5_transactions_for_network(&network, zebra_test::vectors::MAINNET_BLOCKS.iter())
-                .rev()
-                .filter(|transaction| {
-                    !transaction.is_coinbase()
-                        && transaction.inputs().is_empty()
-                        && transaction.expiry_height() >= nu5_activation
-                })
-                .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
-                .expect("No transaction found with Sapling spends");
+        let transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+            .rev()
+            .filter(|transaction| {
+                !transaction.is_coinbase()
+                    && transaction.inputs().is_empty()
+                    && transaction.expiry_height() >= nu5_activation
+            })
+            .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
+            .expect("No transaction found with Sapling spends");
 
         let expected_hash = transaction.unmined_id();
         let height = transaction
@@ -2461,12 +2443,11 @@ fn v5_with_duplicate_sapling_spends() {
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
 
-        let mut transaction =
-            fake_v5_transactions_for_network(&network, zebra_test::vectors::MAINNET_BLOCKS.iter())
-                .rev()
-                .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
-                .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
-                .expect("No transaction found with Sapling spends");
+        let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+            .rev()
+            .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
+            .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
+            .expect("No transaction found with Sapling spends");
 
         let height = transaction
             .expiry_height()
@@ -2507,17 +2488,16 @@ fn v5_with_duplicate_orchard_action() {
         let network = Network::Mainnet;
 
         // Find a transaction with no inputs or outputs to use as base
-        let mut transaction =
-            fake_v5_transactions_for_network(&network, zebra_test::vectors::MAINNET_BLOCKS.iter())
-                .rev()
-                .find(|transaction| {
-                    transaction.inputs().is_empty()
-                        && transaction.outputs().is_empty()
-                        && transaction.sapling_spends_per_anchor().next().is_none()
-                        && transaction.sapling_outputs().next().is_none()
-                        && transaction.joinsplit_count() == 0
-                })
-                .expect("At least one fake V5 transaction with no inputs and no outputs");
+        let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+            .rev()
+            .find(|transaction| {
+                transaction.inputs().is_empty()
+                    && transaction.outputs().is_empty()
+                    && transaction.sapling_spends_per_anchor().next().is_none()
+                    && transaction.sapling_outputs().next().is_none()
+                    && transaction.joinsplit_count() == 0
+            })
+            .expect("At least one fake V5 transaction with no inputs and no outputs");
 
         let height = transaction
             .expiry_height()
@@ -3118,17 +3098,16 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
 
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_ZERO_VECTOR.iter() {
         // Find a transaction with no inputs or outputs to use as base
-        let mut transaction =
-            fake_v5_transactions_for_network(&network, zebra_test::vectors::TESTNET_BLOCKS.iter())
-                .rev()
-                .find(|transaction| {
-                    transaction.inputs().is_empty()
-                        && transaction.outputs().is_empty()
-                        && transaction.sapling_spends_per_anchor().next().is_none()
-                        && transaction.sapling_outputs().next().is_none()
-                        && transaction.joinsplit_count() == 0
-                })
-                .expect("At least one fake V5 transaction with no inputs and no outputs");
+        let mut transaction = v5_transactions(zebra_test::vectors::TESTNET_BLOCKS.iter())
+            .rev()
+            .find(|transaction| {
+                transaction.inputs().is_empty()
+                    && transaction.outputs().is_empty()
+                    && transaction.sapling_spends_per_anchor().next().is_none()
+                    && transaction.sapling_outputs().next().is_none()
+                    && transaction.joinsplit_count() == 0
+            })
+            .expect("At least one fake V5 transaction with no inputs and no outputs");
 
         let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
         shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS
@@ -3160,17 +3139,16 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
 
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_VECTOR.iter() {
         // Find a transaction with no inputs or outputs to use as base
-        let mut transaction =
-            fake_v5_transactions_for_network(&network, zebra_test::vectors::TESTNET_BLOCKS.iter())
-                .rev()
-                .find(|transaction| {
-                    transaction.inputs().is_empty()
-                        && transaction.outputs().is_empty()
-                        && transaction.sapling_spends_per_anchor().next().is_none()
-                        && transaction.sapling_outputs().next().is_none()
-                        && transaction.joinsplit_count() == 0
-                })
-                .expect("At least one fake V5 transaction with no inputs and no outputs");
+        let mut transaction = v5_transactions(zebra_test::vectors::TESTNET_BLOCKS.iter())
+            .rev()
+            .find(|transaction| {
+                transaction.inputs().is_empty()
+                    && transaction.outputs().is_empty()
+                    && transaction.sapling_spends_per_anchor().next().is_none()
+                    && transaction.sapling_outputs().next().is_none()
+                    && transaction.joinsplit_count() == 0
+            })
+            .expect("At least one fake V5 transaction with no inputs and no outputs");
 
         let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
         shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS
