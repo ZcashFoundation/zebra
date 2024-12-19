@@ -29,6 +29,51 @@ use crate::{
     ReadResponse, Response,
 };
 
+/// Identify a spend by a transparent outpoint or revealed nullifier.
+///
+/// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
+/// [`sapling::Nullifier`], and [`orchard::Nullifier`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg(feature = "indexer")]
+pub enum Spend {
+    /// A spend identified by a [`transparent::OutPoint`].
+    OutPoint(transparent::OutPoint),
+    /// A spend identified by a [`sprout::Nullifier`].
+    Sprout(sprout::Nullifier),
+    /// A spend identified by a [`sapling::Nullifier`].
+    Sapling(sapling::Nullifier),
+    /// A spend identified by a [`orchard::Nullifier`].
+    Orchard(orchard::Nullifier),
+}
+
+#[cfg(feature = "indexer")]
+impl From<transparent::OutPoint> for Spend {
+    fn from(outpoint: transparent::OutPoint) -> Self {
+        Self::OutPoint(outpoint)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<sprout::Nullifier> for Spend {
+    fn from(sprout_nullifier: sprout::Nullifier) -> Self {
+        Self::Sprout(sprout_nullifier)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<sapling::Nullifier> for Spend {
+    fn from(sapling_nullifier: sapling::Nullifier) -> Self {
+        Self::Sapling(sapling_nullifier)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<orchard::Nullifier> for Spend {
+    fn from(orchard_nullifier: orchard::Nullifier) -> Self {
+        Self::Orchard(orchard_nullifier)
+    }
+}
+
 /// Identify a block by hash or height.
 ///
 /// This enum implements `From` for [`block::Hash`] and [`block::Height`],
@@ -1020,6 +1065,13 @@ pub enum ReadRequest {
         height_range: RangeInclusive<block::Height>,
     },
 
+    /// Looks up a spending transaction id by its spent transparent input.
+    ///
+    /// Returns [`ReadResponse::TransactionId`] with the hash of the transaction
+    /// that spent the output at the provided [`transparent::OutPoint`].
+    #[cfg(feature = "indexer")]
+    SpendingTransactionId(Spend),
+
     /// Looks up utxos for the provided addresses.
     ///
     /// Returns a type with found utxos and transaction information.
@@ -1106,6 +1158,8 @@ impl ReadRequest {
             }
             ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
+            #[cfg(feature = "indexer")]
+            ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::ChainInfo => "chain_info",
             #[cfg(feature = "getblocktemplate-rpcs")]

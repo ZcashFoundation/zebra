@@ -1383,6 +1383,35 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            #[cfg(feature = "indexer")]
+            ReadRequest::SpendingTransactionId(spend) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let spending_transaction_id = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
+                                read::spending_transaction_hash(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    spend,
+                                )
+                            });
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::TransactionIdForSpentOutPoint",
+                        );
+
+                        Ok(ReadResponse::TransactionId(spending_transaction_id))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             ReadRequest::UnspentBestChainUtxo(outpoint) => {
                 let state = self.clone();
 

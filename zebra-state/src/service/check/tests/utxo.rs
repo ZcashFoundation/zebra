@@ -221,7 +221,7 @@ proptest! {
                 .unwrap();
             prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
             prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
-            prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
+            prop_assert!(chain.spent_utxos.contains_key(&expected_outpoint));
 
             // the finalized state does not have the UTXO
             prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
@@ -310,14 +310,14 @@ proptest! {
             if use_finalized_state_output {
                 // the chain has spent the UTXO from the finalized state
                 prop_assert!(!chain.created_utxos.contains_key(&expected_outpoint));
-                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains_key(&expected_outpoint));
                 // the finalized state has the UTXO, but it will get deleted on commit
                 prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
             } else {
                 // the chain has spent its own UTXO
                 prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
                 prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
-                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains_key(&expected_outpoint));
                 // the finalized state does not have the UTXO
                 prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
             }
@@ -650,12 +650,12 @@ proptest! {
                 // the finalized state has the unspent UTXO
                 prop_assert!(finalized_state.utxo(&expected_outpoint).is_some());
                 // the non-finalized state has spent the UTXO
-                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains_key(&expected_outpoint));
             } else {
                 // the non-finalized state has created and spent the UTXO
                 prop_assert!(!chain.unspent_utxos().contains_key(&expected_outpoint));
                 prop_assert!(chain.created_utxos.contains_key(&expected_outpoint));
-                prop_assert!(chain.spent_utxos.contains(&expected_outpoint));
+                prop_assert!(chain.spent_utxos.contains_key(&expected_outpoint));
                 // the finalized state does not have the UTXO
                 prop_assert!(finalized_state.utxo(&expected_outpoint).is_none());
             }
