@@ -173,15 +173,15 @@ chrono = { version = "0.4.39", default-features = false, features = ["clock", "s
 humantime-serde = "1.1.1"
 indexmap = "2.7.0"
 lazy_static = "1.4.0"
-semver = "1.0.23"
-serde = { version = "1.0.215", features = ["serde_derive"] }
+semver = "1.0.24"
+serde = { version = "1.0.216", features = ["serde_derive"] }
 toml = "0.8.19"
 
 futures = "0.3.31"
 rayon = "1.10.0"
 tokio = { version = "1.42.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tokio-stream = { version = "0.1.17", features = ["time"] }
-tower = { version = "0.4.13", features = ["hedge", "limit"] }
+tower = { version = "0.5.1", features = ["hedge", "limit"] }
 pin-project = "1.1.6"
 
 color-eyre = { version = "0.6.3", default-features = false, features = ["issue-url"] }
@@ -189,7 +189,7 @@ color-eyre = { version = "0.6.3", default-features = false, features = ["issue-u
 # Enable a feature that makes tinyvec compile much faster.
 tinyvec = { version = "1.8.0", features = ["rustc_1_55"] }
 
-thiserror = "2.0.6"
+thiserror = "2.0.8"
 
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tracing-appender = "0.2.3"
@@ -219,7 +219,7 @@ inferno = { version = "0.12.0", default-features = false, optional = true }
 tracing-journald = { version = "0.3.0", optional = true }
 
 # prod feature filter-reload
-hyper = { version = "1.5.1", features = ["http1", "http2", "server"], optional = true }
+hyper = { version = "1.5.2", features = ["http1", "http2", "server"], optional = true }
 http-body-util = { version = "0.1.2", optional = true }
 hyper-util = { version = "0.1.9", optional = true }
 bytes = { version = "1.9.0", optional = true }
@@ -238,8 +238,8 @@ howudoin = { version = "0.1.2", features = ["term-line"], optional = true }
 indicatif = { version = "0.17.9", optional = true }
 
 # test feature proptest-impl
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.5.0", optional = true }
+proptest = { version = "1.6.0", optional = true }
+proptest-derive = { version = "0.5.1", optional = true }
 
 # test feature tokio-console
 console-subscriber = { version = "0.4.0", optional = true }
@@ -263,7 +263,7 @@ insta = { version = "1.41.1", features = ["json"] }
 serde_json = { version = "1.0.133", features = ["preserve_order"] }
 tempfile = "3.14.0"
 
-hyper = { version = "1.5.1", features = ["http1", "http2", "server"]}
+hyper = { version = "1.5.2", features = ["http1", "http2", "server"]}
 tracing-test = { version = "0.2.4", features = ["no-env-filter"] }
 
 tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
@@ -273,8 +273,8 @@ tokio-stream = "0.1.17"
 prost = "0.13.4"
 tonic = "0.12.3"
 
-proptest = "1.4.0"
-proptest-derive = "0.5.0"
+proptest = "1.6.0"
+proptest-derive = "0.5.1"
 
 # enable span traces and track caller in tests
 color-eyre = { version = "0.6.3" }
