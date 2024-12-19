@@ -826,65 +826,83 @@ fn zip244_sighash() -> Result<()> {
 #[test]
 fn binding_signatures() {
     let _init_guard = zebra_test::init();
-    for network in Network::iter() {
-        binding_signatures_for_network(network);
-    }
-}
 
-fn binding_signatures_for_network(network: Network) {
-    let block_iter = network.block_iter();
+    for net in Network::iter() {
+        let sapling_activation_height = NetworkUpgrade::Sapling
+            .activation_height(&net)
+            .expect("a valid height")
+            .0;
 
-    for (height, bytes) in block_iter {
-        let upgrade = NetworkUpgrade::current(&network, Height(*height));
+        let mut at_least_one_v4_checked = false;
+        let mut at_least_one_v5_checked = false;
 
-        let block = bytes
-            .zcash_deserialize_into::<Block>()
-            .expect("a valid block");
+        for (height, block) in net
+            .block_iter()
+            .skip_while(|(height, _)| **height < sapling_activation_height)
+        {
+            let branch_id = NetworkUpgrade::current(&net, Height(*height))
+                .branch_id()
+                .expect("consensus branch ID");
 
-        for tx in block.transactions {
-            match &*tx {
-                Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
-                Transaction::V4 {
-                    sapling_shielded_data,
-                    ..
-                } => {
-                    if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        let shielded_sighash =
-                            tx.sighash(upgrade.branch_id().unwrap(), HashType::ALL, &[], None);
+            for tx in block
+                .zcash_deserialize_into::<Block>()
+                .expect("a valid block")
+                .transactions
+            {
+                match &*tx {
+                    Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => (),
+                    Transaction::V4 {
+                        sapling_shielded_data,
+                        ..
+                    } => {
+                        if let Some(sapling_shielded_data) = sapling_shielded_data {
+                            let sighash = tx.sighash(branch_id, HashType::ALL, &[], None);
 
-                        let bvk = redjubjub::VerificationKey::try_from(
-                            sapling_shielded_data.binding_verification_key(),
-                        )
-                        .expect("a valid redjubjub::VerificationKey");
+                            let bvk = redjubjub::VerificationKey::try_from(
+                                sapling_shielded_data.binding_verification_key(),
+                            )
+                            .expect("a valid redjubjub::VerificationKey");
 
-                        bvk.verify(
-                            shielded_sighash.as_ref(),
-                            &sapling_shielded_data.binding_sig,
-                        )
-                        .expect("must pass verification");
+                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
+                                .expect("must pass verification");
+
+                            at_least_one_v4_checked = true;
+                        }
                     }
-                }
-                Transaction::V5 {
-                    sapling_shielded_data,
-                    ..
-                } => {
-                    if let Some(sapling_shielded_data) = sapling_shielded_data {
-                        let shielded_sighash =
-                            tx.sighash(upgrade.branch_id().unwrap(), HashType::ALL, &[], None);
+                    Transaction::V5 {
+                        sapling_shielded_data,
+                        ..
+                    } => {
+                        if let Some(sapling_shielded_data) = sapling_shielded_data {
+                            // V5 txs have the outputs spent by their transparent inputs hashed into
+                            // their SIGHASH, so we need to exclude txs with transparent inputs.
+                            //
+                            // References:
+                            //
+                            // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
+                            // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
+                            if tx.has_transparent_inputs() {
+                                continue;
+                            }
 
-                        let bvk = redjubjub::VerificationKey::try_from(
-                            sapling_shielded_data.binding_verification_key(),
-                        )
-                        .expect("a valid redjubjub::VerificationKey");
+                            let sighash = tx.sighash(branch_id, HashType::ALL, &[], None);
 
-                        bvk.verify(
-                            shielded_sighash.as_ref(),
-                            &sapling_shielded_data.binding_sig,
-                        )
-                        .expect("must pass verification");
+                            let bvk = redjubjub::VerificationKey::try_from(
+                                sapling_shielded_data.binding_verification_key(),
+                            )
+                            .expect("a valid redjubjub::VerificationKey");
+
+                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
+                                .expect("verification passes");
+
+                            at_least_one_v5_checked = true;
+                        }
                     }
                 }
             }
         }
+
+        assert!(at_least_one_v4_checked);
+        assert!(at_least_one_v5_checked);
     }
 }
