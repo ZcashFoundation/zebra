@@ -814,12 +814,12 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(None, Some(1_000));
-    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
     let verifier = Verifier::new_for_tests(&network, state.clone());
 
     let height = NetworkUpgrade::Nu6
         .activation_height(&network)
-        .expect("Canopy activation height is specified");
+        .expect("NU6 activation height is specified");
     let fund_height = (height - 1).expect("fake source fund block height is too small");
     let (input, output, known_utxos) = mock_transparent_transfer(
         fund_height,
@@ -828,7 +828,7 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
         Amount::try_from(10001).expect("invalid value"),
     );
 
-    // Create a non-coinbase V4 tx with the last valid expiry height.
+    // Create a non-coinbase V5 tx with the last valid expiry height.
     let tx = Transaction::V5 {
         network_upgrade: NetworkUpgrade::Nu6,
         inputs: vec![input],
@@ -872,7 +872,6 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
         state
             .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
             .await
-            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::BestChainNextMedianTimePast(
                 DateTime32::MAX,
             ));
@@ -880,15 +879,7 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
         state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(
-                known_utxos.get(&input_outpoint).map(|utxo| {
-                    let mut utxo = utxo.utxo.clone();
-                    utxo.height = coinbase_spend_height;
-                    utxo.from_coinbase = true;
-                    utxo
-                }),
-            ));
+            .respond(zebra_state::Response::UnspentBestChainUtxo(Some(utxo)));
 
         state
             .expect_request_that(|req| {
@@ -898,7 +889,6 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
                 )
             })
             .await
-            .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 

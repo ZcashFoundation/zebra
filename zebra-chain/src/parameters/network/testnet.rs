@@ -232,7 +232,7 @@ pub struct ParametersBuilder {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
-    /// Whether to allow transactions with transparent outputs that spend coinbase inputs,
+    /// Whether to allow transactions with transparent outputs to spend coinbase outputs,
     /// similar to `fCoinbaseMustBeShielded` in zcashd.
     should_allow_unshielded_coinbase_spends: bool,
     /// The pre-Blossom halving interval for this network
@@ -578,7 +578,7 @@ pub struct Parameters {
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
     disable_pow: bool,
-    /// Whether to allow transactions with transparent outputs that spend coinbase inputs,
+    /// Whether to allow transactions with transparent outputs to spend coinbase outputs,
     /// similar to `fCoinbaseMustBeShielded` in zcashd.
     should_allow_unshielded_coinbase_spends: bool,
     /// Pre-Blossom halving interval for this network
@@ -737,7 +737,7 @@ impl Parameters {
     }
 
     /// Returns true if this network should allow transactions with transparent outputs
-    /// that spend coinbase inputs
+    /// that spend coinbase outputs.
     pub fn should_allow_unshielded_coinbase_spends(&self) -> bool {
         self.should_allow_unshielded_coinbase_spends
     }
@@ -819,7 +819,7 @@ impl Network {
     }
 
     /// Returns true if this network should allow transactions with transparent outputs
-    /// that spend coinbase inputs
+    /// that spend coinbase outputs.
     pub fn should_allow_unshielded_coinbase_spends(&self) -> bool {
         if let Self::Testnet(params) = self {
             params.should_allow_unshielded_coinbase_spends()
