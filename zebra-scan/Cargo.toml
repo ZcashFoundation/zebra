@@ -63,10 +63,10 @@ results-reader = [
 color-eyre = "0.6.3"
 indexmap = { version = "2.7.0", features = ["serde"] }
 itertools = "0.13.0"
-semver = "1.0.23"
-serde = { version = "1.0.215", features = ["serde_derive"] }
+semver = "1.0.24"
+serde = { version = "1.0.216", features = ["serde_derive"] }
 tokio = { version = "1.42.0", features = ["time"] }
-tower = "0.4.13"
+tower = "0.5.1"
 tracing = "0.1.41"
 futures = "0.3.31"
 
@@ -86,8 +86,8 @@ zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.43" }
 chrono = { version = "0.4.39", default-features = false, features = ["clock", "std", "serde"] }
 
 # test feature proptest-impl
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.5.0", optional = true }
+proptest = { version = "1.6.0", optional = true }
+proptest-derive = { version = "0.5.1", optional = true }
 
 bls12_381 = { version = "0.8.0", optional = true }
 ff = { version = "0.13.0", optional = true }
@@ -113,8 +113,8 @@ zebrad = { path = "../zebrad", version = "2.1.0" }
 insta = { version = "1.41.1", features = ["ron", "redactions"] }
 tokio = { version = "1.42.0", features = ["test-util"] }
 
-proptest = "1.4.0"
-proptest-derive = "0.5.0"
+proptest = "1.6.0"
+proptest-derive = "0.5.1"
 bls12_381 = "0.8.0"
 ff = "0.13.0"
 group = "0.13.0"
