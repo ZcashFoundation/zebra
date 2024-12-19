@@ -848,7 +848,7 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
 
     assert_eq!(
         spend_restriction,
-        CoinbaseSpendRestriction::OnlyShieldedOutputs {
+        CoinbaseSpendRestriction::CheckCoinbaseMaturity {
             spend_height: height
         }
     );

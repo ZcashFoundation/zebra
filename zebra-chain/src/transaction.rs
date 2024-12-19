@@ -307,11 +307,11 @@ impl Transaction {
         spend_height: block::Height,
     ) -> CoinbaseSpendRestriction {
         if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
-            // we know this transaction must have shielded outputs,
-            // because of other consensus rules
-            OnlyShieldedOutputs { spend_height }
+            // we know this transaction must have shielded outputs if it has no
+            // transparent outputs, because of other consensus rules.
+            CheckCoinbaseMaturity { spend_height }
         } else {
-            SomeTransparentOutputs
+            DisallowCoinbaseSpend
         }
     }
 

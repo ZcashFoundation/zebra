@@ -197,7 +197,7 @@ pub fn transparent_coinbase_spend(
     }
 
     match spend_restriction {
-        OnlyShieldedOutputs { spend_height } => {
+        CheckCoinbaseMaturity { spend_height } => {
             let min_spend_height = utxo.height + MIN_TRANSPARENT_COINBASE_MATURITY.into();
             let min_spend_height =
                 min_spend_height.expect("valid UTXOs have coinbase heights far below Height::MAX");
@@ -212,7 +212,7 @@ pub fn transparent_coinbase_spend(
                 })
             }
         }
-        SomeTransparentOutputs => Err(UnshieldedTransparentCoinbaseSpend { outpoint }),
+        DisallowCoinbaseSpend => Err(UnshieldedTransparentCoinbaseSpend { outpoint }),
     }
 }
 

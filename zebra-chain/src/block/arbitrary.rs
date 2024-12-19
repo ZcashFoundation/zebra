@@ -650,7 +650,8 @@ where
         + 'static,
 {
     let has_shielded_outputs = transaction.has_shielded_outputs();
-    let delete_transparent_outputs = CoinbaseSpendRestriction::OnlyShieldedOutputs { spend_height };
+    let delete_transparent_outputs =
+        CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height };
     let mut attempts: usize = 0;
 
     // choose an arbitrary spendable UTXO, in hash set order
