@@ -2410,8 +2410,6 @@ fn v4_with_sapling_outputs_and_no_spends() {
 
 /// Test if a V5 transaction with Sapling spends is accepted by the verifier.
 #[test]
-// TODO: add NU5 mainnet test vectors with Sapling spends, then remove should_panic
-#[should_panic]
 fn v5_with_sapling_spends() {
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
