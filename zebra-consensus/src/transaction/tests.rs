@@ -974,47 +974,28 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
     }
 }
 
-#[test]
-fn v5_transaction_is_accepted_after_nu5_activation() {
+#[tokio::test]
+async fn v5_transaction_is_accepted_after_nu5_activation() {
     let _init_guard = zebra_test::init();
 
-    for network in Network::iter() {
-        zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
-            let nu5_activation_height = NetworkUpgrade::Nu5
-                .activation_height(&network)
-                .expect("NU5 activation height is specified");
+    for net in Network::iter() {
+        let state = service_fn(|_| async { unreachable!("Service should not be called") });
+        let tx = v5_transactions(net.block_iter()).next().expect("V5 tx");
+        let tx_height = tx.expiry_height().expect("V5 must have expiry_height");
+        let expected = tx.unmined_id();
 
-            let state = service_fn(|_| async { unreachable!("Service should not be called") });
+        assert!(tx_height >= NetworkUpgrade::Nu5.activation_height(&net).expect("height"));
 
-            let mut tx = v5_transactions(network.block_iter())
-                .next_back()
-                .expect("At least one fake V5 transaction in the test vectors");
+        let verif_res = Verifier::new_for_tests(&net, state)
+            .oneshot(Request::Block {
+                transaction: Arc::new(tx),
+                known_utxos: Arc::new(HashMap::new()),
+                height: tx_height,
+                time: DateTime::<Utc>::MAX_UTC,
+            })
+            .await;
 
-            if tx.expiry_height().expect("V5 must have expiry_height") < nu5_activation_height {
-                *tx.expiry_height_mut() = nu5_activation_height;
-                tx.update_network_upgrade(NetworkUpgrade::Nu5)
-                    .expect("updating the network upgrade for a V5 tx should succeed");
-            }
-
-            let expected_hash = tx.unmined_id();
-            let expiry_height = tx.expiry_height().expect("V5 must have expiry_height");
-
-            let verification_result = Verifier::new_for_tests(&network, state)
-                .oneshot(Request::Block {
-                    transaction: Arc::new(tx),
-                    known_utxos: Arc::new(HashMap::new()),
-                    height: expiry_height,
-                    time: DateTime::<Utc>::MAX_UTC,
-                })
-                .await;
-
-            assert_eq!(
-                verification_result
-                    .expect("successful verification")
-                    .tx_id(),
-                expected_hash
-            );
-        });
+        assert_eq!(verif_res.expect("success").tx_id(), expected);
     }
 }
 
