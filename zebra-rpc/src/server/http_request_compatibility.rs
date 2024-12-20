@@ -131,7 +131,7 @@ impl<S> HttpRequestMiddleware<S> {
         //     - use a regular expression
         //
         // We could also just handle the exact lightwalletd format,
-        // by replacing `{"jsonrpc":"1.0",` with `{`.
+        // by replacing `{"jsonrpc":"1.0",` with `{"jsonrpc":"2.0`.
         data.replace("\"jsonrpc\":\"1.0\",", "\"jsonrpc\":\"2.0\",")
             .replace("\"jsonrpc\": \"1.0\",", "\"jsonrpc\": \"2.0\",")
             .replace(",\"jsonrpc\":\"1.0\"", ",\"jsonrpc\":\"2.0\"")
@@ -202,26 +202,26 @@ where
         // Fix the request headers.
         Self::insert_or_replace_content_type_header(request.headers_mut());
 
-        // Fix the request body
-        let request = request.map(|body| {
-            let new_body = tokio::task::block_in_place(|| {
-                let bytes = tokio::runtime::Handle::current().block_on(async {
-                    body.collect()
-                        .await
-                        .expect("Failed to collect body data")
-                        .to_bytes()
-                });
-                let data = String::from_utf8_lossy(bytes.as_ref()).to_string();
+        let mut service = self.service.clone();
+        let (parts, body) = request.into_parts();
 
-                // Fix JSON-RPC 1.0 requests.
-                let new_data = Self::remove_json_1_fields(data);
+        async move {
+            let bytes = body
+                .collect()
+                .await
+                .expect("Failed to collect body data")
+                .to_bytes();
 
-                HttpBody::from(Bytes::from(new_data).as_ref().to_vec())
-            });
+            let data = String::from_utf8_lossy(bytes.as_ref()).to_string();
 
-            new_body
-        });
+            // Fix JSON-RPC 1.0 requests.
+            let data = Self::remove_json_1_fields(data);
+            let body = HttpBody::from(Bytes::from(data).as_ref().to_vec());
 
-        Box::pin(self.service.call(request).map_err(Into::into))
+            let request = HttpRequest::from_parts(parts, body);
+
+            service.call(request).await.map_err(Into::into)
+        }
+        .boxed()
     }
 }
