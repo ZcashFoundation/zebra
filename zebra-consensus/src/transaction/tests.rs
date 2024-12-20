@@ -3088,43 +3088,34 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
     }
 }
 
-/// Test if random shielded outputs are NOT decryptable with an all-zero outgoing
-/// viewing key.
+/// Test if random shielded outputs are NOT decryptable with an all-zero outgoing viewing key.
 #[test]
 fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
-    let network = Network::new_default_testnet();
-
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_VECTOR.iter() {
-        // Find a transaction with no inputs or outputs to use as base
-        let mut transaction = v5_transactions(zebra_test::vectors::TESTNET_BLOCKS.iter())
-            .rev()
-            .find(|transaction| {
-                transaction.inputs().is_empty()
-                    && transaction.outputs().is_empty()
-                    && transaction.sapling_spends_per_anchor().next().is_none()
-                    && transaction.sapling_outputs().next().is_none()
-                    && transaction.joinsplit_count() == 0
-            })
-            .expect("At least one fake V5 transaction with no inputs and no outputs");
+        for net in Network::iter() {
+            let mut tx = v5_transactions(zebra_test::vectors::TESTNET_BLOCKS.iter())
+                .find(|tx| tx.is_coinbase())
+                .expect("V5 coinbase tx");
 
-        let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-        shielded_data.flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+            let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+            shielded_data.flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
 
-        let action =
-            fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
-        let sig = shielded_data.actions[0].spend_auth_sig;
-        shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
-            .try_into()
-            .unwrap();
+            let action =
+                fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
+            let sig = shielded_data.actions[0].spend_auth_sig;
+            shielded_data.actions = vec![AuthorizedAction::from_parts(action, sig)]
+                .try_into()
+                .unwrap();
 
-        assert_eq!(
-            check::coinbase_outputs_are_decryptable(
-                &transaction,
-                &network,
-                NetworkUpgrade::Nu5.activation_height(&network).unwrap(),
-            ),
-            Err(TransactionError::CoinbaseOutputsNotDecryptable)
-        );
+            assert_eq!(
+                check::coinbase_outputs_are_decryptable(
+                    &tx,
+                    &net,
+                    NetworkUpgrade::Nu5.activation_height(&net).unwrap(),
+                ),
+                Err(TransactionError::CoinbaseOutputsNotDecryptable)
+            );
+        }
     }
 }
 
