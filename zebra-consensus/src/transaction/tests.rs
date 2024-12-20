@@ -153,23 +153,30 @@ fn fake_v5_transaction_with_orchard_actions_has_flags() {
 }
 
 #[test]
-fn v5_transaction_with_no_inputs_fails_validation() {
-    let transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
-        .rev()
-        .find(|transaction| {
-            transaction.inputs().is_empty()
-                && transaction.sapling_spends_per_anchor().next().is_none()
-                && transaction.orchard_actions().next().is_none()
-                && transaction.joinsplit_count() == 0
-                && (!transaction.outputs().is_empty()
-                    || transaction.sapling_outputs().next().is_some())
-        })
-        .expect("At least one fake v5 transaction with no inputs in the test vectors");
-
-    assert_eq!(
-        check::has_inputs_and_outputs(&transaction),
-        Err(TransactionError::NoInputs)
+fn v5_transaction_with_no_inputs_fails_verification() {
+    let (_, output, _) = mock_transparent_transfer(
+        Height(1),
+        true,
+        0,
+        Amount::try_from(1).expect("valid value"),
     );
+
+    for net in Network::iter() {
+        let transaction = Transaction::V5 {
+            inputs: vec![],
+            outputs: vec![output.clone()],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: NetworkUpgrade::Nu5.activation_height(&net).expect("height"),
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            network_upgrade: NetworkUpgrade::Nu5,
+        };
+
+        assert_eq!(
+            check::has_inputs_and_outputs(&transaction),
+            Err(TransactionError::NoInputs)
+        );
+    }
 }
 
 #[test]
