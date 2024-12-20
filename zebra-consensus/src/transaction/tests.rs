@@ -61,9 +61,8 @@ fn v5_fake_transactions() -> Result<(), Report> {
 }
 
 #[test]
-fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
-    // Find a transaction with no inputs or outputs to use as base
-    let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
+    let mut tx = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
         .rev()
         .find(|transaction| {
             transaction.inputs().is_empty()
@@ -72,43 +71,36 @@ fn fake_v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
                 && transaction.sapling_outputs().next().is_none()
                 && transaction.joinsplit_count() == 0
         })
-        .expect("At least one fake V5 transaction with no inputs and no outputs");
+        .expect("V5 tx with only Orchard shielded data");
 
-    // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
-    // guaranteed structurally by `orchard::ShieldedData`)
-    insert_fake_orchard_shielded_data(&mut transaction);
+    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::empty();
 
     // The check will fail if the transaction has no flags
     assert_eq!(
-        check::has_inputs_and_outputs(&transaction),
+        check::has_inputs_and_outputs(&tx),
         Err(TransactionError::NoInputs)
     );
 
     // If we add ENABLE_SPENDS flag it will pass the inputs check but fails with the outputs
-    // TODO: Avoid new calls to `insert_fake_orchard_shielded_data` for each check #2409.
-    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-    shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS;
+    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::ENABLE_SPENDS;
 
     assert_eq!(
-        check::has_inputs_and_outputs(&transaction),
+        check::has_inputs_and_outputs(&tx),
         Err(TransactionError::NoOutputs)
     );
 
     // If we add ENABLE_OUTPUTS flag it will pass the outputs check but fails with the inputs
-    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-    shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
 
     assert_eq!(
-        check::has_inputs_and_outputs(&transaction),
+        check::has_inputs_and_outputs(&tx),
         Err(TransactionError::NoInputs)
     );
 
     // Finally make it valid by adding both required flags
-    let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-    shielded_data.flags =
-        zebra_chain::orchard::Flags::ENABLE_SPENDS | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::ENABLE_SPENDS | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
 
-    assert!(check::has_inputs_and_outputs(&transaction).is_ok());
+    assert!(check::has_inputs_and_outputs(&tx).is_ok());
 }
 
 #[test]
