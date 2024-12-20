@@ -2458,14 +2458,12 @@ fn v5_with_duplicate_sapling_spends() {
 }
 
 /// Test if a V5 transaction with a duplicate Orchard action is rejected by the verifier.
-#[test]
-fn v5_with_duplicate_orchard_action() {
+#[tokio::test]
+async fn v5_with_duplicate_orchard_action() {
     let _init_guard = zebra_test::init();
-    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
-        let network = Network::Mainnet;
 
-        // Find a transaction with no inputs or outputs to use as base
-        let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+    for net in Network::iter() {
+        let mut tx = v5_transactions(net.block_iter())
             .rev()
             .find(|transaction| {
                 transaction.inputs().is_empty()
@@ -2474,47 +2472,40 @@ fn v5_with_duplicate_orchard_action() {
                     && transaction.sapling_outputs().next().is_none()
                     && transaction.joinsplit_count() == 0
             })
-            .expect("At least one fake V5 transaction with no inputs and no outputs");
+            .expect("V5 tx with only Orchard actions");
 
-        let height = transaction
-            .expiry_height()
-            .expect("Transaction is missing expiry height");
+        let height = tx.expiry_height().expect("expiry height");
 
-        // Insert fake Orchard shielded data to the transaction, which has at least one action (this is
-        // guaranteed structurally by `orchard::ShieldedData`)
-        let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
+        let orchard_shielded_data = tx.orchard_shielded_data_mut().unwrap();
 
         // Enable spends
-        shielded_data.flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+        orchard_shielded_data.flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
 
-        // Duplicate the first action
-        let duplicate_action = shielded_data.actions.first().clone();
+        let duplicate_action = orchard_shielded_data.actions.first().clone();
         let duplicate_nullifier = duplicate_action.action.nullifier;
 
-        shielded_data.actions.push(duplicate_action);
+        // Duplicate the first action
+        orchard_shielded_data.actions.push(duplicate_action);
 
-        // Initialize the verifier
-        let state_service =
-            service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
-
-        // Test the transaction verifier
-        let result = verifier
-            .oneshot(Request::Block {
-                transaction: Arc::new(transaction),
-                known_utxos: Arc::new(HashMap::new()),
-                height,
-                time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
+        let verifier = Verifier::new_for_tests(
+            &net,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        );
 
         assert_eq!(
-            result,
+            verifier
+                .oneshot(Request::Block {
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await,
             Err(TransactionError::DuplicateOrchardNullifier(
                 duplicate_nullifier
             ))
         );
-    });
+    }
 }
 
 /// Checks that the tx verifier handles consensus branch ids in V5 txs correctly.
