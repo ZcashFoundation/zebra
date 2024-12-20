@@ -3,10 +3,7 @@
 // These tests call functions which can take unit arguments if some features aren't enabled.
 #![allow(clippy::unit_arg)]
 
-use std::{
-    net::{Ipv4Addr, SocketAddrV4},
-    time::Duration,
-};
+use std::net::{Ipv4Addr, SocketAddrV4};
 
 use tower::buffer::Buffer;
 
@@ -141,6 +138,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
 #[should_panic(expected = "Unable to start RPC server")]
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 async fn rpc_server_spawn_port_conflict() {
+    use std::time::Duration;
     let _init_guard = zebra_test::init();
 
     let port = zebra_test::net::random_known_port();
