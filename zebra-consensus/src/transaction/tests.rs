@@ -29,7 +29,7 @@ use zebra_chain::{
         },
         zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
-    transparent::{self, CoinbaseData},
+    transparent::{self, CoinbaseData, CoinbaseSpendRestriction},
 };
 
 use zebra_node_services::mempool;
@@ -909,7 +909,7 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
     };
 
-    let spend_restriction = tx.coinbase_spend_restriction(height);
+    let spend_restriction = tx.coinbase_spend_restriction(&Network::Mainnet, height);
 
     let coinbase_spend_height = Height(5);
 
@@ -975,6 +975,100 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         verifier_response, expected_error,
         "expected to fail verification, got: {verifier_response:?}"
     );
+}
+
+/// Tests that calls to the transaction verifier with a mempool request that spends
+/// mature coinbase outputs to transparent outputs will return Ok() on Regtest.
+#[tokio::test]
+async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(None, Some(1_000));
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let verifier = Verifier::new_for_tests(&network, state.clone());
+
+    let height = NetworkUpgrade::Nu6
+        .activation_height(&network)
+        .expect("NU6 activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    // Create a non-coinbase V5 tx with the last valid expiry height.
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu6,
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    let spend_restriction = tx.coinbase_spend_restriction(&network, height);
+
+    assert_eq!(
+        spend_restriction,
+        CoinbaseSpendRestriction::CheckCoinbaseMaturity {
+            spend_height: height
+        }
+    );
+
+    let coinbase_spend_height = Height(5);
+
+    let utxo = known_utxos
+        .get(&input_outpoint)
+        .map(|utxo| {
+            let mut utxo = utxo.utxo.clone();
+            utxo.height = coinbase_spend_height;
+            utxo.from_coinbase = true;
+            utxo
+        })
+        .expect("known_utxos should contain the outpoint");
+
+    zebra_state::check::transparent_coinbase_spend(input_outpoint, spend_restriction, &utxo)
+        .expect("check should pass");
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .respond(zebra_state::Response::UnspentBestChainUtxo(Some(utxo)));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await
+        .expect("verification of transaction with mature spend to transparent outputs should pass");
 }
 
 /// Tests that errors from the read state service are correctly converted into
