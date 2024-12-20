@@ -172,6 +172,33 @@ fn v5_transaction_with_no_inputs_fails_validation() {
     );
 }
 
+#[test]
+fn v5_transaction_with_no_outputs_fails_verification() {
+    let (input, _, _) = mock_transparent_transfer(
+        Height(1),
+        true,
+        0,
+        Amount::try_from(1).expect("valid value"),
+    );
+
+    for net in Network::iter() {
+        let transaction = Transaction::V5 {
+            inputs: vec![input.clone()],
+            outputs: vec![],
+            lock_time: LockTime::Height(block::Height(0)),
+            expiry_height: NetworkUpgrade::Nu5.activation_height(&net).expect("height"),
+            sapling_shielded_data: None,
+            orchard_shielded_data: None,
+            network_upgrade: NetworkUpgrade::Nu5,
+        };
+
+        assert_eq!(
+            check::has_inputs_and_outputs(&transaction),
+            Err(TransactionError::NoOutputs)
+        );
+    }
+}
+
 #[tokio::test]
 async fn mempool_request_with_missing_input_is_rejected() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
@@ -899,33 +926,6 @@ async fn state_error_converted_correctly() {
         make_validate_context_error(),
         "expected matching state and transaction errors"
     );
-}
-
-#[test]
-fn v5_transaction_with_no_outputs_fails_validation() {
-    let (input, _, _) = mock_transparent_transfer(
-        Height(1),
-        true,
-        0,
-        Amount::try_from(1).expect("valid value"),
-    );
-
-    for net in Network::iter() {
-        let transaction = Transaction::V5 {
-            inputs: vec![input.clone()],
-            outputs: vec![],
-            lock_time: LockTime::Height(block::Height(0)),
-            expiry_height: NetworkUpgrade::Nu5.activation_height(&net).expect("height"),
-            sapling_shielded_data: None,
-            orchard_shielded_data: None,
-            network_upgrade: NetworkUpgrade::Nu5,
-        };
-
-        assert_eq!(
-            check::has_inputs_and_outputs(&transaction),
-            Err(TransactionError::NoOutputs)
-        );
-    }
 }
 
 #[test]
