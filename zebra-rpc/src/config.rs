@@ -54,6 +54,8 @@ pub struct Config {
     /// We keep it just for backward compatibility but it actually do nothing.
     /// It was something configurable when the RPC server was based in the jsonrpc-core crate,
     /// not anymore since we migrated to jsonrpsee.
+    // TODO: Prefix this field name with an underscore so it's clear that it's now unused, and
+    //       use serde(rename) to continue successfully deserializing old configs.
     pub parallel_cpu_threads: usize,
 
     /// Test-only option that makes Zebra say it is at the chain tip,

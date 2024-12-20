@@ -130,13 +130,7 @@ where
     let block_verifier_router_response = block_verifier_router
         .ready()
         .await
-        .map_err(|error| {
-            ErrorObject::owned(
-                ErrorCode::ServerError(0).code(),
-                error.to_string(),
-                None::<()>,
-            )
-        })?
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
         .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
         .await;
 
@@ -223,13 +217,10 @@ where
         + 'static,
 {
     let request = zebra_state::ReadRequest::ChainInfo;
-    let response = state.oneshot(request.clone()).await.map_err(|error| {
-        ErrorObject::owned(
-            ErrorCode::ServerError(0).code(),
-            error.to_string(),
-            None::<()>,
-        )
-    })?;
+    let response = state
+        .oneshot(request.clone())
+        .await
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
     let chain_info = match response {
         zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
@@ -259,13 +250,7 @@ where
     let response = mempool
         .oneshot(mempool::Request::FullTransactions)
         .await
-        .map_err(|error| {
-            ErrorObject::owned(
-                ErrorCode::ServerError(0).code(),
-                error.to_string(),
-                None::<()>,
-            )
-        })?;
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
     // TODO: Order transactions in block templates based on their dependencies
 

@@ -1436,7 +1436,7 @@ where
             match nix::sys::signal::raise(nix::sys::signal::SIGINT) {
                 Ok(_) => Ok("Zebra server stopping".to_string()),
                 Err(error) => Err(ErrorObject::owned(
-                    ErrorCode::ServerError(ErrorCode::InternalError.code()).code(),
+                    ErrorCode::InternalError.code(),
                     format!("Failed to shut down: {}", error).as_str(),
                     None::<()>,
                 )),
