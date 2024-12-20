@@ -13,7 +13,7 @@ use tower::{buffer::Buffer, service_fn, ServiceExt};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
-    orchard::{AuthorizedAction, Flags},
+    orchard::{Action, AuthorizedAction, Flags},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
@@ -73,7 +73,7 @@ fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
         })
         .expect("V5 tx with only Orchard shielded data");
 
-    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::empty();
+    tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
 
     // The check will fail if the transaction has no flags
     assert_eq!(
@@ -82,7 +82,7 @@ fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     );
 
     // If we add ENABLE_SPENDS flag it will pass the inputs check but fails with the outputs
-    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::ENABLE_SPENDS;
+    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS;
 
     assert_eq!(
         check::has_inputs_and_outputs(&tx),
@@ -90,7 +90,7 @@ fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     );
 
     // If we add ENABLE_OUTPUTS flag it will pass the outputs check but fails with the inputs
-    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_OUTPUTS;
 
     assert_eq!(
         check::has_inputs_and_outputs(&tx),
@@ -129,18 +129,18 @@ fn fake_v5_transaction_with_orchard_actions_has_flags() {
 
     // If we add ENABLE_SPENDS flag it will pass.
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-    shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS;
+    shielded_data.flags = Flags::ENABLE_SPENDS;
     assert!(check::has_enough_orchard_flags(&transaction).is_ok());
 
     // If we add ENABLE_OUTPUTS flag instead, it will pass.
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-    shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+    shielded_data.flags = Flags::ENABLE_OUTPUTS;
     assert!(check::has_enough_orchard_flags(&transaction).is_ok());
 
     // If we add BOTH ENABLE_SPENDS and ENABLE_OUTPUTS flags it will pass.
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
     shielded_data.flags =
-        zebra_chain::orchard::Flags::ENABLE_SPENDS | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+        Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
     assert!(check::has_enough_orchard_flags(&transaction).is_ok());
 }
 
@@ -952,7 +952,7 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 
     let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
 
-    shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS;
+    shielded_data.flags = Flags::ENABLE_SPENDS;
 
     assert_eq!(
         check::coinbase_tx_no_prevout_joinsplit_spend(&transaction),
@@ -2488,8 +2488,8 @@ fn v5_with_duplicate_orchard_action() {
         let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
 
         // Enable spends
-        shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS
-            | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+        shielded_data.flags = Flags::ENABLE_SPENDS
+            | Flags::ENABLE_OUTPUTS;
 
         // Duplicate the first action
         let duplicate_action = shielded_data.actions.first().clone();
@@ -3054,9 +3054,9 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
 /// Given an Orchard action as a base, fill fields related to note encryption
 /// from the given test vector and returned the modified action.
 fn fill_action_with_note_encryption_test_vector(
-    action: &zebra_chain::orchard::Action,
+    action: &Action,
     v: &zebra_test::vectors::TestVector,
-) -> zebra_chain::orchard::Action {
+) -> Action {
     let mut action = action.clone();
     action.cv = v.cv_net.try_into().expect("test vector must be valid");
     action.cm_x = pallas::Base::from_repr(v.cmx).unwrap();
@@ -3090,8 +3090,8 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
             .expect("At least one fake V5 transaction with no inputs and no outputs");
 
         let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-        shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS
-            | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+        shielded_data.flags = Flags::ENABLE_SPENDS
+            | Flags::ENABLE_OUTPUTS;
 
         let action =
             fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
@@ -3131,8 +3131,8 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
             .expect("At least one fake V5 transaction with no inputs and no outputs");
 
         let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-        shielded_data.flags = zebra_chain::orchard::Flags::ENABLE_SPENDS
-            | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+        shielded_data.flags = Flags::ENABLE_SPENDS
+            | Flags::ENABLE_OUTPUTS;
 
         let action =
             fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
