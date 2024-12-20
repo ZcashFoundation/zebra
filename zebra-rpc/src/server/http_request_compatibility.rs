@@ -205,11 +205,12 @@ where
         // Fix the request body
         let request = request.map(|body| {
             let new_body = tokio::task::block_in_place(|| {
-                let bytes = body
-                    .collect()
-                    .map(|data| data.expect("Failed to collect body data").to_bytes())
-                    .now_or_never()
-                    .expect("Failed to get body data immediately");
+                let bytes = tokio::runtime::Handle::current().block_on(async {
+                    body.collect()
+                        .await
+                        .expect("Failed to collect body data")
+                        .to_bytes()
+                });
                 let data = String::from_utf8_lossy(bytes.as_ref()).to_string();
 
                 // Fix JSON-RPC 1.0 requests.
