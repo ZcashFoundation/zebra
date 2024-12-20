@@ -952,35 +952,24 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 
 #[tokio::test]
 async fn v5_transaction_is_rejected_before_nu5_activation() {
-    const V5_TRANSACTION_VERSION: u32 = 5;
-
     let canopy = NetworkUpgrade::Canopy;
 
-    for network in Network::iter() {
-        let state_service = service_fn(|_| async { unreachable!("Service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
-
-        let transaction = v5_transactions(network.block_iter())
-            .next_back()
-            .expect("At least one fake V5 transaction in the test vectors");
-
-        let result = verifier
-            .oneshot(Request::Block {
-                transaction: Arc::new(transaction),
-                known_utxos: Arc::new(HashMap::new()),
-                height: canopy
-                    .activation_height(&network)
-                    .expect("Canopy activation height is specified"),
-                time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
+    for net in Network::iter() {
+        let verifier = Verifier::new_for_tests(
+            &net,
+            service_fn(|_| async { unreachable!("Service should not be called") }),
+        );
 
         assert_eq!(
-            result,
-            Err(TransactionError::UnsupportedByNetworkUpgrade(
-                V5_TRANSACTION_VERSION,
-                canopy
-            ))
+            verifier
+                .oneshot(Request::Block {
+                    transaction: Arc::new(v5_transactions(net.block_iter()).next().expect("V5 tx")),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height: canopy.activation_height(&net).expect("height"),
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await,
+            Err(TransactionError::UnsupportedByNetworkUpgrade(5, canopy))
         );
     }
 }
