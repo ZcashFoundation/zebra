@@ -605,8 +605,10 @@ proptest! {
             let transaction_hash = tx.hash();
             let tx_bytes = tx.zcash_serialize_to_vec()?;
             let tx_hex = hex::encode(&tx_bytes);
-            let send_task = tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex).await });
-
+            let send_task = {
+                let rpc = rpc.clone();
+                tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex).await })
+            };
             let tx_unmined = UnminedTx::from(tx);
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
