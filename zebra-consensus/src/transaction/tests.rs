@@ -13,7 +13,7 @@ use tower::{buffer::Buffer, service_fn, ServiceExt};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
-    orchard::AuthorizedAction,
+    orchard::{AuthorizedAction, Flags},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
@@ -98,7 +98,7 @@ fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
     );
 
     // Finally make it valid by adding both required flags
-    tx.orchard_shielded_data_mut().unwrap().flags = zebra_chain::orchard::Flags::ENABLE_SPENDS | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
+    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
 
     assert!(check::has_inputs_and_outputs(&tx).is_ok());
 }
@@ -929,14 +929,18 @@ async fn state_error_converted_correctly() {
 
 #[test]
 fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
-    let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
+    let mut tx = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
         .rev()
         .find(|transaction| transaction.is_coinbase())
-        .expect("At least one fake V5 coinbase transaction in the test vectors");
+        .expect("V5 coinbase tx");
 
-    insert_fake_orchard_shielded_data(&mut transaction);
+    assert!(tx.is_coinbase());
 
-    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&transaction).is_ok());
+    let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+
+    assert!(!shielded_data.flags.contains(Flags::ENABLE_SPENDS));
+
+    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&tx).is_ok());
 }
 
 #[test]
