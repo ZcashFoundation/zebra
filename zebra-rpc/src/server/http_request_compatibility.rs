@@ -6,7 +6,7 @@ use std::future::Future;
 
 use std::pin::Pin;
 
-use futures::{future, FutureExt, TryFutureExt};
+use futures::{future, FutureExt};
 use http_body_util::BodyExt;
 use hyper::{body::Bytes, header};
 use jsonrpsee::{
@@ -175,7 +175,7 @@ impl<S> With<Cookie> for HttpRequestMiddleware<S> {
 
 impl<S> Service<HttpRequest<HttpBody>> for HttpRequestMiddleware<S>
 where
-    S: Service<HttpRequest, Response = HttpResponse>,
+    S: Service<HttpRequest, Response = HttpResponse> + std::clone::Clone + Send + 'static,
     S::Error: Into<BoxError> + 'static,
     S::Future: Send + 'static,
 {
