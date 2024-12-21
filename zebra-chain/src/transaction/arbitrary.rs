@@ -992,16 +992,17 @@ pub fn test_transactions(
     transactions_from_blocks(blocks)
 }
 
-/// Generate an iterator over fake V5 transactions.
-///
-/// These transactions are converted from non-V5 transactions that exist in the provided network
-/// blocks.
-pub fn fake_v5_transactions_for_network<'b>(
-    network: &'b Network,
+/// Returns an iterator over V5 transactions extracted from the given blocks.
+pub fn v5_transactions<'b>(
     blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
 ) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
-    transactions_from_blocks(blocks)
-        .map(move |(height, transaction)| transaction_to_fake_v5(&transaction, network, height))
+    transactions_from_blocks(blocks).filter_map(|(_, tx)| match *tx {
+        Transaction::V1 { .. }
+        | Transaction::V2 { .. }
+        | Transaction::V3 { .. }
+        | Transaction::V4 { .. } => None,
+        ref tx @ Transaction::V5 { .. } => Some(tx.clone()),
+    })
 }
 
 /// Generate an iterator over ([`block::Height`], [`Arc<Transaction>`]).

@@ -253,9 +253,14 @@ impl Transaction {
 
     // other properties
 
+    /// Does this transaction have transparent inputs?
+    pub fn has_transparent_inputs(&self) -> bool {
+        !self.inputs().is_empty()
+    }
+
     /// Does this transaction have transparent or shielded inputs?
     pub fn has_transparent_or_shielded_inputs(&self) -> bool {
-        !self.inputs().is_empty() || self.has_shielded_inputs()
+        self.has_transparent_inputs() || self.has_shielded_inputs()
     }
 
     /// Does this transaction have shielded inputs?
