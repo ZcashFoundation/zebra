@@ -62,83 +62,87 @@ fn v5_fake_transactions() -> Result<(), Report> {
 
 #[test]
 fn v5_transaction_with_orchard_actions_has_inputs_and_outputs() {
-    let mut tx = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
-        .rev()
-        .find(|transaction| {
-            transaction.inputs().is_empty()
-                && transaction.outputs().is_empty()
-                && transaction.sapling_spends_per_anchor().next().is_none()
-                && transaction.sapling_outputs().next().is_none()
-                && transaction.joinsplit_count() == 0
-        })
-        .expect("V5 tx with only Orchard shielded data");
+    for net in Network::iter() {
+        let mut tx = v5_transactions(net.block_iter())
+            .find(|transaction| {
+                transaction.inputs().is_empty()
+                    && transaction.outputs().is_empty()
+                    && transaction.sapling_spends_per_anchor().next().is_none()
+                    && transaction.sapling_outputs().next().is_none()
+                    && transaction.joinsplit_count() == 0
+            })
+            .expect("V5 tx with only Orchard shielded data");
 
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
 
-    // The check will fail if the transaction has no flags
-    assert_eq!(
-        check::has_inputs_and_outputs(&tx),
-        Err(TransactionError::NoInputs)
-    );
+        // The check will fail if the transaction has no flags
+        assert_eq!(
+            check::has_inputs_and_outputs(&tx),
+            Err(TransactionError::NoInputs)
+        );
 
-    // If we add ENABLE_SPENDS flag it will pass the inputs check but fails with the outputs
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS;
+        // If we add ENABLE_SPENDS flag it will pass the inputs check but fails with the outputs
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS;
 
-    assert_eq!(
-        check::has_inputs_and_outputs(&tx),
-        Err(TransactionError::NoOutputs)
-    );
+        assert_eq!(
+            check::has_inputs_and_outputs(&tx),
+            Err(TransactionError::NoOutputs)
+        );
 
-    // If we add ENABLE_OUTPUTS flag it will pass the outputs check but fails with the inputs
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_OUTPUTS;
+        // If we add ENABLE_OUTPUTS flag it will pass the outputs check but fails with the inputs
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_OUTPUTS;
 
-    assert_eq!(
-        check::has_inputs_and_outputs(&tx),
-        Err(TransactionError::NoInputs)
-    );
+        assert_eq!(
+            check::has_inputs_and_outputs(&tx),
+            Err(TransactionError::NoInputs)
+        );
 
-    // Finally make it valid by adding both required flags
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+        // Finally make it valid by adding both required flags
+        tx.orchard_shielded_data_mut().unwrap().flags =
+            Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
 
-    assert!(check::has_inputs_and_outputs(&tx).is_ok());
+        assert!(check::has_inputs_and_outputs(&tx).is_ok());
+    }
 }
 
 #[test]
 fn v5_transaction_with_orchard_actions_has_flags() {
-    let mut tx = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
-        .rev()
-        .find(|transaction| {
-            transaction.inputs().is_empty()
-                && transaction.outputs().is_empty()
-                && transaction.sapling_spends_per_anchor().next().is_none()
-                && transaction.sapling_outputs().next().is_none()
-                && transaction.joinsplit_count() == 0
-        })
-        .expect("V5 tx with only Orchard actions");
+    for net in Network::iter() {
+        let mut tx = v5_transactions(net.block_iter())
+            .find(|transaction| {
+                transaction.inputs().is_empty()
+                    && transaction.outputs().is_empty()
+                    && transaction.sapling_spends_per_anchor().next().is_none()
+                    && transaction.sapling_outputs().next().is_none()
+                    && transaction.joinsplit_count() == 0
+            })
+            .expect("V5 tx with only Orchard actions");
 
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
 
-    // The check will fail if the transaction has no flags
-    assert_eq!(
-        check::has_enough_orchard_flags(&tx),
-        Err(TransactionError::NotEnoughFlags)
-    );
+        // The check will fail if the transaction has no flags
+        assert_eq!(
+            check::has_enough_orchard_flags(&tx),
+            Err(TransactionError::NotEnoughFlags)
+        );
 
-    // If we add ENABLE_SPENDS flag it will pass.
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS;
-    assert!(check::has_enough_orchard_flags(&tx).is_ok());
+        // If we add ENABLE_SPENDS flag it will pass.
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS;
+        assert!(check::has_enough_orchard_flags(&tx).is_ok());
 
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
 
-    // If we add ENABLE_OUTPUTS flag instead, it will pass.
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_OUTPUTS;
-    assert!(check::has_enough_orchard_flags(&tx).is_ok());
+        // If we add ENABLE_OUTPUTS flag instead, it will pass.
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_OUTPUTS;
+        assert!(check::has_enough_orchard_flags(&tx).is_ok());
 
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
+        tx.orchard_shielded_data_mut().unwrap().flags = Flags::empty();
 
-    // If we add BOTH ENABLE_SPENDS and ENABLE_OUTPUTS flags it will pass.
-    tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
-    assert!(check::has_enough_orchard_flags(&tx).is_ok());
+        // If we add BOTH ENABLE_SPENDS and ENABLE_OUTPUTS flags it will pass.
+        tx.orchard_shielded_data_mut().unwrap().flags =
+            Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+        assert!(check::has_enough_orchard_flags(&tx).is_ok());
+    }
 }
 
 #[test]
@@ -197,51 +201,38 @@ fn v5_transaction_with_no_outputs_fails_verification() {
 
 #[tokio::test]
 async fn mempool_request_with_missing_input_is_rejected() {
-    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
-    let verifier = Verifier::new_for_tests(&Network::Mainnet, state.clone());
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
 
-    let (height, tx) = transactions_from_blocks(zebra_test::vectors::MAINNET_BLOCKS.iter())
-        .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
-        .expect("At least one non-coinbase transaction with transparent inputs in test vectors");
+    for net in Network::iter() {
+        let verifier = Verifier::new_for_tests(&net, state.clone());
 
-    let input_outpoint = match tx.inputs()[0] {
-        transparent::Input::PrevOut { outpoint, .. } => outpoint,
-        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
-    };
+        let (height, tx) = transactions_from_blocks(net.block_iter())
+            .find(|(_, tx)| !(tx.is_coinbase() || tx.inputs().is_empty()))
+            .expect(
+                "At least one non-coinbase transaction with transparent inputs in test vectors",
+            );
 
-    tokio::spawn(async move {
+        let input_outpoint = match tx.inputs()[0] {
+            transparent::Input::PrevOut { outpoint, .. } => outpoint,
+            transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+        };
+
         // The first non-coinbase transaction with transparent inputs in our test vectors
         // does not use a lock time, so we don't see Request::BestChainNextMedianTimePast here
 
-        state
+        let state_req = state
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+            .map(|responder| responder.respond(zebra_state::Response::UnspentBestChainUtxo(None)));
 
-        state
-            .expect_request_that(|req| {
-                matches!(
-                    req,
-                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
-                )
-            })
-            .await
-            .expect("verifier should call mock state service with correct request")
-            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
-    });
-
-    let verifier_response = verifier
-        .oneshot(Request::Mempool {
+        let verifier_req = verifier.oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-        })
-        .await;
+        });
 
-    assert_eq!(
-        verifier_response,
-        Err(TransactionError::TransparentInputNotFound)
-    );
+        let (rsp, _) = futures::join!(verifier_req, state_req);
+
+        assert_eq!(rsp, Err(TransactionError::TransparentInputNotFound));
+    }
 }
 
 #[tokio::test]
@@ -926,29 +917,31 @@ async fn state_error_converted_correctly() {
 
 #[test]
 fn v5_coinbase_transaction_without_enable_spends_flag_passes_validation() {
-    let mut tx = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
-        .rev()
-        .find(|transaction| transaction.is_coinbase())
-        .expect("V5 coinbase tx");
+    for net in Network::iter() {
+        let mut tx = v5_transactions(net.block_iter())
+            .find(|transaction| transaction.is_coinbase())
+            .expect("V5 coinbase tx");
 
-    assert!(tx.is_coinbase());
+        let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
 
-    let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+        assert!(!shielded_data.flags.contains(Flags::ENABLE_SPENDS));
 
-    assert!(!shielded_data.flags.contains(Flags::ENABLE_SPENDS));
-
-    assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&tx).is_ok());
+        assert!(check::coinbase_tx_no_prevout_joinsplit_spend(&tx).is_ok());
+    }
 }
 
 #[test]
 fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
     for net in Network::iter() {
         let mut tx = v5_transactions(net.block_iter())
-            .rev()
             .find(|transaction| transaction.is_coinbase())
             .expect("V5 coinbase tx");
 
-        tx.orchard_shielded_data_mut().unwrap().flags = Flags::ENABLE_SPENDS;
+        let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
+
+        assert!(!shielded_data.flags.contains(Flags::ENABLE_SPENDS));
+
+        shielded_data.flags = Flags::ENABLE_SPENDS;
 
         assert_eq!(
             check::coinbase_tx_no_prevout_joinsplit_spend(&tx),
@@ -2369,92 +2362,79 @@ fn v4_with_sapling_outputs_and_no_spends() {
 }
 
 /// Test if a V5 transaction with Sapling spends is accepted by the verifier.
-#[test]
-fn v5_with_sapling_spends() {
+#[tokio::test]
+async fn v5_with_sapling_spends() {
     let _init_guard = zebra_test::init();
-    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
-        let network = Network::Mainnet;
-        let nu5_activation = NetworkUpgrade::Nu5.activation_height(&network);
 
-        let transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
-            .rev()
-            .filter(|transaction| {
-                !transaction.is_coinbase()
-                    && transaction.inputs().is_empty()
-                    && transaction.expiry_height() >= nu5_activation
+    for net in Network::iter() {
+        let nu5_activation = NetworkUpgrade::Nu5.activation_height(&net);
+
+        let tx = v5_transactions(net.block_iter())
+            .filter(|tx| {
+                !tx.is_coinbase() && tx.inputs().is_empty() && tx.expiry_height() >= nu5_activation
             })
-            .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
-            .expect("No transaction found with Sapling spends");
+            .find(|tx| tx.sapling_spends_per_anchor().next().is_some())
+            .expect("V5 tx with Sapling spends");
 
-        let expected_hash = transaction.unmined_id();
-        let height = transaction
-            .expiry_height()
-            .expect("Transaction is missing expiry height");
+        let expected_hash = tx.unmined_id();
+        let height = tx.expiry_height().expect("expiry height");
 
-        // Initialize the verifier
-        let state_service =
-            service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
-
-        // Test the transaction verifier
-        let result = verifier
-            .oneshot(Request::Block {
-                transaction: Arc::new(transaction),
-                known_utxos: Arc::new(HashMap::new()),
-                height,
-                time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
+        let verifier = Verifier::new_for_tests(
+            &net,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        );
 
         assert_eq!(
-            result.expect("unexpected error response").tx_id(),
+            verifier
+                .oneshot(Request::Block {
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await
+                .expect("unexpected error response")
+                .tx_id(),
             expected_hash
         );
-    });
+    }
 }
 
 /// Test if a V5 transaction with a duplicate Sapling spend is rejected by the verifier.
-#[test]
-fn v5_with_duplicate_sapling_spends() {
+#[tokio::test]
+async fn v5_with_duplicate_sapling_spends() {
     let _init_guard = zebra_test::init();
-    zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
-        let network = Network::Mainnet;
 
-        let mut transaction = v5_transactions(zebra_test::vectors::MAINNET_BLOCKS.iter())
-            .rev()
-            .filter(|transaction| !transaction.is_coinbase() && transaction.inputs().is_empty())
-            .find(|transaction| transaction.sapling_spends_per_anchor().next().is_some())
-            .expect("No transaction found with Sapling spends");
+    for net in Network::iter() {
+        let mut tx = v5_transactions(net.block_iter())
+            .filter(|tx| !tx.is_coinbase() && tx.inputs().is_empty())
+            .find(|tx| tx.sapling_spends_per_anchor().next().is_some())
+            .expect("V5 tx with Sapling spends");
 
-        let height = transaction
-            .expiry_height()
-            .expect("Transaction is missing expiry height");
+        let height = tx.expiry_height().expect("expiry height");
 
         // Duplicate one of the spends
-        let duplicate_nullifier = duplicate_sapling_spend(&mut transaction);
+        let duplicate_nullifier = duplicate_sapling_spend(&mut tx);
 
-        // Initialize the verifier
-        let state_service =
-            service_fn(|_| async { unreachable!("State service should not be called") });
-        let verifier = Verifier::new_for_tests(&network, state_service);
-
-        // Test the transaction verifier
-        let result = verifier
-            .oneshot(Request::Block {
-                transaction: Arc::new(transaction),
-                known_utxos: Arc::new(HashMap::new()),
-                height,
-                time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
+        let verifier = Verifier::new_for_tests(
+            &net,
+            service_fn(|_| async { unreachable!("State service should not be called") }),
+        );
 
         assert_eq!(
-            result,
+            verifier
+                .oneshot(Request::Block {
+                    transaction: Arc::new(tx),
+                    known_utxos: Arc::new(HashMap::new()),
+                    height,
+                    time: DateTime::<Utc>::MAX_UTC,
+                })
+                .await,
             Err(TransactionError::DuplicateSaplingNullifier(
                 duplicate_nullifier
             ))
         );
-    });
+    }
 }
 
 /// Test if a V5 transaction with a duplicate Orchard action is rejected by the verifier.
