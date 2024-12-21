@@ -1,5 +1,6 @@
 //! Provides high-level access to database:
-//! - unspent [`transparent::Output`]s (UTXOs), and
+//! - unspent [`transparent::Output`]s (UTXOs),
+//! - spent [`transparent::Output`]s, and
 //! - transparent address indexes.
 //!
 //! This module makes sure that:
@@ -40,8 +41,41 @@ use crate::{
     BoxError,
 };
 
+use super::super::TypedColumnFamily;
+
+/// The name of the transaction hash by spent outpoints column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const TX_LOC_BY_SPENT_OUT_LOC: &str = "tx_loc_by_spent_out_loc";
+
+/// The type for reading value pools from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type TransactionLocationBySpentOutputLocationCf<'cf> =
+    TypedColumnFamily<'cf, OutputLocation, TransactionLocation>;
+
 impl ZebraDb {
+    // Column family convenience methods
+
+    /// Returns a typed handle to the transaction location by spent output location column family.
+    pub(crate) fn tx_loc_by_spent_output_loc_cf(
+        &self,
+    ) -> TransactionLocationBySpentOutputLocationCf {
+        TransactionLocationBySpentOutputLocationCf::new(&self.db, TX_LOC_BY_SPENT_OUT_LOC)
+            .expect("column family was created when database was created")
+    }
+
     // Read transparent methods
+
+    /// Returns the [`TransactionLocation`] for a transaction that spent the output
+    /// at the provided [`OutputLocation`], if it is in the finalized state.
+    pub fn tx_location_by_spent_output_location(
+        &self,
+        output_location: &OutputLocation,
+    ) -> Option<TransactionLocation> {
+        self.tx_loc_by_spent_output_loc_cf().zs_get(output_location)
+    }
 
     /// Returns the [`AddressBalanceLocation`] for a [`transparent::Address`],
     /// if it is in the finalized state.
@@ -88,6 +122,14 @@ impl ZebraDb {
         let output_location = self.output_location(outpoint)?;
 
         self.utxo_by_location(output_location)
+    }
+
+    /// Returns the [`TransactionLocation`] of the transaction that spent the given
+    /// [`transparent::OutPoint`], if it is unspent in the finalized state and its
+    /// spending transaction hash has been indexed.
+    pub fn spending_tx_loc(&self, outpoint: &transparent::OutPoint) -> Option<TransactionLocation> {
+        let output_location = self.output_location(outpoint)?;
+        self.tx_location_by_spent_output_location(&output_location)
     }
 
     /// Returns the transparent output for an [`OutputLocation`],
@@ -342,14 +384,19 @@ impl DiskWriteBatch {
     #[allow(clippy::too_many_arguments)]
     pub fn prepare_transparent_transaction_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         network: &Network,
         finalized: &FinalizedBlock,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
         spent_utxos_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: &HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
         mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
+        let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
 
         // Update created and spent transparent outputs
@@ -371,11 +418,13 @@ impl DiskWriteBatch {
             let spending_tx_location = TransactionLocation::from_usize(*height, tx_index);
 
             self.prepare_spending_transparent_tx_ids_batch(
-                db,
+                zebra_db,
                 network,
                 spending_tx_location,
                 transaction,
                 spent_utxos_by_outpoint,
+                #[cfg(feature = "indexer")]
+                out_loc_by_outpoint,
                 &address_balances,
             )?;
         }
@@ -531,16 +580,21 @@ impl DiskWriteBatch {
     /// # Errors
     ///
     /// - This method doesn't currently return any errors, but it might in future
-    #[allow(clippy::unwrap_in_result)]
+    #[allow(clippy::unwrap_in_result, clippy::too_many_arguments)]
     pub fn prepare_spending_transparent_tx_ids_batch(
         &mut self,
-        db: &DiskDb,
+        zebra_db: &ZebraDb,
         network: &Network,
         spending_tx_location: TransactionLocation,
         transaction: &Transaction,
         spent_utxos_by_outpoint: &HashMap<transparent::OutPoint, transparent::Utxo>,
+        #[cfg(feature = "indexer")] out_loc_by_outpoint: &HashMap<
+            transparent::OutPoint,
+            OutputLocation,
+        >,
         address_balances: &HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
+        let db = &zebra_db.db;
         let tx_loc_by_transparent_addr_loc =
             db.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();
 
@@ -568,6 +622,18 @@ impl DiskWriteBatch {
                 let address_transaction =
                     AddressTransaction::new(sending_address_location, spending_tx_location);
                 self.zs_insert(&tx_loc_by_transparent_addr_loc, address_transaction, ());
+            }
+
+            #[cfg(feature = "indexer")]
+            {
+                let spent_output_location = out_loc_by_outpoint
+                    .get(&spent_outpoint)
+                    .expect("spent outpoints must already have output locations");
+
+                let _ = zebra_db
+                    .tx_loc_by_spent_output_loc_cf()
+                    .with_batch_for_writing(self)
+                    .zs_insert(spent_output_location, &spending_tx_location);
             }
         }
 
