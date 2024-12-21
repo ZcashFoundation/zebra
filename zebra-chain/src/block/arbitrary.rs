@@ -568,7 +568,7 @@ where
         + Copy
         + 'static,
 {
-    let mut spend_restriction = transaction.coinbase_spend_restriction(height);
+    let mut spend_restriction = transaction.coinbase_spend_restriction(&Network::Mainnet, height);
     let mut new_inputs = Vec::new();
     let mut spent_outputs = HashMap::new();
 
@@ -650,7 +650,8 @@ where
         + 'static,
 {
     let has_shielded_outputs = transaction.has_shielded_outputs();
-    let delete_transparent_outputs = CoinbaseSpendRestriction::OnlyShieldedOutputs { spend_height };
+    let delete_transparent_outputs =
+        CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height };
     let mut attempts: usize = 0;
 
     // choose an arbitrary spendable UTXO, in hash set order
