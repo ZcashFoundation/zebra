@@ -41,7 +41,7 @@ use super::{check, Request, Verifier};
 mod prop;
 
 #[test]
-fn v5_fake_transactions() -> Result<(), Report> {
+fn v5_transactions_basic_check() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     for network in Network::iter() {
