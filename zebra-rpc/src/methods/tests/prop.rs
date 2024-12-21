@@ -4,7 +4,7 @@ use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
-use jsonrpc_core::{Error, ErrorCode};
+use jsonrpsee_types::{ErrorCode, ErrorObject};
 use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -28,7 +28,7 @@ use zebra_test::mock_service::MockService;
 use crate::methods;
 
 use super::super::{
-    AddressBalance, AddressStrings, NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash,
+    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
 };
 
 proptest! {
@@ -49,7 +49,7 @@ proptest! {
 
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
@@ -64,7 +64,7 @@ proptest! {
 
             state.expect_no_requests().await?;
 
-            let result = send_task.await?;
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
             prop_assert_eq!(result, Ok(hash));
 
@@ -91,7 +91,9 @@ proptest! {
             let transaction_bytes = transaction.zcash_serialize_to_vec()?;
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex.clone()));
+            let _rpc = rpc.clone();
+            let _transaction_hex = transaction_hex.clone();
+            let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
@@ -103,11 +105,11 @@ proptest! {
 
             state.expect_no_requests().await?;
 
-            let result = send_task.await?;
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
             check_err_code(result, ErrorCode::ServerError(-1))?;
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex.clone()).await });
 
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
@@ -118,7 +120,7 @@ proptest! {
                 .await?
                 .respond(Ok::<_, BoxError>(mempool::Response::Queued(vec![Ok(rsp_rx)])));
 
-            let result = send_task.await?;
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
             check_err_code(result, ErrorCode::ServerError(-25))?;
 
@@ -173,13 +175,13 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
+            let send_task = rpc.send_raw_transaction(non_hex_string);
 
             // Check that there are no further requests.
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            check_err_code(send_task.await?, ErrorCode::ServerError(-22))?;
+            check_err_code(send_task.await, ErrorCode::ServerError(-22))?;
 
             // The queue task should continue without errors or panics
             prop_assert!(mempool_tx_queue.now_or_never().is_none());
@@ -204,12 +206,12 @@ proptest! {
         prop_assume!(Transaction::zcash_deserialize(&*random_bytes).is_err());
 
         runtime.block_on(async move {
-            let send_task = tokio::spawn(rpc.send_raw_transaction(hex::encode(random_bytes)));
+            let send_task = rpc.send_raw_transaction(hex::encode(random_bytes));
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            check_err_code(send_task.await?, ErrorCode::ServerError(-22))?;
+            check_err_code(send_task.await, ErrorCode::ServerError(-22))?;
 
             // The queue task should continue without errors or panics
             prop_assert!(mempool_tx_queue.now_or_never().is_none());
@@ -374,8 +376,8 @@ proptest! {
             let (response, _) = tokio::join!(response_fut, mock_state_handler);
 
             prop_assert_eq!(
-                &response.err().unwrap().message,
-                "no chain tip available yet"
+                response.err().unwrap().message().to_string(),
+                "no chain tip available yet".to_string()
             );
 
             mempool.expect_no_requests().await?;
@@ -603,8 +605,10 @@ proptest! {
             let transaction_hash = tx.hash();
             let tx_bytes = tx.zcash_serialize_to_vec()?;
             let tx_hex = hex::encode(&tx_bytes);
-            let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
-
+            let send_task = {
+                let rpc = rpc.clone();
+                tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex).await })
+            };
             let tx_unmined = UnminedTx::from(tx);
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
@@ -678,10 +682,11 @@ proptest! {
         runtime.block_on(async move {
             let mut transactions_hash_set = HashSet::new();
             for tx in txs.clone() {
+                let rpc_clone = rpc.clone();
                 // send a transaction
                 let tx_bytes = tx.zcash_serialize_to_vec()?;
                 let tx_hex = hex::encode(&tx_bytes);
-                let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
+                let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex).await });
 
                 let tx_unmined = UnminedTx::from(tx.clone());
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
@@ -768,11 +773,22 @@ fn invalid_txid() -> BoxedStrategy<String> {
 }
 
 /// Checks that the given RPC response contains the given error code.
-fn check_err_code<T>(rsp: Result<T, Error>, error_code: ErrorCode) -> Result<(), TestCaseError> {
-    prop_assert!(
-        matches!(&rsp, Err(Error { code, .. }) if *code == error_code),
-        "the RPC response must match the error code: {error_code:?}"
-    );
+fn check_err_code<T>(
+    rsp: Result<T, ErrorObject>,
+    error_code: ErrorCode,
+) -> Result<(), TestCaseError> {
+    match rsp {
+        Err(e) => {
+            prop_assert!(
+                e.code() == error_code.code(),
+                "the RPC response must match the error code: {:?}",
+                error_code.code()
+            );
+        }
+        Ok(_) => {
+            prop_assert!(false, "expected an error response, but got Ok");
+        }
+    }
 
     Ok(())
 }
