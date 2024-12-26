@@ -75,6 +75,7 @@ jobs:
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
@@ -82,8 +83,6 @@ jobs:
       contents: 'read'
       id-token: 'write'
       pull-requests: write # for `docker-scout` to be able to write the comment
-    environment:
-      name: ${{ inputs.environment }}
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
     steps:

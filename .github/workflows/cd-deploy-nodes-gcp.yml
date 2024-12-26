@@ -155,6 +155,7 @@ jobs:
     # This workflow also runs on release tags, the event name check will run it on releases.
     if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && !inputs.no_cached_disk }}
     with:
+      environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
