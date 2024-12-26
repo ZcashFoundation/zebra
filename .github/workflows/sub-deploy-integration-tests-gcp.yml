@@ -388,6 +388,8 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+    # We want to create images for both dev and prod environments,
+    # but for prod we only want to create images from the main branch
     strategy:
       matrix:
         environment: ${{ github.ref_name == 'main' && fromJSON('["dev", "prod"]') || fromJSON('["dev"]') }}

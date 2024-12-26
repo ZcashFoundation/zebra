@@ -8,9 +8,6 @@ name: Integration Tests on GCP
 on:
   workflow_call:
     inputs:
-      environment:
-        required: true
-        type: string
       network:
         default: "Mainnet"
         type: string
