@@ -1,6 +1,6 @@
 [package]
 name = "zebra-grpc"
-version = "0.1.0-alpha.9"
+version = "0.1.0-alpha.10"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Zebra gRPC interface"
 license = "MIT OR Apache-2.0"
@@ -19,23 +19,23 @@ categories = ["cryptography::cryptocurrencies"]
 futures-util = "0.3.28"
 tonic = "0.12.3"
 tonic-reflection = "0.12.3"
-prost = "0.13.3"
-serde = { version = "1.0.211", features = ["serde_derive"] }
-tokio = { version = "1.41.0", features = ["macros", "rt-multi-thread"] }
-tokio-stream = "0.1.16"
+prost = "0.13.4"
+serde = { version = "1.0.215", features = ["serde_derive"] }
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread"] }
+tokio-stream = "0.1.17"
 tower = { version = "0.4.13", features = ["util", "buffer", "timeout"] }
 color-eyre = "0.6.3"
 
 zcash_primitives.workspace = true
 
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.42", features = ["shielded-scan"] }
-zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.42" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.43", features = ["shielded-scan"] }
+zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.43" }
 
 [build-dependencies]
 tonic-build = "0.12.3"
 
 [dev-dependencies]
-insta = { version = "1.40.0", features = ["redactions", "json", "ron"] }
+insta = { version = "1.41.1", features = ["redactions", "json", "ron"] }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-state = { path = "../zebra-state" }

@@ -2,7 +2,10 @@
 //
 // TODO: split fixed test vectors into a `vectors` module?
 
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
@@ -26,7 +29,7 @@ use zebra_chain::{
         },
         zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
-    transparent::{self, CoinbaseData},
+    transparent::{self, CoinbaseData, CoinbaseSpendRestriction},
 };
 
 use zebra_node_services::mempool;
@@ -694,13 +697,180 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 
     tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
+    // polled before AwaitOutput request and after a mempool transaction with transparent outputs
+    // is successfully verified
     assert_eq!(
         mempool.poll_count(),
         2,
-        "the mempool service should have been polled twice, \
-     first before being called with an AwaitOutput request, \
-     then again shortly after a mempool transaction with transparent outputs \
-     is successfully verified"
+        "the mempool service should have been polled twice"
+    );
+}
+
+#[tokio::test]
+async fn skips_verification_of_block_transactions_in_mempool() {
+    let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
+    let (mempool_setup_tx, mempool_setup_rx) = tokio::sync::oneshot::channel();
+    let verifier = Verifier::new(&Network::Mainnet, state.clone(), mempool_setup_rx);
+    let verifier = Buffer::new(verifier, 1);
+
+    mempool_setup_tx
+        .send(mempool.clone())
+        .ok()
+        .expect("send should succeed");
+
+    let height = NetworkUpgrade::Nu6
+        .activation_height(&Network::Mainnet)
+        .expect("Canopy activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    // Create a non-coinbase V4 tx with the last valid expiry height.
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu6,
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let tx_hash = tx.hash();
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::UnspentBestChainUtxo(None));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    let mut mempool_clone = mempool.clone();
+    tokio::spawn(async move {
+        mempool_clone
+            .expect_request(mempool::Request::AwaitOutput(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(mempool::Response::UnspentOutput(
+                known_utxos
+                    .get(&input_outpoint)
+                    .expect("input outpoint should exist in known_utxos")
+                    .utxo
+                    .output
+                    .clone(),
+            ));
+    });
+
+    let verifier_response = verifier
+        .clone()
+        .oneshot(Request::Mempool {
+            transaction: tx.clone().into(),
+            height,
+        })
+        .await;
+
+    assert!(
+        verifier_response.is_ok(),
+        "expected successful verification, got: {verifier_response:?}"
+    );
+
+    let crate::transaction::Response::Mempool {
+        transaction,
+        spent_mempool_outpoints,
+    } = verifier_response.expect("already checked that response is ok")
+    else {
+        panic!("unexpected response variant from transaction verifier for Mempool request")
+    };
+
+    assert_eq!(
+        spent_mempool_outpoints,
+        vec![input_outpoint],
+        "spent_mempool_outpoints in tx verifier response should match input_outpoint"
+    );
+
+    let mut mempool_clone = mempool.clone();
+    tokio::spawn(async move {
+        for _ in 0..2 {
+            mempool_clone
+                .expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
+                .await
+                .expect("verifier should call mock state service with correct request")
+                .respond(mempool::Response::TransactionWithDeps {
+                    transaction: transaction.clone(),
+                    dependencies: [input_outpoint.hash].into(),
+                });
+        }
+    });
+
+    let make_request = |known_outpoint_hashes| Request::Block {
+        transaction_hash: tx_hash,
+        transaction: Arc::new(tx),
+        known_outpoint_hashes,
+        known_utxos: Arc::new(HashMap::new()),
+        height,
+        time: Utc::now(),
+    };
+
+    let crate::transaction::Response::Block { .. } = verifier
+        .clone()
+        .oneshot(make_request.clone()(Arc::new([input_outpoint.hash].into())))
+        .await
+        .expect("should return Ok without calling state service")
+    else {
+        panic!("unexpected response variant from transaction verifier for Block request")
+    };
+
+    let verifier_response_err = *verifier
+        .clone()
+        .oneshot(make_request(Arc::new(HashSet::new())))
+        .await
+        .expect_err("should return Err without calling state service")
+        .downcast::<TransactionError>()
+        .expect("tx verifier error type should be TransactionError");
+
+    assert_eq!(
+        verifier_response_err,
+        TransactionError::TransparentInputNotFound,
+        "should be a transparent input not found error"
+    );
+
+    tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
+    // polled before AwaitOutput request, after a mempool transaction with transparent outputs,
+    // is successfully verified, and twice more when checking if a transaction in a block is
+    // already the mempool.
+    assert_eq!(
+        mempool.poll_count(),
+        4,
+        "the mempool service should have been polled 4 times"
     );
 }
 
@@ -739,7 +909,7 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
     };
 
-    let spend_restriction = tx.coinbase_spend_restriction(height);
+    let spend_restriction = tx.coinbase_spend_restriction(&Network::Mainnet, height);
 
     let coinbase_spend_height = Height(5);
 
@@ -805,6 +975,100 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         verifier_response, expected_error,
         "expected to fail verification, got: {verifier_response:?}"
     );
+}
+
+/// Tests that calls to the transaction verifier with a mempool request that spends
+/// mature coinbase outputs to transparent outputs will return Ok() on Regtest.
+#[tokio::test]
+async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest() {
+    let _init_guard = zebra_test::init();
+
+    let network = Network::new_regtest(None, Some(1_000));
+    let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
+    let verifier = Verifier::new_for_tests(&network, state.clone());
+
+    let height = NetworkUpgrade::Nu6
+        .activation_height(&network)
+        .expect("NU6 activation height is specified");
+    let fund_height = (height - 1).expect("fake source fund block height is too small");
+    let (input, output, known_utxos) = mock_transparent_transfer(
+        fund_height,
+        true,
+        0,
+        Amount::try_from(10001).expect("invalid value"),
+    );
+
+    // Create a non-coinbase V5 tx with the last valid expiry height.
+    let tx = Transaction::V5 {
+        network_upgrade: NetworkUpgrade::Nu6,
+        inputs: vec![input],
+        outputs: vec![output],
+        lock_time: LockTime::min_lock_time_timestamp(),
+        expiry_height: height,
+        sapling_shielded_data: None,
+        orchard_shielded_data: None,
+    };
+
+    let input_outpoint = match tx.inputs()[0] {
+        transparent::Input::PrevOut { outpoint, .. } => outpoint,
+        transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
+    };
+
+    let spend_restriction = tx.coinbase_spend_restriction(&network, height);
+
+    assert_eq!(
+        spend_restriction,
+        CoinbaseSpendRestriction::CheckCoinbaseMaturity {
+            spend_height: height
+        }
+    );
+
+    let coinbase_spend_height = Height(5);
+
+    let utxo = known_utxos
+        .get(&input_outpoint)
+        .map(|utxo| {
+            let mut utxo = utxo.utxo.clone();
+            utxo.height = coinbase_spend_height;
+            utxo.from_coinbase = true;
+            utxo
+        })
+        .expect("known_utxos should contain the outpoint");
+
+    zebra_state::check::transparent_coinbase_spend(input_outpoint, spend_restriction, &utxo)
+        .expect("check should pass");
+
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
+            .await
+            .respond(zebra_state::Response::BestChainNextMedianTimePast(
+                DateTime32::MAX,
+            ));
+
+        state
+            .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
+            .await
+            .respond(zebra_state::Response::UnspentBestChainUtxo(Some(utxo)));
+
+        state
+            .expect_request_that(|req| {
+                matches!(
+                    req,
+                    zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
+                )
+            })
+            .await
+            .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
+    });
+
+    verifier
+        .oneshot(Request::Mempool {
+            transaction: tx.into(),
+            height,
+        })
+        .await
+        .expect("verification of transaction with mature spend to transparent outputs should pass");
 }
 
 /// Tests that errors from the read state service are correctly converted into
@@ -983,8 +1247,10 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
 
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: canopy
                     .activation_height(&network)
                     .expect("Canopy activation height is specified"),
@@ -1029,8 +1295,10 @@ fn v5_transaction_is_accepted_after_nu5_activation() {
 
             let verification_result = Verifier::new_for_tests(&network, state)
                 .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     height: expiry_height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
@@ -1087,8 +1355,10 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1131,8 +1401,10 @@ async fn v4_transaction_with_last_valid_expiry_height() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1176,8 +1448,10 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1223,8 +1497,10 @@ async fn v4_transaction_with_too_low_expiry_height() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1273,8 +1549,10 @@ async fn v4_transaction_with_exceeding_expiry_height() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1326,8 +1604,10 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1377,8 +1657,10 @@ async fn v4_coinbase_transaction_is_accepted() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1432,8 +1714,10 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1487,8 +1771,10 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1558,8 +1844,10 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
 
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -1634,8 +1922,10 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
 
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -1693,8 +1983,10 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1739,8 +2031,10 @@ async fn v5_transaction_with_last_valid_expiry_height() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1784,8 +2078,10 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1805,8 +2101,10 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1834,8 +2132,10 @@ async fn v5_coinbase_transaction_expiry_height() {
     let result = verifier
         .clone()
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1871,8 +2171,10 @@ async fn v5_coinbase_transaction_expiry_height() {
     let verification_result = verifier
         .clone()
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: new_expiry_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1922,8 +2224,10 @@ async fn v5_transaction_with_too_low_expiry_height() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -1971,8 +2275,10 @@ async fn v5_transaction_with_exceeding_expiry_height() {
 
     let verification_result = Verifier::new_for_tests(&Network::Mainnet, state)
         .oneshot(Request::Block {
-            transaction: Arc::new(transaction),
+            transaction_hash: transaction.hash(),
+            transaction: Arc::new(transaction.clone()),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: height_max,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2025,8 +2331,10 @@ async fn v5_coinbase_transaction_is_accepted() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2082,8 +2390,10 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
 
     let result = verifier
         .oneshot(Request::Block {
+            transaction_hash: transaction.hash(),
             transaction: Arc::new(transaction),
             known_utxos: Arc::new(known_utxos),
+            known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
         })
@@ -2130,8 +2440,10 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
 
         let verification_result = Verifier::new_for_tests(&network, state)
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(known_utxos),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2173,8 +2485,10 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2262,8 +2576,10 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
         let result = verifier
             .clone()
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: transaction.clone(),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2308,8 +2624,10 @@ fn v4_with_sapling_spends() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2350,8 +2668,10 @@ fn v4_with_duplicate_sapling_spends() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2394,8 +2714,10 @@ fn v4_with_sapling_outputs_and_no_spends() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2442,8 +2764,10 @@ fn v5_with_sapling_spends() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2485,8 +2809,10 @@ fn v5_with_duplicate_sapling_spends() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2547,8 +2873,10 @@ fn v5_with_duplicate_orchard_action() {
         // Test the transaction verifier
         let result = verifier
             .oneshot(Request::Block {
+                transaction_hash: transaction.hash(),
                 transaction: Arc::new(transaction),
                 known_utxos: Arc::new(HashMap::new()),
+                known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
             })
@@ -2605,8 +2933,10 @@ async fn v5_consensus_branch_ids() {
             let block_req = verifier
                 .clone()
                 .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     // The consensus branch ID of the tx is outdated for this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
@@ -2633,8 +2963,10 @@ async fn v5_consensus_branch_ids() {
             let block_req = verifier
                 .clone()
                 .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     // The consensus branch ID of the tx is supported by this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
@@ -2690,8 +3022,10 @@ async fn v5_consensus_branch_ids() {
             let block_req = verifier
                 .clone()
                 .oneshot(Request::Block {
+                    transaction_hash: tx.hash(),
                     transaction: Arc::new(tx.clone()),
                     known_utxos: known_utxos.clone(),
+                    known_outpoint_hashes: Arc::new(HashSet::new()),
                     // The consensus branch ID of the tx is not supported by this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,

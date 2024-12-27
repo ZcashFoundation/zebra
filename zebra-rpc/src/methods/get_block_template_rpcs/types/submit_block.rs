@@ -2,11 +2,11 @@
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
-use crate::methods::get_block_template_rpcs::GetBlockTemplateRpc;
+use crate::methods::get_block_template_rpcs::GetBlockTemplate;
 
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
-/// See notes for [`GetBlockTemplateRpc::submit_block`] method
+/// See notes for [`crate::methods::GetBlockTemplateRpcServer::submit_block`] method
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
 pub struct JsonParameters {
     /// The workid for the block template. Currently unused.
@@ -28,7 +28,7 @@ pub struct JsonParameters {
 /// Response to a `submitblock` RPC request.
 ///
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ErrorResponse {
     /// Block was already committed to the non-finalized or finalized state
@@ -44,7 +44,7 @@ pub enum ErrorResponse {
 /// Response to a `submitblock` RPC request.
 ///
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
-#[derive(Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Response {
     /// Block was not successfully submitted, return error
