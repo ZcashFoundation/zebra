@@ -1675,7 +1675,7 @@ impl AddressStrings {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
     /// The total transparent balance.
-    balance: u64,
+    pub balance: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
