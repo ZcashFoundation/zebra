@@ -1647,6 +1647,28 @@ impl AddressStrings {
 
         Ok(valid_addresses)
     }
+
+    /// Given a list of addresses as strings:
+    /// - check if provided list have all valid transparent addresses.
+    /// - return valid addresses as a vec of strings.
+    pub fn valid_address_strings(
+        self,
+    ) -> std::result::Result<Vec<String>, server::error::LegacyCode> {
+        // Reference for the legacy error code:
+        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
+        let valid_addresses = self
+            .addresses
+            .into_iter()
+            .map(|address| {
+                address
+                    .parse::<Address>()
+                    .map(|_| address)
+                    .map_err(|_| server::error::LegacyCode::InvalidAddressOrKey)
+            })
+            .collect::<std::result::Result<Vec<_>, server::error::LegacyCode>>()?;
+
+        Ok(valid_addresses)
+    }
 }
 
 /// The transparent balance of a set of addresses.
