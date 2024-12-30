@@ -10,9 +10,6 @@ name: Zcashd Manual Deploy
 on:
   workflow_dispatch:
     inputs:
-      environment:
-        required: false
-        default: dev
       network:
         default: 'Mainnet'
         description: 'Network to deploy: Mainnet or Testnet'

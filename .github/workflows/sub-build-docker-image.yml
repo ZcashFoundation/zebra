@@ -10,11 +10,6 @@ name: Build docker image
 on:
   workflow_call:
     inputs:
-      environment:
-        description: 'The infra environment to build the image for'
-        required: false
-        default: dev
-        type: string
       image_name:
         required: true
         type: string
@@ -75,7 +70,7 @@ jobs:
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    environment: ${{ github.event_name == 'release' && 'prod' }}
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}

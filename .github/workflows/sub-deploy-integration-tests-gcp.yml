@@ -3,10 +3,6 @@ name: Deploy Tests to GCP
 on:
   workflow_call:
     inputs:
-      environment:
-        required: false
-        default: dev
-        type: string
       # Status and logging
       test_id:
         required: true
@@ -388,11 +384,10 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    # We want to create images for both dev and prod environments,
-    # but for prod we only want to create images from the main branch
+    # We want to create main branch images for both dev and prod environments
     strategy:
       matrix:
-        environment: ${{ github.ref_name == 'main' && fromJSON('["dev", "prod"]') || fromJSON('["dev"]') }}
+        environment: ${{ github.ref_name == 'main' && fromJSON('["dev", "prod"]') }}
     environment: ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@v4.2.2
