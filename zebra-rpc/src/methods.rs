@@ -2179,6 +2179,48 @@ impl Default for GetAddressUtxos {
     }
 }
 
+impl GetAddressUtxos {
+    /// Constructs a new instance of [`GetAddressUtxos`].
+    pub fn from_parts(
+        address: transparent::Address,
+        txid: transaction::Hash,
+        output_index: OutputIndex,
+        script: transparent::Script,
+        satoshis: u64,
+        height: Height,
+    ) -> Self {
+        GetAddressUtxos {
+            address,
+            txid,
+            output_index,
+            script,
+            satoshis,
+            height,
+        }
+    }
+
+    /// Returns the contents of [`GetAddressUtxos`].
+    pub fn into_parts(
+        &self,
+    ) -> (
+        transparent::Address,
+        transaction::Hash,
+        OutputIndex,
+        transparent::Script,
+        u64,
+        Height,
+    ) {
+        (
+            self.address.clone(),
+            self.txid,
+            self.output_index,
+            self.script.clone(),
+            self.satoshis,
+            self.height,
+        )
+    }
+}
+
 /// A struct to use as parameter of the `getaddresstxids`.
 ///
 /// See the notes for the [`Rpc::get_address_tx_ids` method].
@@ -2190,6 +2232,21 @@ pub struct GetAddressTxIdsRequest {
     start: u32,
     // The height to end looking for transactions.
     end: u32,
+}
+
+impl GetAddressTxIdsRequest {
+    /// Constructs [`GetAddressTxIdsRequest`] from its constituent parts.
+    pub fn from_parts(addresses: Vec<String>, start: u32, end: u32) -> Self {
+        GetAddressTxIdsRequest {
+            addresses,
+            start,
+            end,
+        }
+    }
+    /// Returns the contents of [`GetAddressTxIdsRequest`].
+    pub fn into_parts(&self) -> (Vec<String>, u32, u32) {
+        (self.addresses.clone(), self.start, self.end)
+    }
 }
 
 /// Information about the sapling and orchard note commitment trees if any.
