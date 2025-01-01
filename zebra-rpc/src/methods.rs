@@ -1792,6 +1792,18 @@ impl Default for SentTransactionHash {
     }
 }
 
+impl SentTransactionHash {
+    /// Constructs a new [`SentTransactionHash`].
+    pub fn new(hash: transaction::Hash) -> Self {
+        SentTransactionHash(hash)
+    }
+
+    /// Returns the contents of ['SentTransactionHash'].
+    pub fn inner(&self) -> transaction::Hash {
+        self.0
+    }
+}
+
 /// Response to a `getblock` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block`] method.
