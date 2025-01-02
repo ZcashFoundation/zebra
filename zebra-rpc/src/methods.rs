@@ -1629,6 +1629,25 @@ impl AddressStrings {
         AddressStrings { addresses }
     }
 
+    /// Creates a new [`AddessStrings`] from a given vector, returns an error if any addresses are incorrect.
+    pub fn new_valid(
+        addresses: Vec<String>,
+    ) -> std::result::Result<AddressStrings, server::error::LegacyCode> {
+        let checked_addresses = addresses
+            .into_iter()
+            .map(|address| {
+                address
+                    .parse::<Address>()
+                    .map(|_| address)
+                    .map_err(|_| server::error::LegacyCode::InvalidAddressOrKey)
+            })
+            .collect::<std::result::Result<Vec<_>, server::error::LegacyCode>>()?;
+
+        Ok(AddressStrings {
+            addresses: checked_addresses,
+        })
+    }
+
     /// Given a list of addresses as strings:
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a set of `Address`.
