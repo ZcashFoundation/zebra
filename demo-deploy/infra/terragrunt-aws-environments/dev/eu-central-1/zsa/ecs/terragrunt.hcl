@@ -39,8 +39,8 @@ inputs = {
   
   image = "${dependency.ecr.outputs.ecr-url}:latest"
 
-  # task_memory=3072 #
-  # task_cpu=1024 #
+  task_memory=4096
+  task_cpu=1024
 
   enable_logging = true
 
