@@ -89,8 +89,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(903_000), Heartwood),
     (block::Height(1_046_400), Canopy),
     (block::Height(1_687_104), Nu5),
-    // TODO: Add NU6
-    // (block::Height(2_726_400), Nu6),
+    (block::Height(2_726_400), Nu6),
 ];
 
 /// Fake mainnet network upgrade activation heights, used in tests.
@@ -161,6 +160,12 @@ impl ConsensusBranchId {
 impl From<ConsensusBranchId> for u32 {
     fn from(branch: ConsensusBranchId) -> u32 {
         branch.0
+    }
+}
+
+impl From<u32> for ConsensusBranchId {
+    fn from(branch: u32) -> Self {
+        ConsensusBranchId(branch)
     }
 }
 

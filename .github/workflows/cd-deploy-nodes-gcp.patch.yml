@@ -52,3 +52,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "No build required"'
+
+  get-disk-name:
+    name: Get disk name
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'echo "No build required"'

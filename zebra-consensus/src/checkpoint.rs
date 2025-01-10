@@ -611,7 +611,7 @@ where
         // We can't get the block subsidy for blocks with heights in the slow start interval, so we
         // omit the calculation of the expected deferred amount.
         let expected_deferred_amount = if height > self.network.slow_start_interval() {
-            // TODO: Add link to lockbox stream ZIP
+            // See [ZIP-1015](https://zips.z.cash/zip-1015).
             funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
                 .remove(&FundingStreamReceiver::Deferred)
         } else {
@@ -992,9 +992,9 @@ pub enum VerifyCheckpointError {
     CheckpointList(BoxError),
     #[error(transparent)]
     VerifyBlock(VerifyBlockError),
-    #[error("invalid block subsidy")]
+    #[error("invalid block subsidy: {0}")]
     SubsidyError(#[from] SubsidyError),
-    #[error("invalid amount")]
+    #[error("invalid amount: {0}")]
     AmountError(#[from] amount::Error),
     #[error("too many queued blocks at this height")]
     QueuedLimit,

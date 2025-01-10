@@ -8,6 +8,7 @@
 //! verification, where it may be accepted or rejected.
 
 use std::{
+    collections::HashSet,
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -25,7 +26,7 @@ use zebra_chain::{
     amount::Amount,
     block,
     parameters::{subsidy::FundingStreamReceiver, Network},
-    transparent,
+    transaction, transparent,
     work::equihash,
 };
 use zebra_state as zs;
@@ -74,19 +75,19 @@ pub enum VerifyBlockError {
     #[error(transparent)]
     Time(zebra_chain::block::BlockTimeError),
 
-    #[error("unable to commit block after semantic verification")]
+    #[error("unable to commit block after semantic verification: {0}")]
     // TODO: make this into a concrete type, and add it to is_duplicate_request() (#2908)
     Commit(#[source] BoxError),
 
     #[cfg(feature = "getblocktemplate-rpcs")]
-    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals)")]
+    #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals): {0}")]
     // TODO: make this into a concrete type (see #5732)
     ValidateProposal(#[source] BoxError),
 
-    #[error("invalid transaction")]
+    #[error("invalid transaction: {0}")]
     Transaction(#[from] TransactionError),
 
-    #[error("invalid block subsidy")]
+    #[error("invalid block subsidy: {0}")]
     Subsidy(#[from] SubsidyError),
 }
 
@@ -232,13 +233,21 @@ where
                 &block,
                 &transaction_hashes,
             ));
-            for transaction in &block.transactions {
+
+            let known_outpoint_hashes: Arc<HashSet<transaction::Hash>> =
+                Arc::new(known_utxos.keys().map(|outpoint| outpoint.hash).collect());
+
+            for (&transaction_hash, transaction) in
+                transaction_hashes.iter().zip(block.transactions.iter())
+            {
                 let rsp = transaction_verifier
                     .ready()
                     .await
                     .expect("transaction verifier is always ready")
                     .call(tx::Request::Block {
+                        transaction_hash,
                         transaction: transaction.clone(),
+                        known_outpoint_hashes: known_outpoint_hashes.clone(),
                         known_utxos: known_utxos.clone(),
                         height,
                         time: block.header.time,
@@ -284,7 +293,7 @@ where
                 })?;
             }
 
-            // TODO: Add link to lockbox stream ZIP
+            // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
                 height,
                 &network,

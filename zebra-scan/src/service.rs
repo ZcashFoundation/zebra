@@ -93,18 +93,18 @@ impl Service<Request> for ScanService {
             Request::Info => {
                 let db = self.db.clone();
 
-                return async move {
+                async move {
                     Ok(Response::Info {
                         min_sapling_birthday_height: db.network().sapling_activation_height(),
                     })
                 }
-                .boxed();
+                .boxed()
             }
 
             Request::RegisterKeys(keys) => {
                 let mut scan_task = self.scan_task.clone();
 
-                return async move {
+                async move {
                     let newly_registered_keys = scan_task.register_keys(keys)?.await?;
                     if !newly_registered_keys.is_empty() {
                         Ok(Response::RegisteredKeys(newly_registered_keys))
@@ -113,14 +113,14 @@ impl Service<Request> for ScanService {
                         are valid Sapling extended full viewing keys".into())
                     }
                 }
-                .boxed();
+                .boxed()
             }
 
             Request::DeleteKeys(keys) => {
                 let mut db = self.db.clone();
                 let mut scan_task = self.scan_task.clone();
 
-                return async move {
+                async move {
                     // Wait for a message to confirm that the scan task has removed the key up to `DELETE_KEY_TIMEOUT`
                     let remove_keys_result = tokio::time::timeout(
                         DELETE_KEY_TIMEOUT,
@@ -141,13 +141,13 @@ impl Service<Request> for ScanService {
 
                     Ok(Response::DeletedKeys)
                 }
-                .boxed();
+                .boxed()
             }
 
             Request::Results(keys) => {
                 let db = self.db.clone();
 
-                return async move {
+                async move {
                     let mut final_result = BTreeMap::new();
                     for key in keys {
                         let db = db.clone();
@@ -168,26 +168,26 @@ impl Service<Request> for ScanService {
 
                     Ok(Response::Results(final_result))
                 }
-                .boxed();
+                .boxed()
             }
 
             Request::SubscribeResults(keys) => {
                 let mut scan_task = self.scan_task.clone();
 
-                return async move {
+                async move {
                     let results_receiver = scan_task.subscribe(keys)?.await.map_err(|_| {
                         "scan task dropped responder, check that keys are registered"
                     })?;
 
                     Ok(Response::SubscribeResults(results_receiver))
                 }
-                .boxed();
+                .boxed()
             }
 
             Request::ClearResults(keys) => {
                 let mut db = self.db.clone();
 
-                return async move {
+                async move {
                     // Clear results from db for the provided `keys`
                     tokio::task::spawn_blocking(move || {
                         db.delete_sapling_results(keys);
@@ -196,7 +196,7 @@ impl Service<Request> for ScanService {
 
                     Ok(Response::ClearedResults)
                 }
-                .boxed();
+                .boxed()
             }
         }
     }

@@ -80,20 +80,20 @@ jobs:
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.5.1
+        uses: docker/metadata-action@v5.6.1
         with:
           # list of Docker images to use as base name for tags
           # We only publish images to DockerHub if a release is not a pre-release
@@ -126,7 +126,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
@@ -152,7 +152,7 @@ jobs:
       # Setup Docker Buildx to use Docker Build Cloud
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v3.7.1
+        uses: docker/setup-buildx-action@v3.8.0
         with:
           version: "lab:latest"
           driver: cloud
@@ -161,7 +161,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v6.9.0
+        uses: docker/build-push-action@v6.10.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
@@ -193,7 +193,7 @@ jobs:
         # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@v1.14.0
+        uses: docker/scout-action@v1.16.1
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.

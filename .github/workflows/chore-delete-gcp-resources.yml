@@ -39,20 +39,20 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Deletes all mainnet and testnet instances older than $DELETE_INSTANCE_DAYS days.
       #
@@ -106,14 +106,14 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'

@@ -476,6 +476,7 @@ fn validate_expiry_height_mined(
 /// Returns `Ok(())` if spent transparent coinbase outputs are
 /// valid for the block height, or a [`Err(TransactionError)`](TransactionError)
 pub fn tx_transparent_coinbase_spends_maturity(
+    network: &Network,
     tx: Arc<Transaction>,
     height: Height,
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
@@ -488,9 +489,50 @@ pub fn tx_transparent_coinbase_spends_maturity(
             .or_else(|| spent_utxos.get(&spend).cloned())
             .expect("load_spent_utxos_fut.await should return an error if a utxo is missing");
 
-        let spend_restriction = tx.coinbase_spend_restriction(height);
+        let spend_restriction = tx.coinbase_spend_restriction(network, height);
 
         zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
+    }
+
+    Ok(())
+}
+
+/// Checks the `nConsensusBranchId` field.
+///
+/// # Consensus
+///
+/// ## [7.1.2 Transaction Consensus Rules]
+///
+/// > [**NU5** onward] If `effectiveVersion` ≥ 5, the `nConsensusBranchId` field **MUST** match the
+/// > consensus branch ID used for SIGHASH transaction hashes, as specified in [ZIP-244].
+///
+/// ### Notes
+///
+/// - When deserializing transactions, Zebra converts the `nConsensusBranchId` into
+///   [`NetworkUpgrade`].
+///
+/// - The values returned by [`Transaction::version`] match `effectiveVersion` so we use them in
+///   place of `effectiveVersion`. More details in [`Transaction::version`].
+///
+/// [ZIP-244]: <https://zips.z.cash/zip-0244>
+/// [7.1.2 Transaction Consensus Rules]: <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
+pub fn consensus_branch_id(
+    tx: &Transaction,
+    height: Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    let current_nu = NetworkUpgrade::current(network, height);
+
+    if current_nu < NetworkUpgrade::Nu5 || tx.version() < 5 {
+        return Ok(());
+    }
+
+    let Some(tx_nu) = tx.network_upgrade() else {
+        return Err(TransactionError::MissingConsensusBranchId);
+    };
+
+    if tx_nu != current_nu {
+        return Err(TransactionError::WrongConsensusBranchId);
     }
 
     Ok(())

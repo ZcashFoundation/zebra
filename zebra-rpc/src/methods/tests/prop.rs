@@ -1,10 +1,10 @@
 //! Randomised property tests for RPC methods.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
-use hex::ToHex;
-use jsonrpc_core::{Error, ErrorCode};
+use hex::{FromHex, ToHex};
+use jsonrpsee_types::{ErrorCode, ErrorObject};
 use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
 use tokio::sync::oneshot;
@@ -13,11 +13,8 @@ use tower::buffer::Buffer;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
-    chain_tip::{mock::MockChainTip, NoChainTip},
-    parameters::{
-        Network::{self, *},
-        NetworkUpgrade,
-    },
+    chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
+    parameters::{Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
@@ -28,37 +25,31 @@ use zebra_state::BoxError;
 
 use zebra_test::mock_service::MockService;
 
+use crate::methods;
+
 use super::super::{
-    AddressBalance, AddressStrings, NetworkUpgradeStatus, Rpc, RpcImpl, SentTransactionHash,
+    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
 };
 
 proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
     #[test]
-    fn mempool_receives_raw_transaction(transaction in any::<Transaction>()) {
+    fn mempool_receives_raw_tx(transaction in any::<Transaction>(), network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
+        let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
             let hash = SentTransactionHash(transaction.hash());
 
-            let transaction_bytes = transaction
-                .zcash_serialize_to_vec()
-                .expect("Transaction serializes successfully");
+            let transaction_bytes = transaction.zcash_serialize_to_vec()?;
+
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
@@ -73,17 +64,14 @@ proptest! {
 
             state.expect_no_requests().await?;
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
             prop_assert_eq!(result, Ok(hash));
 
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
@@ -91,30 +79,21 @@ proptest! {
     ///
     /// Mempool service errors should become server errors.
     #[test]
-    fn mempool_errors_are_forwarded(transaction in any::<Transaction>()) {
+    fn mempool_errors_are_forwarded(transaction in any::<Transaction>(), network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
+        let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
-            let transaction_bytes = transaction
-                .zcash_serialize_to_vec()
-                .expect("Transaction serializes successfully");
+            let transaction_bytes = transaction.zcash_serialize_to_vec()?;
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex.clone()));
+            let _rpc = rpc.clone();
+            let _transaction_hex = transaction_hex.clone();
+            let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
@@ -126,22 +105,11 @@ proptest! {
 
             state.expect_no_requests().await?;
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::ServerError(_),
-                        ..
-                    })
-                ),
-                "Result is not a server error: {result:?}"
-            );
+            check_err_code(result, ErrorCode::ServerError(-1))?;
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex.clone()).await });
 
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
@@ -152,87 +120,44 @@ proptest! {
                 .await?
                 .respond(Ok::<_, BoxError>(mempool::Response::Queued(vec![Ok(rsp_rx)])));
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
+            let result = send_task.await.expect("send_raw_transaction should not panic");
 
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::ServerError(_),
-                        ..
-                    })
-                ),
-                "Result is not a server error: {result:?}"
-            );
+            check_err_code(result, ErrorCode::ServerError(-25))?;
 
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
     /// Test that when the mempool rejects a transaction the caller receives an error.
     #[test]
-    fn rejected_transactions_are_reported(transaction in any::<Transaction>()) {
+    fn rejected_txs_are_reported(transaction in any::<Transaction>(), network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
+        let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+            let tx = hex::encode(&transaction.zcash_serialize_to_vec()?);
+            let req = mempool::Request::Queue(vec![UnminedTx::from(transaction).into()]);
+            let rsp = mempool::Response::Queued(vec![Err(DummyError.into())]);
+            let mempool_query = mempool.expect_request(req).map_ok(|r| r.respond(rsp));
 
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
+            let (rpc_rsp, _) = tokio::join!(rpc.send_raw_transaction(tx), mempool_query);
 
-            let transaction_bytes = transaction
-                .zcash_serialize_to_vec()
-                .expect("Transaction serializes successfully");
-            let transaction_hex = hex::encode(&transaction_bytes);
+            check_err_code(rpc_rsp, ErrorCode::ServerError(-1))?;
 
-            let send_task = tokio::spawn(rpc.send_raw_transaction(transaction_hex));
-
-            let unmined_transaction = UnminedTx::from(transaction);
-            let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
-            let response = mempool::Response::Queued(vec![Err(DummyError.into())]);
-
-            mempool
-                .expect_request(expected_request)
-                .await?
-                .respond(response);
-
+            // Check that no state request was made.
             state.expect_no_requests().await?;
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
-
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::ServerError(_),
-                        ..
-                    })
-                ),
-                "Result is not a server error: {result:?}"
-            );
-
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
@@ -241,53 +166,27 @@ proptest! {
     /// Try to call `send_raw_transaction` using a string parameter that has at least one
     /// non-hexadecimal character, and check that it fails with an expected error.
     #[test]
-    fn non_hexadecimal_string_results_in_an_error(non_hex_string in ".*[^0-9A-Fa-f].*") {
+    fn non_hex_string_is_error(non_hex_string in ".*[^0-9A-Fa-f].*", network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+            let send_task = rpc.send_raw_transaction(non_hex_string);
 
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
-            let send_task = tokio::spawn(rpc.send_raw_transaction(non_hex_string));
-
+            // Check that there are no further requests.
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
-
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        ..
-                    })
-                ),
-                "Result is not an invalid parameters error: {result:?}"
-            );
+            check_err_code(send_task.await, ErrorCode::ServerError(-22))?;
 
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
@@ -296,9 +195,10 @@ proptest! {
     /// Try to call `send_raw_transaction` using random bytes that fail to deserialize as a
     /// transaction, and check that it fails with an expected error.
     #[test]
-    fn invalid_transaction_results_in_an_error(random_bytes in any::<Vec<u8>>()) {
+    fn invalid_tx_results_in_an_error(random_bytes in any::<Vec<u8>>(), network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
         tokio::time::pause();
@@ -306,45 +206,17 @@ proptest! {
         prop_assume!(Transaction::zcash_deserialize(&*random_bytes).is_err());
 
         runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
-            let send_task = tokio::spawn(rpc.send_raw_transaction(hex::encode(random_bytes)));
+            let send_task = rpc.send_raw_transaction(hex::encode(random_bytes));
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
-
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        ..
-                    })
-                ),
-                "Result is not an invalid parameters error: {result:?}"
-            );
+            check_err_code(send_task.await, ErrorCode::ServerError(-22))?;
 
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
@@ -353,33 +225,18 @@ proptest! {
     /// Make the mock mempool service return a list of transaction IDs, and check that the RPC call
     /// returns those IDs as hexadecimal strings.
     #[test]
-    fn mempool_transactions_are_sent_to_caller(transactions in any::<Vec<VerifiedUnminedTx>>()) {
+    fn mempool_transactions_are_sent_to_caller(transactions in any::<Vec<VerifiedUnminedTx>>(),
+                                               network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
-            let call_task = tokio::spawn(rpc.get_raw_mempool());
-
-
             #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            let expected_response = {
+            let (expected_response, mempool_query) = {
                 let transaction_ids: HashSet<_> = transactions
                     .iter()
                     .map(|tx| tx.transaction.id)
@@ -391,18 +248,18 @@ proptest! {
                     .collect();
                 expected_response.sort();
 
-                mempool
+                let mempool_query = mempool
                     .expect_request(mempool::Request::TransactionIds)
-                    .await?
-                    .respond(mempool::Response::TransactionIds(transaction_ids));
+                    .map_ok(|r|r.respond(mempool::Response::TransactionIds(transaction_ids)));
 
-                expected_response
+                (expected_response, mempool_query)
             };
 
             // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
             #[cfg(feature = "getblocktemplate-rpcs")]
-            let expected_response = {
+            let (expected_response, mempool_query) = {
                 let mut expected_response = transactions.clone();
+
                 expected_response.sort_by_cached_key(|tx| {
                     // zcashd uses modified fee here but Zebra doesn't currently
                     // support prioritizing transactions
@@ -416,150 +273,80 @@ proptest! {
 
                 let expected_response = expected_response
                     .iter()
-                    .map(|tx| tx.transaction.id.mined_id().encode_hex())
-                    .collect();
+                    .map(|tx| tx.transaction.id.mined_id().encode_hex::<String>())
+                    .collect::<Vec<_>>();
 
-                mempool
+                let mempool_query = mempool
                     .expect_request(mempool::Request::FullTransactions)
-                    .await?
-                    .respond(mempool::Response::FullTransactions {
+                    .map_ok(|r| r.respond(mempool::Response::FullTransactions {
                         transactions,
+                        transaction_dependencies: Default::default(),
                         last_seen_tip_hash: [0; 32].into(),
-                    });
+                    }));
 
-                expected_response
+                (expected_response, mempool_query)
             };
 
+            let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(), mempool_query);
+
+            prop_assert_eq!(rpc_rsp?, expected_response);
+
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            let result = call_task
-                .await
-                .expect("Sending raw transactions should not panic");
-
-            prop_assert_eq!(result, Ok(expected_response));
-
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
-    /// Test that the method rejects non-hexadecimal characters.
+    /// Calls `get_raw_transaction` with:
     ///
-    /// Try to call `get_raw_transaction` using a string parameter that has at least one
-    /// non-hexadecimal character, and check that it fails with an expected error.
+    /// 1. an invalid TXID that won't deserialize;
+    /// 2. a valid TXID that is not in the mempool nor in the state;
+    ///
+    /// and checks that the RPC returns the right error code.
     #[test]
-    fn get_raw_transaction_non_hexadecimal_string_results_in_an_error(
-        non_hex_string in ".*[^0-9A-Fa-f].*",
-    ) {
+    fn check_err_for_get_raw_transaction(unknown_txid: transaction::Hash,
+                                         invalid_txid in invalid_txid(),
+                                         network: Network) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+            // Check the invalid TXID first.
+            let rpc_rsp = rpc.get_raw_transaction(invalid_txid, Some(1)).await;
 
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
+            check_err_code(rpc_rsp, ErrorCode::ServerError(-5))?;
 
-            let send_task = tokio::spawn(rpc.get_raw_transaction(non_hex_string, Some(0)));
-
+            // Check that no further requests were made.
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
+            // Now check the unknown TXID.
+            let mempool_query = mempool
+                .expect_request(mempool::Request::TransactionsByMinedId([unknown_txid].into()))
+                .map_ok(|r| r.respond(mempool::Response::Transactions(vec![])));
 
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        ..
-                    })
-                ),
-                "Result is not an invalid parameters error: {result:?}"
-            );
+            let state_query = state
+                .expect_request(zebra_state::ReadRequest::Transaction(unknown_txid))
+                .map_ok(|r| r.respond(zebra_state::ReadResponse::Transaction(None)));
 
-            // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(1));
 
-            Ok::<_, TestCaseError>(())
-        })?;
-    }
+            let (rpc_rsp, _, _) =  tokio::join!(rpc_query, mempool_query, state_query);
 
-    /// Test that the method rejects an input that's not a transaction.
-    ///
-    /// Try to call `get_raw_transaction` using random bytes that fail to deserialize as a
-    /// transaction, and check that it fails with an expected error.
-    #[test]
-    fn get_raw_transaction_invalid_transaction_results_in_an_error(
-        random_bytes in any::<Vec<u8>>(),
-    ) {
-        let (runtime, _init_guard) = zebra_test::init_async();
-        let _guard = runtime.enter();
-
-        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
-        tokio::time::pause();
-
-        prop_assume!(transaction::Hash::zcash_deserialize(&*random_bytes).is_err());
-
-        runtime.block_on(async move {
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
-            let send_task = tokio::spawn(rpc.get_raw_transaction(hex::encode(random_bytes), Some(0)));
-
-            mempool.expect_no_requests().await?;
-            state.expect_no_requests().await?;
-
-            let result = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
-
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        ..
-                    })
-                ),
-                "Result is not an invalid parameters error: {result:?}"
-            );
+            check_err_code(rpc_rsp, ErrorCode::ServerError(-5))?;
 
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
@@ -568,21 +355,10 @@ proptest! {
     fn get_blockchain_info_response_without_a_chain_tip(network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
-        let mut mempool = MockService::build().for_prop_tests();
-        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
 
-        // look for an error with a `NoChainTip`
-        let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-            "RPC test",
-            "RPC test",
-            network,
-            false,
-            true,
-            mempool.clone(),
-            Buffer::new(state.clone(), 1),
-            NoChainTip,
-        );
-
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         runtime.block_on(async move {
             let response_fut = rpc.get_blockchain_info();
@@ -600,18 +376,17 @@ proptest! {
             let (response, _) = tokio::join!(response_fut, mock_state_handler);
 
             prop_assert_eq!(
-                &response.err().unwrap().message,
-                "no chain tip available yet"
+                response.err().unwrap().message().to_string(),
+                "no chain tip available yet".to_string()
             );
-
-            // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            Ok::<_, TestCaseError>(())
+            // The queue task should continue without errors or panics
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
+
+            Ok(())
         })?;
     }
 
@@ -623,25 +398,16 @@ proptest! {
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
-        let mut mempool = MockService::build().for_prop_tests();
-        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) =
+            mock_services(network.clone(), NoChainTip);
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         // get arbitrary chain tip data
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
         let block_time = block.header.time;
-
-        // Start RPC with the mocked `ChainTip`
-        let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-            "RPC test",
-            "RPC test",
-            network.clone(),
-            false,
-            true,
-            mempool.clone(),
-            Buffer::new(state.clone(), 1),
-            NoChainTip,
-        );
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -663,16 +429,21 @@ proptest! {
                         .expect_request(zebra_state::ReadRequest::BlockHeader(block_hash.into()))
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
-                        .respond(zebra_state::ReadResponse::BlockHeader(Some(Arc::new(block::Header {
-                            time: block_time,
-                            version: Default::default(),
-                            previous_block_hash: Default::default(),
-                            merkle_root: Default::default(),
-                            commitment_bytes: Default::default(),
-                            difficulty_threshold: Default::default(),
-                            nonce: Default::default(),
-                            solution: Default::default()
-                        }))));
+                        .respond(zebra_state::ReadResponse::BlockHeader {
+                            header: Arc::new(block::Header {
+                                time: block_time,
+                                version: Default::default(),
+                                previous_block_hash: Default::default(),
+                                merkle_root: Default::default(),
+                                commitment_bytes: Default::default(),
+                                difficulty_threshold: Default::default(),
+                                nonce: Default::default(),
+                                solution: Default::default()
+                            }),
+                            hash: block::Hash::from([0; 32]),
+                            height: Height::MIN,
+                            next_block_hash: None,
+                        });
                 }
             };
 
@@ -712,14 +483,13 @@ proptest! {
                 }
             };
 
-            // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
-
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            Ok::<_, TestCaseError>(())
+            // The queue task should continue without errors or panics
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
+
+            Ok(())
         })?;
     }
 
@@ -732,12 +502,11 @@ proptest! {
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
-
-        let mut mempool = MockService::build().for_prop_tests();
-        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-        // Create a mocked `ChainTip`
         let (chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, chain_tip);
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         // Prepare the list of addresses.
         let address_strings = AddressStrings {
@@ -747,21 +516,8 @@ proptest! {
                 .collect(),
         };
 
-        tokio::time::pause();
-
         // Start RPC with the mocked `ChainTip`
         runtime.block_on(async move {
-            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                network,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                chain_tip,
-            );
-
             // Build the future to call the RPC
             let call = rpc.get_address_balance(address_strings);
 
@@ -786,7 +542,10 @@ proptest! {
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            Ok::<_, TestCaseError>(())
+            // The queue task should continue without errors or panics
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
+
+            Ok(())
         })?;
     }
 
@@ -800,31 +559,17 @@ proptest! {
     ) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        let (chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, chain_tip);
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         prop_assume!(at_least_one_invalid_address
             .iter()
             .any(|string| string.parse::<transparent::Address>().is_err()));
 
-        let mut mempool = MockService::build().for_prop_tests();
-        let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-        // Create a mocked `ChainTip`
-        let (chain_tip, _mock_chain_tip_sender) = MockChainTip::new();
-
-        tokio::time::pause();
-
-        // Start RPC with the mocked `ChainTip`
         runtime.block_on(async move {
-            let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                network,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                chain_tip,
-            );
 
             let address_strings = AddressStrings {
                 addresses: at_least_one_invalid_address,
@@ -833,58 +578,37 @@ proptest! {
             // Build the future to call the RPC
             let result = rpc.get_address_balance(address_strings).await;
 
-            // Check that the invalid addresses lead to an error
-            prop_assert!(
-                matches!(
-                    result,
-                    Err(Error {
-                        code: ErrorCode::InvalidParams,
-                        ..
-                    })
-                ),
-                "Result is not a server error: {result:?}"
-            );
+            check_err_code(result, ErrorCode::ServerError(-5))?;
 
             // Check no requests were made during this test
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
-            Ok::<_, TestCaseError>(())
+            // The queue task should continue without errors or panics
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
+
+            Ok(())
         })?;
     }
 
     /// Test the queue functionality using `send_raw_transaction`
     #[test]
-    fn rpc_queue_main_loop(tx in any::<Transaction>()) {
+    fn rpc_queue_main_loop(tx in any::<Transaction>(), network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
 
-        let transaction_hash = tx.hash();
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         runtime.block_on(async move {
-            tokio::time::pause();
-
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
-            // send a transaction
-            let tx_bytes = tx
-                .zcash_serialize_to_vec()
-                .expect("Transaction serializes successfully");
+            let transaction_hash = tx.hash();
+            let tx_bytes = tx.zcash_serialize_to_vec()?;
             let tx_hex = hex::encode(&tx_bytes);
-            let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
-
+            let send_task = {
+                let rpc = rpc.clone();
+                tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex).await })
+            };
             let tx_unmined = UnminedTx::from(tx);
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
 
@@ -895,9 +619,7 @@ proptest! {
                 .unwrap()
                 .respond(Err(DummyError));
 
-            let _ = send_task
-                .await
-                .expect("Sending raw transactions should not panic");
+            let _ = send_task.await?;
 
             // advance enough time to have a new runner iteration
             let spacing = chrono::Duration::seconds(150);
@@ -940,44 +662,31 @@ proptest! {
             state.expect_no_requests().await?;
 
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 
     /// Test we receive all transactions that are sent in a channel
     #[test]
-    fn rpc_queue_receives_all_transactions_from_channel(txs in any::<[Transaction; 2]>()) {
+    fn rpc_queue_receives_all_txs_from_channel(txs in any::<[Transaction; 2]>(),
+                                               network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         runtime.block_on(async move {
-            tokio::time::pause();
-
-            let mut mempool = MockService::build().for_prop_tests();
-            let mut state: MockService<_, _, _, BoxError> = MockService::build().for_prop_tests();
-
-            let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-                "RPC test",
-                "RPC test",
-                Mainnet,
-                false,
-                true,
-                mempool.clone(),
-                Buffer::new(state.clone(), 1),
-                NoChainTip,
-            );
-
             let mut transactions_hash_set = HashSet::new();
             for tx in txs.clone() {
+                let rpc_clone = rpc.clone();
                 // send a transaction
-                let tx_bytes = tx
-                    .zcash_serialize_to_vec()
-                    .expect("Transaction serializes successfully");
+                let tx_bytes = tx.zcash_serialize_to_vec()?;
                 let tx_hex = hex::encode(&tx_bytes);
-                let send_task = tokio::spawn(rpc.send_raw_transaction(tx_hex));
+                let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex).await });
 
                 let tx_unmined = UnminedTx::from(tx.clone());
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
@@ -993,9 +702,7 @@ proptest! {
                     .unwrap()
                     .respond(Err(DummyError));
 
-                let _ = send_task
-                    .await
-                    .expect("Sending raw transactions should not panic");
+                let _ = send_task.await?;
             }
 
             // advance enough time to have a new runner iteration
@@ -1043,10 +750,9 @@ proptest! {
             state.expect_no_requests().await?;
 
             // The queue task should continue without errors or panics
-            let rpc_tx_queue_task_result = rpc_tx_queue_task_handle.now_or_never();
-            prop_assert!(rpc_tx_queue_task_result.is_none());
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
-            Ok::<_, TestCaseError>(())
+            Ok(())
         })?;
     }
 }
@@ -1054,3 +760,94 @@ proptest! {
 #[derive(Clone, Copy, Debug, Error)]
 #[error("a dummy error type")]
 pub struct DummyError;
+
+// Helper functions
+
+/// Creates [`String`]s that won't deserialize into [`transaction::Hash`].
+fn invalid_txid() -> BoxedStrategy<String> {
+    any::<String>()
+        .prop_filter("string must not deserialize into TXID", |s| {
+            transaction::Hash::from_hex(s).is_err()
+        })
+        .boxed()
+}
+
+/// Checks that the given RPC response contains the given error code.
+fn check_err_code<T>(
+    rsp: Result<T, ErrorObject>,
+    error_code: ErrorCode,
+) -> Result<(), TestCaseError> {
+    match rsp {
+        Err(e) => {
+            prop_assert!(
+                e.code() == error_code.code(),
+                "the RPC response must match the error code: {:?}",
+                error_code.code()
+            );
+        }
+        Ok(_) => {
+            prop_assert!(false, "expected an error response, but got Ok");
+        }
+    }
+
+    Ok(())
+}
+
+/// Creates mocked:
+///
+/// 1. mempool service,
+/// 2. state service,
+/// 3. rpc service,
+///
+/// and a handle to the mempool tx queue.
+fn mock_services<Tip>(
+    network: Network,
+    chain_tip: Tip,
+) -> (
+    zebra_test::mock_service::MockService<
+        zebra_node_services::mempool::Request,
+        zebra_node_services::mempool::Response,
+        zebra_test::mock_service::PropTestAssertion,
+    >,
+    zebra_test::mock_service::MockService<
+        zebra_state::ReadRequest,
+        zebra_state::ReadResponse,
+        zebra_test::mock_service::PropTestAssertion,
+    >,
+    methods::RpcImpl<
+        zebra_test::mock_service::MockService<
+            zebra_node_services::mempool::Request,
+            zebra_node_services::mempool::Response,
+            zebra_test::mock_service::PropTestAssertion,
+        >,
+        tower::buffer::Buffer<
+            zebra_test::mock_service::MockService<
+                zebra_state::ReadRequest,
+                zebra_state::ReadResponse,
+                zebra_test::mock_service::PropTestAssertion,
+            >,
+            zebra_state::ReadRequest,
+        >,
+        Tip,
+    >,
+    tokio::task::JoinHandle<()>,
+)
+where
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+{
+    let mempool = MockService::build().for_prop_tests();
+    let state = MockService::build().for_prop_tests();
+
+    let (rpc, mempool_tx_queue) = RpcImpl::new(
+        "RPC test",
+        "RPC test",
+        network,
+        false,
+        true,
+        mempool.clone(),
+        Buffer::new(state.clone(), 1),
+        chain_tip,
+    );
+
+    (mempool, state, rpc, mempool_tx_queue)
+}

@@ -68,7 +68,7 @@ fn end_of_support_date() {
     ));
 }
 
-/// Check that the the end of support task is working.
+/// Check that the end of support task is working.
 #[tokio::test]
 #[tracing_test::traced_test]
 async fn end_of_support_task() -> Result<()> {

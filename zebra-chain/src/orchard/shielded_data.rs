@@ -270,6 +270,6 @@ impl ZcashDeserialize for Flags {
         // the reserved bits 2..7 of the flagsOrchard field MUST be zero."
         // https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus
         Flags::from_bits(reader.read_u8()?)
-            .ok_or_else(|| SerializationError::Parse("invalid reserved orchard flags"))
+            .ok_or(SerializationError::Parse("invalid reserved orchard flags"))
     }
 }

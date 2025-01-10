@@ -5,16 +5,17 @@
 use std::collections::HashSet;
 
 use tokio::sync::oneshot;
-use zebra_chain::transaction::{self, UnminedTx, UnminedTxId};
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-use zebra_chain::transaction::VerifiedUnminedTx;
+use zebra_chain::{
+    transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transparent,
+};
 
 use crate::BoxError;
 
 mod gossip;
+mod transaction_dependencies;
 
-pub use self::gossip::Gossip;
+pub use self::{gossip::Gossip, transaction_dependencies::TransactionDependencies};
 
 /// A mempool service request.
 ///
@@ -38,6 +39,24 @@ pub enum Request {
     /// directly; V5 transaction are matched just by the Hash, disregarding
     /// the [`AuthDigest`](zebra_chain::transaction::AuthDigest).
     TransactionsByMinedId(HashSet<transaction::Hash>),
+
+    /// Request a [`transparent::Output`] identified by the given [`OutPoint`](transparent::OutPoint),
+    /// waiting until it becomes available if it is unknown.
+    ///
+    /// This request is purely informational, and there are no guarantees about
+    /// whether the UTXO remains unspent or is on the best chain, or any chain.
+    /// Its purpose is to allow orphaned mempool transaction verification.
+    ///
+    /// # Correctness
+    ///
+    /// Output requests should be wrapped in a timeout, so that
+    /// out-of-order and invalid requests do not hang indefinitely.
+    ///
+    /// Outdated requests are pruned on a regular basis.
+    AwaitOutput(transparent::OutPoint),
+
+    /// Request a [`VerifiedUnminedTx`] and its dependencies by its mined id.
+    TransactionWithDepsByMinedId(transaction::Hash),
 
     /// Get all the [`VerifiedUnminedTx`] in the mempool.
     ///
@@ -99,6 +118,17 @@ pub enum Response {
     /// different transactions with different mined IDs.
     Transactions(Vec<UnminedTx>),
 
+    /// Response to [`Request::AwaitOutput`] with the transparent output
+    UnspentOutput(transparent::Output),
+
+    /// Response to [`Request::TransactionWithDepsByMinedId`].
+    TransactionWithDeps {
+        /// The queried transaction
+        transaction: VerifiedUnminedTx,
+        /// A list of dependencies of the queried transaction.
+        dependencies: HashSet<transaction::Hash>,
+    },
+
     /// Returns all [`VerifiedUnminedTx`] in the mempool.
     //
     // TODO: make the Transactions response return VerifiedUnminedTx,
@@ -107,6 +137,9 @@ pub enum Response {
     FullTransactions {
         /// All [`VerifiedUnminedTx`]s in the mempool
         transactions: Vec<VerifiedUnminedTx>,
+
+        /// All transaction dependencies in the mempool
+        transaction_dependencies: TransactionDependencies,
 
         /// Last seen chain tip hash by mempool service
         last_seen_tip_hash: zebra_chain::block::Hash,

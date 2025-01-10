@@ -70,12 +70,12 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Checkout git repository
-        uses: actions/checkout@v4.2.1
+        uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -112,7 +112,7 @@ jobs:
     # When a new job is added to this workflow, add it to this list.
     needs: [ check-release ]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
-    # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
+    # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
     runs-on: ubuntu-latest
     steps:

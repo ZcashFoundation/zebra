@@ -13,17 +13,17 @@ use zebra_chain::{
 use crate::application::release_version;
 
 /// The estimated height that this release will be published.
-pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_678_363;
+pub const ESTIMATED_RELEASE_HEIGHT: u32 = 2_742_000;
 
 /// The maximum number of days after `ESTIMATED_RELEASE_HEIGHT` where a Zebra server will run
 /// without halting.
 ///
 /// Notes:
 ///
-/// - Zebra will exit with a panic if the current tip height is bigger than the `ESTIMATED_RELEASE_HEIGHT`
-///   plus this number of days.
-/// - Currently set to 5 weeks to end support before Mainnet Nu6 activation at block [`2_726_400`](https://zips.z.cash/zip-0253).
-pub const EOS_PANIC_AFTER: u32 = 35;
+/// - Zebra will exit with a panic if the current tip height is bigger than the
+///   `ESTIMATED_RELEASE_HEIGHT` plus this number of days.
+/// - Currently set to 16 weeks.
+pub const EOS_PANIC_AFTER: u32 = 112;
 
 /// The number of days before the end of support where Zebra will display warnings.
 pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;

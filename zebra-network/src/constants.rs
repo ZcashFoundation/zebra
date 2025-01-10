@@ -337,7 +337,10 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// The current protocol version typically changes before Mainnet and Testnet
 /// network upgrades.
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_110);
+///
+/// This version of Zebra draws the current network protocol version from
+/// [ZIP-253](https://zips.z.cash/zip-0253).
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
 
 /// The default RTT estimate for peer responses.
 ///
@@ -393,13 +396,14 @@ lazy_static! {
     ///
     /// The minimum network protocol version typically changes after Mainnet and
     /// Testnet network upgrades.
+    // TODO: Change `Nu6` to `Nu7` after NU7 activation.
     // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<NetworkKind, Version> = {
         let mut hash_map = HashMap::new();
 
-        hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu5));
-        hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu5));
-        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(None, None), Nu5));
+        hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu6));
+        hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu6));
+        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(None, None), Nu6));
 
         hash_map
     };

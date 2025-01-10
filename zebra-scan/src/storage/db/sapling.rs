@@ -265,7 +265,7 @@ trait InsertSaplingHeight {
     fn insert_sapling_height(self, sapling_key: &SaplingScanningKey, height: Height) -> Self;
 }
 
-impl<'cf> InsertSaplingHeight for WriteSaplingTxIdsBatch<'cf> {
+impl InsertSaplingHeight for WriteSaplingTxIdsBatch<'_> {
     /// Insert sapling height with no results.
     ///
     /// If a result already exists for the coinbase transaction at that height,
@@ -283,7 +283,7 @@ trait DeleteSaplingKeys {
     fn delete_sapling_keys(self, sapling_key: Vec<SaplingScanningKey>) -> Self;
 }
 
-impl<'cf> DeleteSaplingKeys for WriteSaplingTxIdsBatch<'cf> {
+impl DeleteSaplingKeys for WriteSaplingTxIdsBatch<'_> {
     /// Delete sapling keys and their results.
     fn delete_sapling_keys(mut self, sapling_keys: Vec<SaplingScanningKey>) -> Self {
         for key in &sapling_keys {

@@ -78,23 +78,29 @@ skip-tree = [
     { name = "base64", version = "=0.21.7" },
     { name = "sync_wrapper", version = "0.1.2" },
 
-    # wait for jsonrpc-http-server to update hyper or for Zebra to replace jsonrpc (#8682)
-    { name = "h2", version = "=0.3.26" },
-    { name = "http", version = "=0.2.12" },
-    { name = "http-body", version = "=0.4.6" },
-    { name = "hyper", version = "=0.14.30" },
+    # wait for abscissa_core to update toml
+    { name = "toml", version = "=0.5.11" },
 
     # wait for structopt-derive to update heck
     { name = "heck", version = "=0.3.3" },
 
     # wait for librocksdb-sys to update bindgen to one that uses newer itertools
     { name = "itertools", version = "=0.12.1" },
+    { name = "bindgen", version = "=0.69.5" },
 
     # wait for halo2_gadgets and primitive-types to update uint
     { name = "uint", version = "=0.9.5" },
 
     # wait for dirs-sys to update windows-sys
     { name = "windows-sys", version = "=0.48.0" },
+
+    # wait for zebra to update tower
+    { name = "tower", version = "=0.4.13" },
+    { name = "hashbrown", version = "=0.14.5" },
+
+    # wait for zebra to update vergen
+    { name = "thiserror", version = "=1.0.69" },
+    { name = "thiserror-impl", version = "=1.0.69" },
 
     # Remove after release candicate period is over and the ECC crates are not patched anymore
     { name = "equihash", version = "=0.2.0" },

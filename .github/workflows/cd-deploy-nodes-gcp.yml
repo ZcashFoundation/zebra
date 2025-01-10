@@ -1,6 +1,6 @@
 # Google Cloud node deployments and tests that run when Rust code or dependencies are modified,
 # but only on PRs from the ZcashFoundation/zebra repository.
-# (External PRs are tested/deployed by mergify.)
+# (External PRs are tested/deployed by GitHub's Merge Queue.)
 #
 # 1. `versioning`: Extracts the major version from the release semver. Useful for segregating instances based on major versions.
 # 2. `build`: Builds a Docker image named `zebrad` with the necessary tags derived from Git.
@@ -27,6 +27,9 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
+  merge_group:
+    types: [ checks_requested ]
+
   workflow_dispatch:
     inputs:
       network:
@@ -141,15 +144,29 @@ jobs:
         id: set
         run: echo "major_version=${{ steps.get.outputs.result }}" >> "$GITHUB_OUTPUT"
 
+  # Finds a cached state disk for zebra
+  #
+  # Passes the disk name to subsequent jobs using `cached_disk_name` output
+  #
+  get-disk-name:
+    name: Get disk name
+    uses: ./.github/workflows/sub-find-cached-disks.yml
+    # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them.
+    # This workflow also runs on release tags, the event name check will run it on releases.
+    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && !inputs.no_cached_disk }}
+    with:
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      disk_prefix: zebrad-cache
+      disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
+      prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
+
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
   #
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
-    # Skip PRs from external repositories, let them pass, and then Mergify will check them.
-    # This workflow also runs on release tags, the event name check will run it on releases.
-    if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
+    needs: get-disk-name
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -184,20 +201,6 @@ jobs:
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
       test_variables: "-e NETWORK"
       network: "Testnet"
-
-  # Finds a `tip` cached state disk for zebra from the main branch
-  #
-  # Passes the disk name to subsequent jobs using `cached_disk_name` output
-  #
-  get-disk-name:
-    name: Get disk name
-    uses: ./.github/workflows/sub-find-cached-disks.yml
-    if: ${{ !inputs.no_cached_disk }}
-    with:
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-      disk_prefix: zebrad-cache
-      disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
-      prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -237,12 +240,12 @@ jobs:
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -260,18 +263,18 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: "${{ vars.GCP_WIF }}"
           service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       - name: Create instance template for ${{ matrix.network }}
         run: |
           DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
-          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
+          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
@@ -282,8 +285,8 @@ jobs:
           fi
           gcloud compute instance-templates create-with-container zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK} \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --boot-disk-size 50GB \
-          --boot-disk-type=pd-ssd \
+          --boot-disk-size=10GB \
+          --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
@@ -348,12 +351,12 @@ jobs:
     if: ${{ !failure() && github.event_name == 'workflow_dispatch' }}
 
     steps:
-      - uses: actions/checkout@v4.2.1
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -371,19 +374,19 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.6
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: "${{ vars.GCP_WIF }}"
           service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Create instance template from container image
       - name: Manual deploy of a single ${{ inputs.network }} instance running zebrad
         run: |
           DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
-          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-ssd"
+          DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
@@ -394,8 +397,8 @@ jobs:
           fi
           gcloud compute instances create-with-container "zebrad-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --boot-disk-size 50GB \
-          --boot-disk-type=pd-ssd \
+          --boot-disk-size=10GB \
+          --boot-disk-type=pd-standard \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
@@ -417,7 +420,7 @@ jobs:
     # When a new job is added to this workflow, add it to this list.
     needs: [versioning, build, deploy-nodes, deploy-instance]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
-    # (PR statuses are already reported in the PR jobs list, and checked by Mergify.)
+    # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
     runs-on: ubuntu-latest
     steps:

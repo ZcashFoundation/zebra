@@ -2,6 +2,7 @@
 
 use std::{fmt, io};
 
+use hex::ToHex;
 use serde_big_array::BigArray;
 
 use crate::{
@@ -112,7 +113,6 @@ impl Solution {
     }
 
     /// Returns a [`Solution`] of `[0; SOLUTION_SIZE]` to be used in block proposals.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub fn for_proposal() -> Self {
         // TODO: Accept network as an argument, and if it's Regtest, return the shorter null solution.
         Self::Common([0; SOLUTION_SIZE])
@@ -193,5 +193,25 @@ impl ZcashDeserialize for Solution {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         let solution: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
         Self::from_bytes(&solution)
+    }
+}
+
+impl ToHex for &Solution {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.value().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.value().encode_hex_upper()
+    }
+}
+
+impl ToHex for Solution {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        (&self).encode_hex_upper()
     }
 }

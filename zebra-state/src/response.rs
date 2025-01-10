@@ -52,7 +52,16 @@ pub enum Response {
     Block(Option<Arc<Block>>),
 
     /// The response to a `BlockHeader` request.
-    BlockHeader(Option<Arc<block::Header>>),
+    BlockHeader {
+        /// The header of the requested block
+        header: Arc<block::Header>,
+        /// The hash of the requested block
+        hash: block::Hash,
+        /// The height of the requested block
+        height: block::Height,
+        /// The hash of the next block after the requested block
+        next_block_hash: Option<block::Hash>,
+    },
 
     /// The response to a `AwaitUtxo` request, from any non-finalized chains, finalized chain,
     /// pending unverified blocks, or blocks received after the request was sent.
@@ -147,7 +156,16 @@ pub enum ReadResponse {
     Block(Option<Arc<Block>>),
 
     /// The response to a `BlockHeader` request.
-    BlockHeader(Option<Arc<block::Header>>),
+    BlockHeader {
+        /// The header of the requested block
+        header: Arc<block::Header>,
+        /// The hash of the requested block
+        hash: block::Hash,
+        /// The height of the requested block
+        height: block::Height,
+        /// The hash of the next block after the requested block
+        next_block_hash: Option<block::Hash>,
+    },
 
     /// Response to [`ReadRequest::Transaction`] with the specified transaction.
     Transaction(Option<MinedTx>),
@@ -287,7 +305,17 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
-            ReadResponse::BlockHeader(header) => Ok(Response::BlockHeader(header)),
+            ReadResponse::BlockHeader {
+                header,
+                hash,
+                height,
+                next_block_hash
+            } => Ok(Response::BlockHeader {
+                header,
+                hash,
+                height,
+                next_block_hash
+            }),
             ReadResponse::Transaction(tx_info) => {
                 Ok(Response::Transaction(tx_info.map(|tx_info| tx_info.tx)))
             }
