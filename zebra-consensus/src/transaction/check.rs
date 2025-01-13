@@ -333,7 +333,7 @@ pub fn coinbase_outputs_are_decryptable(
     if !transaction.is_coinbase() {
         return Ok(());
     }
-      
+
     // The consensus rule only applies to Heartwood onward.
     if height
         < NetworkUpgrade::Heartwood
