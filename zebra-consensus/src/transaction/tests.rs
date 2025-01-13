@@ -2784,7 +2784,9 @@ async fn v5_with_duplicate_orchard_action() {
 
         let height = tx.expiry_height().expect("expiry height");
 
-        let orchard_shielded_data = tx.orchard_shielded_data_mut().unwrap();
+        let orchard_shielded_data = tx
+            .orchard_shielded_data_mut()
+            .expect("tx without transparent, Sprout, or Sapling outputs must have Orchard actions");
 
         // Enable spends
         orchard_shielded_data.flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
@@ -3383,7 +3385,7 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
                 .expect("coinbase V5 tx");
 
             let shielded_data = insert_fake_orchard_shielded_data(&mut transaction);
-            shielded_data.flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+            shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
             let action =
                 fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
@@ -3409,12 +3411,12 @@ fn coinbase_outputs_are_decryptable_for_fake_v5_blocks() {
 fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
     for v in zebra_test::vectors::ORCHARD_NOTE_ENCRYPTION_VECTOR.iter() {
         for net in Network::iter() {
-            let mut tx = v5_transactions(zebra_test::vectors::TESTNET_BLOCKS.iter())
+            let mut tx = v5_transactions(net.block_iter())
                 .find(|tx| tx.is_coinbase())
                 .expect("V5 coinbase tx");
 
             let shielded_data = insert_fake_orchard_shielded_data(&mut tx);
-            shielded_data.flags = Flags::ENABLE_SPENDS | Flags::ENABLE_OUTPUTS;
+            shielded_data.flags = Flags::ENABLE_OUTPUTS;
 
             let action =
                 fill_action_with_note_encryption_test_vector(&shielded_data.actions[0].action, v);
