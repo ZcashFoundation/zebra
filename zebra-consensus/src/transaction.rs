@@ -699,7 +699,7 @@ where
                 .oneshot(zebra_state::Request::AwaitUtxo(*missing_outpoint));
             match query.await {
                 Ok(zebra_state::Response::Utxo(_)) => {}
-                Err(err) => return Some(Err(err.into())),
+                Err(_) => return Some(Err(TransactionError::TransparentInputNotFound)),
                 _ => unreachable!("AwaitUtxo always responds with Utxo"),
             };
         }
@@ -750,7 +750,10 @@ where
                         .clone()
                         .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
 
-                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query.await? else {
+                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
+                        .await
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
+                    else {
                         unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                     };
 
