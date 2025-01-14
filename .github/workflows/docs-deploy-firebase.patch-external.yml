@@ -7,16 +7,15 @@ name: Docs
 on:
   pull_request:
 
-# IMPORTANT
-#
-# The job names in `docs-deploy-firebase.yml`, `docs-deploy-firebase.patch.yml` and
-# `docs-deploy-firebase.patch-external.yml` must be kept in sync.
+#! IMPORTANT
+#!
+#! The job names in `docs-deploy-firebase.yml`, `docs-deploy-firebase.patch.yml` and
+#! `docs-deploy-firebase.patch-external.yml` must be kept in sync.
 jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
-    # Only run on PRs from external repositories.
-    if: ${{ startsWith(github.event_name, 'pull') && github.event.pull_request.head.repo.fork }}
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "Skipping job on fork"'
 
@@ -26,5 +25,6 @@ jobs:
     # change.
     needs: build-docs-book
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "Skipping job on fork"'
