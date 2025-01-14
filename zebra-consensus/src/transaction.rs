@@ -685,6 +685,10 @@ where
             .filter(|dependency_id| !known_outpoint_hashes.contains(dependency_id))
             .collect();
 
+        if missing_deps.is_empty() {
+            return Some(Ok(verified_tx));
+        }
+
         let missing_outpoints = tx.inputs().iter().filter_map(|input| {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
                 missing_deps.contains(&outpoint.hash).then_some(outpoint)
