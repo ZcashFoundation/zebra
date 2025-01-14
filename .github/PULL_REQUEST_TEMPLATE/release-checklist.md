@@ -101,9 +101,6 @@ cargo release replace --verbose --execute --allow-branch '*' --package zebrad
 cargo release commit --verbose --execute --allow-branch '*'
 ```
 
-Crate publishing is [automatically checked in CI](https://github.com/ZcashFoundation/zebra/actions/workflows/release-crates-io.yml) using "dry run" mode, however due to a bug in `cargo-release` we need to pass exact versions to the alpha crates:
-
-- [ ] Update `zebra-scan` and `zebra-grpc` alpha crates in the [release-crates-dry-run workflow script](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/scripts/release-crates-dry-run.sh)
 - [ ] Push the above version changes to the release branch.
 
 ## Update End of Support
