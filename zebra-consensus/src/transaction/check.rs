@@ -309,7 +309,7 @@ where
 /// # Consensus
 ///
 /// > [Heartwood onward] All Sapling and Orchard outputs in coinbase transactions MUST decrypt to a note
-/// > plaintext, i.e. the procedure in § 4.19.3 ‘Decryption using a Full Viewing Key ( Sapling and Orchard )’ on p. 67
+/// > plaintext, i.e. the procedure in § 4.20.3 ‘Decryption using a Full Viewing Key (Sapling and Orchard)’
 /// > does not return ⊥, using a sequence of 32 zero bytes as the outgoing viewing key. (This implies that before
 /// > Canopy activation, Sapling outputs of a coinbase transaction MUST have note plaintext lead byte equal to
 /// > 0x01.)
