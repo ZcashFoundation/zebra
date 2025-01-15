@@ -1582,7 +1582,7 @@ impl GetBlockChainInfo {
         self.blocks
     }
 
-    /// Returns the hash of the currently best block, in big-endian order, hex-encoded.
+    /// Returns the hash of the current best chain tip block, in big-endian order, hex-encoded.
     pub fn best_block_hash(&self) -> &block::Hash {
         &self.best_block_hash
     }
@@ -1630,22 +1630,10 @@ impl AddressStrings {
     }
 
     /// Creates a new [`AddessStrings`] from a given vector, returns an error if any addresses are incorrect.
-    pub fn new_valid(
-        addresses: Vec<String>,
-    ) -> std::result::Result<AddressStrings, server::error::LegacyCode> {
-        let checked_addresses = addresses
-            .into_iter()
-            .map(|address| {
-                address
-                    .parse::<Address>()
-                    .map(|_| address)
-                    .map_err(|_| server::error::LegacyCode::InvalidAddressOrKey)
-            })
-            .collect::<std::result::Result<Vec<_>, server::error::LegacyCode>>()?;
-
-        Ok(AddressStrings {
-            addresses: checked_addresses,
-        })
+    pub fn new_valid(addresses: Vec<String>) -> Result<AddressStrings> {
+        let address_strings = Self { addresses };
+        address_strings.clone().valid_addresses()?;
+        Ok(address_strings)
     }
 
     /// Given a list of addresses as strings:
@@ -1670,23 +1658,9 @@ impl AddressStrings {
     /// Given a list of addresses as strings:
     /// - check if provided list have all valid transparent addresses.
     /// - return valid addresses as a vec of strings.
-    pub fn valid_address_strings(
-        self,
-    ) -> std::result::Result<Vec<String>, server::error::LegacyCode> {
-        // Reference for the legacy error code:
-        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
-        let valid_addresses = self
-            .addresses
-            .into_iter()
-            .map(|address| {
-                address
-                    .parse::<Address>()
-                    .map(|_| address)
-                    .map_err(|_| server::error::LegacyCode::InvalidAddressOrKey)
-            })
-            .collect::<std::result::Result<Vec<_>, server::error::LegacyCode>>()?;
-
-        Ok(valid_addresses)
+    pub fn valid_address_strings(self) -> Result<Vec<String>> {
+        self.clone().valid_addresses()?;
+        Ok(self.addresses)
     }
 }
 
