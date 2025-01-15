@@ -330,6 +330,14 @@ pub fn coinbase_outputs_are_decryptable(
     network: &Network,
     height: Height,
 ) -> Result<(), TransactionError> {
+    // Do quick checks first so we can avoid an expensive tx conversion
+    // in `zcash_note_encryption::decrypts_successfully`.
+
+    // The consensus rule only applies to coinbase txs with shielded outputs.
+    if !transaction.has_shielded_outputs() {
+        return Ok(());
+    }
+
     // The consensus rule only applies to Heartwood onward.
     if height
         < NetworkUpgrade::Heartwood
@@ -337,6 +345,11 @@ pub fn coinbase_outputs_are_decryptable(
             .expect("Heartwood height is known")
     {
         return Ok(());
+    }
+
+    // The passed tx should have been be a coinbase tx.
+    if !transaction.is_coinbase() {
+        return Err(TransactionError::NotCoinbase);
     }
 
     if !zcash_note_encryption::decrypts_successfully(transaction, network, height) {
