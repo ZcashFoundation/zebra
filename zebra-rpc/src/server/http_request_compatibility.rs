@@ -73,7 +73,7 @@ impl<S> HttpRequestMiddleware<S> {
                 .and_then(|encoded| URL_SAFE.decode(encoded).ok())
                 .and_then(|decoded| String::from_utf8(decoded).ok())
                 .and_then(|request_cookie| request_cookie.split(':').nth(1).map(String::from))
-                .map_or(false, |passwd| internal_cookie.authenticate(passwd))
+                .is_some_and(|passwd| internal_cookie.authenticate(passwd))
         })
     }
 
