@@ -990,7 +990,7 @@ impl DiskDb {
             //
             // We don't attempt to guard against malicious symlinks created by attackers
             // (TOCTOU attacks). Zebra should not be run with elevated privileges.
-            if !old_path.starts_with(&cache_path) {
+            if !old_path.starts_with(cache_path) {
                 info!("skipped reusing previous state cache: state is outside cache directory");
                 return;
             }
