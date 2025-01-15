@@ -83,6 +83,9 @@ pub enum TransactionError {
     #[error("non-coinbase transactions MUST NOT have coinbase inputs")]
     NonCoinbaseHasCoinbaseInput,
 
+    #[error("the tx is not coinbase, but it should be")]
+    NotCoinbase,
+
     #[error("transaction is locked until after block height {}", _0.0)]
     LockedUntilAfterBlockHeight(block::Height),
 
