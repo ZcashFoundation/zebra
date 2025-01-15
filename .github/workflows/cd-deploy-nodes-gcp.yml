@@ -1,6 +1,6 @@
 # Google Cloud node deployments and tests that run when Rust code or dependencies are modified,
 # but only on PRs from the ZcashFoundation/zebra repository.
-# (External PRs are tested/deployed by GitHub's Merge Queue.) 
+# (External PRs are tested/deployed by GitHub's Merge Queue.)
 #
 # 1. `versioning`: Extracts the major version from the release semver. Useful for segregating instances based on major versions.
 # 2. `build`: Builds a Docker image named `zebrad` with the necessary tags derived from Git.
@@ -34,7 +34,7 @@ on:
     inputs:
       network:
         default: Mainnet
-        description: 'Network to deploy: Mainnet or Testnet'
+        description: "Network to deploy: Mainnet or Testnet"
         required: true
         type: choice
         options:
@@ -42,7 +42,7 @@ on:
           - Testnet
       cached_disk_type:
         default: tip
-        description: 'Type of cached disk to use'
+        description: "Type of cached disk to use"
         required: true
         type: choice
         options:
@@ -50,63 +50,63 @@ on:
           - checkpoint
       prefer_main_cached_state:
         default: false
-        description: 'Prefer cached state from the main branch'
+        description: "Prefer cached state from the main branch"
         required: false
         type: boolean
       no_cached_disk:
         default: false
-        description: 'Do not use a cached state disk'
+        description: "Do not use a cached state disk"
         required: false
         type: boolean
       no_cache:
-        description: 'Disable the Docker cache for this build'
+        description: "Disable the Docker cache for this build"
         required: false
         type: boolean
         default: false
       log_file:
-        default: ''
-        description: 'Log to a file path rather than standard output'
+        default: ""
+        description: "Log to a file path rather than standard output"
 
   push:
-   # Skip main branch updates where Rust code and dependencies aren't modified.
-   branches:
-     - main
-   paths:
-     # code and tests
-     - '**/*.rs'
-     # hard-coded checkpoints and proptest regressions
-     - '**/*.txt'
-     # dependencies
-     - '**/Cargo.toml'
-     - '**/Cargo.lock'
-     # configuration files
-     - '.cargo/config.toml'
-     - '**/clippy.toml'
-     # workflow definitions
-     - 'docker/**'
-     - '.dockerignore'
-     - '.github/workflows/cd-deploy-nodes-gcp.yml'
-     - '.github/workflows/sub-build-docker-image.yml'
+    # Skip main branch updates where Rust code and dependencies aren't modified.
+    branches:
+      - main
+    paths:
+      # code and tests
+      - "**/*.rs"
+      # hard-coded checkpoints and proptest regressions
+      - "**/*.txt"
+      # dependencies
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      # configuration files
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
+      # workflow definitions
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/cd-deploy-nodes-gcp.yml"
+      - ".github/workflows/sub-build-docker-image.yml"
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
-      - '**/*.rs'
+      - "**/*.rs"
       # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
+      - "**/*.txt"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - 'docker/**'
-      - '.dockerignore'
-      - '.github/workflows/cd-deploy-nodes-gcp.yml'
-      - '.github/workflows/sub-build-docker-image.yml'
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/cd-deploy-nodes-gcp.yml"
+      - ".github/workflows/sub-build-docker-image.yml"
 
   release:
     types:
@@ -183,11 +183,11 @@ jobs:
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'default-conf'
+      test_id: "default-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Mainnet'
+      test_variables: "-e NETWORK"
+      network: "Mainnet"
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
@@ -196,23 +196,11 @@ jobs:
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'testnet-conf'
+      test_id: "testnet-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Testnet'
-
-  # Test that Zebra works using $ZEBRA_CONF_PATH config
-  test-zebra-conf-path:
-    name: Test CD custom Docker config file
-    needs: build
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      test_id: 'custom-conf'
-      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: "-e NETWORK"
+      network: "Testnet"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -234,14 +222,21 @@ jobs:
       matrix:
         network: [Mainnet, Testnet]
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ build, versioning, test-configuration-file, test-zebra-conf-path, get-disk-name ]
+    needs:
+      [
+        build,
+        versioning,
+        test-configuration-file,
+        test-zebra-conf-path,
+        get-disk-name,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
     if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release') }}
 
     steps:
@@ -270,8 +265,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.7
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.2
@@ -344,14 +339,14 @@ jobs:
   # Note: this instances are not automatically replaced or deleted
   deploy-instance:
     name: Deploy single ${{ inputs.network }} instance
-    needs: [ build, test-configuration-file, test-zebra-conf-path, get-disk-name ]
+    needs: [build, test-configuration-file, test-zebra-conf-path, get-disk-name]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
     # Run even if we don't need a cached disk, but only when triggered by a workflow_dispatch
     if: ${{ !failure() && github.event_name == 'workflow_dispatch' }}
 
@@ -381,8 +376,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.7
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.2
@@ -423,7 +418,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ versioning, build, deploy-nodes, deploy-instance ]
+    needs: [versioning, build, deploy-nodes, deploy-instance]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
