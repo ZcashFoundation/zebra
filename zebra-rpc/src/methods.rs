@@ -1489,6 +1489,18 @@ impl Default for GetInfo {
     }
 }
 
+impl GetInfo {
+    /// Constructs [`GetInfo`] from its constituent parts.
+    pub fn from_parts(build: String, subversion: String) -> Self {
+        Self { build, subversion }
+    }
+
+    /// Returns the contents of ['GetInfo'].
+    pub fn into_parts(self) -> (String, String) {
+        (self.build, self.subversion)
+    }
+}
+
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
@@ -1538,6 +1550,68 @@ impl Default for GetBlockChainInfo {
     }
 }
 
+impl GetBlockChainInfo {
+    /// Creates a new [`GetBlockChainInfo`] instance.
+    pub fn new(
+        chain: String,
+        blocks: Height,
+        best_block_hash: block::Hash,
+        estimated_height: Height,
+        value_pools: [types::ValuePoolBalance; 5],
+        upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
+        consensus: TipConsensusBranch,
+    ) -> Self {
+        Self {
+            chain,
+            blocks,
+            best_block_hash,
+            estimated_height,
+            value_pools,
+            upgrades,
+            consensus,
+        }
+    }
+
+    /// Returns the current network name as defined in BIP70 (main, test, regtest).
+    pub fn chain(&self) -> String {
+        self.chain.clone()
+    }
+
+    /// Returns the current number of blocks processed in the server.
+    pub fn blocks(&self) -> Height {
+        self.blocks
+    }
+
+    /// Returns the hash of the current best chain tip block, in big-endian order, hex-encoded.
+    pub fn best_block_hash(&self) -> &block::Hash {
+        &self.best_block_hash
+    }
+
+    /// Returns the estimated height of the chain.
+    ///
+    /// If syncing, the estimated height of the chain, else the current best height, numeric.
+    ///
+    /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
+    pub fn estimated_height(&self) -> Height {
+        self.estimated_height
+    }
+
+    /// Returns the value pool balances.
+    pub fn value_pools(&self) -> &[types::ValuePoolBalance; 5] {
+        &self.value_pools
+    }
+
+    /// Returns the network upgrades.
+    pub fn upgrades(&self) -> &IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo> {
+        &self.upgrades
+    }
+
+    /// Returns the Branch IDs of the current and upcoming consensus rules.
+    pub fn consensus(&self) -> &TipConsensusBranch {
+        &self.consensus
+    }
+}
+
 /// A wrapper type with a list of transparent address strings.
 ///
 /// This is used for the input parameter of [`RpcServer::get_address_balance`],
@@ -1553,6 +1627,13 @@ impl AddressStrings {
     #[cfg(test)]
     pub fn new(addresses: Vec<String>) -> AddressStrings {
         AddressStrings { addresses }
+    }
+
+    /// Creates a new [`AddessStrings`] from a given vector, returns an error if any addresses are incorrect.
+    pub fn new_valid(addresses: Vec<String>) -> Result<AddressStrings> {
+        let address_strings = Self { addresses };
+        address_strings.clone().valid_addresses()?;
+        Ok(address_strings)
     }
 
     /// Given a list of addresses as strings:
@@ -1573,13 +1654,21 @@ impl AddressStrings {
 
         Ok(valid_addresses)
     }
+
+    /// Given a list of addresses as strings:
+    /// - check if provided list have all valid transparent addresses.
+    /// - return valid addresses as a vec of strings.
+    pub fn valid_address_strings(self) -> Result<Vec<String>> {
+        self.clone().valid_addresses()?;
+        Ok(self.addresses)
+    }
 }
 
 /// The transparent balance of a set of addresses.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, serde::Serialize)]
 pub struct AddressBalance {
     /// The total transparent balance.
-    balance: u64,
+    pub balance: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -1693,6 +1782,18 @@ pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
 impl Default for SentTransactionHash {
     fn default() -> Self {
         Self(transaction::Hash::from([0; 32]))
+    }
+}
+
+impl SentTransactionHash {
+    /// Constructs a new [`SentTransactionHash`].
+    pub fn new(hash: transaction::Hash) -> Self {
+        SentTransactionHash(hash)
+    }
+
+    /// Returns the contents of ['SentTransactionHash'].
+    pub fn inner(&self) -> transaction::Hash {
+        self.0
     }
 }
 
@@ -1881,7 +1982,7 @@ pub struct GetBlockHeaderObject {
 
     /// The Equihash solution in the requested block header.
     #[serde(with = "hex")]
-    solution: Solution,
+    pub solution: Solution,
 
     /// The difficulty threshold of the requested block header displayed in compact form.
     #[serde(with = "hex")]
@@ -2071,6 +2172,48 @@ impl Default for GetAddressUtxos {
     }
 }
 
+impl GetAddressUtxos {
+    /// Constructs a new instance of [`GetAddressUtxos`].
+    pub fn from_parts(
+        address: transparent::Address,
+        txid: transaction::Hash,
+        output_index: OutputIndex,
+        script: transparent::Script,
+        satoshis: u64,
+        height: Height,
+    ) -> Self {
+        GetAddressUtxos {
+            address,
+            txid,
+            output_index,
+            script,
+            satoshis,
+            height,
+        }
+    }
+
+    /// Returns the contents of [`GetAddressUtxos`].
+    pub fn into_parts(
+        &self,
+    ) -> (
+        transparent::Address,
+        transaction::Hash,
+        OutputIndex,
+        transparent::Script,
+        u64,
+        Height,
+    ) {
+        (
+            self.address.clone(),
+            self.txid,
+            self.output_index,
+            self.script.clone(),
+            self.satoshis,
+            self.height,
+        )
+    }
+}
+
 /// A struct to use as parameter of the `getaddresstxids`.
 ///
 /// See the notes for the [`Rpc::get_address_tx_ids` method].
@@ -2082,6 +2225,21 @@ pub struct GetAddressTxIdsRequest {
     start: u32,
     // The height to end looking for transactions.
     end: u32,
+}
+
+impl GetAddressTxIdsRequest {
+    /// Constructs [`GetAddressTxIdsRequest`] from its constituent parts.
+    pub fn from_parts(addresses: Vec<String>, start: u32, end: u32) -> Self {
+        GetAddressTxIdsRequest {
+            addresses,
+            start,
+            end,
+        }
+    }
+    /// Returns the contents of [`GetAddressTxIdsRequest`].
+    pub fn into_parts(&self) -> (Vec<String>, u32, u32) {
+        (self.addresses.clone(), self.start, self.end)
+    }
 }
 
 /// Information about the sapling and orchard note commitment trees if any.
