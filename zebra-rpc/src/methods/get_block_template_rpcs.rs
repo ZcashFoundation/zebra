@@ -936,6 +936,8 @@ where
                 }
             };
 
+            let block = Arc::new(block);
+
             let block_height = block
                 .coinbase_height()
                 .map(|height| height.0.to_string())
@@ -950,7 +952,7 @@ where
                     message: error.to_string(),
                     data: None,
                 })?
-                .call(zebra_consensus::Request::Commit(Arc::new(block)))
+                .call(zebra_consensus::Request::Commit(block.clone()))
                 .await;
 
             let chain_error = match block_verifier_router_response {
@@ -972,7 +974,7 @@ where
                         .downcast::<RouterError>()
                         .map(|boxed_chain_error| *boxed_chain_error);
 
-                    tracing::info!(?error, ?block_hash, ?block_height, "submit block failed verification");
+                    tracing::info!(?error, ?block, ?block_hash, ?block_height, "submit block failed verification");
 
                     error
                 }
