@@ -239,6 +239,7 @@ jobs:
     timeout-minutes: 60
     env:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
+    environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     permissions:
       contents: 'read'
       id-token: 'write'

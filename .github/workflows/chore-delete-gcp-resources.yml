@@ -38,6 +38,10 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+    strategy:
+      matrix:
+        environment: [dev, prod]
+    environment: ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@v4.2.2
         with:
@@ -105,6 +109,10 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
+    strategy:
+      matrix:
+        environment: [dev, prod]
+    environment: ${{ matrix.environment }}
     steps:
       - uses: actions/checkout@v4.2.2
         with:
