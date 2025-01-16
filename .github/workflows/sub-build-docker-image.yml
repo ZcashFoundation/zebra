@@ -70,6 +70,7 @@ jobs:
     name: Build images
     timeout-minutes: 210
     runs-on: ubuntu-latest
+    environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
