@@ -927,7 +927,7 @@ where
         let mut block_verifier_router = self.block_verifier_router.clone();
 
         async move {
-            let block: Block = match block_bytes.zcash_deserialize_into() {
+            let block: Block = match block_bytes.clone().zcash_deserialize_into() {
                 Ok(block_bytes) => block_bytes,
                 Err(error) => {
                     tracing::info!(?error, "submit block failed: block bytes could not be deserialized into a structurally valid block");
@@ -974,7 +974,7 @@ where
                         .downcast::<RouterError>()
                         .map(|boxed_chain_error| *boxed_chain_error);
 
-                    tracing::info!(?error, ?block, ?block_hash, ?block_height, "submit block failed verification");
+                    tracing::info!(?error, ?block, ?block_hash, ?block_height, bytes = ?hex::encode(block_bytes), "submit block failed verification");
 
                     error
                 }
