@@ -63,7 +63,7 @@ The following consensus, security, and functional changes are in Zebra's develop
 
 The following list of dependencies is out of scope for the audit. 
 
-Please ignore the dependency versions in these tables, some of them are are outdated. All versions of these dependencies are out of scope.
+Please ignore the dependency versions in these tables, some of them are outdated. All versions of these dependencies are out of scope.
 
 The latest versions of Zebra's dependencies are in [`Cargo.lock`](https://github.com/ZcashFoundation/zebra/tree/audit-v1.0.0-rc.0/Cargo.lock), including transitive dependencies. They can be viewed using `cargo tree`.
 

@@ -1059,7 +1059,7 @@ where
     #[instrument(name = "checkpoint", skip(self, block))]
     fn call(&mut self, block: Arc<Block>) -> Self::Future {
         // Reset the verifier back to the state tip if requested
-        // (e.g. due to an error when committing a block to to the state)
+        // (e.g. due to an error when committing a block to the state)
         if let Ok(tip) = self.reset_receiver.try_recv() {
             self.reset_progress(tip);
         }

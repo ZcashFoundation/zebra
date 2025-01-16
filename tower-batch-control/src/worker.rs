@@ -323,7 +323,7 @@ where
         // We don't schedule any batches on an errored service
         self.pending_batch_timer = None;
 
-        // By closing the mpsc::Receiver, we know that that the run() loop will
+        // By closing the mpsc::Receiver, we know that the run() loop will
         // drain all pending requests. We just need to make sure that any
         // requests that we receive before we've exhausted the receiver receive
         // the error:

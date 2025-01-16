@@ -211,7 +211,7 @@ impl Runner {
 
     /// Remove transactions that are expired according to number of blocks and current spacing between blocks.
     fn remove_expired(&mut self, spacing: Duration) {
-        // Have some extra time to to make sure we re-submit each transaction `NUMBER_OF_BLOCKS_TO_EXPIRE`
+        // Have some extra time to make sure we re-submit each transaction `NUMBER_OF_BLOCKS_TO_EXPIRE`
         // times, as the main loop also takes some time to run.
         let extra_time = Duration::seconds(5);
 
