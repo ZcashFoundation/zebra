@@ -12,20 +12,20 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, Height},
+    block::{self, Block, Header, Height},
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
-    parameters::{Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
-    value_balance::ValueBalance,
+    value_balance::ValueBalance, work::equihash::Solution,
 };
 use zebra_node_services::mempool;
-use zebra_state::BoxError;
+use zebra_state::{BoxError, HashOrHeight};
 
 use zebra_test::mock_service::MockService;
 
-use crate::methods;
+use crate::methods::{self, types::ValuePoolBalance};
 
 use super::super::{
     AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
@@ -370,6 +370,8 @@ proptest! {
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
                         .respond(Err(BoxError::from("no chain tip available yet")));
+
+                    state.expect_request(zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(block::Height(0)))).await.expect("no chain tip available yet").respond(Err(BoxError::from("no chain tip available yet")));
                 }
             };
 
@@ -486,6 +488,109 @@ proptest! {
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
 
+            // The queue task should continue without errors or panics
+            prop_assert!(mempool_tx_queue.now_or_never().is_none());
+
+            Ok(())
+        })?;
+    }
+
+    /// Test the `get_blockchain_info` response when tip_pool request fails.
+    #[test]
+    fn get_blockchain_info_returns_genesis_when_tip_pool_fails(network in any::<Network>()) {
+        let (runtime, _init_guard) = zebra_test::init_async();
+        let _guard = runtime.enter();
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network.clone(), NoChainTip);
+
+
+        let genesis_block = match network {
+            Network::Mainnet => {
+                let block_bytes = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&0];
+                let block: Arc<Block> = block_bytes.zcash_deserialize_into().expect("block is valid");
+                block
+            },
+            Network::Testnet(_) => {
+                let block_bytes = zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS[&0];
+                let block: Arc<Block> = block_bytes.zcash_deserialize_into().expect("block is valid");
+                block
+            },
+        };
+
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
+
+        // Genesis block fields
+        let block_time = genesis_block.header.time;
+        let block_version = genesis_block.header.version;
+        let block_prev_block_hash = genesis_block.header.previous_block_hash;
+        let block_merkle_root = genesis_block.header.merkle_root;
+        let block_commitment_bytes = genesis_block.header.commitment_bytes;
+        let block_difficulty_threshold = genesis_block.header.difficulty_threshold;
+        let block_nonce = genesis_block.header.nonce;
+        let block_solution = genesis_block.header.solution;
+        let block_hash = genesis_block.header.hash();
+
+        runtime.block_on(async move {
+            let response_fut = rpc.get_blockchain_info();
+            let mock_state_handler = {
+                let mut state = state.clone();
+                async move {
+                    state.expect_request(zebra_state::ReadRequest::TipPoolValues)
+                    .await
+                    .expect("getblockchaininfo should call mock state service with correct request")
+                    .respond(Err(BoxError::from("tip values not available")));
+
+
+                    state
+                    .expect_request(zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(Height::MIN)))
+                    .await
+                    .expect("getblockchaininfo should call mock state service with correct request")
+                    .respond(zebra_state::ReadResponse::BlockHeader {
+                        header: Arc::new(block::Header {
+                            time: block_time,
+                            version: block_version,
+                            previous_block_hash: block_prev_block_hash,
+                            merkle_root: block_merkle_root,
+                            commitment_bytes: block_commitment_bytes,
+                            difficulty_threshold: block_difficulty_threshold,
+                            nonce: block_nonce,
+                            solution: block_solution
+                        }),
+                        hash: block_hash,
+                        height: Height::MIN,
+                        next_block_hash: None,
+                    });
+                }
+            };
+
+            let (response, _) = tokio::join!(response_fut, mock_state_handler);
+
+            let response = response.expect("should succeed with genesis block info");
+
+            prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
+            prop_assert_eq!(response.chain, network.bip70_network_name());
+            prop_assert_eq!(response.blocks, Height::MIN);
+            prop_assert_eq!(response.value_pools, ValuePoolBalance::from_value_balance(ValueBalance::zero()));
+
+            let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
+            let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");
+            let next_branch_id = NetworkUpgrade::current(&network, next_height).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
+
+            prop_assert_eq!(response.consensus.chain_tip.0, genesis_branch_id);
+            prop_assert_eq!(response.consensus.next_block.0, next_branch_id);
+
+            for (_, upgrade_info) in response.upgrades {
+                let status = if Height::MIN < upgrade_info.activation_height {
+                    NetworkUpgradeStatus::Pending
+                } else {
+                    NetworkUpgradeStatus::Active
+                };
+                prop_assert_eq!(upgrade_info.status, status);
+            }
+
+            mempool.expect_no_requests().await?;
+            state.expect_no_requests().await?;
+            
             // The queue task should continue without errors or panics
             prop_assert!(mempool_tx_queue.now_or_never().is_none());
 
