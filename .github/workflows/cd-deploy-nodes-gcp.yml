@@ -53,9 +53,9 @@ on:
         description: 'Prefer cached state from the main branch'
         required: false
         type: boolean
-      no_cached_disk:
-        default: false
-        description: 'Do not use a cached state disk'
+      need_cached_disk:
+        default: true
+        description: 'Use a cached state disk'
         required: false
         type: boolean
       no_cache:
@@ -153,7 +153,7 @@ jobs:
     uses: ./.github/workflows/sub-find-cached-disks.yml
     # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them.
     # This workflow also runs on release tags, the event name check will run it on releases.
-    if: ${{ (!startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork) && !inputs.no_cached_disk }}
+    if: ${{ inputs.need_cached_disk && github.event_name != 'release' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
@@ -279,11 +279,15 @@ jobs:
 
       - name: Create instance template for ${{ matrix.network }}
         run: |
-          DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
+          if [ "${{ github.event_name }}" == "release" ]; then
+            DISK_NAME="zebrad-cache-${NETWORK}"
+          else
+            DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
+          fi
           DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
-          elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
+          elif [ ${{ !inputs.need_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
            echo "No cached disk required"
           else
             echo "No cached disk found for ${{ matrix.network }} in main branch"
@@ -395,7 +399,7 @@ jobs:
           DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
-          elif [ ${{ inputs.no_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
+          elif [ ${{ !inputs.need_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
            echo "No cached disk required"
           else
             echo "No cached disk found for ${{ matrix.network }} in main branch"
