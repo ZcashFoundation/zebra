@@ -258,6 +258,16 @@ impl Transaction {
         !self.inputs().is_empty()
     }
 
+    /// Does this transaction have transparent outputs?
+    pub fn has_transparent_outputs(&self) -> bool {
+        !self.outputs().is_empty()
+    }
+
+    /// Does this transaction have transparent inputs or outputs?
+    pub fn has_transparent_inputs_or_outputs(&self) -> bool {
+        self.has_transparent_inputs() || self.has_transparent_outputs()
+    }
+
     /// Does this transaction have transparent or shielded inputs?
     pub fn has_transparent_or_shielded_inputs(&self) -> bool {
         self.has_transparent_inputs() || self.has_shielded_inputs()
@@ -276,11 +286,6 @@ impl Transaction {
                     .contains(orchard::Flags::ENABLE_SPENDS))
     }
 
-    /// Does this transaction have transparent or shielded outputs?
-    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
-        !self.outputs().is_empty() || self.has_shielded_outputs()
-    }
-
     /// Does this transaction have shielded outputs?
     ///
     /// See [`Self::has_transparent_or_shielded_outputs`] for details.
@@ -292,6 +297,11 @@ impl Transaction {
                     .orchard_flags()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_OUTPUTS))
+    }
+
+    /// Does this transaction have transparent or shielded outputs?
+    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
+        self.has_transparent_outputs() || self.has_shielded_outputs()
     }
 
     /// Does this transaction has at least one flag when we have at least one orchard action?
