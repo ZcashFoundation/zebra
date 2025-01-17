@@ -3615,6 +3615,7 @@ async fn has_spending_transaction_ids() -> Result<()> {
     // Read the last 500 blocks - should be greater than the MAX_BLOCK_REORG_HEIGHT so that
     // both the finalized and non-finalized state are checked.
     let num_blocks_to_check = 500;
+    let mut is_failure = false;
     for i in 0..num_blocks_to_check {
         let ReadResponse::Block(block) = read_state
             .ready()
@@ -3654,7 +3655,16 @@ async fn has_spending_transaction_ids() -> Result<()> {
                 panic!("unexpected response to Block request");
             };
 
-            let transaction_hash = transaction_hash.expect("should have spending transaction hash");
+            let Some(transaction_hash) = transaction_hash else {
+                tracing::warn!(
+                    ?spend,
+                    depth = i,
+                    height = ?block.coinbase_height(),
+                    "querying spending tx id for spend failed"
+                );
+                is_failure = true;
+                continue;
+            };
 
             assert_eq!(
                 transaction_hash, expected_transaction_hash,
@@ -3671,6 +3681,11 @@ async fn has_spending_transaction_ids() -> Result<()> {
 
         tip_hash = block.header.previous_block_hash;
     }
+
+    assert!(
+        !is_failure,
+        "at least one spend was missing a spending transaction id"
+    );
 
     Ok(())
 }
