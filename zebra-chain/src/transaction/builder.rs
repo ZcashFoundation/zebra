@@ -26,7 +26,7 @@ impl Transaction {
         // > (nActionsOrchard > 0 and enableSpendsOrchard = 1).
         //
         // > A coinbase transaction for a block at block height greater than 0 MUST have
-        // > a script that, as its first item, encodes the block height height as follows. ...
+        // > a script that, as its first item, encodes the block height as follows. ...
         // > let heightBytes be the signed little-endian representation of height,
         // > using the minimum nonzero number of bytes such that the most significant byte
         // > is < 0x80. The length of heightBytes MUST be in the range {1 .. 5}.
