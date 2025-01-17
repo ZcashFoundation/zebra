@@ -1,7 +1,7 @@
 //! Asynchronous verification of transactions.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -146,8 +146,12 @@ where
 pub enum Request {
     /// Verify the supplied transaction as part of a block.
     Block {
+        /// The transaction hash.
+        transaction_hash: transaction::Hash,
         /// The transaction itself.
         transaction: Arc<Transaction>,
+        /// Set of transaction hashes that create new transparent outputs.
+        known_outpoint_hashes: Arc<HashSet<transaction::Hash>>,
         /// Additional UTXOs which are known at the time of verification.
         known_utxos: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
         /// The height of the block containing this transaction.
@@ -259,11 +263,32 @@ impl Request {
         }
     }
 
+    /// The mined transaction ID for the transaction in this request.
+    pub fn tx_mined_id(&self) -> transaction::Hash {
+        match self {
+            Request::Block {
+                transaction_hash, ..
+            } => *transaction_hash,
+            Request::Mempool { transaction, .. } => transaction.id.mined_id(),
+        }
+    }
+
     /// The set of additional known unspent transaction outputs that's in this request.
     pub fn known_utxos(&self) -> Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>> {
         match self {
             Request::Block { known_utxos, .. } => known_utxos.clone(),
             Request::Mempool { .. } => HashMap::new().into(),
+        }
+    }
+
+    /// The set of additional known [`transparent::OutPoint`]s of unspent transaction outputs that's in this request.
+    pub fn known_outpoint_hashes(&self) -> Arc<HashSet<transaction::Hash>> {
+        match self {
+            Request::Block {
+                known_outpoint_hashes,
+                ..
+            } => known_outpoint_hashes.clone(),
+            Request::Mempool { .. } => HashSet::new().into(),
         }
     }
 
@@ -377,6 +402,16 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
+            if let Some(result) = Self::try_find_verified_unmined_tx(&req, mempool.clone()).await {
+                let verified_tx = result?;
+
+                return Ok(Response::Block {
+                    tx_id,
+                    miner_fee: Some(verified_tx.miner_fee),
+                    legacy_sigop_count: verified_tx.legacy_sigop_count
+                });
+            }
+
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
@@ -451,7 +486,7 @@ where
             // WONTFIX: Return an error for Request::Block as well to replace this check in
             //       the state once #2336 has been implemented?
             if req.is_mempool() {
-                Self::check_maturity_height(&req, &spent_utxos)?;
+                Self::check_maturity_height(&network, &req, &spent_utxos)?;
             }
 
             let cached_ffi_transaction =
@@ -609,8 +644,52 @@ where
         }
     }
 
-    /// Waits for the UTXOs that are being spent by the given transaction to arrive in
-    /// the state for [`Block`](Request::Block) requests.
+    /// Attempts to find a transaction in the mempool by its transaction hash and checks
+    /// that all of its dependencies are available in the block.
+    ///
+    /// Returns [`Some(Ok(VerifiedUnminedTx))`](VerifiedUnminedTx) if successful,
+    /// None if the transaction id was not found in the mempool,
+    /// or `Some(Err(TransparentInputNotFound))` if the transaction was found, but some of its
+    /// dependencies are missing in the block.
+    async fn try_find_verified_unmined_tx(
+        req: &Request,
+        mempool: Option<Timeout<Mempool>>,
+    ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
+        if req.is_mempool() || req.transaction().is_coinbase() {
+            return None;
+        }
+
+        let mempool = mempool?;
+        let known_outpoint_hashes = req.known_outpoint_hashes();
+        let tx_id = req.tx_mined_id();
+
+        let mempool::Response::TransactionWithDeps {
+            transaction,
+            dependencies,
+        } = mempool
+            .oneshot(mempool::Request::TransactionWithDepsByMinedId(tx_id))
+            .await
+            .ok()?
+        else {
+            panic!("unexpected response to TransactionWithDepsByMinedId request");
+        };
+
+        // Note: This does not verify that the spends are in order, the spend order
+        //       should be verified during contextual validation in zebra-state.
+        let has_all_tx_deps = dependencies
+            .into_iter()
+            .all(|dependency_id| known_outpoint_hashes.contains(&dependency_id));
+
+        let result = if has_all_tx_deps {
+            Ok(transaction)
+        } else {
+            Err(TransactionError::TransparentInputNotFound)
+        };
+
+        Some(result)
+    }
+
+    /// Wait for the UTXOs that are being spent by the given transaction.
     ///
     /// Looks up UTXOs that are being spent by the given transaction in the state or waits
     /// for them to be added to the mempool for [`Mempool`](Request::Mempool) requests.
@@ -728,10 +807,12 @@ where
     /// mature and valid for the request height, or a [`TransactionError`] if the transaction
     /// spends transparent coinbase outputs that are immature and invalid for the request height.
     pub fn check_maturity_height(
+        network: &Network,
         request: &Request,
         spent_utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<(), TransactionError> {
         check::tx_transparent_coinbase_spends_maturity(
+            network,
             request.transaction(),
             request.height(),
             request.known_utxos(),

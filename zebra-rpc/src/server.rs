@@ -7,12 +7,11 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use std::{fmt, panic, thread::available_parallelism};
+use std::{fmt, panic};
 
 use cookie::Cookie;
-use http_request_compatibility::With;
-use jsonrpc_core::{Compatibility, MetaIoHandler};
-use jsonrpc_http_server::{CloseHandle, ServerBuilder};
+use jsonrpsee::server::middleware::rpc::RpcServiceBuilder;
+use jsonrpsee::server::{Server, ServerHandle};
 use tokio::task::JoinHandle;
 use tower::Service;
 use tracing::*;
@@ -25,17 +24,18 @@ use zebra_node_services::mempool;
 
 use crate::{
     config::Config,
-    methods::{Rpc, RpcImpl},
+    methods::{RpcImpl, RpcServer as _},
     server::{
-        http_request_compatibility::HttpRequestMiddleware,
+        http_request_compatibility::HttpRequestMiddlewareLayer,
         rpc_call_compatibility::FixRpcResponseMiddleware,
     },
 };
 
 #[cfg(feature = "getblocktemplate-rpcs")]
-use crate::methods::{GetBlockTemplateRpc, GetBlockTemplateRpcImpl};
+use crate::methods::{GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer};
 
 pub mod cookie;
+pub mod error;
 pub mod http_request_compatibility;
 pub mod rpc_call_compatibility;
 
@@ -54,8 +54,8 @@ pub struct RpcServer {
     /// Zebra's application version, with build metadata.
     build_version: String,
 
-    /// A handle that shuts down the RPC server.
-    close_handle: CloseHandle,
+    /// A server handle used to shuts down the RPC server.
+    close_handle: ServerHandle,
 }
 
 impl fmt::Debug for RpcServer {
@@ -67,7 +67,7 @@ impl fmt::Debug for RpcServer {
             .field(
                 "close_handle",
                 // TODO: when it stabilises, use std::any::type_name_of_val(&self.close_handle)
-                &"CloseHandle",
+                &"ServerHandle",
             )
             .finish()
     }
@@ -75,6 +75,8 @@ impl fmt::Debug for RpcServer {
 
 /// The message to log when logging the RPC server's listen address
 pub const OPENED_RPC_ENDPOINT_MSG: &str = "Opened RPC endpoint at ";
+
+type ServerTask = JoinHandle<Result<(), tower::BoxError>>;
 
 impl RpcServer {
     /// Start a new RPC server endpoint using the supplied configs and services.
@@ -89,7 +91,7 @@ impl RpcServer {
     // - put some of the configs or services in their own struct?
     // - replace VersionString with semver::Version, and update the tests to provide valid versions
     #[allow(clippy::too_many_arguments)]
-    pub fn spawn<
+    pub async fn spawn<
         VersionString,
         UserAgentString,
         Mempool,
@@ -114,7 +116,7 @@ impl RpcServer {
         address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
-    ) -> (JoinHandle<()>, JoinHandle<()>, Option<Self>)
+    ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
     where
         VersionString: ToString + Clone + Send + 'static,
         UserAgentString: ToString + Clone + Send + 'static,
@@ -149,136 +151,79 @@ impl RpcServer {
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
         AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     {
-        if let Some(listen_addr) = config.listen_addr {
-            info!("Trying to open RPC endpoint at {}...", listen_addr,);
+        let listen_addr = config
+            .listen_addr
+            .expect("caller should make sure listen_addr is set");
 
-            // Create handler compatible with V1 and V2 RPC protocols
-            let mut io: MetaIoHandler<(), _> =
-                MetaIoHandler::new(Compatibility::Both, FixRpcResponseMiddleware);
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        // Initialize the getblocktemplate rpc method handler
+        let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
+            &network,
+            mining_config.clone(),
+            mempool.clone(),
+            state.clone(),
+            latest_chain_tip.clone(),
+            block_verifier_router,
+            sync_status,
+            address_book,
+        );
 
+        // Initialize the rpc methods with the zebra version
+        let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
+            build_version.clone(),
+            user_agent,
+            network.clone(),
+            config.debug_force_finished_sync,
             #[cfg(feature = "getblocktemplate-rpcs")]
-            {
-                // Initialize the getblocktemplate rpc method handler
-                let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
-                    &network,
-                    mining_config.clone(),
-                    mempool.clone(),
-                    state.clone(),
-                    latest_chain_tip.clone(),
-                    block_verifier_router,
-                    sync_status,
-                    address_book,
-                );
+            mining_config.debug_like_zcashd,
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
+            true,
+            mempool,
+            state,
+            latest_chain_tip,
+        );
 
-                io.extend_with(get_block_template_rpc_impl.to_delegate());
-            }
-
-            // Initialize the rpc methods with the zebra version
-            let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
-                build_version.clone(),
-                user_agent,
-                network.clone(),
-                config.debug_force_finished_sync,
-                #[cfg(feature = "getblocktemplate-rpcs")]
-                mining_config.debug_like_zcashd,
-                #[cfg(not(feature = "getblocktemplate-rpcs"))]
-                true,
-                mempool,
-                state,
-                latest_chain_tip,
-            );
-
-            io.extend_with(rpc_impl.to_delegate());
-
-            // If zero, automatically scale threads to the number of CPU cores
-            let mut parallel_cpu_threads = config.parallel_cpu_threads;
-            if parallel_cpu_threads == 0 {
-                parallel_cpu_threads = available_parallelism().map(usize::from).unwrap_or(1);
-            }
-
-            // The server is a blocking task, which blocks on executor shutdown.
-            // So we need to start it in a std::thread.
-            // (Otherwise tokio panics on RPC port conflict, which shuts down the RPC server.)
-            let span = Span::current();
-            let start_server = move || {
-                span.in_scope(|| {
-                    let middleware = if config.enable_cookie_auth {
-                        let cookie = Cookie::default();
-                        cookie::write_to_disk(&cookie, &config.cookie_dir)
-                            .expect("Zebra must be able to write the auth cookie to the disk");
-                        HttpRequestMiddleware::default().with(cookie)
-                    } else {
-                        HttpRequestMiddleware::default()
-                    };
-
-                    // Use a different tokio executor from the rest of Zebra,
-                    // so that large RPCs and any task handling bugs don't impact Zebra.
-                    let server_instance = ServerBuilder::new(io)
-                        .threads(parallel_cpu_threads)
-                        // TODO: disable this security check if we see errors from lightwalletd
-                        //.allowed_hosts(DomainsValidation::Disabled)
-                        .request_middleware(middleware)
-                        .start_http(&listen_addr)
-                        .expect("Unable to start RPC server");
-
-                    info!("{OPENED_RPC_ENDPOINT_MSG}{}", server_instance.address());
-
-                    let close_handle = server_instance.close_handle();
-
-                    let rpc_server_handle = RpcServer {
-                        config,
-                        network,
-                        build_version: build_version.to_string(),
-                        close_handle,
-                    };
-
-                    (server_instance, rpc_server_handle)
-                })
-            };
-
-            // Propagate panics from the std::thread
-            let (server_instance, rpc_server_handle) = match std::thread::spawn(start_server).join()
-            {
-                Ok(rpc_server) => rpc_server,
-                Err(panic_object) => panic::resume_unwind(panic_object),
-            };
-
-            // The server is a blocking task, which blocks on executor shutdown.
-            // So we need to wait on it on a std::thread, inside a tokio blocking task.
-            // (Otherwise tokio panics when we shut down the RPC server.)
-            let span = Span::current();
-            let wait_on_server = move || {
-                span.in_scope(|| {
-                    server_instance.wait();
-
-                    info!("Stopped RPC endpoint");
-                })
-            };
-
-            let span = Span::current();
-            let rpc_server_task_handle = tokio::task::spawn_blocking(move || {
-                let thread_handle = std::thread::spawn(wait_on_server);
-
-                // Propagate panics from the inner std::thread to the outer tokio blocking task
-                span.in_scope(|| match thread_handle.join() {
-                    Ok(()) => (),
-                    Err(panic_object) => panic::resume_unwind(panic_object),
-                })
-            });
-
-            (
-                rpc_server_task_handle,
-                rpc_tx_queue_task_handle,
-                Some(rpc_server_handle),
-            )
+        let http_middleware_layer = if config.enable_cookie_auth {
+            let cookie = Cookie::default();
+            cookie::write_to_disk(&cookie, &config.cookie_dir)
+                .expect("Zebra must be able to write the auth cookie to the disk");
+            HttpRequestMiddlewareLayer::new(Some(cookie))
         } else {
-            // There is no RPC port, so the RPC tasks do nothing.
-            (
-                tokio::task::spawn(futures::future::pending().in_current_span()),
-                tokio::task::spawn(futures::future::pending().in_current_span()),
-                None,
-            )
-        }
+            HttpRequestMiddlewareLayer::new(None)
+        };
+
+        let http_middleware = tower::ServiceBuilder::new().layer(http_middleware_layer);
+
+        let rpc_middleware = RpcServiceBuilder::new()
+            .rpc_logger(1024)
+            .layer_fn(FixRpcResponseMiddleware::new);
+
+        let server_instance = Server::builder()
+            .http_only()
+            .set_http_middleware(http_middleware)
+            .set_rpc_middleware(rpc_middleware)
+            .build(listen_addr)
+            .await
+            .expect("Unable to start RPC server");
+        let addr = server_instance
+            .local_addr()
+            .expect("Unable to get local address");
+        info!("{OPENED_RPC_ENDPOINT_MSG}{}", addr);
+
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        let mut rpc_module = rpc_impl.into_rpc();
+        #[cfg(not(feature = "getblocktemplate-rpcs"))]
+        let rpc_module = rpc_impl.into_rpc();
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        rpc_module
+            .merge(get_block_template_rpc_impl.into_rpc())
+            .unwrap();
+
+        let server_task: JoinHandle<Result<(), tower::BoxError>> = tokio::spawn(async move {
+            server_instance.start(rpc_module).stopped().await;
+            Ok(())
+        });
+        Ok((server_task, rpc_tx_queue_task_handle))
     }
 
     /// Shut down this RPC server, blocking the current thread.
@@ -304,7 +249,7 @@ impl RpcServer {
     /// Shuts down this RPC server using its `close_handle`.
     ///
     /// See `shutdown_blocking()` for details.
-    fn shutdown_blocking_inner(close_handle: CloseHandle, config: Config) {
+    fn shutdown_blocking_inner(close_handle: ServerHandle, config: Config) {
         // The server is a blocking task, so it can't run inside a tokio thread.
         // See the note at wait_on_server.
         let span = Span::current();
@@ -320,7 +265,7 @@ impl RpcServer {
                 }
 
                 info!("Stopping RPC server");
-                close_handle.clone().close();
+                let _ = close_handle.stop();
                 debug!("Stopped RPC server");
             })
         };

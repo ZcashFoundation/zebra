@@ -41,7 +41,7 @@ pub use unmined::{
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::{ConsensusBranchId, NetworkUpgrade},
+    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize,
@@ -253,9 +253,14 @@ impl Transaction {
 
     // other properties
 
+    /// Does this transaction have transparent inputs?
+    pub fn has_transparent_inputs(&self) -> bool {
+        !self.inputs().is_empty()
+    }
+
     /// Does this transaction have transparent or shielded inputs?
     pub fn has_transparent_or_shielded_inputs(&self) -> bool {
-        !self.inputs().is_empty() || self.has_shielded_inputs()
+        self.has_transparent_inputs() || self.has_shielded_inputs()
     }
 
     /// Does this transaction have shielded inputs?
@@ -303,14 +308,15 @@ impl Transaction {
     /// assuming it is mined at `spend_height`.
     pub fn coinbase_spend_restriction(
         &self,
+        network: &Network,
         spend_height: block::Height,
     ) -> CoinbaseSpendRestriction {
-        if self.outputs().is_empty() {
-            // we know this transaction must have shielded outputs,
-            // because of other consensus rules
-            OnlyShieldedOutputs { spend_height }
+        if self.outputs().is_empty() || network.should_allow_unshielded_coinbase_spends() {
+            // we know this transaction must have shielded outputs if it has no
+            // transparent outputs, because of other consensus rules.
+            CheckCoinbaseMaturity { spend_height }
         } else {
-            SomeTransparentOutputs
+            DisallowCoinbaseSpend
         }
     }
 
