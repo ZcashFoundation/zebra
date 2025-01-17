@@ -18,7 +18,8 @@ use zebra_chain::{
     serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
-    value_balance::ValueBalance, work::equihash::Solution,
+    value_balance::ValueBalance,
+    work::equihash::Solution,
 };
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, HashOrHeight};
@@ -590,7 +591,7 @@ proptest! {
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
-            
+
             // The queue task should continue without errors or panics
             prop_assert!(mempool_tx_queue.now_or_never().is_none());
 

@@ -22,10 +22,18 @@ use tracing::Instrument;
 
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
-    block::{self, Height, SerializedBlock}, chain_tip::{ChainTip, NetworkChainTipHeightEstimator}, parameters::{ConsensusBranchId, Network, NetworkUpgrade}, serialization::{ZcashDeserialize, ZcashSerialize}, subtree::NoteCommitmentSubtreeIndex, transaction::{self, SerializedTransaction, Transaction, UnminedTx}, transparent::{self, Address}, value_balance::ValueBalance, work::{
+    block::{self, Height, SerializedBlock},
+    chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
+    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
+    transaction::{self, SerializedTransaction, Transaction, UnminedTx},
+    transparent::{self, Address},
+    value_balance::ValueBalance,
+    work::{
         difficulty::{CompactDifficulty, ExpandedDifficulty},
         equihash::Solution,
-    }
+    },
 };
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
@@ -539,35 +547,50 @@ where
         let network = self.network.clone();
         let debug_force_finished_sync = self.debug_force_finished_sync;
         let mut state = self.state.clone();
-        
+
         // `chain` field
         let chain = network.bip70_network_name();
 
-        let (tip_height, tip_hash, tip_block_time, value_balance) = match state.ready().and_then(|service| service.call(zebra_state::ReadRequest::TipPoolValues)).await {
-            Ok(zebra_state::ReadResponse::TipPoolValues { tip_height, tip_hash, value_balance }) => {
+        let (tip_height, tip_hash, tip_block_time, value_balance) = match state
+            .ready()
+            .and_then(|service| service.call(zebra_state::ReadRequest::TipPoolValues))
+            .await
+        {
+            Ok(zebra_state::ReadResponse::TipPoolValues {
+                tip_height,
+                tip_hash,
+                value_balance,
+            }) => {
                 let request = zebra_state::ReadRequest::BlockHeader(tip_hash.into());
                 let response: zebra_state::ReadResponse = state
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
                     .map_misc_error()?;
-                
+
                 if let zebra_state::ReadResponse::BlockHeader { header, .. } = response {
-                   (tip_height, tip_hash, header.time, value_balance)
+                    (tip_height, tip_hash, header.time, value_balance)
                 } else {
-                    unreachable!("unmatched response to a BlockHeader request")
+                    unreachable!("unmatched response to a TipPoolValues request")
                 }
             }
             _ => {
-                let request = zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(block::Height(0)));
+                let request =
+                    zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(Height::MIN));
                 let response: zebra_state::ReadResponse = state
                     .ready()
                     .and_then(|service| service.call(request))
                     .await
                     .map_misc_error()?;
-                
-                if let zebra_state::ReadResponse::BlockHeader { header, hash, height, .. } = response {
-                   (height, hash, header.time, ValueBalance::zero())
+
+                if let zebra_state::ReadResponse::BlockHeader {
+                    header,
+                    hash,
+                    height,
+                    ..
+                } = response
+                {
+                    (height, hash, header.time, ValueBalance::zero())
                 } else {
                     unreachable!("unmatched response to a BlockHeader request")
                 }
