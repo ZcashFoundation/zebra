@@ -1629,7 +1629,7 @@ impl AddressStrings {
         AddressStrings { addresses }
     }
 
-    /// Creates a new [`AddessStrings`] from a given vector, returns an error if any addresses are incorrect.
+    /// Creates a new [`AddressStrings`] from a given vector, returns an error if any addresses are incorrect.
     pub fn new_valid(addresses: Vec<String>) -> Result<AddressStrings> {
         let address_strings = Self { addresses };
         address_strings.clone().valid_addresses()?;
