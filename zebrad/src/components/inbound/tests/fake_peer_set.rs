@@ -168,6 +168,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
         ));
@@ -273,6 +274,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
         ));
@@ -375,6 +377,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
         ));
@@ -514,6 +517,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
                 transaction,
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
         ));

@@ -480,6 +480,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -487,6 +488,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
         )
@@ -510,6 +512,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
@@ -517,6 +520,7 @@ impl SpendConflictTestInput {
                 // make sure miner fee is big enough for all cases
                 Amount::try_from(1_000_000).expect("invalid value"),
                 0,
+                false,
             )
             .expect("verification should pass"),
         )

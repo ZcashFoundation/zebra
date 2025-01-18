@@ -251,6 +251,8 @@ where
                         known_utxos: known_utxos.clone(),
                         height,
                         time: block.header.time,
+                        #[cfg(any(test, feature = "proptest-impl"))]
+                        skip_checks: None,
                     });
                 async_checks.push(rsp);
             }

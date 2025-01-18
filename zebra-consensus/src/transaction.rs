@@ -158,6 +158,9 @@ pub enum Request {
         height: block::Height,
         /// The time that the block was mined.
         time: DateTime<Utc>,
+        /// Verification checks to skip, only in tests.
+        #[cfg(any(test, feature = "proptest-impl"))]
+        skip_checks: Option<HashSet<SkipCheck>>,
     },
     /// Verify the supplied transaction as part of the mempool.
     ///
@@ -172,6 +175,9 @@ pub enum Request {
         /// The next block is the first block that could possibly contain a
         /// mempool transaction.
         height: block::Height,
+        /// Verification checks to skip, only in tests.
+        #[cfg(any(test, feature = "proptest-impl"))]
+        skip_checks: Option<HashSet<SkipCheck>>,
     },
 }
 
@@ -318,6 +324,15 @@ impl Request {
     pub fn is_mempool(&self) -> bool {
         matches!(self, Request::Mempool { .. })
     }
+
+    /// Returns the verification checks that should be skipped, only in tests.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn skip_checks(&self) -> Option<HashSet<SkipCheck>> {
+        match self {
+            Request::Block { skip_checks, .. } => skip_checks.clone(),
+            Request::Mempool { skip_checks, .. } => skip_checks.clone(),
+        }
+    }
 }
 
 impl Response {
@@ -415,7 +430,12 @@ where
             // Do quick checks first
             check::has_inputs_and_outputs(&tx)?;
             check::has_enough_orchard_flags(&tx)?;
+            #[cfg(not(test))]
             check::consensus_branch_id(&tx, req.height(), &network)?;
+            #[cfg(test)]
+            if req.skip_checks().is_none_or(|c| !c.contains(&SkipCheck::ConsensusBranchId)) {
+                check::consensus_branch_id(&tx, req.height(), &network)?;
+            }
 
             // Validate the coinbase input consensus rules
             if req.is_mempool() && tx.is_coinbase() {
@@ -432,7 +452,12 @@ where
             if tx.is_coinbase() {
                 check::coinbase_expiry_height(&req.height(), &tx, &network)?;
             } else {
+                #[cfg(not(test))]
                 check::non_coinbase_expiry_height(&req.height(), &tx)?;
+                #[cfg(test)]
+                if req.skip_checks().is_none_or(|c| !c.contains(&SkipCheck::ExpiryHeight)) {
+                    check::non_coinbase_expiry_height(&req.height(), &tx)?;
+                }
             }
 
             // Consensus rule:
@@ -575,12 +600,20 @@ where
                     miner_fee,
                     legacy_sigop_count,
                 },
-                Request::Mempool { transaction, .. } => {
+                Request::Mempool { transaction: ref tx, .. } => {
+                    // #[cfg(test)]
+                    #[cfg(any(test, feature = "proptest-impl"))]
                     let transaction = VerifiedUnminedTx::new(
-                        transaction,
-                        miner_fee.expect(
-                            "unexpected mempool coinbase transaction: should have already rejected",
-                        ),
+                        tx.clone(),
+                        miner_fee.expect("fee should have been checked earlier"),
+                        legacy_sigop_count,
+                        req.skip_checks().is_some_and(|checks| checks.contains(&SkipCheck::Zip317))
+                    )?;
+
+                    #[cfg(not(any(test, feature = "proptest-impl")))]
+                    let transaction = VerifiedUnminedTx::new(
+                        tx.clone(),
+                        miner_fee.expect("fee should have been checked earlier"),
                         legacy_sigop_count,
                     )?;
 
@@ -1387,4 +1420,16 @@ where
     {
         AsyncChecks(iterator.into_iter().map(FutureExt::boxed).collect())
     }
+}
+
+/// Checks the tx verifier should skip, only in tests.
+#[cfg(any(test, feature = "proptest-impl"))]
+#[derive(Eq, Hash, PartialEq, Debug, Clone)]
+pub enum SkipCheck {
+    /// Skip checks related to the transaction consensus branch ID.
+    ConsensusBranchId,
+    /// Skip mempool checks defined in ZIP 317.
+    Zip317,
+    /// Skip the expiry height check.
+    ExpiryHeight,
 }
