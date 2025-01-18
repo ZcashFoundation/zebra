@@ -298,5 +298,10 @@ zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.11" }
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.44" }
 
+# Enable the "proptest-impl" feature for "self" in tests.
+# <https://github.com/rust-lang/cargo/issues/2911#issuecomment-749580481>
+# <https://github.com/rust-lang/cargo/issues/2911#issuecomment-1483256987>
+zebrad = { path = ".", features = ["proptest-impl"], default-features = false }
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }

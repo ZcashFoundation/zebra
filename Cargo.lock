@@ -6176,6 +6176,7 @@ dependencies = [
  "zebra-state",
  "zebra-test",
  "zebra-utils",
+ "zebrad",
 ]
 
 [[package]]
