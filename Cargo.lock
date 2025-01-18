@@ -5982,6 +5982,7 @@ dependencies = [
  "zcash_note_encryption",
  "zcash_primitives",
  "zebra-chain",
+ "zebra-consensus",
  "zebra-grpc",
  "zebra-node-services",
  "zebra-rpc",
