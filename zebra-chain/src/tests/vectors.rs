@@ -65,6 +65,7 @@ impl Network {
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
                     0,
+                    #[cfg(feature = "proptest-impl")]
                     false,
                 )
                 .ok()
