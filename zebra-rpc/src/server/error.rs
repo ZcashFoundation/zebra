@@ -8,7 +8,7 @@ use jsonrpsee_types::{ErrorCode, ErrorObject, ErrorObjectOwned};
 /// ## Notes
 ///
 /// - All explicit discriminants fit within `i64`.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub enum LegacyCode {
     // General application defined errors
     /// `std::exception` thrown in command handling

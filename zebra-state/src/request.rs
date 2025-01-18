@@ -1099,8 +1099,8 @@ impl ReadRequest {
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
-            ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
-            ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
+            ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
+            ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }

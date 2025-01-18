@@ -55,7 +55,7 @@ fn push_and_prune_for_network_upgrade(
         assert_eq!(first_commitment, ChainHistoryActivationReserved);
     }
 
-    // Build initial history tree tree with only the first block
+    // Build initial history tree with only the first block
     let first_sapling_root =
         sapling::tree::Root::try_from(**sapling_roots.get(&height).expect("test vector exists"))?;
     let mut tree = NonEmptyHistoryTree::from_block(
