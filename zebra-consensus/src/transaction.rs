@@ -601,20 +601,12 @@ where
                     legacy_sigop_count,
                 },
                 Request::Mempool { transaction: ref tx, .. } => {
-                    // #[cfg(test)]
-                    #[cfg(any(test, feature = "proptest-impl"))]
                     let transaction = VerifiedUnminedTx::new(
                         tx.clone(),
                         miner_fee.expect("fee should have been checked earlier"),
                         legacy_sigop_count,
+                        #[cfg(any(test, feature = "proptest-impl"))]
                         req.skip_checks().is_some_and(|checks| checks.contains(&SkipCheck::Zip317))
-                    )?;
-
-                    #[cfg(not(any(test, feature = "proptest-impl")))]
-                    let transaction = VerifiedUnminedTx::new(
-                        tx.clone(),
-                        miner_fee.expect("fee should have been checked earlier"),
-                        legacy_sigop_count,
                     )?;
 
                     if let Some(mut mempool) = mempool {
