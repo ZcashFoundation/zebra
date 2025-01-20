@@ -2150,21 +2150,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "jsonrpc-core"
-version = "18.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14f7f76aef2d054868398427f6c54943cf3d1caa9a7ec7d0c38d69df97a965eb"
-dependencies = [
- "futures",
- "futures-executor",
- "futures-util",
- "log",
- "serde",
- "serde_derive",
- "serde_json",
-]
-
-[[package]]
 name = "jsonrpsee"
 version = "0.24.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5895,7 +5880,7 @@ name = "zebra-node-services"
 version = "1.0.0-beta.44"
 dependencies = [
  "color-eyre",
- "jsonrpc-core",
+ "jsonrpsee-types",
  "reqwest",
  "serde",
  "serde_json",
