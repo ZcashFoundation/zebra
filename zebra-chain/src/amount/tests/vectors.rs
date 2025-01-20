@@ -180,12 +180,12 @@ fn deserialize_checks_bounds() -> Result<()> {
     let mut big_bytes = Vec::new();
     (&mut big_bytes)
         .write_u64::<LittleEndian>(big)
-        .expect("unexpected serialization failure: vec should be infalliable");
+        .expect("unexpected serialization failure: vec should be infallible");
 
     let mut neg_bytes = Vec::new();
     (&mut neg_bytes)
         .write_i64::<LittleEndian>(neg)
-        .expect("unexpected serialization failure: vec should be infalliable");
+        .expect("unexpected serialization failure: vec should be infallible");
 
     Amount::<NonNegative>::zcash_deserialize(big_bytes.as_slice())
         .expect_err("deserialization should reject too large values");
