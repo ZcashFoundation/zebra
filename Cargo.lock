@@ -5896,6 +5896,7 @@ version = "1.0.0-beta.44"
 dependencies = [
  "color-eyre",
  "jsonrpc-core",
+ "jsonrpsee-types",
  "reqwest",
  "serde",
  "serde_json",
