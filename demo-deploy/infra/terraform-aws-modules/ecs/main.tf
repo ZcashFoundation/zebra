@@ -118,6 +118,16 @@ resource "aws_ecs_task_definition" "task" {
           awslogs-stream-prefix = "ecs"
         }
       } : null
+      healthCheck = {
+        command = [
+          "CMD-SHELL",
+          "curl --silent --user myusername --data-binary '{\"jsonrpc\": \"1.0\", \"id\":\"curltest\", \"method\": \"getinfo\", \"params\": [] }' -H 'content-type: text/plain;' http://127.0.0.1:8232/ | grep 'version'"
+        ]
+        interval           = 15
+        timeout            = 10
+        retries            = 3
+        startPeriod        = 120
+      }
       
     mountPoints = var.enable_persistent ? [{
         sourceVolume  = "persistent-volume"
@@ -345,7 +355,7 @@ resource "aws_security_group" "efs_sg" {
 
 data "aws_route53_zone" "selected" {
   count        = var.enable_domain ? 1 : 0
-  name         = var.domain
+  name         = var.zone_name
   private_zone = false
 }
 

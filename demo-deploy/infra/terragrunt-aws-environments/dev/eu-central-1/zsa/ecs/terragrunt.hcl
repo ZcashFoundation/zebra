@@ -45,8 +45,8 @@ inputs = {
   enable_logging = true
 
   enable_domain = true
-  domain = "zebra.qed-it.com"
-  zone_name = "zebra.qed-it.com"
+  domain = "zebra.zsa-test.net"
+  zone_name = "zsa-test.net"
 
   persistent_volume_size = 40
 
