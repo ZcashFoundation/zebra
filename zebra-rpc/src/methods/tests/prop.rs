@@ -12,14 +12,13 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, Header, Height},
+    block::{self, Block, Height},
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
     value_balance::ValueBalance,
-    work::equihash::Solution,
 };
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, HashOrHeight};
@@ -503,22 +502,21 @@ proptest! {
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network.clone(), NoChainTip);
 
+        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
+        tokio::time::pause();
 
         let genesis_block = match network {
             Network::Mainnet => {
-                let block_bytes = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS[&0];
+                let block_bytes = &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES;
                 let block: Arc<Block> = block_bytes.zcash_deserialize_into().expect("block is valid");
                 block
             },
             Network::Testnet(_) => {
-                let block_bytes = zebra_test::vectors::CONTINUOUS_TESTNET_BLOCKS[&0];
+                let block_bytes = &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES;
                 let block: Arc<Block> = block_bytes.zcash_deserialize_into().expect("block is valid");
                 block
             },
         };
-
-        // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
-        tokio::time::pause();
 
         // Genesis block fields
         let block_time = genesis_block.header.time;
