@@ -538,14 +538,6 @@ impl NetworkUpgrade {
     ) -> Duration {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
     }
-
-    /// Returns the NetworkUpgrade given an u32 as ConsensusBranchId
-    pub fn from_branch_id(branch_id: u32) -> Option<NetworkUpgrade> {
-        CONSENSUS_BRANCH_IDS
-            .iter()
-            .find(|id| id.1 == ConsensusBranchId(branch_id))
-            .map(|nu| nu.0)
-    }
 }
 
 impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
