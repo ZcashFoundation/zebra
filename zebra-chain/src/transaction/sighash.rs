@@ -2,7 +2,7 @@
 
 use super::Transaction;
 
-use crate::parameters::ConsensusBranchId;
+use crate::parameters::NetworkUpgrade;
 use crate::transparent;
 
 use crate::primitives::zcash_primitives::{sighash, PrecomputedTxData};
@@ -49,12 +49,11 @@ impl<'a> SigHasher<'a> {
     /// Create a new SigHasher for the given transaction.
     pub fn new(
         trans: &'a Transaction,
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         all_previous_outputs: &'a [transparent::Output],
     ) -> Self {
-        let precomputed_tx_data = PrecomputedTxData::new(trans, branch_id, all_previous_outputs);
         SigHasher {
-            precomputed_tx_data,
+            precomputed_tx_data: PrecomputedTxData::new(trans, nu, all_previous_outputs),
         }
     }
 

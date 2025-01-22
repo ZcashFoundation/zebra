@@ -37,11 +37,12 @@ pub use sighash::{HashType, SigHash, SigHasher};
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
+use zcash_protocol::consensus;
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize,
@@ -217,22 +218,22 @@ impl Transaction {
     /// - if the input index is out of bounds for self.inputs()
     pub fn sighash(
         &self,
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         hash_type: sighash::HashType,
         all_previous_outputs: &[transparent::Output],
         input_index_script_code: Option<(usize, Vec<u8>)>,
     ) -> SigHash {
-        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
+        sighash::SigHasher::new(self, nu, all_previous_outputs)
             .sighash(hash_type, input_index_script_code)
     }
 
     /// Return a [`SigHasher`] for this transaction.
     pub fn sighasher<'a>(
         &'a self,
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         all_previous_outputs: &'a [transparent::Output],
     ) -> sighash::SigHasher<'a> {
-        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
+        sighash::SigHasher::new(self, nu, all_previous_outputs)
     }
 
     /// Compute the authorizing data commitment of this transaction as specified
@@ -1226,6 +1227,29 @@ impl Transaction {
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+    }
+
+    /// Converts [`Transaction`] to [`zcash_primitives::transaction::Transaction`].
+    pub(crate) fn to_librustzcash(
+        &self,
+        nu: NetworkUpgrade,
+    ) -> Result<zcash_primitives::transaction::Transaction, crate::Error> {
+        if self.network_upgrade().is_some_and(|tx_nu| tx_nu != nu) {
+            return Err(crate::Error::InvalidConsensusBranchId);
+        }
+
+        let Some(branch_id) = nu.branch_id() else {
+            return Err(crate::Error::InvalidConsensusBranchId);
+        };
+
+        let Ok(branch_id) = consensus::BranchId::try_from(branch_id) else {
+            return Err(crate::Error::InvalidConsensusBranchId);
+        };
+
+        Ok(zcash_primitives::transaction::Transaction::read(
+            &self.zcash_serialize_to_vec()?[..],
+            branch_id,
+        )?)
     }
 }
 
