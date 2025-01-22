@@ -416,7 +416,7 @@ where
     }
 }
 
-// TODO: add infalliable impls for NonNegative <-> NegativeOrZero,
+// TODO: add infallible impls for NonNegative <-> NegativeOrZero,
 //       when Rust uses trait output types to disambiguate overlapping impls.
 impl<C> std::ops::Neg for Amount<C>
 where
