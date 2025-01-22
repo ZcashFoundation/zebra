@@ -216,6 +216,15 @@ impl fmt::Display for ConsensusBranchId {
     }
 }
 
+impl TryFrom<ConsensusBranchId> for zcash_primitives::consensus::BranchId {
+    type Error = crate::Error;
+
+    fn try_from(id: ConsensusBranchId) -> Result<Self, Self::Error> {
+        zcash_primitives::consensus::BranchId::try_from(u32::from(id))
+            .map_err(|_| Self::Error::InvalidConsensusBranchId)
+    }
+}
+
 /// Network Upgrade Consensus Branch Ids.
 ///
 /// Branch ids are the same for mainnet and testnet. If there is a testnet
