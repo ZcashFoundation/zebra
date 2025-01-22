@@ -150,34 +150,6 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
 
 // End of (mostly) copied code
 
-impl TryFrom<&Transaction> for zp_tx::Transaction {
-    type Error = io::Error;
-
-    /// Convert a Zebra transaction into a librustzcash one.
-    ///
-    /// # Panics
-    ///
-    /// If the transaction is not V5. (Currently there is no need for this
-    /// conversion for other versions.)
-    #[allow(clippy::unwrap_in_result)]
-    fn try_from(trans: &Transaction) -> Result<Self, Self::Error> {
-        let network_upgrade = match trans {
-            Transaction::V5 {
-                network_upgrade, ..
-            } => network_upgrade,
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => panic!("Zebra only uses librustzcash for V5 transactions"),
-        };
-
-        convert_tx_to_librustzcash(
-            trans,
-            network_upgrade.branch_id().expect("V5 txs have branch IDs"),
-        )
-    }
-}
-
 /// Convert a Zebra transparent::Output into a librustzcash one.
 impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
     type Error = io::Error;
