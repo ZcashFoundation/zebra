@@ -209,14 +209,17 @@ pub(crate) struct PrecomputedTxData<'a> {
 }
 
 impl<'a> PrecomputedTxData<'a> {
-    /// Compute data used for sighash or txid computation.
+    /// Computes the data used for sighash or txid computation.
     ///
     /// # Inputs
     ///
-    /// - `tx`: the relevant transaction
-    /// - `branch_id`: the branch ID of the transaction
-    /// - `all_previous_outputs` the transparent Output matching each
-    ///   transparent input in the transaction.
+    /// - `tx`: the relevant transaction.
+    /// - `nu`: the network upgrade to which the transaction belongs.
+    /// - `all_previous_outputs`: the transparent Output matching each transparent input in `tx`.
+    ///
+    /// # Panics
+    ///
+    /// - If `tx` can't be converted to its `librustzcash` equivalent.
     pub(crate) fn new(
         tx: &'a Transaction,
         nu: NetworkUpgrade,
