@@ -63,6 +63,18 @@ pub enum NetworkUpgrade {
     Nu6,
 }
 
+impl TryFrom<u32> for NetworkUpgrade {
+    type Error = crate::Error;
+
+    fn try_from(branch_id: u32) -> Result<Self, Self::Error> {
+        CONSENSUS_BRANCH_IDS
+            .iter()
+            .find(|id| id.1 == ConsensusBranchId(branch_id))
+            .map(|nu| nu.0)
+            .ok_or(Self::Error::InvalidConsensusBranchId)
+    }
+}
+
 impl fmt::Display for NetworkUpgrade {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         // Same as the debug representation for now
