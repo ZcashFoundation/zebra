@@ -1777,7 +1777,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
-        let network_upgrade = NetworkUpgrade::Canopy;
+        let nu = NetworkUpgrade::Canopy;
 
         let canopy_activation_height = NetworkUpgrade::Canopy
             .activation_height(&network)
@@ -1804,12 +1804,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(
-            network_upgrade.branch_id().expect("must have branch ID"),
-            HashType::ALL,
-            &[],
-            None,
-        );
+        let sighash = transaction.sighash(nu, HashType::ALL, &[], None);
 
         match &mut transaction {
             Transaction::V4 {
@@ -1850,7 +1845,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
     let _init_guard = zebra_test::init();
     zebra_test::MULTI_THREADED_RUNTIME.block_on(async {
         let network = Network::Mainnet;
-        let network_upgrade = NetworkUpgrade::Canopy;
+        let nu = NetworkUpgrade::Canopy;
 
         let canopy_activation_height = NetworkUpgrade::Canopy
             .activation_height(&network)
@@ -1883,12 +1878,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(
-            network_upgrade.branch_id().expect("must have branch ID"),
-            HashType::ALL,
-            &[],
-            None,
-        );
+        let sighash = transaction.sighash(nu, HashType::ALL, &[], None);
 
         match &mut transaction {
             Transaction::V4 {

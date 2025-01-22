@@ -320,7 +320,9 @@ fn empty_v5_librustzcash_round_trip() {
     let _init_guard = zebra_test::init();
 
     let tx: &Transaction = &EMPTY_V5_TX;
-    let _alt_tx: zcash_primitives::transaction::Transaction = tx.try_into().expect(
+    let nu = tx.network_upgrade().expect("network upgrade");
+
+    tx.to_librustzcash(nu).expect(
         "librustzcash deserialization might work for empty zebra serialized transactions. \
         Hint: if empty transactions fail, but other transactions work, delete this test",
     );
@@ -417,9 +419,10 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
                 "v1-v4 transaction data must change when converted to fake v5"
             );
 
-            let _alt_tx: zcash_primitives::transaction::Transaction = fake_tx
-                .as_ref()
-                .try_into()
+            let nu = fake_tx.network_upgrade().expect("network upgrade");
+
+            fake_tx
+                .to_librustzcash(nu)
                 .expect("librustzcash deserialization must work for zebra serialized transactions");
         }
     }
@@ -430,14 +433,14 @@ fn zip244_round_trip() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     for test in zip0244::TEST_VECTORS.iter() {
-        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
-        let reencoded = transaction.zcash_serialize_to_vec()?;
+        let tx = test.tx.zcash_deserialize_into::<Transaction>()?;
+        let reencoded = tx.zcash_serialize_to_vec()?;
+
         assert_eq!(test.tx, reencoded);
 
-        // The borrow is actually needed to call the correct trait impl
-        #[allow(clippy::needless_borrow)]
-        let _alt_tx: zcash_primitives::transaction::Transaction = (&transaction)
-            .try_into()
+        let nu = tx.network_upgrade().expect("network upgrade");
+
+        tx.to_librustzcash(nu)
             .expect("librustzcash deserialization must work for zebra serialized transactions");
     }
 
@@ -449,9 +452,10 @@ fn zip244_txid() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     for test in zip0244::TEST_VECTORS.iter() {
-        let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
-        let hasher = TxIdBuilder::new(&transaction);
-        let txid = hasher.txid()?;
+        let txid = TxIdBuilder::new(&test.tx.zcash_deserialize_into::<Transaction>()?)
+            .txid()
+            .expect("txid");
+
         assert_eq!(txid.0, test.txid);
     }
 
@@ -482,11 +486,7 @@ fn test_vec143_1() -> Result<()> {
 
     let transaction = ZIP143_1.zcash_deserialize_into::<Transaction>()?;
 
-    let hasher = SigHasher::new(
-        &transaction,
-        NetworkUpgrade::Overwinter.branch_id().unwrap(),
-        &[],
-    );
+    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Overwinter, &[]);
 
     let hash = hasher.sighash(HashType::ALL, None);
     let expected = "a1f1a4e5cd9bd522322d661edd2af1bf2a7019cfab94ece18f4ba935b0a19073";
@@ -520,7 +520,7 @@ fn test_vec143_2() -> Result<()> {
 
     let hasher = SigHasher::new(
         &transaction,
-        NetworkUpgrade::Overwinter.branch_id().unwrap(),
+        NetworkUpgrade::Overwinter,
         &all_previous_outputs,
     );
 
@@ -549,11 +549,7 @@ fn test_vec243_1() -> Result<()> {
 
     let transaction = ZIP243_1.zcash_deserialize_into::<Transaction>()?;
 
-    let hasher = SigHasher::new(
-        &transaction,
-        NetworkUpgrade::Sapling.branch_id().unwrap(),
-        &[],
-    );
+    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, &[]);
 
     let hash = hasher.sighash(HashType::ALL, None);
     let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
@@ -567,11 +563,7 @@ fn test_vec243_1() -> Result<()> {
     let _guard = span.enter();
     assert_eq!(expected, result);
 
-    let precomputed_tx_data = PrecomputedTxData::new(
-        &transaction,
-        NetworkUpgrade::Sapling.branch_id().unwrap(),
-        &[],
-    );
+    let precomputed_tx_data = PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, &[]);
     let alt_sighash =
         crate::primitives::zcash_primitives::sighash(&precomputed_tx_data, HashType::ALL, None);
     let result = hex::encode(alt_sighash);
@@ -595,11 +587,7 @@ fn test_vec243_2() -> Result<()> {
     };
     let all_previous_outputs = mock_pre_v5_output_list(output, input_ind);
 
-    let hasher = SigHasher::new(
-        &transaction,
-        NetworkUpgrade::Sapling.branch_id().unwrap(),
-        &all_previous_outputs,
-    );
+    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, &all_previous_outputs);
 
     let hash = hasher.sighash(
         HashType::NONE,
@@ -624,11 +612,8 @@ fn test_vec243_2() -> Result<()> {
     let index = input_ind;
     let all_previous_outputs = mock_pre_v5_output_list(prevout, input_ind);
 
-    let precomputed_tx_data = PrecomputedTxData::new(
-        &transaction,
-        NetworkUpgrade::Sapling.branch_id().unwrap(),
-        &all_previous_outputs,
-    );
+    let precomputed_tx_data =
+        PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, &all_previous_outputs);
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &precomputed_tx_data,
         HashType::NONE,
@@ -656,11 +641,7 @@ fn test_vec243_3() -> Result<()> {
         lock_script: lock_script.clone(),
     }];
 
-    let hasher = SigHasher::new(
-        &transaction,
-        NetworkUpgrade::Sapling.branch_id().unwrap(),
-        &all_previous_outputs,
-    );
+    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, &all_previous_outputs);
 
     let hash = hasher.sighash(
         HashType::ALL,
@@ -687,11 +668,8 @@ fn test_vec243_3() -> Result<()> {
     let index = input_ind;
 
     let all_previous_outputs = &[prevout];
-    let precomputed_tx_data = PrecomputedTxData::new(
-        &transaction,
-        NetworkUpgrade::Sapling.branch_id().unwrap(),
-        all_previous_outputs,
-    );
+    let precomputed_tx_data =
+        PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, all_previous_outputs);
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &precomputed_tx_data,
         HashType::ALL,
@@ -724,7 +702,7 @@ fn zip143_sighash() -> Result<()> {
             None => vec![],
         };
         let result = hex::encode(transaction.sighash(
-            ConsensusBranchId(test.consensus_branch_id),
+            NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
             HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
             &all_previous_outputs,
             input_index.map(|input_index| {
@@ -762,7 +740,7 @@ fn zip243_sighash() -> Result<()> {
             None => vec![],
         };
         let result = hex::encode(transaction.sighash(
-            ConsensusBranchId(test.consensus_branch_id),
+            NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
             HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
             &all_previous_outputs,
             input_index.map(|input_index| {
@@ -797,7 +775,7 @@ fn zip244_sighash() -> Result<()> {
             .collect();
 
         let result = hex::encode(transaction.sighash(
-            NetworkUpgrade::Nu5.branch_id().unwrap(),
+            NetworkUpgrade::Nu5,
             HashType::ALL,
             &all_previous_outputs,
             None,
@@ -808,7 +786,7 @@ fn zip244_sighash() -> Result<()> {
         if let Some(sighash_all) = test.sighash_all {
             let result = hex::encode(
                 transaction.sighash(
-                    NetworkUpgrade::Nu5.branch_id().unwrap(),
+                    NetworkUpgrade::Nu5,
                     HashType::ALL,
                     &all_previous_outputs,
                     test.transparent_input
@@ -840,9 +818,7 @@ fn binding_signatures() {
             .block_iter()
             .skip_while(|(height, _)| **height < sapling_activation_height)
         {
-            let branch_id = NetworkUpgrade::current(&net, Height(*height))
-                .branch_id()
-                .expect("consensus branch ID");
+            let nu = NetworkUpgrade::current(&net, Height(*height));
 
             for tx in block
                 .zcash_deserialize_into::<Block>()
@@ -856,7 +832,7 @@ fn binding_signatures() {
                         ..
                     } => {
                         if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            let sighash = tx.sighash(branch_id, HashType::ALL, &[], None);
+                            let sighash = tx.sighash(nu, HashType::ALL, &[], None);
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),
@@ -885,7 +861,7 @@ fn binding_signatures() {
                                 continue;
                             }
 
-                            let sighash = tx.sighash(branch_id, HashType::ALL, &[], None);
+                            let sighash = tx.sighash(nu, HashType::ALL, &[], None);
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),
