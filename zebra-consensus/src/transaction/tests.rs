@@ -3108,53 +3108,36 @@ async fn v5_consensus_branch_ids_sighash() {
         // need to disable some additional checks to let the verifier reach the binding sig
         // verification.
 
-        let block_verification_result = verifier
-            .clone()
-            .oneshot(block_req_with(
-                NetworkUpgrade::Nu6,
-                Some(HashSet::from_iter([
-                    SkipCheck::ConsensusBranchId,
-                    SkipCheck::ExpiryHeight,
-                ])),
-            ))
-            .map_ok(|rsp| rsp.tx_id())
-            .map_err(|e| format!("{e}"))
-            .await;
+        // Try a block request under NU6.
 
-        assert_eq!(block_verification_result, Ok(tx_id));
+        std::panic::AssertUnwindSafe(verifier.clone().oneshot(block_req_with(
+            NetworkUpgrade::Nu6,
+            Some(HashSet::from_iter([
+                SkipCheck::ConsensusBranchId,
+                SkipCheck::ExpiryHeight,
+            ])),
+        )))
+        .catch_unwind()
+        .await
+        .expect_err("SIGHASH computation should panic due to an invalid consenus branch id in tx");
 
-        let verifier_req = verifier
-            .clone()
-            .oneshot(mempool_req_with(
-                NetworkUpgrade::Nu6,
-                Some(HashSet::from_iter([
-                    SkipCheck::ConsensusBranchId,
-                    SkipCheck::ExpiryHeight,
-                    // We need to skip ZIP 317 mempool checks because we don't have a Testnet V5 tx
-                    // in our test vectors without unpaid actions.
-                    //
-                    // TODO: Add at least one V5 tx with no unpaid actions to Testnet test vectors.
-                    SkipCheck::Zip317,
-                ])),
-            ))
-            .map_ok(|rsp| rsp.tx_id())
-            .map_err(|e| format!("{e}"));
+        // Try a mempool request under NU6.
 
-        let state_req = async {
-            state
-                .expect_request_that(|req| {
-                    matches!(
-                        req,
-                        zebra_state::Request::CheckBestChainTipNullifiersAndAnchors(_)
-                    )
-                })
-                .map(|r| r.respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors))
-                .await;
-        };
-
-        let (_, mempool_verification_result) = futures::join!(state_req, verifier_req);
-
-        assert_eq!(mempool_verification_result, Ok(tx_id));
+        std::panic::AssertUnwindSafe(verifier.clone().oneshot(mempool_req_with(
+            NetworkUpgrade::Nu6,
+            Some(HashSet::from_iter([
+                SkipCheck::ConsensusBranchId,
+                SkipCheck::ExpiryHeight,
+                // We need to skip ZIP 317 mempool checks because we don't have a Testnet V5 tx
+                // in our test vectors without unpaid actions.
+                //
+                // TODO: Add at least one V5 tx with no unpaid actions to Testnet test vectors.
+                SkipCheck::Zip317,
+            ])),
+        )))
+        .catch_unwind()
+        .await
+        .expect_err("SIGHASH computation should panic due to an invalid consenus branch id tx");
     }
 }
 
