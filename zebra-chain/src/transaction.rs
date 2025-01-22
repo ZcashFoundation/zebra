@@ -1230,6 +1230,10 @@ impl Transaction {
     }
 
     /// Converts [`Transaction`] to [`zcash_primitives::transaction::Transaction`].
+    ///
+    /// If the tx contains a network upgrade, this network upgrade must match the passed `nu`. The
+    /// passed `nu` must also contain a consensus branch id convertible to its `librustzcash`
+    /// equivalent.
     pub(crate) fn to_librustzcash(
         &self,
         nu: NetworkUpgrade,
