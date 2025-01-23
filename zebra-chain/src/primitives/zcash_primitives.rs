@@ -220,6 +220,26 @@ impl<'a> PrecomputedTxData<'a> {
     /// # Panics
     ///
     /// - If `tx` can't be converted to its `librustzcash` equivalent.
+    ///
+    /// # Consensus
+    ///
+    /// > [NU5 only, pre-NU6] All transactions MUST use the NU5 consensus branch ID `0xF919A198` as
+    /// > defined in [ZIP-252].
+    ///
+    /// > [NU6 only] All transactions MUST use the NU6 consensus branch ID `0xC8E71055` as defined
+    /// > in  [ZIP-253].
+    ///
+    /// # Notes
+    ///
+    /// The check that ensures compliance with the two consensus rules stated above takes place in
+    /// the [`Transaction::to_librustzcash`] method. If the check fails, the tx can't be converted
+    /// to its `librustzcash` equivalent, which leads to a panic. The check relies on the passed
+    /// `nu` parameter, which uniquely represents a consensus branch id and can, therefore, be used
+    /// as an equivalent to a consensus branch id. The desired `nu` is set either by the script or
+    /// tx verifier in `zebra-consensus`.
+    ///
+    /// [ZIP-252]: <https://zips.z.cash/zip-0252>
+    /// [ZIP-253]: <https://zips.z.cash/zip-0253>
     pub(crate) fn new(
         tx: &'a Transaction,
         nu: NetworkUpgrade,
