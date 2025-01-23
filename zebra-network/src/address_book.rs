@@ -265,7 +265,7 @@ impl AddressBook {
     /// Get the active addresses in `self` in random order with sanitized timestamps,
     /// including our local listener address.
     ///
-    /// Limited to a the number of peer addresses Zebra should give out per `GetAddr` request.
+    /// Limited to the number of peer addresses Zebra should give out per `GetAddr` request.
     pub fn fresh_get_addr_response(&self) -> Vec<MetaAddr> {
         let now = Utc::now();
         let mut peers = self.sanitized(now);
