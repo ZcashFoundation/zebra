@@ -152,9 +152,8 @@ impl CachedFfiTransaction {
         &self.all_previous_outputs
     }
 
-    /// Verify if the script in the input at `input_index` of a transaction correctly
-    /// spends the matching [`transparent::Output`] it refers to, with the [`ConsensusBranchId`]
-    /// of the block containing the transaction.
+    /// Verify if the script in the input at `input_index` of a transaction correctly spends the
+    /// matching [`transparent::Output`] it refers to.
     #[allow(clippy::unwrap_in_result)]
     pub fn is_valid(&self, nu: NetworkUpgrade, input_index: usize) -> Result<(), Error> {
         let previous_output = self
