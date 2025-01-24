@@ -344,7 +344,9 @@ mod tests {
         };
         let input_index = 0;
         let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index)
+            .expect_err("verification should fail");
 
         Ok(())
     }
@@ -390,7 +392,9 @@ mod tests {
         let input_index = 0;
 
         verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index + 1)?;
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
 
         Ok(())
     }
@@ -412,7 +416,9 @@ mod tests {
 
         let input_index = 0;
 
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index + 1)?;
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
         verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
 
         Ok(())
@@ -435,8 +441,12 @@ mod tests {
 
         let input_index = 0;
 
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index + 1)?;
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index + 1)?;
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
 
         Ok(())
     }
