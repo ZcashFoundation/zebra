@@ -65,7 +65,7 @@ pub enum Error {
 
     /// Zebra's type could not be converted to its librustzcash equivalent.
     #[error("Zebra's type could not be converted to its librustzcash equivalent: ")]
-    Convertion(#[from] io::Error),
+    Conversion(#[from] io::Error),
 
     /// The transaction is missing a network upgrade.
     #[error("the transaction is missing a network upgrade")]

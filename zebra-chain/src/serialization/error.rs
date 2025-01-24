@@ -56,7 +56,7 @@ impl From<crate::Error> for SerializationError {
     fn from(value: crate::Error) -> Self {
         match value {
             crate::Error::InvalidConsensusBranchId => Self::Parse("invalid consensus branch id"),
-            crate::Error::Convertion(e) => Self::Io(e),
+            crate::Error::Conversion(e) => Self::Io(e),
             crate::Error::MissingNetworkUpgrade => Self::Parse("missing network upgrade"),
         }
     }
