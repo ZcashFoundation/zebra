@@ -25,7 +25,7 @@ use zebra_chain::{
 /// will work with inline links.
 #[allow(unused_imports)]
 use crate::{
-    constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA},
+    constants::{MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS},
     ReadResponse, Response,
 };
 
@@ -86,6 +86,15 @@ impl HashOrHeight {
             Some(*height)
         } else {
             None
+        }
+    }
+}
+
+impl std::fmt::Display for HashOrHeight {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            HashOrHeight::Hash(hash) => write!(f, "{hash}"),
+            HashOrHeight::Height(height) => write!(f, "{}", height.0),
         }
     }
 }
@@ -721,7 +730,7 @@ pub enum Request {
     /// Stops the list of headers after:
     ///   * adding the best tip,
     ///   * adding the header matching the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding [`MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA`] headers to the list.
+    ///   * adding [`MAX_FIND_BLOCK_HEADERS_RESULTS`] headers to the list.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -925,7 +934,7 @@ pub enum ReadRequest {
     /// Stops the list of headers after:
     ///   * adding the best tip,
     ///   * adding the header matching the `stop` hash to the list, if it is in the best chain, or
-    ///   * adding [`MAX_FIND_BLOCK_HEADERS_RESULTS_FOR_ZEBRA`] headers to the list.
+    ///   * adding [`MAX_FIND_BLOCK_HEADERS_RESULTS`] headers to the list.
     ///
     /// Returns an empty list if the state is empty.
     ///
@@ -1090,8 +1099,8 @@ impl ReadRequest {
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
             ReadRequest::AddressBalance { .. } => "address_balance",
-            ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addesses",
-            ReadRequest::UtxosByAddresses(_) => "utxos_by_addesses",
+            ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
+            ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",
             ReadRequest::CheckBestChainTipNullifiersAndAnchors(_) => {
                 "best_chain_tip_nullifiers_anchors"
             }

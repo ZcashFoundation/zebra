@@ -622,9 +622,8 @@ impl ZcashSerialize for Transaction {
                 }
 
                 // Denoted as `bindingSigSapling` in the spec.
-                match sapling_shielded_data {
-                    Some(sd) => writer.write_all(&<[u8; 64]>::from(sd.binding_sig)[..])?,
-                    None => {}
+                if let Some(shielded_data) = sapling_shielded_data {
+                    writer.write_all(&<[u8; 64]>::from(shielded_data.binding_sig)[..])?;
                 }
             }
 
@@ -890,7 +889,7 @@ impl ZcashDeserialize for Transaction {
                 // Convert it to a NetworkUpgrade
                 let network_upgrade =
                     NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
-                        .ok_or_else(|| {
+                        .ok_or({
                             SerializationError::Parse(
                                 "expected a valid network upgrade from the consensus branch id",
                             )

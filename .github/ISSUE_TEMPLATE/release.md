@@ -16,7 +16,7 @@ They can be skipped for urgent releases.
 
 To check consensus correctness, we want to test that the state format is valid after a full sync. (Format upgrades are tested in CI on each PR.)
 
-- [ ] Make sure there has been [at least one successful full sync test](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-integration-tests-gcp.yml?query=event%3Aschedule) since the last state change, or
+- [ ] Make sure there has been [at least one successful full sync test](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml?query=event%3Aschedule) since the last state change, or
 - [ ] Start a manual workflow run with a Zebra and `lightwalletd` full sync.
 
 State format changes can be made in `zebra-state` or `zebra-chain`. The state format can be changed by data that is sent to the state, data created within the state using `zebra-chain`, or serialization formats in `zebra-state` or `zebra-chain`. 

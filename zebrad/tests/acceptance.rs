@@ -2555,7 +2555,7 @@ async fn submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
 
-/// Check that the the end of support code is called at least once.
+/// Check that the end of support code is called at least once.
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -2914,7 +2914,8 @@ async fn validate_regtest_genesis_block() {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state).await;
+    ) = zebra_consensus::router::init_test(zebra_consensus::Config::default(), &network, state)
+        .await;
 
     let genesis_hash = block_verifier_router
         .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
@@ -3269,7 +3270,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             types::submit_block,
         },
         hex_data::HexData,
-        GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+        GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
     };
     use zebra_test::mock_service::MockService;
     let _init_guard = zebra_test::init();
@@ -3314,8 +3315,12 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), &network, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
 
     tracing::info!("started state service and block verifier, committing Regtest genesis block");
 
@@ -3348,6 +3353,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             .await
             .respond(mempool::Response::FullTransactions {
                 transactions: vec![],
+                transaction_dependencies: Default::default(),
                 // tip hash needs to match chain info for long poll requests
                 last_seen_tip_hash: genesis_hash,
             });
@@ -3474,7 +3480,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         "invalid block with excessive coinbase output value should be rejected"
     );
 
-    // Use an invalid coinbase transaction (with an output value less than than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
+    // Use an invalid coinbase transaction (with an output value less than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
     let network = base_network_params
         .clone()
         .with_post_nu6_funding_streams(ConfiguredFundingStreams {
@@ -3531,4 +3537,16 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     Ok(())
+}
+
+/// Check that Zebra does not depend on any crates from git sources.
+#[test]
+#[ignore]
+fn check_no_git_refs_in_cargo_lock() {
+    let cargo_lock_contents =
+        fs::read_to_string("../Cargo.lock").expect("should have Cargo.lock file in root dir");
+
+    if cargo_lock_contents.contains(r#"source = "git+"#) {
+        panic!("Cargo.lock includes git sources")
+    }
 }

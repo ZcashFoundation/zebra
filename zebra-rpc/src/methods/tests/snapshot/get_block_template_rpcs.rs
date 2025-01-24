@@ -12,7 +12,7 @@ use std::{
 
 use hex::FromHex;
 use insta::Settings;
-use jsonrpc_core::Result;
+use jsonrpsee::core::RpcResult as Result;
 use tower::{buffer::Buffer, Service};
 
 use zebra_chain::{
@@ -47,7 +47,7 @@ use crate::methods::{
     },
     hex_data::HexData,
     tests::{snapshot::EXCESSIVE_BLOCK_HEIGHT, utils::fake_history_tree},
-    GetBlockHash, GetBlockTemplateRpc, GetBlockTemplateRpcImpl,
+    GetBlockHash, GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
 };
 
 pub async fn test_responses<State, ReadState>(
@@ -86,8 +86,12 @@ pub async fn test_responses<State, ReadState>(
         _transaction_verifier,
         _parameter_download_task_handle,
         _max_checkpoint_height,
-    ) = zebra_consensus::router::init(zebra_consensus::Config::default(), network, state.clone())
-        .await;
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        network,
+        state.clone(),
+    )
+    .await;
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
@@ -101,7 +105,8 @@ pub async fn test_responses<State, ReadState>(
         extra_coinbase_data: None,
         debug_like_zcashd: true,
         // TODO: Use default field values when optional features are enabled in tests #8183
-        ..Default::default()
+        #[cfg(feature = "internal-miner")]
+        internal_miner: true,
     };
 
     // nu5 block height
@@ -261,6 +266,7 @@ pub async fn test_responses<State, ReadState>(
                 .await
                 .respond(mempool::Response::FullTransactions {
                     transactions: vec![],
+                    transaction_dependencies: Default::default(),
                     // tip hash needs to match chain info for long poll requests
                     last_seen_tip_hash: fake_tip_hash,
                 });
@@ -482,20 +488,18 @@ pub async fn test_responses<State, ReadState>(
     // `z_listunifiedreceivers`
 
     let ua1 = String::from("u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf");
-    let z_list_unified_receivers =
-        tokio::spawn(get_block_template_rpc.z_list_unified_receivers(ua1))
-            .await
-            .expect("unexpected panic in z_list_unified_receivers RPC task")
-            .expect("unexpected error in z_list_unified_receivers RPC call");
+    let z_list_unified_receivers = get_block_template_rpc
+        .z_list_unified_receivers(ua1)
+        .await
+        .expect("unexpected error in z_list_unified_receivers RPC call");
 
     snapshot_rpc_z_listunifiedreceivers("ua1", z_list_unified_receivers, &settings);
 
     let ua2 = String::from("u1uf4qsmh037x2jp6k042h9d2w22wfp39y9cqdf8kcg0gqnkma2gf4g80nucnfeyde8ev7a6kf0029gnwqsgadvaye9740gzzpmr67nfkjjvzef7rkwqunqga4u4jges4tgptcju5ysd0");
-    let z_list_unified_receivers =
-        tokio::spawn(get_block_template_rpc.z_list_unified_receivers(ua2))
-            .await
-            .expect("unexpected panic in z_list_unified_receivers RPC task")
-            .expect("unexpected error in z_list_unified_receivers RPC call");
+    let z_list_unified_receivers = get_block_template_rpc
+        .z_list_unified_receivers(ua2)
+        .await
+        .expect("unexpected error in z_list_unified_receivers RPC call");
 
     snapshot_rpc_z_listunifiedreceivers("ua2", z_list_unified_receivers, &settings);
 }

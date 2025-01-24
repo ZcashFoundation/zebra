@@ -1,5 +1,5 @@
 # Google Cloud docs updates that run when docs, Rust code, or dependencies are modified,
-# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are deployed by mergify.)
+# but only on PRs from the ZcashFoundation/zebra repository. (External PRs are deployed by GitHub's Merge Queue.)
 
 # - Builds and deploys Zebra Book Docs using mdBook, setting up necessary tools and deploying to Firebase.
 # - Compiles and deploys external documentation, setting up Rust with the beta toolchain and default profile, building the docs, and deploying them to Firebase.
@@ -74,7 +74,7 @@ env:
 jobs:
   build-docs-book:
     name: Build and Deploy Zebra Book Docs
-    # Skip PRs from external repositories, let them pass, and then Mergify will check them
+    # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 5
     runs-on: ubuntu-latest
@@ -85,14 +85,14 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout the source code
-        uses: actions/checkout@v4.1.7
+        uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Setup mdBook
-        uses: jontze/action-mdbook@v3.0.0
+        uses: jontze/action-mdbook@v3.0.1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mdbook-version: '~0.4'
@@ -106,7 +106,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.5
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
@@ -138,7 +138,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout the source code
-        uses: actions/checkout@v4.1.7
+        uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
 
@@ -155,7 +155,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.7.3
+      - uses: Swatinem/rust-cache@v2.7.7
 
       - name: Build internal docs
         run: |
@@ -164,7 +164,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.5
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'

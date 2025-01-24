@@ -100,4 +100,4 @@ ldb --db="$HOME/.cache/zebra/private-scan/v1/mainnet" --secondary_path= --column
 
 Some of the output will be markers the scanner uses to keep track of progress, however, some of them will be transactions found.
 
-To lean more about how to filter the database please refer to [RocksDB Administration and Data Access Tool](https://github.com/facebook/rocksdb/wiki/Administration-and-Data-Access-Tool)
+To learn more about how to filter the database please refer to [RocksDB Administration and Data Access Tool](https://github.com/facebook/rocksdb/wiki/Administration-and-Data-Access-Tool)

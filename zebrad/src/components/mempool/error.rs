@@ -23,7 +23,9 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("the transaction will be rejected from the mempool until the next chain tip block")]
+    #[error(
+        "the transaction will be rejected from the mempool until the next chain tip block: {0}"
+    )]
     StorageExactTip(#[from] ExactTipRejectionError),
 
     /// Transaction rejected based on its effects (spends, outputs, transaction
@@ -33,7 +35,7 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("any transaction with the same effects will be rejected from the mempool until the next chain tip block")]
+    #[error("any transaction with the same effects will be rejected from the mempool until the next chain tip block: {0}")]
     StorageEffectsTip(#[from] SameEffectsTipRejectionError),
 
     /// Transaction rejected based on its effects (spends, outputs, transaction
@@ -44,7 +46,7 @@ pub enum MempoolError {
     ///
     /// Note that the mempool caches this error. See [`super::storage::Storage`]
     /// for more details.
-    #[error("any transaction with the same effects will be rejected from the mempool until a chain reset")]
+    #[error("any transaction with the same effects will be rejected from the mempool until a chain reset: {0}")]
     StorageEffectsChain(#[from] SameEffectsChainRejectionError),
 
     /// Transaction rejected because the mempool already contains another

@@ -48,7 +48,10 @@ pub const POST_BLOSSOM_HALVING_INTERVAL: HeightDiff =
 /// as specified in [protocol specification §7.10.1][7.10.1]
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-pub const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
+pub(crate) const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
+
+/// The first halving height in the regtest is at block height `287`.
+const FIRST_HALVING_REGTEST: Height = Height(287);
 
 /// The funding stream receiver categories.
 #[derive(Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -62,18 +65,18 @@ pub enum FundingStreamReceiver {
 
     /// The Major Grants (Zcash Community Grants) funding stream.
     MajorGrants,
-    /// The deferred pool contribution.
-    // TODO: Add link to lockbox stream ZIP
+
+    /// The deferred pool contribution, see [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
     Deferred,
 }
 
 impl FundingStreamReceiver {
     /// Returns a human-readable name and a specification URL for the receiver, as described in
-    /// [ZIP-1014] and [`zcashd`] before NU6. After NU6, the specification is in the [ZIP-lockbox].
+    /// [ZIP-1014] and [`zcashd`] before NU6. After NU6, the specification is in the [ZIP-1015].
     ///
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
-    /// [ZIP-lockbox]: https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model
+    /// [ZIP-1015]: https://zips.z.cash/zip-1015
     pub fn info(&self, is_nu6: bool) -> (&'static str, &'static str) {
         if is_nu6 {
             (
@@ -109,10 +112,10 @@ pub const FUNDING_STREAM_RECEIVER_DENOMINATOR: u64 = 100;
 /// [ZIP-214]: https://zips.z.cash/zip-0214
 pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
 
-/// The specification for post-NU6 funding stream and lockbox receivers, a URL that links to [ZIP-lockbox].
+/// The specification for post-NU6 funding stream and lockbox receivers, a URL that links to [ZIP-1015].
 ///
-/// [ZIP-lockbox]: https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model
-pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/draft-nuttycom-funding-allocation#alternative-2-hybrid-deferred-dev-fund-transitioning-to-a-non-direct-funding-model";
+/// [ZIP-1015]: https://zips.z.cash/zip-1015
+pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/zip-1015";
 
 /// Funding stream recipients and height ranges.
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
@@ -222,10 +225,8 @@ lazy_static! {
         .collect(),
     };
 
-    /// The post-NU6 funding streams for Mainnet
-    // TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+    /// The post-NU6 funding streams for Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        // TODO: Adjust this height range and recipient list once a proposal is selected
         height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
         recipients: [
             (
@@ -234,8 +235,7 @@ lazy_static! {
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                // TODO: Update these addresses
-                FundingStreamRecipient::new(8, FUNDING_STREAM_MG_ADDRESSES_MAINNET),
+                FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET),
             ),
         ]
         .into_iter()
@@ -264,11 +264,8 @@ lazy_static! {
         .collect(),
     };
 
-    /// The post-NU6 funding streams for Testnet
-    // TODO: Add a reference to lockbox stream ZIP, this is currently based on the number of blocks between the
-    //       start and end heights for Mainnet in https://zips.z.cash/draft-nuttycom-funding-allocation
+    /// The post-NU6 funding streams for Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        // TODO: Adjust this height range and recipient list once a proposal is selected
         height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
         recipients: [
             (
@@ -277,7 +274,6 @@ lazy_static! {
             ),
             (
                 FundingStreamReceiver::MajorGrants,
-                // TODO: Update these addresses
                 FundingStreamRecipient::new(8, POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET),
             ),
         ]
@@ -286,15 +282,14 @@ lazy_static! {
     };
 }
 
-/// The start height of post-NU6 funding streams on Mainnet
-// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+/// The start height of post-NU6 funding streams on Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
 
-/// The start height of post-NU6 funding streams on Testnet
-// TODO: Add a reference to lockbox stream ZIP, this is currently based on https://zips.z.cash/draft-nuttycom-funding-allocation
+/// The start height of post-NU6 funding streams on Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
 
-/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet.
+/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
+/// in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
 
 /// The post-NU6 funding stream height range on Mainnet
@@ -379,6 +374,20 @@ pub trait ParameterSubsidy {
     ///
     /// [7.10]: <https://zips.z.cash/protocol/protocol.pdf#fundingstreams>
     fn height_for_first_halving(&self) -> Height;
+
+    /// Returns the halving interval after Blossom
+    fn post_blossom_halving_interval(&self) -> HeightDiff;
+
+    /// Returns the halving interval before Blossom
+    fn pre_blossom_halving_interval(&self) -> HeightDiff;
+
+    /// Returns the address change interval for funding streams
+    /// as described in [protocol specification §7.10][7.10].
+    ///
+    /// > FSRecipientChangeInterval := PostBlossomHalvingInterval / 48
+    ///
+    /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+    fn funding_stream_address_change_interval(&self) -> HeightDiff;
 }
 
 /// Network methods related to Block Subsidy and Funding Streams
@@ -391,9 +400,34 @@ impl ParameterSubsidy for Network {
             Network::Mainnet => NetworkUpgrade::Canopy
                 .activation_height(self)
                 .expect("canopy activation height should be available"),
-            // TODO: Check what zcashd does here, consider adding a field to `testnet::Parameters` to make this configurable.
-            Network::Testnet(_params) => FIRST_HALVING_TESTNET,
+            Network::Testnet(params) => {
+                if params.is_regtest() {
+                    FIRST_HALVING_REGTEST
+                } else if params.is_default_testnet() {
+                    FIRST_HALVING_TESTNET
+                } else {
+                    height_for_halving(1, self).expect("first halving height should be available")
+                }
+            }
         }
+    }
+
+    fn post_blossom_halving_interval(&self) -> HeightDiff {
+        match self {
+            Network::Mainnet => POST_BLOSSOM_HALVING_INTERVAL,
+            Network::Testnet(params) => params.post_blossom_halving_interval(),
+        }
+    }
+
+    fn pre_blossom_halving_interval(&self) -> HeightDiff {
+        match self {
+            Network::Mainnet => PRE_BLOSSOM_HALVING_INTERVAL,
+            Network::Testnet(params) => params.pre_blossom_halving_interval(),
+        }
+    }
+
+    fn funding_stream_address_change_interval(&self) -> HeightDiff {
+        self.post_blossom_halving_interval() / 48
     }
 }
 
@@ -404,6 +438,18 @@ pub const FUNDING_STREAM_ZF_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// List of addresses for the Major Grants funding stream in the Mainnet.
 pub const FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
     ["t3XyYW8yBFRuMnfvm5KLGFbEVz25kckZXym"; FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
+
+/// Number of addresses for each post-NU6 funding stream on Mainnet.
+/// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
+/// however we know this value beforehand so we prefer to make it a constant instead.
+///
+/// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 12;
+
+/// List of addresses for the Major Grants post-NU6 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
+pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_MAINNET: [&str;
+    POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET] =
+    ["t3cFfPt1Bcvgez9ZbMBFWeZsskxTkPzGCow"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET];
 
 /// Number of addresses for each funding stream in the Testnet.
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
@@ -482,7 +528,7 @@ pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
 pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
 
-/// List of addresses for the Major Grants post-NU6 funding stream in the Testnet administered by the Financial Privacy Fund (FPF).
+/// List of addresses for the Major Grants post-NU6 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
 pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;
     POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
     ["t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"; POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
@@ -503,10 +549,54 @@ pub fn funding_stream_address_period<N: ParameterSubsidy>(height: Height, networ
 
     let height_after_first_halving = height - network.height_for_first_halving();
 
-    let address_period = (height_after_first_halving + POST_BLOSSOM_HALVING_INTERVAL)
-        / FUNDING_STREAM_ADDRESS_CHANGE_INTERVAL;
+    let address_period = (height_after_first_halving + network.post_blossom_halving_interval())
+        / network.funding_stream_address_change_interval();
 
     address_period
         .try_into()
         .expect("all values are positive and smaller than the input height")
+}
+
+/// The first block height of the halving at the provided halving index for a network.
+///
+/// See `Halving(height)`, as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
+    if halving == 0 {
+        return Some(Height(0));
+    }
+
+    let slow_start_shift = i64::from(network.slow_start_shift().0);
+    let blossom_height = i64::from(
+        NetworkUpgrade::Blossom
+            .activation_height(network)
+            .expect("blossom activation height should be available")
+            .0,
+    );
+    let pre_blossom_halving_interval = network.pre_blossom_halving_interval();
+    let halving_index = i64::from(halving);
+
+    let unscaled_height = halving_index
+        .checked_mul(pre_blossom_halving_interval)
+        .expect("Multiplication overflow: consider reducing the halving interval");
+
+    let pre_blossom_height = unscaled_height
+        .min(blossom_height)
+        .checked_add(slow_start_shift)
+        .expect("Addition overflow: consider reducing the halving interval");
+
+    let post_blossom_height = 0
+        .max(unscaled_height - blossom_height)
+        .checked_mul(i64::from(BLOSSOM_POW_TARGET_SPACING_RATIO))
+        .expect("Multiplication overflow: consider reducing the halving interval")
+        .checked_add(slow_start_shift)
+        .expect("Addition overflow: consider reducing the halving interval");
+
+    let height = pre_blossom_height
+        .checked_add(post_blossom_height)
+        .expect("Addition overflow: consider reducing the halving interval");
+
+    let height = u32::try_from(height).ok()?;
+    height.try_into().ok()
 }

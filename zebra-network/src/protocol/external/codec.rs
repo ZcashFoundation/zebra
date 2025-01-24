@@ -224,7 +224,7 @@ impl Codec {
 
                 writer.write_u64::<LittleEndian>(nonce.0)?;
 
-                if user_agent.as_bytes().len() > MAX_USER_AGENT_LENGTH {
+                if user_agent.len() > MAX_USER_AGENT_LENGTH {
                     // zcashd won't accept this version message
                     return Err(Error::Parse(
                         "user agent too long: must be 256 bytes or less",
@@ -248,7 +248,7 @@ impl Codec {
                 reason,
                 data,
             } => {
-                if message.as_bytes().len() > MAX_REJECT_MESSAGE_LENGTH {
+                if message.len() > MAX_REJECT_MESSAGE_LENGTH {
                     // zcashd won't accept this reject message
                     return Err(Error::Parse(
                         "reject message too long: must be 12 bytes or less",
@@ -259,7 +259,7 @@ impl Codec {
 
                 writer.write_u8(*ccode as u8)?;
 
-                if reason.as_bytes().len() > MAX_REJECT_REASON_LENGTH {
+                if reason.len() > MAX_REJECT_REASON_LENGTH {
                     return Err(Error::Parse(
                         "reject reason too long: must be 111 bytes or less",
                     ));
@@ -508,7 +508,9 @@ impl Codec {
             timestamp: Utc
                 .timestamp_opt(reader.read_i64::<LittleEndian>()?, 0)
                 .single()
-                .ok_or_else(|| Error::Parse("version timestamp is out of range for DateTime"))?,
+                .ok_or(Error::Parse(
+                    "version timestamp is out of range for DateTime",
+                ))?,
             address_recv: AddrInVersion::zcash_deserialize(&mut reader)?,
             address_from: AddrInVersion::zcash_deserialize(&mut reader)?,
             nonce: Nonce(reader.read_u64::<LittleEndian>()?),

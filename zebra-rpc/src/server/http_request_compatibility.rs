@@ -2,30 +2,47 @@
 //!
 //! These fixes are applied at the HTTP level, before the RPC request is parsed.
 
-use futures::TryStreamExt;
-use jsonrpc_http_server::{
-    hyper::{body::Bytes, header, Body, Request},
-    RequestMiddleware, RequestMiddlewareAction,
-};
+use std::future::Future;
 
-/// HTTP [`RequestMiddleware`] with compatibility workarounds.
+use std::pin::Pin;
+
+use futures::{future, FutureExt};
+use http_body_util::BodyExt;
+use hyper::{body::Bytes, header};
+use jsonrpsee::{
+    core::BoxError,
+    server::{HttpBody, HttpRequest, HttpResponse},
+};
+use jsonrpsee_types::ErrorObject;
+use tower::Service;
+
+use super::cookie::Cookie;
+
+use base64::{engine::general_purpose::URL_SAFE, Engine as _};
+
+/// HTTP [`HttpRequestMiddleware`] with compatibility workarounds.
 ///
 /// This middleware makes the following changes to HTTP requests:
 ///
-/// ## Remove `jsonrpc` field in JSON RPC 1.0
+/// ### Remove `jsonrpc` field in JSON RPC 1.0
 ///
 /// Removes "jsonrpc: 1.0" fields from requests,
 /// because the "jsonrpc" field was only added in JSON-RPC 2.0.
 ///
 /// <http://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0>
 ///
-/// ## Add missing `content-type` HTTP header
+/// ### Add missing `content-type` HTTP header
 ///
 /// Some RPC clients don't include a `content-type` HTTP header.
-/// But unlike web browsers, [`jsonrpc_http_server`] does not do content sniffing.
+/// But unlike web browsers, [`jsonrpsee`] does not do content sniffing.
 ///
 /// If there is no `content-type` header, we assume the content is JSON,
 /// and let the parser error if we are incorrect.
+///
+/// ### Authenticate incoming requests
+///
+/// If the cookie-based RPC authentication is enabled, check that the incoming request contains the
+/// authentication cookie.
 ///
 /// This enables compatibility with `zcash-cli`.
 ///
@@ -34,71 +51,30 @@ use jsonrpc_http_server::{
 /// Any user-specified data in RPC requests is hex or base58check encoded.
 /// We assume lightwalletd validates data encodings before sending it on to Zebra.
 /// So any fixes Zebra performs won't change user-specified data.
-#[derive(Copy, Clone, Debug)]
-pub struct FixHttpRequestMiddleware;
-
-impl RequestMiddleware for FixHttpRequestMiddleware {
-    fn on_request(&self, mut request: Request<Body>) -> RequestMiddlewareAction {
-        tracing::trace!(?request, "original HTTP request");
-
-        // Fix the request headers if needed and we can do so.
-        FixHttpRequestMiddleware::insert_or_replace_content_type_header(request.headers_mut());
-
-        // Fix the request body
-        let request = request.map(|body| {
-            let body = body.map_ok(|data| {
-                // To simplify data handling, we assume that any search strings won't be split
-                // across multiple `Bytes` data buffers.
-                //
-                // To simplify error handling, Zebra only supports valid UTF-8 requests,
-                // and uses lossy UTF-8 conversion.
-                //
-                // JSON-RPC requires all requests to be valid UTF-8.
-                // The lower layers should reject invalid requests with lossy changes.
-                // But if they accept some lossy changes, that's ok,
-                // because the request was non-standard anyway.
-                //
-                // We're not concerned about performance here, so we just clone the Cow<str>
-                let data = String::from_utf8_lossy(data.as_ref()).to_string();
-
-                // Fix up the request.
-                let data = Self::remove_json_1_fields(data);
-
-                Bytes::from(data)
-            });
-
-            Body::wrap_stream(body)
-        });
-
-        tracing::trace!(?request, "modified HTTP request");
-
-        RequestMiddlewareAction::Proceed {
-            // TODO: disable this security check if we see errors from lightwalletd.
-            should_continue_on_invalid_cors: false,
-            request,
-        }
-    }
+#[derive(Clone, Debug)]
+pub struct HttpRequestMiddleware<S> {
+    service: S,
+    cookie: Option<Cookie>,
 }
 
-impl FixHttpRequestMiddleware {
-    /// Remove any "jsonrpc: 1.0" fields in `data`, and return the resulting string.
-    pub fn remove_json_1_fields(data: String) -> String {
-        // Replace "jsonrpc = 1.0":
-        // - at the start or middle of a list, and
-        // - at the end of a list;
-        // with no spaces (lightwalletd format), and spaces after separators (example format).
-        //
-        // TODO: if we see errors from lightwalletd, make this replacement more accurate:
-        //     - use a partial JSON fragment parser
-        //     - combine the whole request into a single buffer, and use a JSON parser
-        //     - use a regular expression
-        //
-        // We could also just handle the exact lightwalletd format,
-        // by replacing `{"jsonrpc":"1.0",` with `{`.
-        data.replace("\"jsonrpc\":\"1.0\",", "")
-            .replace("\"jsonrpc\": \"1.0\",", "")
-            .replace(",\"jsonrpc\":\"1.0\"", "")
-            .replace(", \"jsonrpc\": \"1.0\"", "")
+impl<S> HttpRequestMiddleware<S> {
+    /// Create a new `HttpRequestMiddleware` with the given service and cookie.
+    pub fn new(service: S, cookie: Option<Cookie>) -> Self {
+        Self { service, cookie }
+    }
+
+    /// Check if the request is authenticated.
+    pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
+        self.cookie.as_ref().map_or(true, |internal_cookie| {
+            headers
+                .get(header::AUTHORIZATION)
+                .and_then(|auth_header| auth_header.to_str().ok())
+                .and_then(|auth_header| auth_header.split_whitespace().nth(1))
+                .and_then(|encoded| URL_SAFE.decode(encoded).ok())
+                .and_then(|decoded| String::from_utf8(decoded).ok())
+                .and_then(|request_cookie| request_cookie.split(':').nth(1).map(String::from))
+                .is_some_and(|passwd| internal_cookie.authenticate(passwd))
+        })
     }
 
     /// Insert or replace client supplied `content-type` HTTP header to `application/json` in the following cases:
@@ -140,5 +116,112 @@ impl FixHttpRequestMiddleware {
                 header::HeaderValue::from_static("application/json"),
             );
         }
+    }
+
+    /// Remove any "jsonrpc: 1.0" fields in `data`, and return the resulting string.
+    pub fn remove_json_1_fields(data: String) -> String {
+        // Replace "jsonrpc = 1.0":
+        // - at the start or middle of a list, and
+        // - at the end of a list;
+        // with no spaces (lightwalletd format), and spaces after separators (example format).
+        //
+        // TODO: if we see errors from lightwalletd, make this replacement more accurate:
+        //     - use a partial JSON fragment parser
+        //     - combine the whole request into a single buffer, and use a JSON parser
+        //     - use a regular expression
+        //
+        // We could also just handle the exact lightwalletd format,
+        // by replacing `{"jsonrpc":"1.0",` with `{"jsonrpc":"2.0`.
+        data.replace("\"jsonrpc\":\"1.0\",", "\"jsonrpc\":\"2.0\",")
+            .replace("\"jsonrpc\": \"1.0\",", "\"jsonrpc\": \"2.0\",")
+            .replace(",\"jsonrpc\":\"1.0\"", ",\"jsonrpc\":\"2.0\"")
+            .replace(", \"jsonrpc\": \"1.0\"", ", \"jsonrpc\": \"2.0\"")
+    }
+}
+
+/// Implement the Layer for HttpRequestMiddleware to allow injecting the cookie
+#[derive(Clone)]
+pub struct HttpRequestMiddlewareLayer {
+    cookie: Option<Cookie>,
+}
+
+impl HttpRequestMiddlewareLayer {
+    /// Create a new `HttpRequestMiddlewareLayer` with the given cookie.
+    pub fn new(cookie: Option<Cookie>) -> Self {
+        Self { cookie }
+    }
+}
+
+impl<S> tower::Layer<S> for HttpRequestMiddlewareLayer {
+    type Service = HttpRequestMiddleware<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        HttpRequestMiddleware::new(service, self.cookie.clone())
+    }
+}
+
+/// A trait for updating an object, consuming it and returning the updated version.
+pub trait With<T> {
+    /// Updates `self` with an instance of type `T` and returns the updated version of `self`.
+    fn with(self, _: T) -> Self;
+}
+
+impl<S> With<Cookie> for HttpRequestMiddleware<S> {
+    fn with(mut self, cookie: Cookie) -> Self {
+        self.cookie = Some(cookie);
+        self
+    }
+}
+
+impl<S> Service<HttpRequest<HttpBody>> for HttpRequestMiddleware<S>
+where
+    S: Service<HttpRequest, Response = HttpResponse> + std::clone::Clone + Send + 'static,
+    S::Error: Into<BoxError> + 'static,
+    S::Future: Send + 'static,
+{
+    type Response = S::Response;
+    type Error = BoxError;
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.service.poll_ready(cx).map_err(Into::into)
+    }
+
+    fn call(&mut self, mut request: HttpRequest<HttpBody>) -> Self::Future {
+        // Check if the request is authenticated
+        if !self.check_credentials(request.headers_mut()) {
+            let error = ErrorObject::borrowed(401, "unauthenticated method", None);
+            // TODO: Error object is not being returned to the user but an empty response.
+            return future::err(BoxError::from(error)).boxed();
+        }
+
+        // Fix the request headers.
+        Self::insert_or_replace_content_type_header(request.headers_mut());
+
+        let mut service = self.service.clone();
+        let (parts, body) = request.into_parts();
+
+        async move {
+            let bytes = body
+                .collect()
+                .await
+                .expect("Failed to collect body data")
+                .to_bytes();
+
+            let data = String::from_utf8_lossy(bytes.as_ref()).to_string();
+
+            // Fix JSON-RPC 1.0 requests.
+            let data = Self::remove_json_1_fields(data);
+            let body = HttpBody::from(Bytes::from(data).as_ref().to_vec());
+
+            let request = HttpRequest::from_parts(parts, body);
+
+            service.call(request).await.map_err(Into::into)
+        }
+        .boxed()
     }
 }

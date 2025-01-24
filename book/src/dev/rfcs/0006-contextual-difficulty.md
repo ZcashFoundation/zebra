@@ -421,7 +421,7 @@ fn mean_target_difficulty(&self) -> ExpandedDifficulty { ... }
 Since the `PoWLimit`s are `2^251 − 1` for Testnet, and `2^243 − 1` for Mainnet,
 the sum of these difficulty thresholds will be less than or equal to
 `(2^251 − 1)*17 = 2^255 + 2^251 - 17`. Therefore, this calculation can not
-overflow a `u256` value. So the function is infalliable.
+overflow a `u256` value. So the function is infallible.
 
 In Zebra, contextual validation starts after Canopy activation, so we can assume
 that the relevant chain contains at least 17 blocks. Therefore, the `PoWLimit`
@@ -499,7 +499,7 @@ that the relevant chain contains at least 28 blocks. Therefore:
 * there is always an odd number of blocks in `MedianTime()`, so the median is
   always the exact middle of the sequence.
 
-Therefore, the function is infalliable.
+Therefore, the function is infallible.
 
 ### Test network minimum difficulty calculation
 [test-net-min-difficulty-calculation]: #test-net-min-difficulty-calculation
@@ -580,7 +580,7 @@ In Zcash, the Testnet minimum difficulty rule starts at block 299188, and in
 Zebra, contextual validation starts after Canopy activation. So we can assume
 that there is always a previous block.
 
-Therefore, this function is infalliable.
+Therefore, this function is infallible.
 
 ### Block difficulty threshold calculation
 [block-difficulty-threshold-calculation]: #block-difficulty-threshold-calculation
@@ -647,7 +647,7 @@ Note that the multiplication by `ActualTimespanBounded` must happen after the
 division by `AveragingWindowTimespan`. Performing the multiplication first
 could overflow.
 
-If implemented in this way, the function is infalliable.
+If implemented in this way, the function is infallible.
 
 `zcashd` truncates the `MeanTarget` after the mean calculation, and
 after dividing by `AveragingWindowTimespan`. But as long as there is no overflow,

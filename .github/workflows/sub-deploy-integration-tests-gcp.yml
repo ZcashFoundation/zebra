@@ -113,6 +113,7 @@ jobs:
   get-disk-name:
     name: Get disk name
     uses: ./.github/workflows/sub-find-cached-disks.yml
+    if: ${{ inputs.needs_zebra_state || inputs.needs_lwd_state }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: ${{ inputs.needs_lwd_state && 'lwd-cache' || inputs.needs_zebra_state && 'zebrad-cache' }}
@@ -139,14 +140,14 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.1.7
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -171,34 +172,33 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.5
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME env as the source image to populate the disk cached state
       # if the test needs it.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
-        shell: /usr/bin/bash -x {0}
         run: |
           NAME="${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }}"
-          DISK_PARAMS="size=400GB,type=pd-ssd,name=${NAME},device-name=${NAME}"
+          DISK_PARAMS="size=400GB,type=pd-balanced,name=${NAME},device-name=${NAME}"
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           fi
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
-          --boot-disk-size 50GB \
-          --boot-disk-type pd-ssd \
+          --boot-disk-size=50GB \
+          --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk="${DISK_PARAMS}" \
           --container-image=gcr.io/google-containers/busybox \
-          --machine-type ${{ vars.GCP_LARGE_MACHINE }} \
+          --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
           --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
           --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
@@ -255,7 +255,6 @@ jobs:
       # are only used to match those variables paths.
       - name: Launch ${{ inputs.test_id }} test
         id: launch-test
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -287,7 +286,6 @@ jobs:
       # Show debug logs if previous job failed
       - name: Show debug logs if previous job failed
         if: ${{ failure() }}
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -314,7 +312,6 @@ jobs:
       #
       # Errors in the tests are caught by the final test status job.
       - name: Check startup logs for ${{ inputs.test_id }}
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -343,7 +340,6 @@ jobs:
       # with that status.
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
-        shell: /usr/bin/bash -x {0}
         run: |
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -389,14 +385,14 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.1.7
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
@@ -433,13 +429,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.5
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
@@ -476,7 +472,6 @@ jobs:
       # Passes the versions to subsequent steps using the $INITIAL_DISK_DB_VERSION,
       # $RUNNING_DB_VERSION, and $DB_VERSION_SUMMARY env variables.
       - name: Get database versions from logs
-        shell: /usr/bin/bash -x {0}
         run: |
           INITIAL_DISK_DB_VERSION=""
           RUNNING_DB_VERSION=""
@@ -502,18 +497,19 @@ jobs:
           )
 
           if [[ -z "$INITIAL_DISK_DB_VERSION" ]]; then
+          # Check for new database creation
+          if echo "$DOCKER_LOGS" | grep -q "creating.new.database"; then
+              INITIAL_DISK_DB_VERSION="new"
+          else
               echo "Checked logs:"
               echo ""
               echo "$DOCKER_LOGS"
               echo ""
-              echo "Missing initial disk database version in logs: $INITIAL_DISK_DB_VERSION"
+              echo "Missing initial disk database version in logs"
               # Fail the tests, because Zebra didn't log the initial disk database version,
               # or the regex in this step is wrong.
-              false
+              exit 1
           fi
-
-          if [[ "$INITIAL_DISK_DB_VERSION" = "creating.new.database" ]]; then
-              INITIAL_DISK_DB_VERSION="new"
           else
               INITIAL_DISK_DB_VERSION="v${INITIAL_DISK_DB_VERSION//./-}"
           fi
@@ -537,7 +533,7 @@ jobs:
               echo "Missing running database version in logs: $RUNNING_DB_VERSION"
               # Fail the tests, because Zebra didn't log the running database version,
               # or the regex in this step is wrong.
-              false
+              exit 1
           fi
 
           RUNNING_DB_VERSION="v${RUNNING_DB_VERSION//./-}"
@@ -566,7 +562,6 @@ jobs:
       #
       # Passes the sync height to subsequent steps using the $SYNC_HEIGHT env variable.
       - name: Get sync height from logs
-        shell: /usr/bin/bash -x {0}
         run: |
           SYNC_HEIGHT=""
 
@@ -653,6 +648,7 @@ jobs:
       # (This is unlikely, because each image created by a workflow has a different name.)
       #
       # The image name must also be 63 characters or less.
+      # More info: https://cloud.google.com/compute/docs/naming-resources#resource-name-format
       #
       # Force the image creation (--force) as the disk is still attached even though is not being
       # used by the container.
@@ -667,7 +663,7 @@ jobs:
               --source-disk-zone=${{ vars.GCP_ZONE }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
           else
               echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT of $ORIGINAL_DISK_NAME"
           fi
@@ -685,27 +681,27 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.1.7
+      - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v4
+        uses: rlespinasse/github-slug-action@v5
         with:
           short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.5
+        uses: google-github-actions/auth@v2.1.7
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.1
+        uses: google-github-actions/setup-gcloud@v2.1.2
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.

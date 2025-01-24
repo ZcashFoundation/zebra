@@ -551,16 +551,14 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sprout tree");
 
-        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        // Add the new tree only if:
+        //
+        // - it differs from the previous one, or
+        // - there's no previous tree.
         if height.is_min()
             || self
-                .sprout_tree(
-                    height
-                        .previous()
-                        .expect("Already checked for underflow.")
-                        .into(),
-                )
-                .map_or(true, |prev_tree| prev_tree != tree)
+                .sprout_tree(height.previous().expect("prev height").into())
+                .is_none_or(|prev_tree| prev_tree != tree)
         {
             assert_eq!(
                 self.sprout_trees_by_height.insert(height, tree.clone()),
@@ -756,16 +754,14 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding sapling tree");
 
-        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        // Add the new tree only if:
+        //
+        // - it differs from the previous one, or
+        // - there's no previous tree.
         if height.is_min()
             || self
-                .sapling_tree(
-                    height
-                        .previous()
-                        .expect("Already checked for underflow.")
-                        .into(),
-                )
-                .map_or(true, |prev_tree| prev_tree != tree)
+                .sapling_tree(height.previous().expect("prev height").into())
+                .is_none_or(|prev_tree| prev_tree != tree)
         {
             assert_eq!(
                 self.sapling_trees_by_height.insert(height, tree),
@@ -963,16 +959,14 @@ impl Chain {
         let anchor = tree.root();
         trace!(?height, ?anchor, "adding orchard tree");
 
-        // Don't add a new tree unless it differs from the previous one or there's no previous tree.
+        // Add the new tree only if:
+        //
+        // - it differs from the previous one, or
+        // - there's no previous tree.
         if height.is_min()
             || self
-                .orchard_tree(
-                    height
-                        .previous()
-                        .expect("Already checked for underflow.")
-                        .into(),
-                )
-                .map_or(true, |prev_tree| prev_tree != tree)
+                .orchard_tree(height.previous().expect("prev height").into())
+                .is_none_or(|prev_tree| prev_tree != tree)
         {
             assert_eq!(
                 self.orchard_trees_by_height.insert(height, tree),
@@ -1272,7 +1266,7 @@ impl Chain {
     pub fn partial_transparent_indexes<'a>(
         &'a self,
         addresses: &'a HashSet<transparent::Address>,
-    ) -> impl Iterator<Item = &TransparentTransfers> {
+    ) -> impl Iterator<Item = &'a TransparentTransfers> {
         addresses
             .iter()
             .flat_map(|address| self.partial_transparent_transfers.get(address))

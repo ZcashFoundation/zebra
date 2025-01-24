@@ -137,7 +137,7 @@ async fn check_transcripts() -> Result<(), Report> {
     let network = Network::Mainnet;
     let state_service = zebra_state::init_test(&network);
 
-    let transaction = transaction::Verifier::new(&network, state_service.clone());
+    let transaction = transaction::Verifier::new_for_tests(&network, state_service.clone());
     let transaction = Buffer::new(BoxService::new(transaction), 1);
     let block_verifier = Buffer::new(
         SemanticBlockVerifier::new(&network, state_service.clone(), transaction),
@@ -515,7 +515,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
 
             let expected_block_subsidy = block_subsidy(height, &network)?;
 
-            // TODO: Add link to lockbox stream ZIP
+            // See [ZIP-1015](https://zips.z.cash/zip-1015).
             let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
                 height,
                 &network,
@@ -549,8 +549,8 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
         .expect("block should deserialize");
     let height = block.coinbase_height().expect("valid coinbase height");
     let expected_block_subsidy = block_subsidy(height, &network)?;
-    // TODO: Add link to lockbox stream ZIP
-    let expected_deferred_amount =
+    // See [ZIP-1015](https://zips.z.cash/zip-1015).
+    let expected_deferred_amount: Amount<zebra_chain::amount::NonNegative> =
         subsidy::funding_streams::funding_stream_values(height, &network, expected_block_subsidy)
             .expect("we always expect a funding stream hashmap response even if empty")
             .remove(&FundingStreamReceiver::Deferred)

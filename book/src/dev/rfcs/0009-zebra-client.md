@@ -341,7 +341,7 @@ endpoint
 <!-- be and how it would affect Zebra and Zcash as a whole. Try to use this -->
 <!-- section as a tool to more fully consider all possible -->
 <!-- interactions with the project and cryptocurrency ecosystem in your proposal. -->
-<!-- Also consider how the this all fits into the roadmap for the project -->
+<!-- Also consider how this all fits into the roadmap for the project -->
 <!-- and of the relevant sub-team. -->
 
 <!-- This is also a good place to "dump ideas", if they are out of scope for the -->
