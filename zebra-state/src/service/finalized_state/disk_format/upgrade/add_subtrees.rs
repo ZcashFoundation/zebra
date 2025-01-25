@@ -1,7 +1,8 @@
 //! Fully populate the Sapling and Orchard note commitment subtrees for existing blocks in the database.
 
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 
+use crossbeam_channel::{Receiver, TryRecvError};
 use hex_literal::hex;
 use itertools::Itertools;
 use tracing::instrument;
@@ -30,7 +31,7 @@ use crate::service::finalized_state::{
 pub fn run(
     initial_tip_height: Height,
     upgrade_db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
     // # Consensus
     //
@@ -65,7 +66,7 @@ pub fn run(
 
     for (prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
@@ -90,7 +91,7 @@ pub fn run(
 
     for (prev_end_height, prev_tree, end_height, tree) in subtrees {
         // Return early if the upgrade is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
@@ -110,10 +111,10 @@ pub fn run(
 pub fn reset(
     _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
     // Return early if the upgrade is cancelled.
-    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
         return Err(CancelFormatChange);
     }
 
@@ -127,7 +128,7 @@ pub fn reset(
         .write_batch(batch)
         .expect("deleting old sapling note commitment subtrees is a valid database operation");
 
-    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
         return Err(CancelFormatChange);
     }
 
@@ -306,7 +307,7 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
 /// Check that note commitment subtrees were correctly added.
 pub fn subtree_format_validity_checks_detailed(
     db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<Result<(), String>, CancelFormatChange> {
     // This is redundant in some code paths, but not in others. But it's quick anyway.
     let quick_result = subtree_format_calculation_pre_checks(db);
@@ -332,7 +333,7 @@ pub fn subtree_format_validity_checks_detailed(
 /// Returns an error if a note commitment subtree is missing or incorrect.
 fn check_sapling_subtrees(
     db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<Result<(), &'static str>, CancelFormatChange> {
     let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
         db.sapling_tree_for_tip().subtree_index()
@@ -348,7 +349,7 @@ fn check_sapling_subtrees(
     let mut result = Ok(());
     for index in 0..first_incomplete_subtree_index {
         // Return early if the format check is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
@@ -418,7 +419,7 @@ fn check_sapling_subtrees(
         })
     {
         // Return early if the format check is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
@@ -462,7 +463,7 @@ fn check_sapling_subtrees(
 /// Returns an error if a note commitment subtree is missing or incorrect.
 fn check_orchard_subtrees(
     db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<Result<(), &'static str>, CancelFormatChange> {
     let Some(NoteCommitmentSubtreeIndex(mut first_incomplete_subtree_index)) =
         db.orchard_tree_for_tip().subtree_index()
@@ -478,7 +479,7 @@ fn check_orchard_subtrees(
     let mut result = Ok(());
     for index in 0..first_incomplete_subtree_index {
         // Return early if the format check is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
@@ -548,7 +549,7 @@ fn check_orchard_subtrees(
         })
     {
         // Return early if the format check is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 

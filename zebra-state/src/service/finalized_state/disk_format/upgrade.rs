@@ -2,10 +2,11 @@
 
 use std::{
     cmp::Ordering,
-    sync::{mpsc, Arc},
+    sync::Arc,
     thread::{self, JoinHandle},
 };
 
+use crossbeam_channel::{bounded, Receiver, RecvTimeoutError, Sender, TryRecvError};
 use semver::Version;
 use tracing::Span;
 
@@ -27,6 +28,12 @@ use crate::{
 pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
+
+#[cfg(not(feature = "indexer"))]
+pub(crate) mod drop_tx_locs_by_spends;
+
+#[cfg(feature = "indexer")]
+pub(crate) mod track_tx_locs_by_spends;
 
 /// The kind of database format change or validity check we're performing.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -96,7 +103,7 @@ pub struct DbFormatChangeThreadHandle {
     update_task: Option<Arc<JoinHandle<Result<(), CancelFormatChange>>>>,
 
     /// A channel that tells the running format thread to finish early.
-    cancel_handle: mpsc::SyncSender<CancelFormatChange>,
+    cancel_handle: Sender<CancelFormatChange>,
 }
 
 /// Marker type that is sent to cancel a format upgrade, and returned as an error on cancellation.
@@ -121,7 +128,7 @@ impl DbFormatChange {
             return NewlyCreated { running_version };
         };
 
-        match disk_version.cmp(&running_version) {
+        match disk_version.cmp_precedence(&running_version) {
             Ordering::Less => {
                 info!(
                     %running_version,
@@ -228,7 +235,7 @@ impl DbFormatChange {
         //
         // Cancel handles must use try_send() to avoid blocking waiting for the format change
         // thread to shut down.
-        let (cancel_handle, cancel_receiver) = mpsc::sync_channel(1);
+        let (cancel_handle, cancel_receiver) = bounded(1);
 
         let span = Span::current();
         let update_task = thread::spawn(move || {
@@ -256,7 +263,7 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
-        cancel_receiver: mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         self.run_format_change_or_check(&db, initial_tip_height, &cancel_receiver)?;
 
@@ -269,7 +276,7 @@ impl DbFormatChange {
             // But return early if there is a cancel signal.
             if !matches!(
                 cancel_receiver.recv_timeout(debug_validity_check_interval),
-                Err(mpsc::RecvTimeoutError::Timeout)
+                Err(RecvTimeoutError::Timeout)
             ) {
                 return Err(CancelFormatChange);
             }
@@ -288,7 +295,7 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
@@ -337,6 +344,60 @@ impl DbFormatChange {
             }
         }
 
+        #[cfg(feature = "indexer")]
+        if let (
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
+            Some(initial_tip_height),
+        ) = (self, initial_tip_height)
+        {
+            // Indexing transaction locations by their spent outpoints and revealed nullifiers.
+            let timer = CodeTimer::start();
+
+            // Add build metadata to on-disk version file just before starting to add indexes
+            let mut version = db
+                .format_version_on_disk()
+                .expect("unable to read database format version file")
+                .expect("should write database format version file above");
+            version.build = db.format_version_in_code().build;
+
+            db.update_format_version_on_disk(&version)
+                .expect("unable to write database format version file to disk");
+
+            info!("started checking/adding indexes for spending tx ids");
+            track_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+            info!("finished checking/adding indexes for spending tx ids");
+
+            timer.finish(module_path!(), line!(), "indexing spending transaction ids");
+        };
+
+        #[cfg(not(feature = "indexer"))]
+        if let (
+            Upgrade { .. } | CheckOpenCurrent { .. } | Downgrade { .. },
+            Some(initial_tip_height),
+        ) = (self, initial_tip_height)
+        {
+            let mut version = db
+                .format_version_on_disk()
+                .expect("unable to read database format version file")
+                .expect("should write database format version file above");
+
+            if version.build.contains("indexer") {
+                // Indexing transaction locations by their spent outpoints and revealed nullifiers.
+                let timer = CodeTimer::start();
+
+                info!("started removing indexes for spending tx ids");
+                drop_tx_locs_by_spends::run(initial_tip_height, db, cancel_receiver)?;
+                info!("finished removing indexes for spending tx ids");
+
+                // Remove build metadata to on-disk version file after indexes have been dropped.
+                version.build = db.format_version_in_code().build;
+                db.update_format_version_on_disk(&version)
+                    .expect("unable to write database format version file to disk");
+
+                timer.finish(module_path!(), line!(), "removing spending transaction ids");
+            }
+        };
+
         // These checks should pass for all format changes:
         // - upgrades should produce a valid format (and they already do that check)
         // - an empty state should pass all the format checks
@@ -381,7 +442,7 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
             newer_running_version,
@@ -433,7 +494,7 @@ impl DbFormatChange {
             // The block after genesis is the first possible duplicate.
             for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                     return Err(CancelFormatChange);
                 }
 
@@ -460,7 +521,7 @@ impl DbFormatChange {
             // The block after genesis is the first possible duplicate.
             for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
                 // Return early if there is a cancel signal.
-                if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                     return Err(CancelFormatChange);
                 }
 
@@ -598,7 +659,7 @@ impl DbFormatChange {
     #[allow(clippy::vec_init_then_push)]
     pub fn format_validity_checks_detailed(
         db: &ZebraDb,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
         let timer = CodeTimer::start();
         let mut results = Vec::new();
@@ -635,7 +696,7 @@ impl DbFormatChange {
     #[allow(clippy::unwrap_in_result)]
     fn check_for_duplicate_trees(
         db: &ZebraDb,
-        cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<Result<(), String>, CancelFormatChange> {
         // Runtime test: make sure we removed all duplicates.
         // We always run this test, even if the state has supposedly been upgraded.
@@ -645,7 +706,7 @@ impl DbFormatChange {
         let mut prev_tree = None;
         for (height, tree) in db.sapling_tree_by_height_range(..) {
             // Return early if the format check is cancelled.
-            if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                 return Err(CancelFormatChange);
             }
 
@@ -667,7 +728,7 @@ impl DbFormatChange {
         let mut prev_tree = None;
         for (height, tree) in db.orchard_tree_by_height_range(..) {
             // Return early if the format check is cancelled.
-            if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                 return Err(CancelFormatChange);
             }
 
