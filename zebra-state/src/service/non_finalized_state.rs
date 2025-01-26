@@ -6,17 +6,19 @@ use std::{
     collections::{BTreeSet, HashMap},
     mem,
     sync::Arc,
+    time::SystemTime,
 };
 
+use chain::UpdateWith;
 use zebra_chain::{
-    block::{self, Block},
+    block::{self, Block, Hash},
     parameters::Network,
     sprout, transparent,
 };
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    request::{ContextuallyVerifiedBlock, FinalizableBlock},
+    request::{ContextuallyVerifiedBlock, FinalizableBlock, InvalidatedBlockData},
     service::{check, finalized_state::ZebraDb},
     SemanticallyVerifiedBlock, ValidateContextError,
 };
@@ -44,6 +46,9 @@ pub struct NonFinalizedState {
     /// Using `chain_set.last()` or `chain_set.iter().next_back()` is deprecated,
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
+
+    /// Invalidated blocks and descendants
+    invalidated_blocks: HashMap<block::Hash, InvalidatedBlockData>,
 
     // Configuration
     //
@@ -92,6 +97,7 @@ impl Clone for NonFinalizedState {
         Self {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
+            invalidated_blocks: self.invalidated_blocks.clone(),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: self.should_count_metrics,
@@ -112,6 +118,7 @@ impl NonFinalizedState {
         NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
+            invalidated_blocks: Default::default(),
             #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
@@ -262,6 +269,49 @@ impl NonFinalizedState {
         self.update_metrics_for_committed_block(height, hash);
 
         Ok(())
+    }
+
+    /// Invalidate block with has `block_hash` and all descendants from the non-finalized state. Insert
+    /// the new chain into the chain_set and discard the previous.
+    pub fn invalidate_block(&mut self, block_hash: Hash) {
+        if !self.any_chain_contains(&block_hash) {
+            return;
+        }
+
+        let mut chain = self
+            .find_chain(|chain| chain.contains_block_hash(block_hash))
+            .expect("block hash exist in a chain");
+
+        let new_chain = Arc::make_mut(&mut chain);
+        let block_height = new_chain.height_by_hash(block_hash).unwrap();
+
+        // Split the new chain at the the `block_hash` and invalidate the block with the
+        // block_hash along with the block's descendants
+        let mut invalidated_blocks = new_chain.blocks.split_off(&block_height);
+        for (_, ctx_block) in invalidated_blocks.iter().rev() {
+            new_chain.revert_chain_with(ctx_block, chain::RevertPosition::Tip);
+        }
+
+        self.invalidated_blocks.insert(
+            block_hash,
+            InvalidatedBlockData {
+                block: invalidated_blocks.remove(&block_height).unwrap(),
+                descendants: invalidated_blocks,
+                timestamp: SystemTime::now(),
+            },
+        );
+
+        // If the new chain still contains blocks:
+        // - add the new chain fork or updated chain to the set of recent chains
+        // - remove the chain containing the hash of the block from the chain set
+        if !new_chain.is_empty() {
+            self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
+                chain_set.retain(|c| !c.contains_block_hash(block_hash))
+            });
+
+            self.update_metrics_for_chains();
+            self.update_metrics_bars();
+        }
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
@@ -576,6 +626,11 @@ impl NonFinalizedState {
     /// Return the number of chains.
     pub fn chain_count(&self) -> usize {
         self.chain_set.len()
+    }
+
+    /// Return the invalidated blocks.
+    pub fn invalidated_blocks(&self) -> HashMap<block::Hash, InvalidatedBlockData> {
+        self.invalidated_blocks.clone()
     }
 
     /// Return the chain whose tip block hash is `parent_hash`.

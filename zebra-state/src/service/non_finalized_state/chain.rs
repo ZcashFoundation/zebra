@@ -1565,7 +1565,7 @@ impl DerefMut for Chain {
 
 /// The revert position being performed on a chain.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-enum RevertPosition {
+pub(crate) enum RevertPosition {
     /// The chain root is being reverted via [`Chain::pop_root`], when a block
     /// is finalized.
     Root,
@@ -1584,7 +1584,7 @@ enum RevertPosition {
 /// and [`Chain::pop_tip`] functions, and fear that it would be easy to
 /// introduce bugs when updating them, unless the code was reorganized to keep
 /// related operations adjacent to each other.
-trait UpdateWith<T> {
+pub(crate) trait UpdateWith<T> {
     /// When `T` is added to the chain tip,
     /// update [`Chain`] cumulative data members to add data that are derived from `T`.
     fn update_chain_tip_with(&mut self, _: &T) -> Result<(), ValidateContextError>;

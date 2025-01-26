@@ -1,9 +1,10 @@
 //! State [`tower::Service`] request types.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     ops::{Deref, DerefMut, RangeInclusive},
     sync::Arc,
+    time::SystemTime,
 };
 
 use zebra_chain::{
@@ -232,6 +233,18 @@ pub struct ContextuallyVerifiedBlock {
 
     /// The sum of the chain value pool changes of all transactions in this block.
     pub(crate) chain_value_pool_change: ValueBalance<NegativeAllowed>,
+}
+
+/// Data related to an invalidated block including the [`ContextuallyVerifiedBlock`] and
+/// descendants.
+#[derive(Clone, Debug)]
+pub struct InvalidatedBlockData {
+    /// The block that was invalidated.
+    pub block: ContextuallyVerifiedBlock,
+    /// All descendant blocks that were also removed in order by [`block::Height`].
+    pub descendants: BTreeMap<block::Height, ContextuallyVerifiedBlock>,
+    /// Timestamp in which the block was invalidated.
+    pub timestamp: SystemTime,
 }
 
 /// Wraps note commitment trees and the history tree together.
