@@ -356,6 +356,14 @@ impl NetworkUpgrade {
             .map(|p| NETWORK_UPGRADES_IN_ORDER[p + 1])
     }
 
+    /// Returns the previous network before after this network upgrade
+    pub fn previous_upgrade(self) -> Option<Self> {
+        Self::iter()
+            .position(|nu| self == nu)
+            .filter(|&p| p > 0)
+            .map(|p| NETWORK_UPGRADES_IN_ORDER[p - 1])
+    }
+
     /// Returns the next network upgrade for `network` and `height`.
     ///
     /// Returns None if the next upgrade has not been implemented in Zebra
