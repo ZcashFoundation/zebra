@@ -1,6 +1,5 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 166
 expression: empty_column_families
 ---
 [
@@ -24,6 +23,7 @@ expression: empty_column_families
   "tip_chain_value_pool: no entries",
   "tx_by_loc: no entries",
   "tx_loc_by_hash: no entries",
+  "tx_loc_by_spent_out_loc: no entries",
   "tx_loc_by_transparent_addr_loc: no entries",
   "utxo_by_out_loc: no entries",
   "utxo_loc_by_transparent_addr_loc: no entries",
