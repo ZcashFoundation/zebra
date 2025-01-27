@@ -29,6 +29,7 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
+    value_balance::ValueBalance,
     work::{
         difficulty::{CompactDifficulty, ExpandedDifficulty},
         equihash::Solution,
@@ -550,34 +551,51 @@ where
         // `chain` field
         let chain = network.bip70_network_name();
 
-        let request = zebra_state::ReadRequest::TipPoolValues;
-        let response: zebra_state::ReadResponse = state
+        let (tip_height, tip_hash, tip_block_time, value_balance) = match state
             .ready()
-            .and_then(|service| service.call(request))
+            .and_then(|service| service.call(zebra_state::ReadRequest::TipPoolValues))
             .await
-            .map_misc_error()?;
+        {
+            Ok(zebra_state::ReadResponse::TipPoolValues {
+                tip_height,
+                tip_hash,
+                value_balance,
+            }) => {
+                let request = zebra_state::ReadRequest::BlockHeader(tip_hash.into());
+                let response: zebra_state::ReadResponse = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_misc_error()?;
 
-        let zebra_state::ReadResponse::TipPoolValues {
-            tip_height,
-            tip_hash,
-            value_balance,
-        } = response
-        else {
-            unreachable!("unmatched response to a TipPoolValues request")
+                if let zebra_state::ReadResponse::BlockHeader { header, .. } = response {
+                    (tip_height, tip_hash, header.time, value_balance)
+                } else {
+                    unreachable!("unmatched response to a TipPoolValues request")
+                }
+            }
+            _ => {
+                let request =
+                    zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(Height::MIN));
+                let response: zebra_state::ReadResponse = state
+                    .ready()
+                    .and_then(|service| service.call(request))
+                    .await
+                    .map_misc_error()?;
+
+                if let zebra_state::ReadResponse::BlockHeader {
+                    header,
+                    hash,
+                    height,
+                    ..
+                } = response
+                {
+                    (height, hash, header.time, ValueBalance::zero())
+                } else {
+                    unreachable!("unmatched response to a BlockHeader request")
+                }
+            }
         };
-
-        let request = zebra_state::ReadRequest::BlockHeader(tip_hash.into());
-        let response: zebra_state::ReadResponse = state
-            .ready()
-            .and_then(|service| service.call(request))
-            .await
-            .map_misc_error()?;
-
-        let zebra_state::ReadResponse::BlockHeader { header, .. } = response else {
-            unreachable!("unmatched response to a BlockHeader request")
-        };
-
-        let tip_block_time = header.time;
 
         let now = Utc::now();
         let zebra_estimated_height =
