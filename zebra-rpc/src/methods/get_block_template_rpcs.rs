@@ -6,6 +6,7 @@ use futures::{future::OptionFuture, TryFutureExt};
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::ErrorObject;
+use tokio::sync::watch;
 use tower::{Service, ServiceExt};
 
 use zcash_address::{unified::Encoding, TryFromAddress};
@@ -375,6 +376,9 @@ pub struct GetBlockTemplateRpcImpl<
 
     /// Address book of peers, used for `getpeerinfo`.
     address_book: AddressBook,
+
+    /// The sender part of a Channel to avertise mined blocks by this node to the network.
+    mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
 }
 
 impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook> Debug
@@ -465,6 +469,7 @@ where
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
+        mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
     ) -> Self {
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
         if let Some(miner_address) = mining_config.miner_address.clone() {
@@ -527,6 +532,7 @@ where
             block_verifier_router,
             sync_status,
             address_book,
+            mined_block_sender,
         }
     }
 }
@@ -935,10 +941,11 @@ where
             }
         };
 
-        let block_height = block
-            .coinbase_height()
-            .map(|height| height.0.to_string())
-            .unwrap_or_else(|| "invalid coinbase height".to_string());
+        let block_height = block.coinbase_height().ok_or(ErrorObject::owned(
+            0,
+            "coinbase height not found".to_string(),
+            None::<()>,
+        ))?;
         let block_hash = block.hash();
 
         let block_verifier_router_response = block_verifier_router
@@ -957,6 +964,17 @@ where
             // The difference is important to miners, because they want to mine on the best chain.
             Ok(block_hash) => {
                 tracing::info!(?block_hash, ?block_height, "submit block accepted");
+
+                self.mined_block_sender
+                    .send((block_hash, block_height))
+                    .map_err(|e| {
+                        ErrorObject::owned(
+                            0,
+                            format!("failed to send mined block: {e}"),
+                            None::<()>,
+                        )
+                    })?;
+
                 return Ok(submit_block::Response::Accepted);
             }
 

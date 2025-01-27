@@ -78,11 +78,17 @@ use std::sync::Arc;
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
-use tokio::{pin, select, sync::oneshot};
+use tokio::{
+    pin, select,
+    sync::{oneshot, watch},
+};
 use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::block::genesis::regtest_genesis_block;
+use zebra_chain::{
+    block::{genesis::regtest_genesis_block, Height},
+    parameters::GENESIS_PREVIOUS_BLOCK_HASH,
+};
 use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
 use zebra_rpc::server::RpcServer;
 
@@ -242,6 +248,10 @@ impl StartCmd {
             );
         }
 
+        // Create a channel to send mined blocks to the gossip task
+        let (mined_block_sender, mined_block_receiver) =
+            watch::channel((GENESIS_PREVIOUS_BLOCK_HASH, Height::MIN));
+
         // Launch RPC server
         let (rpc_task_handle, mut rpc_tx_queue_task_handle) =
             if let Some(listen_addr) = config.rpc.listen_addr {
@@ -259,6 +269,7 @@ impl StartCmd {
                     address_book.clone(),
                     latest_chain_tip.clone(),
                     config.network.network.clone(),
+                    mined_block_sender.clone(),
                 );
                 rpc_task_handle.await.unwrap()
             } else {
@@ -301,6 +312,8 @@ impl StartCmd {
                 sync_status.clone(),
                 chain_tip_change.clone(),
                 peer_set.clone(),
+                mined_block_receiver,
+                config.network.network.clone(),
             )
             .in_current_span(),
         );
@@ -382,6 +395,7 @@ impl StartCmd {
         #[cfg(feature = "internal-miner")]
         let miner_task_handle = if config.mining.is_internal_miner_enabled() {
             info!("spawning Zcash miner");
+
             let rpc = zebra_rpc::methods::get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
                 &config.network.network,
                 config.mining.clone(),
@@ -391,6 +405,7 @@ impl StartCmd {
                 block_verifier_router,
                 sync_status,
                 address_book,
+                mined_block_sender,
             );
 
             crate::components::miner::spawn_init(&config.network.network, &config.mining, rpc)
