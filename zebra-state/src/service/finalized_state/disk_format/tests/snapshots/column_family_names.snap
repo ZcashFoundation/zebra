@@ -1,6 +1,5 @@
 ---
 source: zebra-state/src/service/finalized_state/disk_format/tests/snapshot.rs
-assertion_line: 81
 expression: cf_names
 ---
 [
@@ -25,6 +24,7 @@ expression: cf_names
   "tip_chain_value_pool",
   "tx_by_loc",
   "tx_loc_by_hash",
+  "tx_loc_by_spent_out_loc",
   "tx_loc_by_transparent_addr_loc",
   "utxo_by_out_loc",
   "utxo_loc_by_transparent_addr_loc",

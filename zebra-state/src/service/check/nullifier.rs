@@ -1,13 +1,16 @@
 //! Checks for nullifier uniqueness.
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use tracing::trace;
 use zebra_chain::transaction::Transaction;
 
 use crate::{
     error::DuplicateNullifierError,
-    service::{finalized_state::ZebraDb, non_finalized_state::Chain},
+    service::{
+        finalized_state::ZebraDb,
+        non_finalized_state::{Chain, SpendingTransactionId},
+    },
     SemanticallyVerifiedBlock, ValidateContextError,
 };
 
@@ -105,19 +108,22 @@ pub(crate) fn tx_no_duplicates_in_chain(
     find_duplicate_nullifier(
         transaction.sprout_nullifiers(),
         |nullifier| finalized_chain.contains_sprout_nullifier(nullifier),
-        non_finalized_chain.map(|chain| |nullifier| chain.sprout_nullifiers.contains(nullifier)),
+        non_finalized_chain
+            .map(|chain| |nullifier| chain.sprout_nullifiers.contains_key(nullifier)),
     )?;
 
     find_duplicate_nullifier(
         transaction.sapling_nullifiers(),
         |nullifier| finalized_chain.contains_sapling_nullifier(nullifier),
-        non_finalized_chain.map(|chain| |nullifier| chain.sapling_nullifiers.contains(nullifier)),
+        non_finalized_chain
+            .map(|chain| |nullifier| chain.sapling_nullifiers.contains_key(nullifier)),
     )?;
 
     find_duplicate_nullifier(
         transaction.orchard_nullifiers(),
         |nullifier| finalized_chain.contains_orchard_nullifier(nullifier),
-        non_finalized_chain.map(|chain| |nullifier| chain.orchard_nullifiers.contains(nullifier)),
+        non_finalized_chain
+            .map(|chain| |nullifier| chain.orchard_nullifiers.contains_key(nullifier)),
     )?;
 
     Ok(())
@@ -156,8 +162,9 @@ pub(crate) fn tx_no_duplicates_in_chain(
 /// [5]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn add_to_non_finalized_chain_unique<'block, NullifierT>(
-    chain_nullifiers: &mut HashSet<NullifierT>,
+    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = &'block NullifierT>,
+    revealing_tx_id: SpendingTransactionId,
 ) -> Result<(), ValidateContextError>
 where
     NullifierT: DuplicateNullifierError + Copy + std::fmt::Debug + Eq + std::hash::Hash + 'block,
@@ -166,7 +173,10 @@ where
         trace!(?nullifier, "adding nullifier");
 
         // reject the nullifier if it is already present in this non-finalized chain
-        if !chain_nullifiers.insert(*nullifier) {
+        if chain_nullifiers
+            .insert(*nullifier, revealing_tx_id)
+            .is_some()
+        {
             Err(nullifier.duplicate_nullifier_error(false))?;
         }
     }
@@ -200,7 +210,7 @@ where
 /// [1]: service::non_finalized_state::Chain
 #[tracing::instrument(skip(chain_nullifiers, shielded_data_nullifiers))]
 pub(crate) fn remove_from_non_finalized_chain<'block, NullifierT>(
-    chain_nullifiers: &mut HashSet<NullifierT>,
+    chain_nullifiers: &mut HashMap<NullifierT, SpendingTransactionId>,
     shielded_data_nullifiers: impl IntoIterator<Item = &'block NullifierT>,
 ) where
     NullifierT: std::fmt::Debug + Eq + std::hash::Hash + 'block,
@@ -209,7 +219,7 @@ pub(crate) fn remove_from_non_finalized_chain<'block, NullifierT>(
         trace!(?nullifier, "removing nullifier");
 
         assert!(
-            chain_nullifiers.remove(nullifier),
+            chain_nullifiers.remove(nullifier).is_some(),
             "nullifier must be present if block was added to chain"
         );
     }

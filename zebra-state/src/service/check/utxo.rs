@@ -1,6 +1,6 @@
 //! Consensus rule checks for the finalized state.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use zebra_chain::{
     amount,
@@ -9,7 +9,7 @@ use zebra_chain::{
 
 use crate::{
     constants::MIN_TRANSPARENT_COINBASE_MATURITY,
-    service::finalized_state::ZebraDb,
+    service::{finalized_state::ZebraDb, non_finalized_state::SpendingTransactionId},
     SemanticallyVerifiedBlock,
     ValidateContextError::{
         self, DuplicateTransparentSpend, EarlyTransparentSpend, ImmatureTransparentCoinbaseSpend,
@@ -38,7 +38,7 @@ use crate::{
 pub fn transparent_spend(
     semantically_verified: &SemanticallyVerifiedBlock,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
+    non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<HashMap<transparent::OutPoint, transparent::OrderedUtxo>, ValidateContextError> {
     let mut block_spends = HashMap::new();
@@ -128,7 +128,7 @@ fn transparent_spend_chain_order(
     spend_tx_index_in_block: usize,
     block_new_outputs: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
     non_finalized_chain_unspent_utxos: &HashMap<transparent::OutPoint, transparent::OrderedUtxo>,
-    non_finalized_chain_spent_utxos: &HashSet<transparent::OutPoint>,
+    non_finalized_chain_spent_utxos: &HashMap<transparent::OutPoint, SpendingTransactionId>,
     finalized_state: &ZebraDb,
 ) -> Result<transparent::OrderedUtxo, ValidateContextError> {
     if let Some(output) = block_new_outputs.get(&spend) {
@@ -148,7 +148,7 @@ fn transparent_spend_chain_order(
         }
     }
 
-    if non_finalized_chain_spent_utxos.contains(&spend) {
+    if non_finalized_chain_spent_utxos.contains_key(&spend) {
         // reject the spend if its UTXO is already spent in the
         // non-finalized parent chain
         return Err(DuplicateTransparentSpend {

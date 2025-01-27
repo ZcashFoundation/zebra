@@ -326,6 +326,19 @@ We use the following rocksdb column families:
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
 
+With the following additional modifications when compiled with the `indexer` feature:
+
+| Column Family                      | Keys                   | Values                        | Changes |
+| ---------------------------------- | ---------------------- | ----------------------------- | ------- |
+| *Transparent*                      |                        |                               |         |
+| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
+| *Sprout*                           |                        |                               |         |
+| `sprout_nullifiers`                | `sprout::Nullifier`    | `TransactionLocation`         | Create  |
+| *Sapling*                          |                        |                               |         |
+| `sapling_nullifiers`               | `sapling::Nullifier`   | `TransactionLocation`         | Create  |
+| *Orchard*                          |                        |                               |         |
+| `orchard_nullifiers`               | `orchard::Nullifier`   | `TransactionLocation`         | Create  |
+
 ### Data Formats
 [rocksdb-data-format]: #rocksdb-data-format
 

@@ -331,6 +331,16 @@ impl IntoDisk for TransactionLocation {
     }
 }
 
+impl FromDisk for Option<TransactionLocation> {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        if disk_bytes.as_ref().len() == TRANSACTION_LOCATION_DISK_BYTES {
+            Some(TransactionLocation::from_bytes(disk_bytes))
+        } else {
+            None
+        }
+    }
+}
+
 impl FromDisk for TransactionLocation {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
         let (height_bytes, index_bytes) = disk_bytes.as_ref().split_at(HEIGHT_DISK_BYTES);
