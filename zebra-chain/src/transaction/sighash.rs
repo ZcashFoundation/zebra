@@ -41,6 +41,7 @@ impl AsRef<[u8]> for SigHash {
 
 /// A SigHasher context which stores precomputed data that is reused
 /// between sighash computations for the same transaction.
+#[derive(Debug)]
 pub struct SigHasher<'a> {
     precomputed_tx_data: PrecomputedTxData<'a>,
 }
