@@ -467,7 +467,6 @@ fn validate(
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: block_time,
-                skip_checks: None,
             })
             .await
             .map_err(|err| {

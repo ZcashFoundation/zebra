@@ -385,31 +385,21 @@ impl VerifiedUnminedTx {
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
         legacy_sigop_count: u64,
-        // Allows skipping ZIP 317 checks, only in tests.
-        #[cfg(feature = "proptest-impl")] skip_checks: bool,
     ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let conventional_actions = zip317::conventional_actions(&transaction.transaction);
         let unpaid_actions = zip317::unpaid_actions(&transaction, miner_fee);
-        let tx_size = transaction.size;
 
-        let verified_unmined_tx = Self {
+        zip317::mempool_checks(unpaid_actions, miner_fee, transaction.size)?;
+
+        Ok(Self {
             transaction,
             miner_fee,
             legacy_sigop_count,
             fee_weight_ratio,
             conventional_actions,
             unpaid_actions,
-        };
-
-        #[cfg(feature = "proptest-impl")]
-        if skip_checks {
-            return Ok(verified_unmined_tx);
-        }
-
-        zip317::mempool_checks(unpaid_actions, miner_fee, tx_size)?;
-
-        Ok(verified_unmined_tx)
+        })
     }
 
     /// Returns `true` if the transaction pays at least the [ZIP-317] conventional fee.

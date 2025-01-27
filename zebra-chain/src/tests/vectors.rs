@@ -63,10 +63,8 @@ impl Network {
             .filter_map(|transaction| {
                 VerifiedUnminedTx::new(
                     transaction,
-                    Amount::try_from(1_000_000).expect("invalid value"),
+                    Amount::try_from(1_000_000).expect("valid amount"),
                     0,
-                    #[cfg(feature = "proptest-impl")]
-                    false,
                 )
                 .ok()
             })

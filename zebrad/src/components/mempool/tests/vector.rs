@@ -825,7 +825,6 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
                     0,
-                    false,
                 )
                 .expect("verification should pass"),
             ));
@@ -886,7 +885,6 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
                     transaction,
                     Amount::try_from(1_000_000).expect("invalid value"),
                     0,
-                    false,
                 )
                 .expect("verification should pass"),
             ));

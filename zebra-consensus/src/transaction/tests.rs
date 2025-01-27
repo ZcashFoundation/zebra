@@ -36,10 +36,7 @@ use zebra_node_services::mempool;
 use zebra_state::ValidateContextError;
 use zebra_test::mock_service::MockService;
 
-use crate::{
-    error::TransactionError,
-    transaction::{SkipCheck, POLL_MEMPOOL_DELAY},
-};
+use crate::{error::TransactionError, transaction::POLL_MEMPOOL_DELAY};
 
 use super::{check, Request, Verifier};
 
@@ -233,7 +230,6 @@ async fn mempool_request_with_missing_input_is_rejected() {
         let verifier_req = verifier.oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         });
 
         let (rsp, _) = futures::join!(verifier_req, state_req);
@@ -300,7 +296,6 @@ async fn mempool_request_with_present_input_is_accepted() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -378,7 +373,6 @@ async fn mempool_request_with_invalid_lock_time_is_rejected() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -448,7 +442,6 @@ async fn mempool_request_with_unlocked_lock_time_is_accepted() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -519,7 +512,6 @@ async fn mempool_request_with_lock_time_max_sequence_number_is_accepted() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -595,7 +587,6 @@ async fn mempool_request_with_past_lock_time_is_accepted() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -689,7 +680,6 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -811,7 +801,6 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         .oneshot(Request::Mempool {
             transaction: tx.clone().into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -855,7 +844,6 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         known_utxos: Arc::new(HashMap::new()),
         height,
         time: Utc::now(),
-        skip_checks: None,
     };
 
     let crate::transaction::Response::Block { .. } = verifier
@@ -985,7 +973,6 @@ async fn mempool_request_with_immature_spend_is_rejected() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await
         .expect_err("verification of transaction with immature spend should fail");
@@ -1085,7 +1072,6 @@ async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest(
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await
         .expect("verification of transaction with mature spend to transparent outputs should pass");
@@ -1158,7 +1144,6 @@ async fn state_error_converted_correctly() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -1250,7 +1235,6 @@ async fn v5_transaction_is_rejected_before_nu5_activation() {
                     known_outpoint_hashes: Arc::new(HashSet::new()),
                     height: sapling.activation_height(&net).expect("height"),
                     time: DateTime::<Utc>::MAX_UTC,
-                    skip_checks: None,
                 })
                 .await,
             Err(TransactionError::UnsupportedByNetworkUpgrade(5, sapling))
@@ -1278,7 +1262,6 @@ async fn v5_transaction_is_accepted_after_nu5_activation() {
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: tx_height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -1333,7 +1316,6 @@ async fn v4_transaction_with_transparent_transfer_is_accepted() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1380,7 +1362,6 @@ async fn v4_transaction_with_last_valid_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1428,7 +1409,6 @@ async fn v4_coinbase_transaction_with_low_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1478,7 +1458,6 @@ async fn v4_transaction_with_too_low_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1531,7 +1510,6 @@ async fn v4_transaction_with_exceeding_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1587,7 +1565,6 @@ async fn v4_coinbase_transaction_with_exceeding_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1641,7 +1618,6 @@ async fn v4_coinbase_transaction_is_accepted() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1699,7 +1675,6 @@ async fn v4_transaction_with_transparent_transfer_is_rejected_by_the_script() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1757,7 +1732,6 @@ async fn v4_transaction_with_conflicting_transparent_spend_is_rejected() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -1826,7 +1800,6 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -1900,7 +1873,6 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height: transaction_block_height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -1962,7 +1934,6 @@ async fn v5_transaction_with_transparent_transfer_is_accepted() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2011,7 +1982,6 @@ async fn v5_transaction_with_last_valid_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2059,7 +2029,6 @@ async fn v5_coinbase_transaction_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2083,7 +2052,6 @@ async fn v5_coinbase_transaction_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await
         .map_err(|err| {
@@ -2115,7 +2083,6 @@ async fn v5_coinbase_transaction_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await
         .map_err(|err| {
@@ -2155,7 +2122,6 @@ async fn v5_coinbase_transaction_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: new_expiry_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2209,7 +2175,6 @@ async fn v5_transaction_with_too_low_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2261,7 +2226,6 @@ async fn v5_transaction_with_exceeding_expiry_height() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: height_max,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2318,7 +2282,6 @@ async fn v5_coinbase_transaction_is_accepted() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2378,7 +2341,6 @@ async fn v5_transaction_with_transparent_transfer_is_rejected_by_the_script() {
             known_outpoint_hashes: Arc::new(HashSet::new()),
             height: transaction_block_height,
             time: DateTime::<Utc>::MAX_UTC,
-            skip_checks: None,
         })
         .await;
 
@@ -2429,7 +2391,6 @@ async fn v5_transaction_with_conflicting_transparent_spend_is_rejected() {
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -2475,7 +2436,6 @@ fn v4_with_signed_sprout_transfer_is_accepted() {
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -2567,7 +2527,6 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await
             .map_err(|err| {
@@ -2616,7 +2575,6 @@ fn v4_with_sapling_spends() {
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -2661,7 +2619,6 @@ fn v4_with_duplicate_sapling_spends() {
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -2708,7 +2665,6 @@ fn v4_with_sapling_outputs_and_no_spends() {
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-                skip_checks: None,
             })
             .await;
 
@@ -2751,7 +2707,6 @@ async fn v5_with_sapling_spends() {
                     known_outpoint_hashes: Arc::new(HashSet::new()),
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
-                    skip_checks: None,
                 })
                 .await
                 .expect("unexpected error response")
@@ -2791,7 +2746,6 @@ async fn v5_with_duplicate_sapling_spends() {
                     known_outpoint_hashes: Arc::new(HashSet::new()),
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
-                    skip_checks: None,
                 })
                 .await,
             Err(TransactionError::DuplicateSaplingNullifier(
@@ -2847,7 +2801,6 @@ async fn v5_with_duplicate_orchard_action() {
                     known_outpoint_hashes: Arc::new(HashSet::new()),
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
-                    skip_checks: None,
                 })
                 .await,
             Err(TransactionError::DuplicateOrchardNullifier(
@@ -2906,7 +2859,6 @@ async fn v5_consensus_branch_ids() {
                     // The consensus branch ID of the tx is outdated for this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
-                    skip_checks: None,
                 })
                 .map_err(|err| *err.downcast().expect("`TransactionError` type"));
 
@@ -2916,7 +2868,6 @@ async fn v5_consensus_branch_ids() {
                     transaction: tx.clone().into(),
                     // The consensus branch ID of the tx is outdated for this height.
                     height,
-                    skip_checks: None,
                 })
                 .map_err(|err| *err.downcast().expect("`TransactionError` type"));
 
@@ -2938,7 +2889,6 @@ async fn v5_consensus_branch_ids() {
                     // The consensus branch ID of the tx is supported by this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
-                    skip_checks: None,
                 })
                 .map_ok(|rsp| rsp.tx_id())
                 .map_err(|e| format!("{e}"));
@@ -2949,7 +2899,6 @@ async fn v5_consensus_branch_ids() {
                     transaction: tx.clone().into(),
                     // The consensus branch ID of the tx is supported by this height.
                     height,
-                    skip_checks: None,
                 })
                 .map_ok(|rsp| rsp.tx_id())
                 .map_err(|e| format!("{e}"));
@@ -2999,7 +2948,6 @@ async fn v5_consensus_branch_ids() {
                     // The consensus branch ID of the tx is not supported by this height.
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
-                    skip_checks: None,
                 })
                 .map_err(|err| *err.downcast().expect("`TransactionError` type"));
 
@@ -3009,7 +2957,6 @@ async fn v5_consensus_branch_ids() {
                     transaction: tx.clone().into(),
                     // The consensus branch ID of the tx is not supported by this height.
                     height,
-                    skip_checks: None,
                 })
                 .map_err(|err| *err.downcast().expect("`TransactionError` type"));
 
@@ -3572,7 +3519,6 @@ async fn mempool_zip317_error() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 
@@ -3645,7 +3591,6 @@ async fn mempool_zip317_ok() {
         .oneshot(Request::Mempool {
             transaction: tx.into(),
             height,
-            skip_checks: None,
         })
         .await;
 

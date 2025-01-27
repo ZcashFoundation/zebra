@@ -373,8 +373,6 @@ where
                 .oneshot(tx::Request::Mempool {
                     transaction: tx.clone(),
                     height: next_height,
-                    #[cfg(feature = "proptest-impl")]
-                    skip_checks: None,
                 })
                 .map_ok(|rsp| {
                     let tx::Response::Mempool { transaction, spent_mempool_outpoints } = rsp else {
