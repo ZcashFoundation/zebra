@@ -1,8 +1,10 @@
 //! Fixed test vectors for transactions.
 
+use arbitrary::v5_transactions;
 use chrono::DateTime;
 use color_eyre::eyre::Result;
 use lazy_static::lazy_static;
+use rand::{seq::IteratorRandom, thread_rng};
 
 use crate::{
     block::{Block, Height, MAX_BLOCK_BYTES},
@@ -799,6 +801,31 @@ fn zip244_sighash() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[test]
+fn consensus_branch_id_sighash() {
+    for net in Network::iter() {
+        for tx in v5_transactions(net.block_iter()).filter(|tx| {
+            !tx.has_transparent_inputs() && tx.has_shielded_data() && tx.network_upgrade().is_some()
+        }) {
+            let tx_nu = tx
+                .network_upgrade()
+                .expect("this test shouldn't use txs without a network upgrade");
+
+            let any_other_nu = NetworkUpgrade::iter()
+                .filter(|&nu| nu != tx_nu)
+                .choose(&mut thread_rng())
+                .expect("there must be a network upgrade other than the tx one");
+
+            // The sighash computation should succeed under the correct nu.
+            tx.sighash(tx_nu, HashType::ALL, &[], None);
+
+            // The sighash computation should panic under a wrong nu.
+            std::panic::catch_unwind(|| tx.sighash(any_other_nu, HashType::ALL, &[], None))
+                .expect_err("the sighash computation should panic under a wrong network upgrade");
+        }
+    }
 }
 
 #[test]
