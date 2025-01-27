@@ -538,6 +538,11 @@ impl NetworkUpgrade {
     ) -> Duration {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
     }
+
+    /// Returns an iterator over [`NetworkUpgrade`] variants.
+    pub fn iter() -> impl Iterator<Item = NetworkUpgrade> {
+        NETWORK_UPGRADES_IN_ORDER.into_iter()
+    }
 }
 
 impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
