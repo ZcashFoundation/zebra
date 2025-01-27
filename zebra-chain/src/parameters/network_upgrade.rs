@@ -15,7 +15,7 @@ use hex::{FromHex, ToHex};
 use proptest_derive::Arbitrary;
 
 /// A list of network upgrades in the order that they must be activated.
-pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
+const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
     Genesis,
     BeforeOverwinter,
     Overwinter,
