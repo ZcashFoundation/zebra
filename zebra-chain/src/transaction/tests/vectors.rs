@@ -804,7 +804,7 @@ fn zip244_sighash() -> Result<()> {
 }
 
 #[test]
-fn consensus_branch_id_sighash() {
+fn consensus_branch_id() {
     for net in Network::iter() {
         for tx in v5_transactions(net.block_iter()).filter(|tx| {
             !tx.has_transparent_inputs() && tx.has_shielded_data() && tx.network_upgrade().is_some()
@@ -818,12 +818,27 @@ fn consensus_branch_id_sighash() {
                 .choose(&mut thread_rng())
                 .expect("there must be a network upgrade other than the tx one");
 
-            // The sighash computation should succeed under the correct nu.
+            // All computations should succeed under the tx nu.
+
+            tx.to_librustzcash(tx_nu)
+                .expect("tx is convertible under tx nu");
+            PrecomputedTxData::new(&tx, tx_nu, &[]);
+            sighash::SigHasher::new(&tx, tx_nu, &[]);
             tx.sighash(tx_nu, HashType::ALL, &[], None);
 
-            // The sighash computation should panic under a wrong nu.
+            // All computations should fail under an nu other than the tx one.
+
+            tx.to_librustzcash(any_other_nu)
+                .expect_err("tx is not convertible under nu other than the tx one");
+
+            std::panic::catch_unwind(|| PrecomputedTxData::new(&tx, any_other_nu, &[]))
+                .expect_err("precomputing tx sighash data panics under nu other than the tx one");
+
+            std::panic::catch_unwind(|| sighash::SigHasher::new(&tx, any_other_nu, &[]))
+                .expect_err("creating the sighasher panics under nu other than the tx one");
+
             std::panic::catch_unwind(|| tx.sighash(any_other_nu, HashType::ALL, &[], None))
-                .expect_err("the sighash computation should panic under a wrong network upgrade");
+                .expect_err("the sighash computation panics under nu other than the tx one");
         }
     }
 }
