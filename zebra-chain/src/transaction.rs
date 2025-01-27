@@ -1255,6 +1255,13 @@ impl Transaction {
             branch_id,
         )?)
     }
+
+    // Common Sapling & Orchard Properties
+
+    /// Does this transaction have shielded inputs or outputs?
+    pub fn has_shielded_data(&self) -> bool {
+        self.has_shielded_inputs() || self.has_shielded_outputs()
+    }
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
