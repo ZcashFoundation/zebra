@@ -26,7 +26,7 @@ mod chain;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use chain::Chain;
+pub(crate) use chain::{Chain, SpendingTransactionId};
 
 /// The state of the chains in memory, including queued blocks.
 ///
@@ -540,7 +540,7 @@ impl NonFinalizedState {
     #[allow(dead_code)]
     pub fn best_contains_sprout_nullifier(&self, sprout_nullifier: &sprout::Nullifier) -> bool {
         self.best_chain()
-            .map(|best_chain| best_chain.sprout_nullifiers.contains(sprout_nullifier))
+            .map(|best_chain| best_chain.sprout_nullifiers.contains_key(sprout_nullifier))
             .unwrap_or(false)
     }
 
@@ -552,7 +552,11 @@ impl NonFinalizedState {
         sapling_nullifier: &zebra_chain::sapling::Nullifier,
     ) -> bool {
         self.best_chain()
-            .map(|best_chain| best_chain.sapling_nullifiers.contains(sapling_nullifier))
+            .map(|best_chain| {
+                best_chain
+                    .sapling_nullifiers
+                    .contains_key(sapling_nullifier)
+            })
             .unwrap_or(false)
     }
 
@@ -564,7 +568,11 @@ impl NonFinalizedState {
         orchard_nullifier: &zebra_chain::orchard::Nullifier,
     ) -> bool {
         self.best_chain()
-            .map(|best_chain| best_chain.orchard_nullifiers.contains(orchard_nullifier))
+            .map(|best_chain| {
+                best_chain
+                    .orchard_nullifiers
+                    .contains_key(orchard_nullifier)
+            })
             .unwrap_or(false)
     }
 
