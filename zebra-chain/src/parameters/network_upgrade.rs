@@ -350,17 +350,10 @@ impl NetworkUpgrade {
 
     /// Returns the next expected network upgrade after this network upgrade
     pub fn next_upgrade(self) -> Option<Self> {
-        match self {
-            Genesis => Some(BeforeOverwinter),
-            BeforeOverwinter => Some(Overwinter),
-            Overwinter => Some(Sapling),
-            Sapling => Some(Blossom),
-            Blossom => Some(Heartwood),
-            Heartwood => Some(Canopy),
-            Canopy => Some(Nu5),
-            Nu5 => Some(Nu6),
-            Nu6 => None,
-        }
+        Self::iter()
+            .position(|nu| self == nu)
+            .filter(|&p| (p + 1) < NETWORK_UPGRADES_IN_ORDER.len())
+            .map(|p| NETWORK_UPGRADES_IN_ORDER[p + 1])
     }
 
     /// Returns the next network upgrade for `network` and `height`.
