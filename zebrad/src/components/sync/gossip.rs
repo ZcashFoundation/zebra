@@ -6,7 +6,7 @@ use thiserror::Error;
 use tokio::sync::watch;
 use tower::{timeout::Timeout, Service, ServiceExt};
 
-use zebra_chain::{block, chain_sync_status::ChainSyncStatus, parameters::Network};
+use zebra_chain::{block, chain_sync_status::ChainSyncStatus};
 use zebra_network as zn;
 use zebra_state::ChainTipChange;
 
@@ -48,7 +48,6 @@ pub async fn gossip_best_tip_block_hashes<ZN>(
     mut chain_state: ChainTipChange,
     broadcast_network: ZN,
     mut receiver: watch::Receiver<(block::Hash, block::Height)>,
-    network: Network,
 ) -> Result<(), BlockGossipError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -91,7 +90,7 @@ where
             // build a request with the obtained hash.
             let request = zn::Request::AdvertiseBlock(hash);
 
-            debug!(?height, ?request, "sending mined block broadcast");
+            info!(?height, ?request, "sending mined block broadcast");
             request
         } else {
             // we don't have a new block to broadcast, so wait for a new one.
@@ -99,18 +98,13 @@ where
             continue;
         };
 
-        // The regtest networks don't have p2p support, so we skip the broadcast.
-        if network.is_regtest() {
-            warn!("we are in a regtest network with no p2p support, skipping broadcast");
-        } else {
-            // broadcast requests don't return errors, and we'd just want to ignore them anyway
-            let _ = broadcast_network
-                .ready()
-                .await
-                .map_err(PeerSetReadiness)?
-                .call(request)
-                .await;
-        }
+        // broadcast requests don't return errors, and we'd just want to ignore them anyway
+        let _ = broadcast_network
+            .ready()
+            .await
+            .map_err(PeerSetReadiness)?
+            .call(request)
+            .await;
 
         // wait for at least the network timeout between gossips
         //

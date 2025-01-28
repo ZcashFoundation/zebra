@@ -981,7 +981,6 @@ async fn setup(
         chain_tip_change.clone(),
         peer_set.clone(),
         submitblock_channel.receiver(),
-        network.clone(),
     ));
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(

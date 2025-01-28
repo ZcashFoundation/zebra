@@ -308,7 +308,6 @@ impl StartCmd {
                 chain_tip_change.clone(),
                 peer_set.clone(),
                 submit_block_channel.receiver(),
-                config.network.network.clone(),
             )
             .in_current_span(),
         );
