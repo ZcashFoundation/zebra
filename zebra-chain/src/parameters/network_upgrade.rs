@@ -350,18 +350,12 @@ impl NetworkUpgrade {
 
     /// Returns the next expected network upgrade after this network upgrade
     pub fn next_upgrade(self) -> Option<Self> {
-        Self::iter()
-            .position(|nu| self == nu)
-            .filter(|&p| (p + 1) < NETWORK_UPGRADES_IN_ORDER.len())
-            .map(|p| NETWORK_UPGRADES_IN_ORDER[p + 1])
+        Self::iter().skip_while(|&nu| self != nu).nth(1)
     }
 
     /// Returns the previous network before after this network upgrade
     pub fn previous_upgrade(self) -> Option<Self> {
-        Self::iter()
-            .position(|nu| self == nu)
-            .filter(|&p| p > 0)
-            .map(|p| NETWORK_UPGRADES_IN_ORDER[p - 1])
+        Self::iter().rev().skip_while(|&nu| self != nu).nth(1)
     }
 
     /// Returns the next network upgrade for `network` and `height`.
@@ -541,7 +535,7 @@ impl NetworkUpgrade {
     }
 
     /// Returns an iterator over [`NetworkUpgrade`] variants.
-    pub fn iter() -> impl Iterator<Item = NetworkUpgrade> {
+    pub fn iter() -> impl DoubleEndedIterator<Item = NetworkUpgrade> {
         NETWORK_UPGRADES_IN_ORDER.into_iter()
     }
 }
