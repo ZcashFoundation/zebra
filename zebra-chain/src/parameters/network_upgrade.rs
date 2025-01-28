@@ -348,12 +348,12 @@ impl NetworkUpgrade {
             .expect("every height has a current network upgrade")
     }
 
-    /// Returns the next expected network upgrade after this network upgrade
+    /// Returns the next expected network upgrade after this network upgrade.
     pub fn next_upgrade(self) -> Option<Self> {
         Self::iter().skip_while(|&nu| self != nu).nth(1)
     }
 
-    /// Returns the previous network before after this network upgrade
+    /// Returns the previous network upgrade before this network upgrade.
     pub fn previous_upgrade(self) -> Option<Self> {
         Self::iter().rev().skip_while(|&nu| self != nu).nth(1)
     }
