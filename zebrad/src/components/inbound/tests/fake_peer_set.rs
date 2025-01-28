@@ -24,6 +24,7 @@ use zebra_network::{
     AddressBook, InventoryResponse, Request, Response,
 };
 use zebra_node_services::mempool;
+use zebra_rpc::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
 use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -974,10 +975,13 @@ async fn setup(
     // Pretend we're close to tip
     SyncStatus::sync_close_to_tip(&mut recent_syncs);
 
+    let submitblock_channel = SubmitBlockChannel::new();
     let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
         chain_tip_change.clone(),
         peer_set.clone(),
+        submitblock_channel.receiver(),
+        network.clone(),
     ));
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(

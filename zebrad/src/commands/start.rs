@@ -78,19 +78,15 @@ use std::sync::Arc;
 use abscissa_core::{config, Command, FrameworkError};
 use color_eyre::eyre::{eyre, Report};
 use futures::FutureExt;
-use tokio::{
-    pin, select,
-    sync::{oneshot, watch},
-};
+use tokio::{pin, select, sync::oneshot};
 use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
-use zebra_chain::{
-    block::{genesis::regtest_genesis_block, Height},
-    parameters::GENESIS_PREVIOUS_BLOCK_HASH,
-};
+use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
-use zebra_rpc::server::RpcServer;
+use zebra_rpc::{
+    methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel, server::RpcServer,
+};
 
 use crate::{
     application::{build_version, user_agent},
@@ -249,8 +245,7 @@ impl StartCmd {
         }
 
         // Create a channel to send mined blocks to the gossip task
-        let (mined_block_sender, mined_block_receiver) =
-            watch::channel((GENESIS_PREVIOUS_BLOCK_HASH, Height::MIN));
+        let submit_block_channel = SubmitBlockChannel::new();
 
         // Launch RPC server
         let (rpc_task_handle, mut rpc_tx_queue_task_handle) =
@@ -269,7 +264,7 @@ impl StartCmd {
                     address_book.clone(),
                     latest_chain_tip.clone(),
                     config.network.network.clone(),
-                    mined_block_sender.clone(),
+                    submit_block_channel.sender(),
                 );
                 rpc_task_handle.await.unwrap()
             } else {
@@ -312,7 +307,7 @@ impl StartCmd {
                 sync_status.clone(),
                 chain_tip_change.clone(),
                 peer_set.clone(),
-                mined_block_receiver,
+                submit_block_channel.receiver(),
                 config.network.network.clone(),
             )
             .in_current_span(),
@@ -405,7 +400,7 @@ impl StartCmd {
                 block_verifier_router,
                 sync_status,
                 address_book,
-                mined_block_sender,
+                submit_block_channel.sender(),
             );
 
             crate::components::miner::spawn_init(&config.network.network, &config.mining, rpc)

@@ -6,19 +6,20 @@ use std::sync::Arc;
 use futures::FutureExt;
 use tower::buffer::Buffer;
 
-use zebra_chain::serialization::ZcashSerialize;
 use zebra_chain::{
     amount::Amount,
     block::Block,
     chain_tip::{mock::MockChainTip, NoChainTip},
     parameters::Network::*,
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::UnminedTxId,
 };
 use zebra_node_services::BoxError;
 
 use zebra_state::{LatestChainTip, ReadStateService};
 use zebra_test::mock_service::MockService;
+
+use crate::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
 
 use super::super::*;
 
@@ -1195,6 +1196,7 @@ async fn rpc_getblockcount() {
         block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     // Get the tip height using RPC method `get_block_count`
@@ -1244,6 +1246,7 @@ async fn rpc_getblockcount_empty_state() {
         block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     // Get the tip height using RPC method `get_block_count
@@ -1312,6 +1315,7 @@ async fn rpc_getpeerinfo() {
         block_verifier_router,
         MockSyncStatus::default(),
         mock_address_book,
+        SubmitBlockChannel::new().sender(),
     );
 
     // Call `get_peer_info`
@@ -1372,6 +1376,7 @@ async fn rpc_getblockhash() {
         tower::ServiceBuilder::new().service(block_verifier_router),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     // Query the hashes using positive indexes
@@ -1428,6 +1433,7 @@ async fn rpc_getmininginfo() {
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     get_block_template_rpc
@@ -1464,6 +1470,7 @@ async fn rpc_getnetworksolps() {
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     let get_network_sol_ps_inputs = [
@@ -1595,6 +1602,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         block_verifier_router,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     // Fake the ChainInfo response
@@ -1870,6 +1878,7 @@ async fn rpc_submitblock_errors() {
         block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     // Try to submit pre-populated blocks and assert that it responds with duplicate.
@@ -1922,6 +1931,7 @@ async fn rpc_validateaddress() {
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     let validate_address = get_block_template_rpc
@@ -1967,6 +1977,7 @@ async fn rpc_z_validateaddress() {
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     let z_validate_address = get_block_template_rpc
@@ -2055,6 +2066,7 @@ async fn rpc_getdifficulty() {
         block_verifier_router,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     // Fake the ChainInfo response: smallest numeric difficulty
@@ -2176,6 +2188,7 @@ async fn rpc_z_listunifiedreceivers() {
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        SubmitBlockChannel::new().sender(),
     );
 
     // invalid address

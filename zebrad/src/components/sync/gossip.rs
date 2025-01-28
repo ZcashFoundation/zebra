@@ -44,7 +44,7 @@ pub enum BlockGossipError {
 ///
 /// [`block::Hash`]: zebra_chain::block::Hash
 pub async fn gossip_best_tip_block_hashes<ZN>(
-    sync_status: SyncStatus,
+    mut sync_status: SyncStatus,
     mut chain_state: ChainTipChange,
     broadcast_network: ZN,
     mut receiver: watch::Receiver<(block::Hash, block::Height)>,
@@ -61,40 +61,47 @@ where
     let mut broadcast_network = Timeout::new(broadcast_network, TIPS_RESPONSE_TIMEOUT);
 
     loop {
-        // get block hash and height to broadcast, if any.
-        let (hash, height) = if receiver.has_changed().map_err(SyncStatus)? {
-            // we have a new block to broadcast from the `submitblock `RPC method, get block data and release the channel.
-            receiver.borrow_and_update().clone()
-        } else if sync_status.is_close_to_tip() {
+        // build a request if the sync status is close to the tip, or if we receive a block in the submitblock channel.
+        let request = if sync_status.is_close_to_tip() {
             // wait for at least one tip change, to make sure we have a new block hash to broadcast
             let tip_action = chain_state.wait_for_tip_change().await.map_err(TipChange)?;
+
+            // wait until we're close to the tip, because broadcasts are only useful for nodes near the tip
+            // (if they're a long way from the tip, they use the syncer and block locators)
+            sync_status
+                .wait_until_close_to_tip()
+                .await
+                .map_err(SyncStatus)?;
 
             // get the latest tip change - it might be different to the change we awaited,
             // because the syncer might take a long time to reach the tip
             let tip_action = chain_state.last_tip_change().unwrap_or(tip_action);
 
-            (tip_action.best_tip_hash(), tip_action.best_tip_height())
+            // block broadcasts inform other nodes about new blocks,
+            // so our internal Grow or Reset state doesn't matter to them
+            let request = zn::Request::AdvertiseBlock(tip_action.best_tip_hash());
+
+            let height = tip_action.best_tip_height();
+            debug!(?height, ?request, "sending committed block broadcast");
+            request
+        } else if receiver.has_changed().map_err(SyncStatus)? {
+            // we have a new block to broadcast from the `submitblock `RPC method, get block data and release the channel.
+            let (hash, height) = *receiver.borrow_and_update();
+
+            // build a request with the obtained hash.
+            let request = zn::Request::AdvertiseBlock(hash);
+
+            debug!(?height, ?request, "sending mined block broadcast");
+            request
         } else {
-            // wait for at least the network timeout between gossips
-            //
-            // in practice, we expect blocks to arrive approximately every 75 seconds,
-            // so waiting 6 seconds won't make much difference
+            // we don't have a new block to broadcast, so wait for a new one.
             tokio::time::sleep(PEER_GOSSIP_DELAY).await;
             continue;
         };
 
-        // block broadcasts inform other nodes about new blocks,
-        // so our internal Grow or Reset state doesn't matter to them
-        let request = zn::Request::AdvertiseBlock(hash);
-
-        debug!(?height, ?request, "sending committed block broadcast");
-
+        // The regtest networks don't have p2p support, so we skip the broadcast.
         if network.is_regtest() {
-            warn!(
-                ?height,
-                ?request,
-                "we are in a regtest network, skipping broadcast"
-            );
+            warn!("we are in a regtest network with no p2p support, skipping broadcast");
         } else {
             // broadcast requests don't return errors, and we'd just want to ignore them anyway
             let _ = broadcast_network
@@ -104,5 +111,11 @@ where
                 .call(request)
                 .await;
         }
+
+        // wait for at least the network timeout between gossips
+        //
+        // in practice, we expect blocks to arrive approximately every 75 seconds,
+        // so waiting 6 seconds won't make much difference
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
     }
 }

@@ -15,6 +15,8 @@ use zebra_node_services::BoxError;
 
 use zebra_test::mock_service::MockService;
 
+use crate::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
+
 use super::super::*;
 
 /// Test that the JSON-RPC server spawns.
@@ -56,6 +58,7 @@ async fn rpc_server_spawn() {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
+        SubmitBlockChannel::new().sender(),
     );
 
     info!("spawned RPC server, checking services...");
@@ -115,6 +118,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
+        SubmitBlockChannel::new().sender(),
     )
     .await
     .expect("");
@@ -170,6 +174,7 @@ async fn rpc_server_spawn_port_conflict() {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
+        SubmitBlockChannel::new().sender(),
     )
     .await;
 
@@ -189,6 +194,7 @@ async fn rpc_server_spawn_port_conflict() {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
+        SubmitBlockChannel::new().sender(),
     )
     .await;
 
