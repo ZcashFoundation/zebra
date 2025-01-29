@@ -193,9 +193,11 @@ ENV GID=${GID}
 
 RUN addgroup --system --gid ${GID} ${USER}
 
-# System users have no home dirs, but we set a hard-coded one for users'
-# convenience.
-RUN adduser --system --uid ${UID} --gid ${GID} --home "/home/zebra/" ${USER}
+# System users have no home dirs, but we set one for users' convenience.
+ARG HOME="/home/zebra"
+WORKDIR ${HOME}
+
+RUN adduser --system --uid ${UID} --gid ${GID} --home ${HOME} ${USER}
 
 ARG ZEBRA_CONF_DIR="/etc/zebrad"
 ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR}
