@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.43"
+version = "1.0.0-beta.44"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license = "MIT OR Apache-2.0"
@@ -27,6 +27,7 @@ indexer-rpcs = [
     "tonic-reflection",
     "prost",
     "tokio-stream",
+    "zebra-state/indexer"
 ]
 
 # Production features that activate extra dependencies, or extra features in dependencies
@@ -64,9 +65,7 @@ jsonrpsee-types = "0.24.7"
 jsonrpsee-proc-macros = "0.24.7"
 hyper = "1.5.0"
 http-body-util = "0.1.2"
-
-# zebra-rpc needs the preserve_order feature in serde_json, which is a dependency of jsonrpc-core
-serde_json = { version = "1.0.133", features = ["preserve_order"] }
+serde_json = "1.0.133"
 indexmap = { version = "2.7.0", features = ["serde"] }
 
 # RPC endpoint basic auth
@@ -106,16 +105,16 @@ zcash_address = { workspace = true, optional = true}
 # Test-only feature proptest-impl
 proptest = { version = "1.4.0", optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.43", features = [
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.44", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.43" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.43" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.43", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.44" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.44" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.44", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.43" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.43" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.44" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.44" }
 
 [build-dependencies]
 tonic-build = { version = "0.12.3", optional = true }
@@ -128,17 +127,17 @@ proptest = "1.4.0"
 thiserror = "2.0.6"
 tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.43", features = [
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.44", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.43", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.44", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.43", features = [
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.44", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.43", features = [
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.44", features = [
     "proptest-impl",
 ] }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.43" }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.44" }

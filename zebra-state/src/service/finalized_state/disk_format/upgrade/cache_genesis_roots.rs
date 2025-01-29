@@ -3,8 +3,7 @@
 //! This reduces CPU usage when the genesis tree roots are used for transaction validation.
 //! Since mempool transactions are cheap to create, this is a potential remote denial of service.
 
-use std::sync::mpsc;
-
+use crossbeam_channel::{Receiver, TryRecvError};
 use zebra_chain::{block::Height, sprout};
 
 use crate::service::finalized_state::{disk_db::DiskWriteBatch, ZebraDb};
@@ -23,7 +22,7 @@ use super::CancelFormatChange;
 pub fn run(
     _initial_tip_height: Height,
     upgrade_db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<(), CancelFormatChange> {
     let sprout_genesis_tree = sprout::tree::NoteCommitmentTree::default();
     let sprout_tip_tree = upgrade_db.sprout_tree_for_tip();
@@ -50,7 +49,7 @@ pub fn run(
     batch.create_orchard_tree(upgrade_db, &Height(0), &orchard_genesis_tree);
 
     // Return before we write if the upgrade is cancelled.
-    if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
         return Err(CancelFormatChange);
     }
 
@@ -126,7 +125,7 @@ pub fn quick_check(db: &ZebraDb) -> Result<(), String> {
 /// If the state is empty.
 pub fn detailed_check(
     db: &ZebraDb,
-    cancel_receiver: &mpsc::Receiver<CancelFormatChange>,
+    cancel_receiver: &Receiver<CancelFormatChange>,
 ) -> Result<Result<(), String>, CancelFormatChange> {
     // This is redundant in some code paths, but not in others. But it's quick anyway.
     // Check the entire format before returning any errors.
@@ -134,7 +133,7 @@ pub fn detailed_check(
 
     for (root, tree) in db.sprout_trees_full_map() {
         // Return early if the format check is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
@@ -149,7 +148,7 @@ pub fn detailed_check(
 
     for (height, tree) in db.sapling_tree_by_height_range(..) {
         // Return early if the format check is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 
@@ -164,7 +163,7 @@ pub fn detailed_check(
 
     for (height, tree) in db.orchard_tree_by_height_range(..) {
         // Return early if the format check is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(mpsc::TryRecvError::Empty)) {
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(CancelFormatChange);
         }
 

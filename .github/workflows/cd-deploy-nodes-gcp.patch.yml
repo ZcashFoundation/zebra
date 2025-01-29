@@ -22,39 +22,43 @@ on:
      - '.github/workflows/cd-deploy-nodes-gcp.yml'
      - '.github/workflows/sub-build-docker-image.yml'
 
-# IMPORTANT
-#
-# The job names in `cd-deploy-nodes-gcp.yml`, `cd-deploy-nodes-gcp.patch.yml` and
-# `cd-deploy-nodes-gcp.patch-external.yml` must be kept in sync.
+#! IMPORTANT
+#!
+#! The job names in `cd-deploy-nodes-gcp.yml`, `cd-deploy-nodes-gcp.patch.yml` and
+#! `cd-deploy-nodes-gcp.patch-external.yml` must be kept in sync.
 jobs:
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
+  get-disk-name:
+    name: Get disk name / Get Mainnet cached disk
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
   build:
     name: Build CD Docker / Build images
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
   test-configuration-file:
     name: Test CD default Docker config file / Test default-conf in Docker
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
   test-configuration-file-testnet:
-    name: Test CD testnet Docker config file / Test default-conf in Docker
+    name: Test CD testnet Docker config file / Test testnet-conf in Docker
     runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
-
 
   test-zebra-conf-path:
     name: Test CD custom Docker config file / Test custom-conf in Docker
     runs-on: ubuntu-latest
-    steps:
-      - run: 'echo "No build required"'
-
-  get-disk-name:
-    name: Get disk name
-    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
