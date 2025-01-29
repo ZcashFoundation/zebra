@@ -796,6 +796,7 @@ use tracing_subscriber::fmt;
 struct TestWriter(Arc<Mutex<Vec<u8>>>);
 
 impl io::Write for TestWriter {
+    #[allow(clippy::unwrap_in_result)]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let mut logs = self.0.lock().unwrap();
         logs.extend_from_slice(buf);
@@ -860,7 +861,7 @@ async fn submitblock_channel() -> Result<(), crate::BoxError> {
 
     // Start the block gossip task with a SubmitBlockChannel
     let submitblock_channel = SubmitBlockChannel::new();
-    let _ = tokio::spawn(sync::gossip_best_tip_block_hashes(
+    let gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
         chain_tip_change,
         peer_set.clone(),
@@ -882,6 +883,8 @@ async fn submitblock_channel() -> Result<(), crate::BoxError> {
 
     assert!(log_output.contains("initializing block gossip task"));
     assert!(log_output.contains("sending mined block broadcast"));
+
+    std::mem::drop(gossip_task_handle);
 
     Ok(())
 }

@@ -58,7 +58,7 @@ async fn rpc_server_spawn() {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
-        SubmitBlockChannel::new().sender(),
+        SubmitBlockChannel::default().sender(),
     );
 
     info!("spawned RPC server, checking services...");
@@ -118,7 +118,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
-        SubmitBlockChannel::new().sender(),
+        SubmitBlockChannel::default().sender(),
     )
     .await
     .expect("");
@@ -174,7 +174,7 @@ async fn rpc_server_spawn_port_conflict() {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
-        SubmitBlockChannel::new().sender(),
+        SubmitBlockChannel::default().sender(),
     )
     .await;
 
@@ -194,7 +194,7 @@ async fn rpc_server_spawn_port_conflict() {
         MockAddressBookPeers::default(),
         NoChainTip,
         Mainnet,
-        SubmitBlockChannel::new().sender(),
+        SubmitBlockChannel::default().sender(),
     )
     .await;
 

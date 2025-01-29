@@ -94,3 +94,9 @@ impl SubmitBlockChannel {
         self.receiver.clone()
     }
 }
+
+impl Default for SubmitBlockChannel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
