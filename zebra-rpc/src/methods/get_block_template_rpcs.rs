@@ -532,7 +532,8 @@ where
             block_verifier_router,
             sync_status,
             address_book,
-            mined_block_sender: mined_block_sender.unwrap_or_default(),
+            mined_block_sender: mined_block_sender
+                .unwrap_or(submit_block::SubmitBlockChannel::default().sender()),
         }
     }
 }
