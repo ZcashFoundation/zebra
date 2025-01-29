@@ -47,7 +47,7 @@ pub async fn gossip_best_tip_block_hashes<ZN>(
     mut sync_status: SyncStatus,
     mut chain_state: ChainTipChange,
     broadcast_network: ZN,
-    mut receiver: watch::Receiver<(block::Hash, block::Height)>,
+    mut receiver: Option<watch::Receiver<(block::Hash, block::Height)>>,
 ) -> Result<(), BlockGossipError>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
@@ -83,9 +83,15 @@ where
             let height = tip_action.best_tip_height();
             debug!(?height, ?request, "sending committed block broadcast");
             request
-        } else if receiver.has_changed().map_err(SyncStatus)? {
+        } else if receiver.is_some()
+            && receiver
+                .clone()
+                .unwrap()
+                .has_changed()
+                .map_err(SyncStatus)?
+        {
             // we have a new block to broadcast from the `submitblock `RPC method, get block data and release the channel.
-            let (hash, height) = *receiver.borrow_and_update();
+            let (hash, height) = *receiver.as_mut().unwrap().borrow_and_update();
 
             // build a request with the obtained hash.
             let request = zn::Request::AdvertiseBlock(hash);

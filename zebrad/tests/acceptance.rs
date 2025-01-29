@@ -3349,7 +3349,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_verifier_router,
         mock_sync_status,
         MockAddressBookPeers::default(),
-        submitblock_channel.sender(),
+        Some(submitblock_channel.sender()),
     );
 
     let make_mock_mempool_request_handler = || async move {

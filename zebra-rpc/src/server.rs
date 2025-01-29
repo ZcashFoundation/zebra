@@ -117,7 +117,7 @@ impl RpcServer {
         latest_chain_tip: Tip,
         network: Network,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
+        mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
     where
         VersionString: ToString + Clone + Send + 'static,

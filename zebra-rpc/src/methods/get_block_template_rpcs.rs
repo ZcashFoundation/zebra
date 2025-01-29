@@ -469,7 +469,7 @@ where
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
-        mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
+        mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
         if let Some(miner_address) = mining_config.miner_address.clone() {
@@ -532,7 +532,7 @@ where
             block_verifier_router,
             sync_status,
             address_book,
-            mined_block_sender,
+            mined_block_sender: mined_block_sender.unwrap_or_default(),
         }
     }
 }
