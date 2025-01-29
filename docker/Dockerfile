@@ -173,13 +173,6 @@ COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --from=release /usr/local/bin/entrypoint.sh /usr/local/bin/
 
 # Create a non-privileged user for running `zebrad`.
-#
-# ## Security
-#
-# If an attacker manages to break out of the container, they will have root
-# access to the host. [1][1]
-#
-# [1]: https://docs.docker.com/go/dockerfile-user-best-practices/
 ARG USER="zebra"
 ENV USER=${USER}
 
