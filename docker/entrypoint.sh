@@ -72,11 +72,11 @@ prepare_default_conf_file() {
   cat <<EOF >"$1"
 [network]
 network = "${NETWORK}"
+cache_dir = "${ZEBRA_CACHED_STATE_DIR}"
 listen_addr = "${ZEBRA_LISTEN_ADDR}"
 [state]
 cache_dir = "${ZEBRA_CACHED_STATE_DIR}"
 EOF
-
   # Spaces are important here to avoid partial matches.
   if [[ " ${FEATURES} " =~ " prometheus " ]]; then
     cat <<EOF >>"$1"
