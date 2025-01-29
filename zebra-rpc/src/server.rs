@@ -116,6 +116,7 @@ impl RpcServer {
         address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
+        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
     ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
     where
