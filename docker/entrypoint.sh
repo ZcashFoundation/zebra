@@ -88,6 +88,7 @@ EOF
   if [[ -n "${RPC_PORT}" ]]; then
     cat <<EOF >>"$1"
 [rpc]
+cookie_dir = "${ZEBRA_CACHED_STATE_DIR}"
 listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
 EOF
   fi
