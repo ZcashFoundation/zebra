@@ -172,6 +172,9 @@ FROM debian:bookworm-slim AS runtime
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --from=release /usr/local/bin/entrypoint.sh /usr/local/bin/
 
+ARG FEATURES
+ENV FEATURES=${FEATURES}
+
 # Create a non-privileged system user for running `zebrad`.
 ARG USER="zebra"
 ENV USER=${USER}

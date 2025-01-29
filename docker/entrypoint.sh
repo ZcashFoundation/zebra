@@ -84,7 +84,6 @@ EOF
 endpoint_addr = "${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}"
 EOF
   fi
-
   if [[ -n "${RPC_PORT}" ]]; then
     cat <<EOF >>"$1"
 [rpc]
@@ -92,7 +91,6 @@ cookie_dir = "${ZEBRA_CACHED_STATE_DIR}"
 listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
 EOF
   fi
-
   if [[ -n "${LOG_FILE}" ]] || [[ -n "${LOG_COLOR}" ]] || [[ -n "${TRACING_ENDPOINT_ADDR}" ]]; then
     cat <<EOF >>"$1"
 [tracing]
@@ -123,7 +121,6 @@ use_color = false
 EOF
     fi
   fi
-
   if [[ -n "${MINER_ADDRESS}" ]]; then
     cat <<EOF >>"$1"
 [mining]
