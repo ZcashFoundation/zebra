@@ -4,7 +4,7 @@
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
 # We are using 4 (TODO: 5) stages:
-# - deps: install build dependencies and sets the needed variables
+# - deps: installs build dependencies and sets default values
 # - tests: builds tests binaries
 # - release: builds release binaries
 # - runtime: runs the release binaries
