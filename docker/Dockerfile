@@ -172,11 +172,30 @@ FROM debian:bookworm-slim AS runtime
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY --from=release /usr/local/bin/entrypoint.sh /usr/local/bin/
 
-# Create a non-privileged user for running `zebrad`.
+# Create a non-privileged system user for running `zebrad`.
 ARG USER="zebra"
 ENV USER=${USER}
 
-RUN adduser --system ${USER}
+# System UIDs should be set according to
+# https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/uidrange.html.
+#
+# In Debian, the default dynamic range for system UIDs is defined by
+# [FIRST_SYSTEM_UID, LAST_SYSTEM_UID], which is set to [100, 999] in
+# `etc/adduser.conf`:
+# https://manpages.debian.org/bullseye/adduser/adduser.8.en.html
+#
+# Debian assigns GID 100 to group `users`, so we set UID = GID = 101 as the
+# default value.
+ARG UID=101
+ENV UID=${UID}
+ARG GID=${UID}
+ENV GID=${GID}
+
+RUN addgroup --system --gid ${GID} ${USER}
+
+# System users have no home dirs, but we set a hard-coded one for users'
+# convenience.
+RUN adduser --system --uid ${UID} --gid ${GID} --home "/home/zebra/" ${USER}
 
 ARG ZEBRA_CONF_DIR="/etc/zebrad"
 ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR}
