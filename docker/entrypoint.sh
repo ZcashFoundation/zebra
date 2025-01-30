@@ -167,7 +167,7 @@ check_directory_files() {
 #
 # ## Positional Parameters
 #
-# - '$1' must contain cargo FEATURES as desribed here:
+# - '$1' must contain cargo FEATURES as described here:
 #   https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options,
 #   or be empty
 # - the remaining params will be appended to a command starting with `exec cargo
