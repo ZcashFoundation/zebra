@@ -15,6 +15,13 @@
 
 set -eo pipefail
 
+if [[ -z "${ZEBRA_CONF_PATH}" ]] && [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
+  echo "the ZEBRA_CONF_PATH var is set to ${ZEBRA_CONF_PATH}, but it doesn't \
+    point to a Zebra conf file"
+
+  exit 1
+fi
+
 # Sets default values for various env vars.
 #
 # Takes no arguments.
