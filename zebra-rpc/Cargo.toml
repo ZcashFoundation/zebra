@@ -70,7 +70,7 @@ indexmap = { version = "2.7.1", features = ["serde"] }
 
 # RPC endpoint basic auth
 base64 = "0.22.1"
-rand = "0.9.0"
+rand = "0.8.5"
 
 # Error handling
 color-eyre = "0.6.3"
@@ -81,7 +81,7 @@ tokio = { version = "1.43.0", features = [
     "macros",
     "tracing",
 ] }
-tower = "0.5.1"
+tower = "0.4.13"
 
 # indexer-rpcs dependencies
 tonic = { version = "0.12.3", optional = true }

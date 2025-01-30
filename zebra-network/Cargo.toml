@@ -53,7 +53,7 @@ lazy_static = "1.4.0"
 num-integer = "0.1.46"
 ordered-map = "0.4.2"
 pin-project = "1.1.8"
-rand = "0.9.0"
+rand = "0.8.5"
 rayon = "1.10.0"
 regex = "1.11.0"
 serde = { version = "1.0.217", features = ["serde_derive"] }
@@ -64,7 +64,7 @@ futures = "0.3.31"
 tokio = { version = "1.43.0", features = ["fs", "io-util", "net", "time", "tracing", "macros", "rt-multi-thread"] }
 tokio-stream = { version = "0.1.17", features = ["sync", "time"] }
 tokio-util = { version = "0.7.13", features = ["codec"] }
-tower = { version = "0.5.1", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
+tower = { version = "0.4.13", features = ["retry", "discover", "load", "load-shed", "timeout", "util", "buffer"] }
 
 metrics = "0.24.1"
 tracing-futures = "0.2.5"
