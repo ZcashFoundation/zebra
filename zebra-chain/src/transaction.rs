@@ -216,6 +216,10 @@ impl Transaction {
     /// - if called on a v1 or v2 transaction
     /// - if the input index points to a transparent::Input::CoinBase
     /// - if the input index is out of bounds for self.inputs()
+    /// - if the tx contains `nConsensusBranchId` field and `nu` doesn't match it
+    /// - if the tx is not convertible to its `librustzcash` equivalent
+    /// - if `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
+    ///   equivalent
     pub fn sighash(
         &self,
         nu: NetworkUpgrade,

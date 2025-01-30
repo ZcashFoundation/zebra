@@ -220,6 +220,8 @@ impl<'a> PrecomputedTxData<'a> {
     /// # Panics
     ///
     /// - If `tx` can't be converted to its `librustzcash` equivalent.
+    /// - If `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
+    ///   equivalent.
     ///
     /// # Consensus
     ///
