@@ -109,7 +109,10 @@ skip-tree = [
     { name = "zcash_address", version = "=0.4.0" },
     { name = "zcash_keys", version = "=0.3.0" },
     { name = "zcash_primitives", version = "=0.16.0" },
-    { name = "zcash_protocol", version = "=0.2.0" }
+    { name = "zcash_protocol", version = "=0.2.0" },
+
+    # wait for bip32 to update, and zcash_primitives to update bip32
+    { name = "secp256k1", version = "=0.27.0" }
 ]
 
 # This section is considered when running `cargo deny check sources`.
