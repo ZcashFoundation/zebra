@@ -15,9 +15,11 @@
 
 set -eo pipefail
 
+# Exit early if `ZEBRA_CONF_PATH` is set but doesn't point to a file.
 if [[ -z "${ZEBRA_CONF_PATH}" ]] && [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
-  echo "the ZEBRA_CONF_PATH var is set to ${ZEBRA_CONF_PATH}, but it doesn't \
-    point to a Zebra conf file"
+
+  echo "the ZEBRA_CONF_PATH var is set to '${ZEBRA_CONF_PATH}', which doesn't" \
+    "point to a Zebra conf file"
 
   exit 1
 fi
