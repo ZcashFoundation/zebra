@@ -179,6 +179,10 @@ ENV FEATURES=${FEATURES}
 ARG USER="zebra"
 ENV USER=${USER}
 
+# System users have no home dirs, but we set one for users' convenience.
+ARG HOME="/home/zebra"
+WORKDIR ${HOME}
+
 # System UIDs should be set according to
 # https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/uidrange.html.
 #
@@ -195,20 +199,18 @@ ARG GID=${UID}
 ENV GID=${GID}
 
 RUN addgroup --system --gid ${GID} ${USER}
+RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
-# System users have no home dirs, but we set one for users' convenience.
-ARG HOME="/home/zebra"
-WORKDIR ${HOME}
+# We set the locations of the conf and cache dirs according to the XDG spec:
+# https://specifications.freedesktop.org/basedir-spec/latest/
 
-RUN adduser --system --uid ${UID} --gid ${GID} --home ${HOME} ${USER}
-
-ARG ZEBRA_CONF_DIR="/etc/zebrad"
+ARG ZEBRA_CONF_DIR="${HOME}/.config"
 ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR}
-RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${USER} ${ZEBRA_CONF_DIR}
+RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${UID}:${GID} ${ZEBRA_CONF_DIR}
 
-ARG ZEBRA_CACHE_DIR="/var/cache/zebrad"
+ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown ${USER} ${ZEBRA_CACHE_DIR}
+RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
 USER $USER
 
