@@ -20,7 +20,7 @@ on:
         type: string
       network:
         type: string
-        default: 'Mainnet'
+        default: "Mainnet"
       no_cache:
         type: boolean
         default: false
@@ -145,18 +145,32 @@ jobs:
     name: Test CI default Docker config file
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'default-conf'
+      test_id: "default-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Mainnet'
+      test_variables: "-e NETWORK"
+      network:
+        "Mainnet"
+
+  # Test reconfiguring the the docker image for tesnet.
+  test-configuration-file-testnet:
+    name: Test CI testnet Docker config file
+    # Make sure Zebra can sync the genesis block on testnet
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: "testnet-conf"
+      docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
+      # TODO: improve the entrypoint to avoid using `ENTRYPOINT_FEATURES=""`
+      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="/etc/zebrad/zebrad.toml" -e ENTRYPOINT_FEATURES=""'
+      network: "Testnet"
 
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
     name: Test CI custom Docker config file
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'custom-conf'
+      test_id: "custom-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
       grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
       test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
@@ -168,7 +182,15 @@ jobs:
     #
     # This list is for reliable tests that are run on the `main` branch.
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
-    needs: [ test-all, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-zebra-conf-path ]
+    needs:
+      [
+        test-all,
+        test-fake-activation-heights,
+        test-empty-sync,
+        test-lightwalletd-integration,
+        test-configuration-file,
+        test-zebra-conf-path,
+      ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     # TODO: if a job times out, we want to create a ticket. Does failure() do that? Or do we need cancelled()?
@@ -189,7 +211,7 @@ jobs:
     if: contains(github.event.pull_request.labels.*.name, 'A-release')
     runs-on: ubuntu-latest
     steps:
-    - name: Run check_no_git_refs_in_cargo_lock
-      run: |
-        docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-        docker run --tty -e NETWORK -e RUN_CHECK_NO_GIT_REFS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+      - name: Run check_no_git_refs_in_cargo_lock
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty -e NETWORK -e RUN_CHECK_NO_GIT_REFS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
