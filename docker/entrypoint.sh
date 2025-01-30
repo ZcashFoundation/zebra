@@ -9,7 +9,7 @@
 # - If `$ZEBRA_CONF_PATH` is set, it must point to a Zebra conf file readable by
 #   `$USER`.
 # - If `$ZEBRA_CONF_DIR` is set, it must point to a dir writable by `$USER`.
-# - If `$ZEBRA_CACHED_STATE_DIR` or `$LIGHTWALLETD_DATA_DIR` are set, they must
+# - If `$ZEBRA_CACHE_DIR` or `$LIGHTWALLETD_DATA_DIR` are set, they must
 #   point to dirs writable by `$USER`. If they're not set, `/var/cache/zebrad`
 #   and `var/cache/lwd` must be writable by `$USER`.
 
@@ -27,7 +27,7 @@ prepare_env_vars() {
   : "${ZEBRA_CHECKPOINT_SYNC:=true}"
 
   # [state]
-  : "${ZEBRA_CACHED_STATE_DIR:=/var/cache/zebrad}"
+  : "${ZEBRA_CACHE_DIR:=/var/cache/zebrad}"
   : "${LIGHTWALLETD_DATA_DIR:=/var/cache/lwd}"
 
   # [metrics]
@@ -72,10 +72,10 @@ prepare_default_conf_file() {
   cat <<EOF >"$1"
 [network]
 network = "${NETWORK}"
-cache_dir = "${ZEBRA_CACHED_STATE_DIR}"
+cache_dir = "${ZEBRA_CACHE_DIR}"
 listen_addr = "${ZEBRA_LISTEN_ADDR}"
 [state]
-cache_dir = "${ZEBRA_CACHED_STATE_DIR}"
+cache_dir = "${ZEBRA_CACHE_DIR}"
 EOF
   # Spaces are important here to avoid partial matches.
   if [[ " ${FEATURES} " =~ " prometheus " ]]; then
@@ -87,7 +87,7 @@ EOF
   if [[ -n "${RPC_PORT}" ]]; then
     cat <<EOF >>"$1"
 [rpc]
-cookie_dir = "${ZEBRA_CACHED_STATE_DIR}"
+cookie_dir = "${ZEBRA_CACHE_DIR}"
 listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
 EOF
   fi
@@ -228,12 +228,12 @@ run_tests() {
   elif [[ -n "${FULL_SYNC_MAINNET_TIMEOUT_MINUTES}" ]]; then
     # Run a Zebra full sync test on mainnet.
     run_cargo_test "${ENTRYPOINT_FEATURES}" "full_sync_mainnet"
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
 
   elif [[ -n "${FULL_SYNC_TESTNET_TIMEOUT_MINUTES}" ]]; then
     # Run a Zebra full sync test on testnet.
     run_cargo_test "${ENTRYPOINT_FEATURES}" "full_sync_testnet"
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
 
   elif [[ "${TEST_DISK_REBUILD}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
@@ -241,16 +241,16 @@ run_tests() {
     # TODO: use environment variables instead of Rust features (part of #2995)
     run_cargo_test "test_sync_to_mandatory_checkpoint_${NETWORK,,},${ENTRYPOINT_FEATURES}" \
       "sync_to_mandatory_checkpoint_${NETWORK,,}"
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
 
   elif [[ "${TEST_UPDATE_SYNC}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached tip, and syncing to the latest tip.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "zebrad_update_sync"
 
   elif [[ "${TEST_CHECKPOINT_SYNC}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing past it.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     # TODO: use environment variables instead of Rust features (part of #2995)
     run_cargo_test "test_sync_past_mandatory_checkpoint_${NETWORK,,},${ENTRYPOINT_FEATURES}" \
       "sync_past_mandatory_checkpoint_${NETWORK,,}"
@@ -260,19 +260,19 @@ run_tests() {
     #
     # TODO: disable or filter out logs like:
     # test generate_checkpoints_mainnet has been running for over 60 seconds
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "generate_checkpoints_mainnet"
 
   elif [[ "${GENERATE_CHECKPOINTS_TESTNET}" -eq "1" ]]; then
     # Generate checkpoints after syncing Zebra on testnet.
     #
     # This test might fail if testnet is unstable.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "generate_checkpoints_testnet"
 
   elif [[ "${TEST_LWD_RPC_CALL}" -eq "1" ]]; then
     # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     # Run both the fully synced RPC test and the subtree snapshot test, one test
     # at a time. Since these tests use the same cached state, a state problem in
     # the first test can fail the second test.
@@ -284,13 +284,13 @@ run_tests() {
 
   elif [[ "${TEST_LWD_FULL_SYNC}" -eq "1" ]]; then
     # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_full_sync"
     check_directory_files "${LIGHTWALLETD_DATA_DIR}/db"
 
   elif [[ "${TEST_LWD_UPDATE_SYNC}" -eq "1" ]]; then
     # Starting with a cached Zebra and lightwalletd tip, run a quick update sync.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     check_directory_files "${LIGHTWALLETD_DATA_DIR}/db"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_update_sync"
 
@@ -298,14 +298,14 @@ run_tests() {
   elif [[ "${TEST_LWD_GRPC}" -eq "1" ]]; then
     # Starting with a cached Zebra and lightwalletd tip, test all gRPC calls to
     # lightwalletd, which calls Zebra.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     check_directory_files "${LIGHTWALLETD_DATA_DIR}/db"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_wallet_grpc_tests"
 
   elif [[ "${TEST_LWD_TRANSACTIONS}" -eq "1" ]]; then
     # Starting with a cached Zebra and lightwalletd tip, test sending
     # transactions gRPC call to lightwalletd, which calls Zebra.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     check_directory_files "${LIGHTWALLETD_DATA_DIR}/db"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "sending_transactions_using_lightwalletd"
 
@@ -313,18 +313,18 @@ run_tests() {
   elif [[ "${TEST_GET_BLOCK_TEMPLATE}" -eq "1" ]]; then
     # Starting with a cached Zebra tip, test getting a block template from
     # Zebra's RPC server.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "get_block_template"
 
   elif [[ "${TEST_SUBMIT_BLOCK}" -eq "1" ]]; then
     # Starting with a cached Zebra tip, test sending a block to Zebra's RPC
     # port.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     run_cargo_test "${ENTRYPOINT_FEATURES}" "submit_block"
 
   elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
     # Test that the scan task commands are working.
-    check_directory_files "${ZEBRA_CACHED_STATE_DIR}"
+    check_directory_files "${ZEBRA_CACHE_DIR}"
     exec cargo test --locked --release --features "zebra-test" --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands
 

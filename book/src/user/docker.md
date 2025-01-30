@@ -156,7 +156,7 @@ This approach ensures you can run the same tests locally that are run in CI, pro
 
 - `ZEBRA_CHECKPOINT_SYNC`: Enables or disables checkpoint sync. Example: `true`
 - `ZEBRA_LISTEN_ADDR`: Address for Zebra to listen on. Example: `"0.0.0.0"`
-- `ZEBRA_CACHED_STATE_DIR`: Directory for cached state. Example: `"/var/cache/zebrad-cache"`
+- `ZEBRA_CACHE_DIR`: Directory for cached state. Example: `"/var/cache/zebrad-cache"`
 
 #### Mining Configuration
 
