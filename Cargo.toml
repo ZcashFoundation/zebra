@@ -35,7 +35,7 @@ zcash_proofs = "0.19.0"
 zcash_protocol = "0.4.0"
 
 [patch.crates-io]
-zcash_script = { git = 'https://github.com/ZcashFoundation/zcash_script.git', rev = "9d16e79" }
+zcash_script = { git = 'https://github.com/ZcashFoundation/zcash_script.git', rev = "61f3ef3e74209ad4bd642f098c44cc3ad54ed6c3" }
 
 [workspace.metadata.release]
 

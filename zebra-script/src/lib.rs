@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use thiserror::Error;
 
-use zcash_script;
 use zcash_script::ZcashScript;
 
 use zebra_chain::{
@@ -54,7 +53,7 @@ impl From<zcash_script::Error> for Error {
     #[allow(non_upper_case_globals)]
     fn from(err_code: zcash_script::Error) -> Error {
         match err_code {
-            zcash_script::Error::Ok => Error::ScriptInvalid,
+            zcash_script::Error::Ok(_) => Error::ScriptInvalid,
             unknown => Error::Unknown(unknown),
         }
     }
@@ -118,7 +117,7 @@ impl CachedFfiTransaction {
         let flags = zcash_script::VerificationFlags::P2SH
             | zcash_script::VerificationFlags::CHECKLOCKTIMEVERIFY;
 
-        let lock_time = self.transaction.raw_lock_time() as i64;
+        let lock_time = self.transaction.raw_lock_time();
         let is_final = self.transaction.inputs()[input_index].sequence() == u32::MAX;
         let signature_script = match &self.transaction.inputs()[input_index] {
             transparent::Input::PrevOut {
@@ -131,16 +130,21 @@ impl CachedFfiTransaction {
 
         let calculate_sighash = |script_code: &[u8], hash_type: zcash_script::HashType| {
             let script_code_vec = script_code.to_vec();
+            let mut our_hash_type = match hash_type.signed_outputs {
+                zcash_script::SignedOutputs::All => HashType::ALL,
+                zcash_script::SignedOutputs::Single => HashType::SINGLE,
+                zcash_script::SignedOutputs::None => HashType::NONE,
+            };
+            if hash_type.anyone_can_pay {
+                our_hash_type |= HashType::ANYONECANPAY;
+            }
             Some(
                 SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs)
-                    .sighash(
-                        HashType::from_bits_truncate(hash_type.bits() as u32),
-                        Some((input_index, script_code_vec)),
-                    )
+                    .sighash(our_hash_type, Some((input_index, script_code_vec)))
                     .0,
             )
         };
-        zcash_script::Cxx::verify_callback(
+        zcash_script::CxxRustComparisonInterpreter::verify_callback(
             &calculate_sighash,
             lock_time,
             is_final,
@@ -165,7 +169,8 @@ impl CachedFfiTransaction {
                     sequence: _,
                 } => {
                     let script = unlock_script.as_raw_bytes();
-                    zcash_script::Cxx::legacy_sigop_count_script(script).map_err(Error::from)?
+                    zcash_script::CxxRustComparisonInterpreter::legacy_sigop_count_script(script)
+                        .map_err(Error::from)?
                 }
                 transparent::Input::Coinbase { .. } => 0,
             } as u64;
@@ -173,7 +178,8 @@ impl CachedFfiTransaction {
 
         for output in self.transaction.outputs() {
             let script = output.lock_script.as_raw_bytes();
-            let ret = zcash_script::Cxx::legacy_sigop_count_script(script).map_err(Error::from)?;
+            let ret = zcash_script::CxxRustComparisonInterpreter::legacy_sigop_count_script(script)
+                .map_err(Error::from)?;
             count += ret as u64;
         }
         Ok(count)
