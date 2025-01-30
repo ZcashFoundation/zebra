@@ -652,20 +652,21 @@ where
     /// Returns [`Some(Ok(VerifiedUnminedTx))`](VerifiedUnminedTx) if successful,
     /// None if the transaction id was not found in the mempool,
     /// or `Some(Err(TransparentInputNotFound))` if the transaction was found, but some of its
-    /// dependencies are missing in the block.
+    /// dependencies were not found in the block or state after a timeout.
     async fn find_verified_unmined_tx(
         req: &Request,
         mempool: Option<Timeout<Mempool>>,
         state: Timeout<ZS>,
     ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
-        if req.is_mempool() || req.transaction().is_coinbase() {
+        let tx = req.transaction();
+
+        if req.is_mempool() || tx.is_coinbase() {
             return None;
         }
 
         let mempool = mempool?;
         let known_outpoint_hashes = req.known_outpoint_hashes();
         let tx_id = req.tx_mined_id();
-        let tx = req.transaction();
 
         let mempool::Response::TransactionWithDeps {
             transaction: verified_tx,
