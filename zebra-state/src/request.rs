@@ -733,7 +733,8 @@ pub enum Request {
     ///
     /// This request is purely informational, and there are no guarantees about
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
-    /// Its purpose is to allow asynchronous script verification.
+    /// Its purpose is to allow asynchronous script verification or to wait until
+    /// the UTXO arrives in the state before validating dependant transactions.
     ///
     /// # Correctness
     ///
