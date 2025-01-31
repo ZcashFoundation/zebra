@@ -30,7 +30,6 @@ fi
 prepare_env_vars() {
   # [network]
   : "${NETWORK:=Mainnet}"
-  : "${ZEBRA_LISTEN_ADDR:=0.0.0.0}"
 
   # [consensus]
   : "${ZEBRA_CHECKPOINT_SYNC:=true}"
@@ -82,7 +81,6 @@ prepare_default_conf_file() {
 [network]
 network = "${NETWORK}"
 cache_dir = "${ZEBRA_CACHE_DIR}"
-listen_addr = "${ZEBRA_LISTEN_ADDR}"
 [state]
 cache_dir = "${ZEBRA_CACHE_DIR}"
 EOF
