@@ -970,7 +970,7 @@ where
 
                 self.mined_block_sender
                     .send((block_hash, block_height))
-                    .map_error_with_prefix(0, "failed to send mined block:")?;
+                    .map_error_with_prefix(0, "failed to send mined block")?;
 
                 return Ok(submit_block::Response::Accepted);
             }

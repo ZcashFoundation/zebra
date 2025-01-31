@@ -796,7 +796,7 @@ async fn setup(
 mod submitblock_test {
     use std::io;
     use std::sync::{Arc, Mutex};
-    use tracing::Level;
+    use tracing::{Instrument, Level};
     use tracing_subscriber::fmt;
 
     use super::*;
@@ -872,12 +872,15 @@ mod submitblock_test {
 
         // Start the block gossip task with a SubmitBlockChannel
         let submitblock_channel = SubmitBlockChannel::new();
-        let gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
-            sync_status.clone(),
-            chain_tip_change,
-            peer_set.clone(),
-            Some(submitblock_channel.receiver()),
-        ));
+        let gossip_task_handle = tokio::spawn(
+            sync::gossip_best_tip_block_hashes(
+                sync_status.clone(),
+                chain_tip_change,
+                peer_set.clone(),
+                Some(submitblock_channel.receiver()),
+            )
+            .in_current_span(),
+        );
 
         // Send a block top the channel
         submitblock_channel

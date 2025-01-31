@@ -70,6 +70,7 @@ pub(crate) trait MapError<T>: Sized {
     fn map_error(self, code: impl Into<ErrorCode>) -> std::result::Result<T, ErrorObjectOwned>;
 
     /// Maps errors to [`jsonrpsee_types::ErrorObjectOwned`] with a prefixed message and a specific error code.
+    #[cfg(feature = "getblocktemplate-rpcs")]
     fn map_error_with_prefix(
         self,
         code: impl Into<ErrorCode>,
@@ -106,6 +107,7 @@ where
         self.map_err(|error| ErrorObject::owned(code.into().code(), error.to_string(), None::<()>))
     }
 
+    #[cfg(feature = "getblocktemplate-rpcs")]
     fn map_error_with_prefix(
         self,
         code: impl Into<ErrorCode>,

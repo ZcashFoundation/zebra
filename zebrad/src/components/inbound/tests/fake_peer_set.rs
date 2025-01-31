@@ -5,7 +5,7 @@ use std::{collections::HashSet, iter, net::SocketAddr, str::FromStr, sync::Arc, 
 use futures::FutureExt;
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 use tower::{buffer::Buffer, builder::ServiceBuilder, util::BoxService, Service, ServiceExt};
-use tracing::Span;
+use tracing::{Instrument, Span};
 
 use zebra_chain::{
     amount::Amount,
@@ -978,15 +978,18 @@ async fn setup(
 
     #[cfg(feature = "getblocktemplate-rpcs")]
     let submitblock_channel = SubmitBlockChannel::new();
-    let sync_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
-        sync_status.clone(),
-        chain_tip_change.clone(),
-        peer_set.clone(),
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        Some(submitblock_channel.receiver()),
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        None,
-    ));
+    let sync_gossip_task_handle = tokio::spawn(
+        sync::gossip_best_tip_block_hashes(
+            sync_status.clone(),
+            chain_tip_change.clone(),
+            peer_set.clone(),
+            #[cfg(feature = "getblocktemplate-rpcs")]
+            Some(submitblock_channel.receiver()),
+            #[cfg(not(feature = "getblocktemplate-rpcs"))]
+            None,
+        )
+        .in_current_span(),
+    );
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
         transaction_receiver,
