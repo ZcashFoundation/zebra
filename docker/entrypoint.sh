@@ -31,9 +31,6 @@ prepare_env_vars() {
   # [network]
   : "${NETWORK:=Mainnet}"
 
-  # [consensus]
-  : "${ZEBRA_CHECKPOINT_SYNC:=true}"
-
   # [state]
   : "${ZEBRA_CACHE_DIR:=/var/cache/zebrad}"
   : "${LIGHTWALLETD_DATA_DIR:=/var/cache/lwd}"
