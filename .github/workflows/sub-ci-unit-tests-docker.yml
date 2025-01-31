@@ -169,8 +169,8 @@ jobs:
     with:
       test_id: "custom-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
+      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v2.1.0.toml"'
+      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v2.1.0.toml"'
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   failure-issue:
