@@ -753,8 +753,9 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         transparent::Input::Coinbase { .. } => panic!("requires a non-coinbase transaction"),
     };
 
+    let mut state_clone = state.clone();
     tokio::spawn(async move {
-        state
+        state_clone
             .expect_request(zebra_state::Request::BestChainNextMedianTimePast)
             .await
             .expect("verifier should call mock state service with correct request")
@@ -762,13 +763,13 @@ async fn skips_verification_of_block_transactions_in_mempool() {
                 DateTime32::MAX,
             ));
 
-        state
+        state_clone
             .expect_request(zebra_state::Request::UnspentBestChainUtxo(input_outpoint))
             .await
             .expect("verifier should call mock state service with correct request")
             .respond(zebra_state::Response::UnspentBestChainUtxo(None));
 
-        state
+        state_clone
             .expect_request_that(|req| {
                 matches!(
                     req,
@@ -780,20 +781,20 @@ async fn skips_verification_of_block_transactions_in_mempool() {
             .respond(zebra_state::Response::ValidBestChainTipNullifiersAndAnchors);
     });
 
+    let utxo = known_utxos
+        .get(&input_outpoint)
+        .expect("input outpoint should exist in known_utxos")
+        .utxo
+        .clone();
+
     let mut mempool_clone = mempool.clone();
+    let output = utxo.output.clone();
     tokio::spawn(async move {
         mempool_clone
             .expect_request(mempool::Request::AwaitOutput(input_outpoint))
             .await
             .expect("verifier should call mock state service with correct request")
-            .respond(mempool::Response::UnspentOutput(
-                known_utxos
-                    .get(&input_outpoint)
-                    .expect("input outpoint should exist in known_utxos")
-                    .utxo
-                    .output
-                    .clone(),
-            ));
+            .respond(mempool::Response::UnspentOutput(output));
     });
 
     let verifier_response = verifier
@@ -825,11 +826,11 @@ async fn skips_verification_of_block_transactions_in_mempool() {
 
     let mut mempool_clone = mempool.clone();
     tokio::spawn(async move {
-        for _ in 0..2 {
+        for _ in 0..3 {
             mempool_clone
                 .expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
                 .await
-                .expect("verifier should call mock state service with correct request")
+                .expect("verifier should call mock mempool service with correct request")
                 .respond(mempool::Response::TransactionWithDeps {
                     transaction: transaction.clone(),
                     dependencies: [input_outpoint.hash].into(),
@@ -855,6 +856,23 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         panic!("unexpected response variant from transaction verifier for Block request")
     };
 
+    tokio::spawn(async move {
+        state
+            .expect_request(zebra_state::Request::AwaitUtxo(input_outpoint))
+            .await
+            .expect("verifier should call mock state service with correct request")
+            .respond(zebra_state::Response::Utxo(utxo));
+    });
+
+    let crate::transaction::Response::Block { .. } = verifier
+        .clone()
+        .oneshot(make_request.clone()(Arc::new(HashSet::new())))
+        .await
+        .expect("should succeed after calling state service")
+    else {
+        panic!("unexpected response variant from transaction verifier for Block request")
+    };
+
     let verifier_response_err = *verifier
         .clone()
         .oneshot(make_request(Arc::new(HashSet::new())))
@@ -875,7 +893,7 @@ async fn skips_verification_of_block_transactions_in_mempool() {
     // already the mempool.
     assert_eq!(
         mempool.poll_count(),
-        4,
+        5,
         "the mempool service should have been polled 4 times"
     );
 }
