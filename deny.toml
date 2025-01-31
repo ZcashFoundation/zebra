@@ -65,10 +65,6 @@ skip-tree = [
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
 
-    # wait for reqwest to update base64
-    { name = "base64", version = "=0.21.7" },
-    { name = "sync_wrapper", version = "0.1.2" },
-
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
 
@@ -92,7 +88,15 @@ skip-tree = [
 
     # Remove after release candicate period is over and the ECC crates are not patched anymore
     { name = "equihash", version = "=0.2.0" },
-    { name = "f4jumble", version = "=0.1.0" },
+
+    # wait for zcash_client_backend to update bech32
+    { name = "bech32", version = "=0.9.1" },
+
+    # wait for zcash_script to update itertools
+    { name = "itertools", version = "=0.13.0" },
+
+    # wait for abscissa_core to update synstructure
+    { name = "synstructure", version = "=0.12.6" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
