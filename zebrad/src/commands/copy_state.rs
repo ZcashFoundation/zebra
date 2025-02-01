@@ -280,7 +280,7 @@ impl CopyStateCmd {
             // then deserializes bytes into new `Block` structs when reading.
             // So these checks are sufficient to detect block data corruption.
             //
-            // If Zebra starts re-using cached `Block` structs after writing them,
+            // If Zebra starts reusing cached `Block` structs after writing them,
             // we'll also need to check `Block` structs created from the actual database bytes.
             if source_block_hash != target_block_commit_hash
                 || source_block_hash != target_block_data_hash

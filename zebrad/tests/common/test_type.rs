@@ -200,7 +200,7 @@ impl TestType {
         if !use_internet_connection {
             config.network.initial_mainnet_peers = IndexSet::new();
             config.network.initial_testnet_peers = IndexSet::new();
-            // Avoid re-using cached peers from disk when we're supposed to be a disconnected instance
+            // Avoid reusing cached peers from disk when we're supposed to be a disconnected instance
             config.network.cache_dir = CacheDir::disabled();
 
             // Activate the mempool immediately by default

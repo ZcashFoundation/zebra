@@ -463,7 +463,7 @@ where
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
         // layer is relatively unimportant, because slow requests will
-        // probably be pre-emptively hedged.
+        // probably be preemptively hedged.
         //
         // The Hedge goes outside the Retry, because the Retry layer
         // abstracts away spurious failures from individual peers

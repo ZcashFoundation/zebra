@@ -888,12 +888,7 @@ impl ZcashDeserialize for Transaction {
                 // Denoted as `nConsensusBranchId` in the spec.
                 // Convert it to a NetworkUpgrade
                 let network_upgrade =
-                    NetworkUpgrade::from_branch_id(limited_reader.read_u32::<LittleEndian>()?)
-                        .ok_or({
-                            SerializationError::Parse(
-                                "expected a valid network upgrade from the consensus branch id",
-                            )
-                        })?;
+                    NetworkUpgrade::try_from(limited_reader.read_u32::<LittleEndian>()?)?;
 
                 // Denoted as `lock_time` in the spec.
                 let lock_time = LockTime::zcash_deserialize(&mut limited_reader)?;

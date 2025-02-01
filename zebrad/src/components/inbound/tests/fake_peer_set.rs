@@ -166,7 +166,7 @@ async fn mempool_push_transaction() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -271,7 +271,7 @@ async fn mempool_advertise_transaction_ids() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -373,7 +373,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -512,7 +512,7 @@ async fn mempool_transaction_expiration() -> Result<(), crate::BoxError> {
         responder.respond(transaction::Response::from(
             VerifiedUnminedTx::new(
                 transaction,
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
