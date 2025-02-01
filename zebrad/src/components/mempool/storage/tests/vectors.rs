@@ -267,7 +267,7 @@ fn mempool_expired_basic_for_network(network: Network) -> Result<()> {
     storage.insert(
         VerifiedUnminedTx::new(
             tx.into(),
-            Amount::try_from(1_000_000).expect("invalid value"),
+            Amount::try_from(1_000_000).expect("valid amount"),
             0,
         )
         .expect("verification should pass"),

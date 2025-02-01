@@ -575,12 +575,10 @@ where
                     miner_fee,
                     legacy_sigop_count,
                 },
-                Request::Mempool { transaction, .. } => {
+                Request::Mempool { transaction: ref tx, .. } => {
                     let transaction = VerifiedUnminedTx::new(
-                        transaction,
-                        miner_fee.expect(
-                            "unexpected mempool coinbase transaction: should have already rejected",
-                        ),
+                        tx.clone(),
+                        miner_fee.expect("fee should have been checked earlier"),
                         legacy_sigop_count,
                     )?;
 
@@ -874,14 +872,12 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
-        let upgrade = request.upgrade(network);
+        let nu = request.upgrade(network);
 
-        Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
+        Self::verify_v4_transaction_network_upgrade(&tx, nu)?;
 
         let shielded_sighash = tx.sighash(
-            upgrade
-                .branch_id()
-                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
+            nu,
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
             None,
@@ -970,14 +966,12 @@ where
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
-        let upgrade = request.upgrade(network);
+        let nu = request.upgrade(network);
 
-        Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
+        Self::verify_v5_transaction_network_upgrade(&transaction, nu)?;
 
         let shielded_sighash = transaction.sighash(
-            upgrade
-                .branch_id()
-                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
+            nu,
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
             None,
