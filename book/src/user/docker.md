@@ -159,7 +159,6 @@ This approach ensures you can run the same tests locally that are run in CI, pro
 #### Mining Configuration
 
 - `RPC_LISTEN_ADDR`: Address for RPC to listen on. Example: `"0.0.0.0"`
-- `RPC_PORT`: Port for RPC. Example: `8232`
 - `MINER_ADDRESS`: Address for the miner. Example: `"t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc"`
 
 #### Other Configuration

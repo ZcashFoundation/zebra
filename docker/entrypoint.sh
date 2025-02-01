@@ -44,18 +44,6 @@ prepare_env_vars() {
   : "${TRACING_ENDPOINT_ADDR:=0.0.0.0}"
   : "${TRACING_ENDPOINT_PORT:=3000}"
 
-  # [rpc]
-  : "${RPC_LISTEN_ADDR:=0.0.0.0}"
-
-  # if `${RPC_PORT}` is not set, use the default value for the current network
-  if [[ -z "${RPC_PORT}" ]]; then
-    if [[ "${NETWORK}" = "Mainnet" ]]; then
-      : "${RPC_PORT:=8232}"
-    elif [[ "${NETWORK}" = "Testnet" ]]; then
-      : "${RPC_PORT:=18232}"
-    fi
-  fi
-
   echo "Using the following env vars:"
   echo ""
   printenv
@@ -86,13 +74,6 @@ EOF
     cat <<EOF >>"$1"
 [metrics]
 endpoint_addr = "${METRICS_ENDPOINT_ADDR}:${METRICS_ENDPOINT_PORT}"
-EOF
-  fi
-  if [[ -n "${RPC_PORT}" ]]; then
-    cat <<EOF >>"$1"
-[rpc]
-cookie_dir = "${ZEBRA_CACHE_DIR}"
-listen_addr = "${RPC_LISTEN_ADDR}:${RPC_PORT}"
 EOF
   fi
   if [[ -n "${LOG_FILE}" ]] || [[ -n "${LOG_COLOR}" ]] || [[ -n "${TRACING_ENDPOINT_ADDR}" ]]; then
