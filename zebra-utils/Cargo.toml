@@ -118,7 +118,7 @@ zcash_client_backend = { workspace = true, optional = true }
 zcash_protocol.workspace = true
 
 # For the openapi generator
-rand = "0.8.5"
+rand = "0.9.0"
 syn = { version = "2.0.96", features = ["full"], optional = true }
 quote = { version = "1.0.38", optional = true }
 serde_yml = { version = "0.0.12", optional = true }

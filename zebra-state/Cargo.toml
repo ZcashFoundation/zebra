@@ -64,7 +64,7 @@ metrics = "0.24.1"
 mset = "0.1.1"
 regex = "1.11.0"
 rlimit = "0.10.2"
-rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
+rocksdb = { version = "0.23.0", default-features = false, features = ["lz4"] }
 semver = "1.0.25"
 crossbeam-channel = "0.5.14"
 serde = { version = "1.0.217", features = ["serde_derive"] }
@@ -73,7 +73,7 @@ thiserror = "2.0.11"
 
 rayon = "1.10.0"
 tokio = { version = "1.43.0", features = ["rt-multi-thread", "sync", "tracing"] }
-tower = { version = "0.4.13", features = ["buffer", "util"] }
+tower = { version = "0.5.2", features = ["buffer", "util"] }
 tracing = "0.1.41"
 
 # elasticsearch specific dependencies.
@@ -105,7 +105,7 @@ insta = { version = "1.42.1", features = ["ron", "redactions"] }
 
 proptest = "1.6.0"
 proptest-derive = "0.5.1"
-rand = "0.8.5"
+rand = "0.9.0"
 
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 jubjub = "0.10.0"

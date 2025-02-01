@@ -93,7 +93,7 @@ dependencies = [
  "getrandom 0.2.15",
  "once_cell",
  "version_check",
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -2144,9 +2144,9 @@ dependencies = [
 
 [[package]]
 name = "impl-codec"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba6a270039626615617f3f36d15fc827041df3b78c439da2cadfa47455a77f2f"
+checksum = "b67aa010c1e3da95bf151bd8b4c059b2ed7e75387cdb969b4f8f2723a43f9941"
 dependencies = [
  "parity-scale-codec",
 ]
@@ -2520,14 +2520,13 @@ dependencies = [
 
 [[package]]
 name = "librocksdb-sys"
-version = "0.16.0+8.10.0"
+version = "0.17.1+9.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce3d60bc059831dc1c83903fb45c103f75db65c5a7bf22272764d9cc683e348c"
+checksum = "2b7869a512ae9982f4d46ba482c2a304f1efd80c6412a3d4bf57bb79a619679f"
 dependencies = [
  "bindgen 0.69.5",
  "bzip2-sys",
  "cc",
- "glob",
  "libc",
  "libz-sys",
  "lz4-sys",
@@ -2654,9 +2653,9 @@ dependencies = [
 
 [[package]]
 name = "metrics-exporter-prometheus"
-version = "0.16.1"
+version = "0.16.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12779523996a67c13c84906a876ac6fe4d07a6e1adb54978378e13f199251a62"
+checksum = "dd7399781913e5393588a8d8c6a2867bf85fb38eaf2502fdce465aad2dc6f034"
 dependencies = [
  "base64 0.22.1",
  "http-body-util",
@@ -3203,7 +3202,7 @@ version = "0.2.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77957b295656769bb8ad2b6a6b09d897d94f05c41b069aede1fcdaa675eaea04"
 dependencies = [
- "zerocopy",
+ "zerocopy 0.7.35",
 ]
 
 [[package]]
@@ -3223,8 +3222,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b34d9fd68ae0b74a41b21c03c2f62847aa0ffea044eee893b4c140b37e244e2"
 dependencies = [
  "fixed-hash",
- "impl-codec",
  "uint 0.9.5",
+]
+
+[[package]]
+name = "primitive-types"
+version = "0.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d15600a7d856470b7d278b3fe0e311fe28c2526348549f8ef2ff7db3299c87f5"
+dependencies = [
+ "fixed-hash",
+ "impl-codec",
+ "uint 0.10.0",
 ]
 
 [[package]]
@@ -3519,6 +3528,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
+dependencies = [
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.0",
+ "zerocopy 0.8.14",
+]
+
+[[package]]
 name = "rand_chacha"
 version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3539,6 +3559,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rand_chacha"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.9.0",
+]
+
+[[package]]
 name = "rand_core"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3554,6 +3584,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 dependencies = [
  "getrandom 0.2.15",
+]
+
+[[package]]
+name = "rand_core"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b08f3c9802962f7e1b25113931d94f43ed9725bebc59db9d0c3e9a23b67e15ff"
+dependencies = [
+ "getrandom 0.3.1",
+ "zerocopy 0.8.14",
 ]
 
 [[package]]
@@ -3797,9 +3837,9 @@ dependencies = [
 
 [[package]]
 name = "rocksdb"
-version = "0.22.0"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bd13e55d6d7b8cd0ea569161127567cd587676c99f4472f779a0279aa60a7a7"
+checksum = "26ec73b20525cb235bad420f911473b69f9fe27cc856c5461bccd7e4af037f43"
 dependencies = [
  "libc",
  "librocksdb-sys",
@@ -4858,7 +4898,6 @@ checksum = "b8fa9be0de6cf49e536ce1851f987bd21a43b771b09473c3549a6c853db37c1c"
 dependencies = [
  "futures-core",
  "futures-util",
- "hdrhistogram",
  "indexmap 1.9.3",
  "pin-project",
  "pin-project-lite",
@@ -4879,11 +4918,14 @@ checksum = "d039ad9159c98b70ecfd540b2573b97f7f52c3e8d9f8ad57a24b916a536975f9"
 dependencies = [
  "futures-core",
  "futures-util",
+ "hdrhistogram",
  "pin-project-lite",
  "sync_wrapper",
  "tokio",
+ "tokio-util",
  "tower-layer",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -4895,13 +4937,13 @@ dependencies = [
  "futures",
  "futures-core",
  "pin-project",
- "rand 0.8.5",
+ "rand 0.9.0",
  "rayon",
  "tinyvec",
  "tokio",
  "tokio-test",
  "tokio-util",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tower-fallback",
  "tower-test",
  "tracing",
@@ -4916,7 +4958,7 @@ dependencies = [
  "futures-core",
  "pin-project",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tracing",
  "zebra-test",
 ]
@@ -5834,7 +5876,7 @@ checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
- "primitive-types",
+ "primitive-types 0.12.2",
 ]
 
 [[package]]
@@ -5996,12 +6038,12 @@ dependencies = [
  "lazy_static",
  "num-integer",
  "orchard",
- "primitive-types",
+ "primitive-types 0.13.1",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "rand_core 0.6.4",
+ "rand 0.9.0",
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.0",
  "rayon",
  "reddsa",
  "redjubjub",
@@ -6054,7 +6096,7 @@ dependencies = [
  "orchard",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.9.0",
  "rayon",
  "sapling-crypto",
  "serde",
@@ -6062,7 +6104,7 @@ dependencies = [
  "thiserror 2.0.11",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tower-batch-control",
  "tower-fallback",
  "tracing",
@@ -6092,7 +6134,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.4.13",
+ "tower 0.5.2",
  "zcash_primitives",
  "zebra-chain",
  "zebra-node-services",
@@ -6122,7 +6164,7 @@ dependencies = [
  "pin-project",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.9.0",
  "rayon",
  "regex",
  "serde",
@@ -6133,7 +6175,7 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "toml 0.8.19",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tracing",
  "tracing-error",
  "tracing-futures",
@@ -6173,7 +6215,7 @@ dependencies = [
  "nix",
  "proptest",
  "prost",
- "rand 0.8.5",
+ "rand 0.9.0",
  "serde",
  "serde_json",
  "thiserror 2.0.11",
@@ -6182,7 +6224,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tonic-reflection",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tracing",
  "zcash_address",
  "zcash_primitives",
@@ -6214,7 +6256,7 @@ dependencies = [
  "lazy_static",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.9.0",
  "sapling-crypto",
  "semver",
  "serde",
@@ -6224,7 +6266,7 @@ dependencies = [
  "tokio",
  "toml 0.8.19",
  "tonic",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tracing",
  "tracing-subscriber",
  "zcash_address",
@@ -6280,7 +6322,7 @@ dependencies = [
  "once_cell",
  "proptest",
  "proptest-derive",
- "rand 0.8.5",
+ "rand 0.9.0",
  "rayon",
  "regex",
  "rlimit",
@@ -6293,7 +6335,7 @@ dependencies = [
  "thiserror 2.0.11",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tracing",
  "zebra-chain",
  "zebra-test",
@@ -6314,14 +6356,14 @@ dependencies = [
  "once_cell",
  "owo-colors 4.1.0",
  "proptest",
- "rand 0.8.5",
+ "rand 0.9.0",
  "regex",
  "spandoc",
  "tempfile",
  "thiserror 2.0.11",
  "tinyvec",
  "tokio",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tracing",
  "tracing-error",
  "tracing-subscriber",
@@ -6337,7 +6379,7 @@ dependencies = [
  "itertools 0.14.0",
  "jsonrpc",
  "quote",
- "rand 0.8.5",
+ "rand 0.9.0",
  "regex",
  "reqwest",
  "serde",
@@ -6393,7 +6435,7 @@ dependencies = [
  "proptest",
  "proptest-derive",
  "prost",
- "rand 0.8.5",
+ "rand 0.9.0",
  "rayon",
  "regex",
  "semver",
@@ -6409,7 +6451,7 @@ dependencies = [
  "toml 0.8.19",
  "tonic",
  "tonic-build",
- "tower 0.4.13",
+ "tower 0.5.2",
  "tracing",
  "tracing-appender",
  "tracing-error",
@@ -6437,7 +6479,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
 dependencies = [
  "byteorder",
- "zerocopy-derive",
+ "zerocopy-derive 0.7.35",
+]
+
+[[package]]
+name = "zerocopy"
+version = "0.8.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a367f292d93d4eab890745e75a778da40909cab4d6ff8173693812f79c4a2468"
+dependencies = [
+ "zerocopy-derive 0.8.14",
 ]
 
 [[package]]
@@ -6445,6 +6496,17 @@ name = "zerocopy-derive"
 version = "0.7.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.96",
+]
+
+[[package]]
+name = "zerocopy-derive"
+version = "0.8.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3931cb58c62c13adec22e38686b559c86a30565e16ad6e8510a337cedc611e1"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -183,7 +183,7 @@ futures = "0.3.31"
 rayon = "1.10.0"
 tokio = { version = "1.43.0", features = ["time", "rt-multi-thread", "macros", "tracing", "signal"] }
 tokio-stream = { version = "0.1.17", features = ["time"] }
-tower = { version = "0.4.13", features = ["hedge", "limit"] }
+tower = { version = "0.5.2", features = ["hedge", "limit"] }
 pin-project = "1.1.8"
 
 color-eyre = { version = "0.6.3", default-features = false, features = ["issue-url"] }
@@ -205,7 +205,7 @@ dirs = "6.0.0"
 atty = "0.2.14"
 
 num-integer = "0.1.46"
-rand = "0.8.5"
+rand = "0.9.0"
 
 # prod feature internal-miner
 thread-priority = { version = "1.2.0", optional = true }
@@ -227,7 +227,7 @@ hyper-util = { version = "0.1.9", optional = true }
 bytes = { version = "1.9.0", optional = true }
 
 # prod feature prometheus
-metrics-exporter-prometheus = { version = "0.16.1", default-features = false, features = ["http-listener"], optional = true }
+metrics-exporter-prometheus = { version = "0.16.2", default-features = false, features = ["http-listener"], optional = true }
 
 # prod feature release_max_level_info
 #
