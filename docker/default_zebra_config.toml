@@ -1,0 +1,24 @@
+# Configuration file for Zebra.
+#
+# You can use this file as a starting point for custom configs. Zebra uses
+# default values for unspecified fields.
+#
+# The config format, including a complete list of sections and fields, is
+# documented here:
+# https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
+
+[network]
+network = "Mainnet"
+listen_addr = "0.0.0.0"
+cache_dir = "/home/zebra/.cache/zebra"
+
+[rpc]
+listen_addr = "0.0.0.0"
+cookie_dir = "/home/zebra/.cache/zebra"
+
+[state]
+cache_dir = "/home/zebra/.cache/zebra"
+
+[tracing]
+force_use_color = false
+use_color = false
