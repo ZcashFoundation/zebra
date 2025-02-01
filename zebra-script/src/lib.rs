@@ -444,9 +444,6 @@ mod tests {
         verifier
             .is_valid(NetworkUpgrade::Blossom, input_index + 1)
             .expect_err("verification should fail");
-        verifier
-            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
-            .expect_err("verification should fail");
 
         Ok(())
     }
