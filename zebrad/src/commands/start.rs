@@ -262,7 +262,7 @@ impl StartCmd {
                 );
                 rpc_task_handle.await.unwrap()
             } else {
-                info!("configure an listen_addr to start the RPC server");
+                info!("configure a listen_addr to start the RPC server");
                 (
                     tokio::spawn(std::future::pending().in_current_span()),
                     tokio::spawn(std::future::pending().in_current_span()),
