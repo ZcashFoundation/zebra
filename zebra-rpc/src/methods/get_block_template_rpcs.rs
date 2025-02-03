@@ -64,7 +64,10 @@ use crate::{
         hex_data::HexData,
         GetBlockHash,
     },
-    server::{self, error::MapError},
+    server::{
+        self,
+        error::{MapError, OkOrError},
+    },
 };
 
 pub mod constants;
@@ -377,7 +380,8 @@ pub struct GetBlockTemplateRpcImpl<
     /// Address book of peers, used for `getpeerinfo`.
     address_book: AddressBook,
 
-    /// The sender part of a Channel to avertise mined blocks by this node to the network.
+    /// A channel to send successful block submissions to the block gossip task,
+    /// so they can be advertised to peers.
     mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
 }
 
@@ -942,11 +946,9 @@ where
             }
         };
 
-        let block_height = block.coinbase_height().ok_or(ErrorObject::owned(
-            0,
-            "coinbase height not found".to_string(),
-            None::<()>,
-        ))?;
+        let block_height = block
+            .coinbase_height()
+            .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
 
         let block_verifier_router_response = block_verifier_router
@@ -968,13 +970,7 @@ where
 
                 self.mined_block_sender
                     .send((block_hash, block_height))
-                    .map_err(|e| {
-                        ErrorObject::owned(
-                            0,
-                            format!("failed to send mined block: {e}"),
-                            None::<()>,
-                        )
-                    })?;
+                    .map_error_with_prefix(0, "failed to send mined block")?;
 
                 return Ok(submit_block::Response::Accepted);
             }
