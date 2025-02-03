@@ -12,23 +12,22 @@ In this release, Zebra fixed a consensus bug in the branch ID of Nu6 transaction
 ### Added
 
 - An index to track spending transaction ids by spent outpoints and revealed nullifiers ([#8895](https://github.com/ZcashFoundation/zebra/pull/8895))
-- Public getter / setter functions to Zebra-RPC::methods.rs ([#9113](https://github.com/ZcashFoundation/zebra/pull/9113))
+- Accessor methods to `zebra-rpc` request/response types ([#9113](https://github.com/ZcashFoundation/zebra/pull/9113))
 - `getblock` RPC method now can return transaction details with verbosity=2 ([#9083](https://github.com/ZcashFoundation/zebra/pull/9083))
-- A missing serialized NU5 blocks to test vectors ([#9098](https://github.com/ZcashFoundation/zebra/pull/9098))
+- Serialized NU5 blocks to test vectors ([#9098](https://github.com/ZcashFoundation/zebra/pull/9098))
 
 ### Changed
 
 - Migrated from deprecated `jsonrpc_*` crates to `jsonrpsee` ([#9059](https://github.com/ZcashFoundation/zebra/pull/9059), [#9151](https://github.com/ZcashFoundation/zebra/pull/9151))
 - Optimized checks for coinbase transactions ([#9126](https://github.com/ZcashFoundation/zebra/pull/9126))
-- Avoid re-verifying transactions in blocks if those transactions are in the mempool ([#8951](https://github.com/ZcashFoundation/zebra/pull/8951))
+- Avoid re-verifying transactions in blocks if those transactions are in the mempool ([#8951](https://github.com/ZcashFoundation/zebra/pull/8951), [#9118](https://github.com/ZcashFoundation/zebra/pull/9118))
 - Allow transactions spending coinbase outputs to have transparent outputs on Regtest ([#9085](https://github.com/ZcashFoundation/zebra/pull/9085))
 
 ### Fixed
 
 - Respond to getblockchaininfo with genesis block when empty state ([#9138](https://github.com/ZcashFoundation/zebra/pull/9138))
-- Avoid a concurrency bug when verifying transactions in blocks that are already present in the mempool ([#9118](https://github.com/ZcashFoundation/zebra/pull/9118))
 - Verify consensus branch ID in SIGHASH precomputation ([#9139](https://github.com/ZcashFoundation/zebra/pull/9139))
-- Refactor `getrawtransaction` and RPC error handling ([#9049](https://github.com/ZcashFoundation/zebra/pull/9049))
+- More closely match zcashd RPC errors and `getrawtransaction` RPC behaviour ([#9049](https://github.com/ZcashFoundation/zebra/pull/9049))
 - Fixes bugs in the lightwalletd integration tests ([#9052](https://github.com/ZcashFoundation/zebra/pull/9052))
 
 ### Contributors
