@@ -280,6 +280,17 @@ pub enum MetaAddrChange {
         addr: PeerSocketAddr,
         services: Option<PeerServices>,
     },
+
+    /// Updates an existing `MetaAddr` when a peer misbehaves such as by advertising
+    /// semantically invalid blocks or transactions.
+    UpdateMisbehavior {
+        #[cfg_attr(
+            any(test, feature = "proptest-impl"),
+            proptest(strategy = "canonical_peer_addr_strategy()")
+        )]
+        addr: PeerSocketAddr,
+        score_increment: u32,
+    },
 }
 
 impl MetaAddr {
@@ -679,7 +690,8 @@ impl MetaAddrChange {
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr,
+            | UpdateFailed { addr, .. }
+            | UpdateMisbehavior { addr, .. } => *addr,
         }
     }
 
@@ -695,7 +707,8 @@ impl MetaAddrChange {
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr = new_addr,
+            | UpdateFailed { addr, .. }
+            | UpdateMisbehavior { addr, .. } => *addr = new_addr,
         }
     }
 
@@ -713,6 +726,7 @@ impl MetaAddrChange {
             UpdateConnected { services, .. } => Some(*services),
             UpdateResponded { .. } => None,
             UpdateFailed { services, .. } => *services,
+            UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -729,7 +743,8 @@ impl MetaAddrChange {
             UpdateAttempt { .. }
             | UpdateConnected { .. }
             | UpdateResponded { .. }
-            | UpdateFailed { .. } => None,
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -760,7 +775,10 @@ impl MetaAddrChange {
             // peer address. So the attempt time is a lower bound for the actual
             // handshake time.
             UpdateAttempt { .. } => Some(now),
-            UpdateConnected { .. } | UpdateResponded { .. } | UpdateFailed { .. } => None,
+            UpdateConnected { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -774,7 +792,7 @@ impl MetaAddrChange {
             // - the peer will appear to be live for longer, delaying future
             //   reconnection attempts.
             UpdateConnected { .. } | UpdateResponded { .. } => Some(now),
-            UpdateFailed { .. } => None,
+            UpdateFailed { .. } | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -792,7 +810,7 @@ impl MetaAddrChange {
             //   states for longer, and
             // - the peer will appear to be used for longer, delaying future
             //   reconnection attempts.
-            UpdateFailed { .. } => Some(now),
+            UpdateFailed { .. } | UpdateMisbehavior { .. } => Some(now),
         }
     }
 
@@ -804,7 +822,8 @@ impl MetaAddrChange {
             // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
-            UpdateConnected { .. } | UpdateResponded { .. } => Responded,
+            // TODO: Review whether this will have unintended consequences
+            UpdateConnected { .. } | UpdateResponded { .. } | UpdateMisbehavior { .. } => Responded,
             UpdateFailed { .. } => Failed,
         }
     }

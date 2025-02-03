@@ -9,6 +9,12 @@ use std::{
     time::Instant,
 };
 
+// TODO:
+//
+// - Add a sender to the peer conn discover channel as a field on address book,
+// - Report failures from mempool/sync to the address book?
+// - Send `Change::Remove` messages from the address book once a peer's bad score is excessive.
+
 use chrono::Utc;
 use ordered_map::OrderedMap;
 use tokio::sync::watch;

@@ -5,7 +5,7 @@
 //! [tower-balance]: https://github.com/tower-rs/tower/tree/master/tower/src/balance
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
     net::SocketAddr,
     pin::Pin,
@@ -22,7 +22,7 @@ use futures::{
 use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::broadcast,
+    sync::{broadcast, mpsc},
     time::{sleep, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
@@ -34,7 +34,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
 
 use crate::{
-    address_book_updater::AddressBookUpdater,
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
@@ -101,6 +101,7 @@ pub async fn init<S, C>(
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Sender<(PeerSocketAddr, u32)>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -111,6 +112,47 @@ where
 
     let (address_book, address_book_updater, address_metrics, address_book_updater_guard) =
         AddressBookUpdater::spawn(&config, listen_addr);
+
+    let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
+        3 * config
+            .peerset_total_connection_limit()
+            .max(MIN_CHANNEL_SIZE),
+    );
+
+    let misbehaviour_updater = address_book_updater.clone();
+    tokio::spawn(
+        async move {
+            let mut misbehaviors: HashMap<PeerSocketAddr, u32> = HashMap::new();
+            let mut flush_timer =
+                IntervalStream::new(tokio::time::interval(Duration::from_secs(60)));
+
+            loop {
+                tokio::select! {
+                    msg = misbehavior_rx.recv() => match msg {
+                        Some((peer_addr, score_increment)) => *misbehaviors
+                            .entry(peer_addr)
+                            .or_default()
+                            += score_increment,
+                        None => break,
+                    },
+
+                    _ = flush_timer.next() => {
+                        for (addr, score_increment) in misbehaviors.drain() {
+                            let _ = misbehaviour_updater
+                                .send(MetaAddrChange::UpdateMisbehavior{
+                                    addr,
+                                    score_increment
+                                })
+                                .await;
+                        }
+                    },
+                };
+            }
+
+            tracing::warn!("exiting misbehavior update batch task");
+        }
+        .in_current_span(),
+    );
 
     // Create a broadcast channel for peer inventory advertisements.
     // If it reaches capacity, this channel drops older inventory advertisements.
@@ -258,7 +300,7 @@ where
         ])
         .unwrap();
 
-    (peer_set, address_book)
+    (peer_set, address_book, misbehavior_tx)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
