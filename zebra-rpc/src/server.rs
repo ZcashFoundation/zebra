@@ -86,6 +86,10 @@ impl RpcServer {
     ///
     /// Returns [`JoinHandle`]s for the RPC server and `sendrawtransaction` queue tasks,
     /// and a [`RpcServer`] handle, which can be used to shut down the RPC server task.
+    ///
+    /// # Panics
+    ///
+    /// - If [`Config::listen_addr`] is `None`.
     //
     // TODO:
     // - put some of the configs or services in their own struct?
