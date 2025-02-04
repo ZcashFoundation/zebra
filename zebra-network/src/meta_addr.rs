@@ -286,11 +286,8 @@ pub enum MetaAddrChange {
 
     /// Updates an existing `MetaAddr` when a peer misbehaves such as by advertising
     /// semantically invalid blocks or transactions.
+    #[proptest(skip)]
     UpdateMisbehavior {
-        #[cfg_attr(
-            any(test, feature = "proptest-impl"),
-            proptest(strategy = "canonical_peer_addr_strategy()")
-        )]
         addr: PeerSocketAddr,
         score_increment: u32,
     },

@@ -37,7 +37,7 @@ use crate::{
         external::{types::Nonce, InventoryHash, Message},
         internal::{InventoryResponse, Request, Response},
     },
-    BoxError, MAX_TX_INV_IN_SENT_MESSAGE,
+    BoxError, PeerSocketAddr, MAX_TX_INV_IN_SENT_MESSAGE,
 };
 
 use InventoryResponse::*;
@@ -140,6 +140,7 @@ impl Handler {
         &mut self,
         msg: Message,
         cached_addrs: &mut Vec<MetaAddr>,
+        transient_addr: Option<PeerSocketAddr>,
     ) -> Option<Message> {
         let mut ignored_msg = None;
         // TODO: can this be avoided?
@@ -215,7 +216,9 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFoundResponse(missing_transaction_ids)))
                 } else if pending_ids.is_empty() || ignored_msg.is_some() {
                     // If we got some of what we wanted, let the internal client know.
-                    let available = transactions.into_iter().map(InventoryResponse::Available);
+                    let available = transactions
+                        .into_iter()
+                        .map(|t| InventoryResponse::Available((t, transient_addr)));
                     let missing = pending_ids.into_iter().map(InventoryResponse::Missing);
 
                     Handler::Finished(Ok(Response::Transactions(
@@ -263,7 +266,9 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFoundResponse(missing_transaction_ids)))
                 } else {
                     // If we got some of what we wanted, let the internal client know.
-                    let available = transactions.into_iter().map(InventoryResponse::Available);
+                    let available = transactions
+                        .into_iter()
+                        .map(|t| InventoryResponse::Available((t, transient_addr)));
                     let missing = pending_ids.into_iter().map(InventoryResponse::Missing);
 
                     Handler::Finished(Ok(Response::Transactions(
@@ -324,7 +329,9 @@ impl Handler {
 
                 if pending_hashes.is_empty() {
                     // If we got everything we wanted, let the internal client know.
-                    let available = blocks.into_iter().map(InventoryResponse::Available);
+                    let available = blocks
+                        .into_iter()
+                        .map(|block| InventoryResponse::Available((block, transient_addr)));
                     Handler::Finished(Ok(Response::Blocks(available.collect())))
                 } else {
                     // Keep on waiting for all the blocks we wanted, until we get them or time out.
@@ -368,7 +375,9 @@ impl Handler {
                     Handler::Finished(Err(PeerError::NotFoundResponse(missing_block_hashes)))
                 } else {
                     // If we got some of what we wanted, let the internal client know.
-                    let available = blocks.into_iter().map(InventoryResponse::Available);
+                    let available = blocks
+                        .into_iter()
+                        .map(|block| InventoryResponse::Available((block, transient_addr)));
                     let missing = pending_hashes.into_iter().map(InventoryResponse::Missing);
 
                     Handler::Finished(Ok(Response::Blocks(available.chain(missing).collect())))
@@ -854,7 +863,7 @@ where
                             let request_msg = match self.state {
                                 State::AwaitingResponse {
                                     ref mut handler, ..
-                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs)),
+                                } => span.in_scope(|| handler.process_message(peer_msg, &mut self.cached_addrs, self.connection_info.connected_addr.get_transient_addr())),
                                 _ => unreachable!("unexpected state after AwaitingResponse: {:?}, peer_msg: {:?}, client_receiver: {:?}",
                                                   self.state,
                                                   peer_msg,
@@ -1448,7 +1457,7 @@ where
 
                 for transaction in transactions.into_iter() {
                     match transaction {
-                        Available(transaction) => {
+                        Available((transaction, _)) => {
                             if let Err(e) = self.peer_tx.send(Message::Tx(transaction)).await {
                                 self.fail_with(e).await;
                                 return;
@@ -1472,7 +1481,7 @@ where
 
                 for block in blocks.into_iter() {
                     match block {
-                        Available(block) => {
+                        Available((block, _)) => {
                             if let Err(e) = self.peer_tx.send(Message::Block(block)).await {
                                 self.fail_with(e).await;
                                 return;

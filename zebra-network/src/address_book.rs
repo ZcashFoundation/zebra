@@ -10,10 +10,12 @@ use std::{
 };
 
 // TODO:
-//
-// - Add a sender to the peer conn discover channel as a field on address book,
-// - Report failures from mempool/sync to the address book?
-// - Send `Change::Remove` messages from the address book once a peer's bad score is excessive.
+// - Search for "bad score" in zcashd and replicate its behaviour and weights in Zebra
+// - Cache ban list on disk
+// - Cache misbehaviour scores on disk?
+// - Add an acceptance test to check that two zebrad testchild instances on different and
+//   incompatible custom Testnets initially connect to each other, but then disconnect (this may rely on reliably gossiping mined blocks).
+//   Note: It disconnects from entire IPs, but this is fine as it'll be tested with only one other local peer node.
 
 use chrono::Utc;
 use indexmap::IndexMap;
