@@ -3715,3 +3715,9 @@ fn check_no_git_refs_in_cargo_lock() {
         panic!("Cargo.lock includes git sources")
     }
 }
+
+// TODO: Add an acceptance test to check that two zebrad testchild instances on different and
+//       incompatible custom Testnets initially connect to each other, but then disconnect.
+//       (this may depend on reliably gossiping mined blocks)
+//
+// Note: It disconnects from entire IPs, but this is fine as it'll be tested with only one other local peer node.

@@ -200,6 +200,7 @@ pub struct MetaAddr {
     last_failure: Option<Instant>,
 
     /// The misbehavior score for this peer.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = 0))]
     misbehavior_score: u32,
 
     /// The outcome of our most recent communication attempt with this peer.
