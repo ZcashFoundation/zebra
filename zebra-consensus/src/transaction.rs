@@ -575,9 +575,9 @@ where
                     miner_fee,
                     legacy_sigop_count,
                 },
-                Request::Mempool { transaction: ref tx, .. } => {
+                Request::Mempool { transaction: tx, .. } => {
                     let transaction = VerifiedUnminedTx::new(
-                        tx.clone(),
+                        tx,
                         miner_fee.expect("fee should have been checked earlier"),
                         legacy_sigop_count,
                     )?;
