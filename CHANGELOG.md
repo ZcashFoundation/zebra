@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 2.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.2.0) - 2025-02-03
 
-In this release, Zebra fixed a consensus bug in the branch ID of Nu6 transactions, along with important refactors and improvements.
+In this release, Zebra introduced an additional consensus check on the branch ID of Nu6 transactions
+(which is currently also checked elsewhere; but we believe it's important to check on its own to protect
+against future code changes), along with important refactors and improvements.
 
 ### Added
 
