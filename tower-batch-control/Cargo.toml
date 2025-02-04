@@ -22,29 +22,29 @@ keywords = ["tower", "batch"]
 categories = ["algorithms", "asynchronous"]
 
 [dependencies]
-futures = "0.3.31"
-futures-core = "0.3.28"
-pin-project = "1.1.8"
-rayon = "1.10.0"
-tokio = { version = "1.43.0", features = ["time", "sync", "tracing", "macros"] }
-tokio-util = "0.7.13"
-tower = { version = "0.4.13", features = ["util", "buffer"] }
-tracing = "0.1.41"
-tracing-futures = "0.2.5"
+futures = { workspace = true }
+futures-core = { workspace = true }
+pin-project = { workspace = true }
+rayon = { workspace = true }
+tokio = { workspace = true, features = ["time", "sync", "tracing", "macros"] }
+tokio-util = { workspace = true }
+tower = { workspace = true, features = ["util", "buffer"] }
+tracing = { workspace = true }
+tracing-futures = { workspace = true }
 
 [dev-dependencies]
-color-eyre = "0.6.3"
+color-eyre = { workspace = true }
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.8.1", features = ["rustc_1_55"] }
+tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
-ed25519-zebra = "4.0.3"
-rand = "0.8.5"
+ed25519-zebra = { workspace = true }
+rand = { workspace = true }
 
-tokio = { version = "1.43.0", features = ["full", "tracing", "test-util"] }
-tokio-test = "0.4.4"
+tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
+tokio-test = { workspace = true }
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.20" }
-tower-test = "0.4.0"
+tower-test = { workspace = true }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.44" }
 
