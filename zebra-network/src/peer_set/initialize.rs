@@ -7,7 +7,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::Arc,
     time::Duration,
@@ -19,10 +19,11 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     Future, TryFutureExt,
 };
+use indexmap::IndexMap;
 use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::{broadcast, mpsc},
+    sync::{broadcast, mpsc, watch},
     time::{sleep, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
@@ -110,8 +111,13 @@ where
 {
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
-    let (address_book, address_book_updater, address_metrics, address_book_updater_guard) =
-        AddressBookUpdater::spawn(&config, listen_addr);
+    let (
+        address_book,
+        bans_receiver,
+        address_book_updater,
+        address_metrics,
+        address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, listen_addr);
 
     let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
         3 * config
@@ -230,6 +236,7 @@ where
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
+        bans_receiver,
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
@@ -592,6 +599,7 @@ async fn accept_inbound_connections<S>(
     min_inbound_peer_connection_interval: Duration,
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
@@ -627,6 +635,12 @@ where
 
         if let Ok((tcp_stream, addr)) = inbound_result {
             let addr: PeerSocketAddr = addr.into();
+
+            if bans_receiver.borrow().clone().contains_key(&addr.ip()) {
+                debug!(?addr, "banned inbound connection attempt");
+                std::mem::drop(tcp_stream);
+                continue;
+            }
 
             if active_inbound_connections.update_count()
                 >= config.peerset_inbound_connection_limit()

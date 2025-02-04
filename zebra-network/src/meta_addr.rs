@@ -199,6 +199,9 @@ pub struct MetaAddr {
     /// See the [`MetaAddr::last_failure`] method for details.
     last_failure: Option<Instant>,
 
+    /// The misbehavior score for this peer.
+    misbehavior_score: u32,
+
     /// The outcome of our most recent communication attempt with this peer.
     //
     // TODO: move the time and services fields into PeerAddrState?
@@ -317,6 +320,7 @@ impl MetaAddr {
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
+            misbehavior_score: 0,
         }
     }
 
@@ -634,12 +638,22 @@ impl MetaAddr {
         }
     }
 
+    /// Returns a score of misbehavior encountered in a peer at this address.
+    pub fn misbehavior(&self) -> u32 {
+        self.misbehavior_score
+    }
+
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
         if !self.last_known_info_is_valid_for_outbound(network) {
+            return None;
+        }
+
+        // Avoid responding to GetAddr requests with addresses of misbehaving peers.
+        if self.misbehavior_score != 0 {
             return None;
         }
 
@@ -666,6 +680,7 @@ impl MetaAddr {
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
+            misbehavior_score: 0,
         })
     }
 }
@@ -838,6 +853,17 @@ impl MetaAddrChange {
             last_attempt: self.last_attempt(instant_now),
             last_failure: self.last_failure(instant_now),
             last_connection_state: self.peer_addr_state(),
+            misbehavior_score: self.misbehavior_score(),
+        }
+    }
+
+    /// Returns the misbehavior score increment for the current change.
+    pub fn misbehavior_score(&self) -> u32 {
+        match self {
+            MetaAddrChange::UpdateMisbehavior {
+                score_increment, ..
+            } => *score_increment,
+            _ => 0,
         }
     }
 
@@ -860,6 +886,7 @@ impl MetaAddrChange {
             last_attempt: None,
             last_failure: None,
             last_connection_state: self.peer_addr_state(),
+            misbehavior_score: self.misbehavior_score(),
         }
     }
 
@@ -1011,6 +1038,7 @@ impl MetaAddrChange {
                 last_attempt: None,
                 last_failure: None,
                 last_connection_state: self.peer_addr_state(),
+                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
             })
         } else {
             // Existing entry and change are both Attempt, Responded, Failed,
@@ -1033,6 +1061,7 @@ impl MetaAddrChange {
                 last_failure: self.last_failure(instant_now).or(previous.last_failure),
                 // Replace the state with the updated state.
                 last_connection_state: self.peer_addr_state(),
+                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
             })
         }
     }
