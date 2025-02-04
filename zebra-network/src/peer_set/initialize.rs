@@ -221,6 +221,7 @@ where
         demand_tx.clone(),
         handle_rx,
         inv_receiver,
+        bans_receiver.clone(),
         address_metrics,
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
