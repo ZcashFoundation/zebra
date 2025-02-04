@@ -643,8 +643,8 @@ impl Storage {
 
             // Consensus verification failed. Reject transaction to avoid
             // having to download and verify it again just for it to fail again.
-            TransactionDownloadVerifyError::Invalid(e) => {
-                self.reject(tx_id, ExactTipRejectionError::FailedVerification(e).into())
+            TransactionDownloadVerifyError::Invalid { error, .. }  => {
+                self.reject(tx_id, ExactTipRejectionError::FailedVerification(error).into())
             }
         }
     }

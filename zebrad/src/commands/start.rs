@@ -173,7 +173,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book, _misbehavior_sender) = zebra_network::init(
+        let (peer_set, address_book, misbehavior_sender) = zebra_network::init(
             config.network.clone(),
             inbound,
             latest_chain_tip.clone(),
@@ -211,6 +211,7 @@ impl StartCmd {
             sync_status.clone(),
             latest_chain_tip.clone(),
             chain_tip_change.clone(),
+            misbehavior_sender.clone(),
         );
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new()
@@ -230,6 +231,7 @@ impl StartCmd {
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
+            misbehavior_sender,
         };
         setup_tx
             .send(setup_data)
