@@ -151,6 +151,7 @@ pub async fn test_responses<State, ReadState>(
         block_verifier_router.clone(),
         mock_sync_status.clone(),
         mock_address_book,
+        None,
     );
 
     if network.is_a_test_network() && !network.is_default_testnet() {
@@ -286,6 +287,7 @@ pub async fn test_responses<State, ReadState>(
         block_verifier_router,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
+        None,
     );
 
     // Basic variant (default mode and no extra features)
@@ -395,6 +397,7 @@ pub async fn test_responses<State, ReadState>(
         mock_block_verifier_router.clone(),
         mock_sync_status,
         MockAddressBookPeers::default(),
+        None,
     );
 
     let get_block_template_fut = get_block_template_rpc_mock_state_verifier.get_block_template(

@@ -6,6 +6,7 @@ use futures::{future::OptionFuture, TryFutureExt};
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::ErrorObject;
+use tokio::sync::watch;
 use tower::{Service, ServiceExt};
 
 use zcash_address::{unified::Encoding, TryFromAddress};
@@ -63,7 +64,10 @@ use crate::{
         hex_data::HexData,
         GetBlockHash,
     },
-    server::{self, error::MapError},
+    server::{
+        self,
+        error::{MapError, OkOrError},
+    },
 };
 
 pub mod constants;
@@ -375,6 +379,10 @@ pub struct GetBlockTemplateRpcImpl<
 
     /// Address book of peers, used for `getpeerinfo`.
     address_book: AddressBook,
+
+    /// A channel to send successful block submissions to the block gossip task,
+    /// so they can be advertised to peers.
+    mined_block_sender: watch::Sender<(block::Hash, block::Height)>,
 }
 
 impl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook> Debug
@@ -465,6 +473,7 @@ where
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
+        mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
         if let Some(miner_address) = mining_config.miner_address.clone() {
@@ -527,6 +536,8 @@ where
             block_verifier_router,
             sync_status,
             address_book,
+            mined_block_sender: mined_block_sender
+                .unwrap_or(submit_block::SubmitBlockChannel::default().sender()),
         }
     }
 }
@@ -937,8 +948,7 @@ where
 
         let block_height = block
             .coinbase_height()
-            .map(|height| height.0.to_string())
-            .unwrap_or_else(|| "invalid coinbase height".to_string());
+            .ok_or_error(0, "coinbase height not found")?;
         let block_hash = block.hash();
 
         let block_verifier_router_response = block_verifier_router
@@ -957,6 +967,11 @@ where
             // The difference is important to miners, because they want to mine on the best chain.
             Ok(block_hash) => {
                 tracing::info!(?block_hash, ?block_height, "submit block accepted");
+
+                self.mined_block_sender
+                    .send((block_hash, block_height))
+                    .map_error_with_prefix(0, "failed to send mined block")?;
+
                 return Ok(submit_block::Response::Accepted);
             }
 
