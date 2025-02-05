@@ -39,12 +39,7 @@ WORKDIR ${APP_HOME}
 # Install zebra build deps and Dockerfile deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-    llvm \
     libclang-dev \
-    clang \
-    ca-certificates \
-    protobuf-compiler \
-    rocksdb-tools \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Build arguments and variables set for tracelog levels and debug information
