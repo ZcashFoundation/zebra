@@ -201,17 +201,18 @@ ENV GID=${GID}
 RUN addgroup --system --gid ${GID} ${USER}
 RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
-# We set the locations of the conf and cache dirs according to the XDG spec:
-# https://specifications.freedesktop.org/basedir-spec/latest/
+# We set the default locations of the conf and cache dirs according to the XDG
+# spec: https://specifications.freedesktop.org/basedir-spec/latest/
 
-ARG ZEBRA_CONF_DIR="${HOME}/.config"
-ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR}
-RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${UID}:${GID} ${ZEBRA_CONF_DIR}
+ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
+ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${GID} ./docker/default_zebra_config.toml ${ZEBRA_CONF_PATH}
 
 ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
+RUN chown -R ${UID}:${GID} ${HOME}
 USER $USER
 
 ENTRYPOINT [ "entrypoint.sh" ]
