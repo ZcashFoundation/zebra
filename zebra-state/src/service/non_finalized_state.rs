@@ -6,10 +6,8 @@ use std::{
     collections::{BTreeSet, HashMap},
     mem,
     sync::Arc,
-    time::SystemTime,
 };
 
-use chain::UpdateWith;
 use zebra_chain::{
     block::{self, Block, Hash},
     parameters::Network,
@@ -18,9 +16,9 @@ use zebra_chain::{
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
-    request::{ContextuallyVerifiedBlock, FinalizableBlock, InvalidatedBlockData},
+    request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
-    SemanticallyVerifiedBlock, ValidateContextError,
+    HashOrHeight, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -47,8 +45,9 @@ pub struct NonFinalizedState {
     /// callers should migrate to `chain_iter().next()`.
     chain_set: BTreeSet<Arc<Chain>>,
 
-    /// Invalidated blocks and descendants
-    invalidated_blocks: HashMap<block::Hash, InvalidatedBlockData>,
+    /// Blocks that have been invalidated in, and removed from, the non finalized
+    /// state.
+    invalidated_blocks: HashMap<Hash, Arc<Vec<ContextuallyVerifiedBlock>>>,
 
     // Configuration
     //
@@ -282,24 +281,24 @@ impl NonFinalizedState {
             .find_chain(|chain| chain.contains_block_hash(block_hash))
             .expect("block hash exist in a chain");
 
+        // If the non-finalized chain root has the intended hash drop the chain
+        // and return early
+        let root = chain
+            .block(HashOrHeight::Height(chain.non_finalized_root_height()))
+            .unwrap();
+        if root.hash == block_hash {
+            self.chain_set.remove(&chain);
+            self.update_metrics_for_chains();
+            self.update_metrics_bars();
+            return;
+        }
+
         let new_chain = Arc::make_mut(&mut chain);
         let block_height = new_chain.height_by_hash(block_hash).unwrap();
 
-        // Split the new chain at the the `block_hash` and invalidate the block with the
-        // block_hash along with the block's descendants
-        let mut invalidated_blocks = new_chain.blocks.split_off(&block_height);
-        for (_, ctx_block) in invalidated_blocks.iter().rev() {
-            new_chain.revert_chain_with(ctx_block, chain::RevertPosition::Tip);
-        }
-
-        self.invalidated_blocks.insert(
-            block_hash,
-            InvalidatedBlockData {
-                block: invalidated_blocks.remove(&block_height).unwrap(),
-                descendants: invalidated_blocks,
-                timestamp: SystemTime::now(),
-            },
-        );
+        let invalidated_descendants = new_chain.invalidate_block_and_descendants(&block_height);
+        self.invalidated_blocks
+            .insert(block_hash, Arc::new(invalidated_descendants));
 
         // If the new chain still contains blocks:
         // - add the new chain fork or updated chain to the set of recent chains
@@ -629,7 +628,7 @@ impl NonFinalizedState {
     }
 
     /// Return the invalidated blocks.
-    pub fn invalidated_blocks(&self) -> HashMap<block::Hash, InvalidatedBlockData> {
+    pub fn invalidated_blocks(&self) -> HashMap<block::Hash, Arc<Vec<ContextuallyVerifiedBlock>>> {
         self.invalidated_blocks.clone()
     }
 

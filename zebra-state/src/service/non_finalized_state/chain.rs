@@ -343,6 +343,20 @@ impl Chain {
         (block, treestate)
     }
 
+    pub fn invalidate_block_and_descendants(
+        &mut self,
+        height: &block::Height,
+    ) -> Vec<ContextuallyVerifiedBlock> {
+        // Split the new chain at the the `block_hash` and invalidate the block with the
+        // block_hash along with the block's descendants
+        let invalidated_blocks = self.blocks.split_off(height);
+        for (_, ctx_block) in invalidated_blocks.iter().rev() {
+            self.revert_chain_with(ctx_block, RevertPosition::Tip);
+        }
+
+        invalidated_blocks.into_values().collect()
+    }
+
     /// Returns the height of the chain root.
     pub fn non_finalized_root_height(&self) -> block::Height {
         self.blocks
