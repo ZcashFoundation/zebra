@@ -2,7 +2,7 @@
 
 use super::Transaction;
 
-use crate::parameters::ConsensusBranchId;
+use crate::parameters::NetworkUpgrade;
 use crate::transparent;
 
 use crate::primitives::zcash_primitives::{sighash, PrecomputedTxData};
@@ -41,20 +41,28 @@ impl AsRef<[u8]> for SigHash {
 
 /// A SigHasher context which stores precomputed data that is reused
 /// between sighash computations for the same transaction.
+#[derive(Debug)]
 pub struct SigHasher<'a> {
     precomputed_tx_data: PrecomputedTxData<'a>,
 }
 
 impl<'a> SigHasher<'a> {
     /// Create a new SigHasher for the given transaction.
+    ///
+    /// # Panics
+    ///
+    /// - If `trans` can't be converted to its `librustzcash` equivalent. This could happen, for
+    ///   example, if `trans` contains the `nConsensusBranchId` field, and `nu` doesn't match it.
+    ///   More details in [`PrecomputedTxData::new`].
+    /// - If `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
+    ///   equivalent.
     pub fn new(
         trans: &'a Transaction,
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         all_previous_outputs: &'a [transparent::Output],
     ) -> Self {
-        let precomputed_tx_data = PrecomputedTxData::new(trans, branch_id, all_previous_outputs);
         SigHasher {
-            precomputed_tx_data,
+            precomputed_tx_data: PrecomputedTxData::new(trans, nu, all_previous_outputs),
         }
     }
 

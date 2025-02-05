@@ -51,3 +51,13 @@ pub enum SerializationError {
     #[error("transaction balance is non-zero but doesn't have Sapling shielded spends or outputs")]
     BadTransactionBalance,
 }
+
+impl From<crate::Error> for SerializationError {
+    fn from(value: crate::Error) -> Self {
+        match value {
+            crate::Error::InvalidConsensusBranchId => Self::Parse("invalid consensus branch id"),
+            crate::Error::Conversion(e) => Self::Io(e),
+            crate::Error::MissingNetworkUpgrade => Self::Parse("missing network upgrade"),
+        }
+    }
+}

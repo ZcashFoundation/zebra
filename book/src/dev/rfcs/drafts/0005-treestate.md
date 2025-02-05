@@ -126,7 +126,7 @@ finished validating everything that can be validated without the context of
 their anchor's finalization state.
 
 So for each transaction, for both `Spend` descriptions and `JoinSplit`s, we can
-pre-emptively try to do our consensus check by looking up the anchors in our
+preemptively try to do our consensus check by looking up the anchors in our
 finalized set first. For `Spend`s, we then trigger the remaining validation and
 when that finishes we are full done with those. For `JoinSplit`s, the anchor
 state check may pass early if it's a previous block Sprout `NoteCommitment` tree

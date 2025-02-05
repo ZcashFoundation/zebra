@@ -1,5 +1,9 @@
 //! Errors that can occur inside any `zebra-chain` submodule.
+
+use std::io;
 use thiserror::Error;
+
+// TODO: Move all these enums into a common enum at the bottom.
 
 /// Errors related to random bytes generation.
 #[derive(Error, Copy, Clone, Debug, PartialEq, Eq)]
@@ -50,4 +54,20 @@ pub enum AddressError {
     /// Errors pertaining to diversifier generation.
     #[error("Randomness did not hash into the Jubjub group for producing a new diversifier")]
     DiversifierGenerationFailure,
+}
+
+/// `zebra-chain`'s errors
+#[derive(Error, Debug)]
+pub enum Error {
+    /// Invalid consensus branch ID.
+    #[error("invalid consensus branch id")]
+    InvalidConsensusBranchId,
+
+    /// Zebra's type could not be converted to its librustzcash equivalent.
+    #[error("Zebra's type could not be converted to its librustzcash equivalent: ")]
+    Conversion(#[from] io::Error),
+
+    /// The transaction is missing a network upgrade.
+    #[error("the transaction is missing a network upgrade")]
+    MissingNetworkUpgrade,
 }

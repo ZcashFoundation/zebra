@@ -37,11 +37,12 @@ pub use sighash::{HashType, SigHash, SigHasher};
 pub use unmined::{
     zip317, UnminedTx, UnminedTxId, VerifiedUnminedTx, MEMPOOL_TRANSACTION_COST_THRESHOLD,
 };
+use zcash_protocol::consensus;
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize,
@@ -215,24 +216,28 @@ impl Transaction {
     /// - if called on a v1 or v2 transaction
     /// - if the input index points to a transparent::Input::CoinBase
     /// - if the input index is out of bounds for self.inputs()
+    /// - if the tx contains `nConsensusBranchId` field and `nu` doesn't match it
+    /// - if the tx is not convertible to its `librustzcash` equivalent
+    /// - if `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
+    ///   equivalent
     pub fn sighash(
         &self,
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         hash_type: sighash::HashType,
         all_previous_outputs: &[transparent::Output],
         input_index_script_code: Option<(usize, Vec<u8>)>,
     ) -> SigHash {
-        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
+        sighash::SigHasher::new(self, nu, all_previous_outputs)
             .sighash(hash_type, input_index_script_code)
     }
 
     /// Return a [`SigHasher`] for this transaction.
     pub fn sighasher<'a>(
         &'a self,
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         all_previous_outputs: &'a [transparent::Output],
     ) -> sighash::SigHasher<'a> {
-        sighash::SigHasher::new(self, branch_id, all_previous_outputs)
+        sighash::SigHasher::new(self, nu, all_previous_outputs)
     }
 
     /// Compute the authorizing data commitment of this transaction as specified
@@ -258,6 +263,16 @@ impl Transaction {
         !self.inputs().is_empty()
     }
 
+    /// Does this transaction have transparent outputs?
+    pub fn has_transparent_outputs(&self) -> bool {
+        !self.outputs().is_empty()
+    }
+
+    /// Does this transaction have transparent inputs or outputs?
+    pub fn has_transparent_inputs_or_outputs(&self) -> bool {
+        self.has_transparent_inputs() || self.has_transparent_outputs()
+    }
+
     /// Does this transaction have transparent or shielded inputs?
     pub fn has_transparent_or_shielded_inputs(&self) -> bool {
         self.has_transparent_inputs() || self.has_shielded_inputs()
@@ -276,11 +291,6 @@ impl Transaction {
                     .contains(orchard::Flags::ENABLE_SPENDS))
     }
 
-    /// Does this transaction have transparent or shielded outputs?
-    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
-        !self.outputs().is_empty() || self.has_shielded_outputs()
-    }
-
     /// Does this transaction have shielded outputs?
     ///
     /// See [`Self::has_transparent_or_shielded_outputs`] for details.
@@ -292,6 +302,11 @@ impl Transaction {
                     .orchard_flags()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_OUTPUTS))
+    }
+
+    /// Does this transaction have transparent or shielded outputs?
+    pub fn has_transparent_or_shielded_outputs(&self) -> bool {
+        self.has_transparent_outputs() || self.has_shielded_outputs()
     }
 
     /// Does this transaction has at least one flag when we have at least one orchard action?
@@ -1216,6 +1231,40 @@ impl Transaction {
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         self.value_balance_from_outputs(&outputs_from_utxos(utxos.clone()))
+    }
+
+    /// Converts [`Transaction`] to [`zcash_primitives::transaction::Transaction`].
+    ///
+    /// If the tx contains a network upgrade, this network upgrade must match the passed `nu`. The
+    /// passed `nu` must also contain a consensus branch id convertible to its `librustzcash`
+    /// equivalent.
+    pub(crate) fn to_librustzcash(
+        &self,
+        nu: NetworkUpgrade,
+    ) -> Result<zcash_primitives::transaction::Transaction, crate::Error> {
+        if self.network_upgrade().is_some_and(|tx_nu| tx_nu != nu) {
+            return Err(crate::Error::InvalidConsensusBranchId);
+        }
+
+        let Some(branch_id) = nu.branch_id() else {
+            return Err(crate::Error::InvalidConsensusBranchId);
+        };
+
+        let Ok(branch_id) = consensus::BranchId::try_from(branch_id) else {
+            return Err(crate::Error::InvalidConsensusBranchId);
+        };
+
+        Ok(zcash_primitives::transaction::Transaction::read(
+            &self.zcash_serialize_to_vec()?[..],
+            branch_id,
+        )?)
+    }
+
+    // Common Sapling & Orchard Properties
+
+    /// Does this transaction have shielded inputs or outputs?
+    pub fn has_shielded_data(&self) -> bool {
+        self.has_shielded_inputs() || self.has_shielded_outputs()
     }
 }
 

@@ -86,6 +86,9 @@ use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
 use zebra_rpc::server::RpcServer;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use zebra_rpc::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
+
 use crate::{
     application::{build_version, user_agent},
     components::{
@@ -242,6 +245,10 @@ impl StartCmd {
             );
         }
 
+        #[cfg(feature = "getblocktemplate-rpcs")]
+        // Create a channel to send mined blocks to the gossip task
+        let submit_block_channel = SubmitBlockChannel::new();
+
         // Launch RPC server
         let (rpc_task_handle, mut rpc_tx_queue_task_handle) =
             if let Some(listen_addr) = config.rpc.listen_addr {
@@ -259,10 +266,14 @@ impl StartCmd {
                     address_book.clone(),
                     latest_chain_tip.clone(),
                     config.network.network.clone(),
+                    #[cfg(feature = "getblocktemplate-rpcs")]
+                    Some(submit_block_channel.sender()),
+                    #[cfg(not(feature = "getblocktemplate-rpcs"))]
+                    None,
                 );
                 rpc_task_handle.await.unwrap()
             } else {
-                warn!("configure an listen_addr to start the RPC server");
+                info!("configure a listen_addr to start the RPC server");
                 (
                     tokio::spawn(std::future::pending().in_current_span()),
                     tokio::spawn(std::future::pending().in_current_span()),
@@ -301,6 +312,10 @@ impl StartCmd {
                 sync_status.clone(),
                 chain_tip_change.clone(),
                 peer_set.clone(),
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                Some(submit_block_channel.receiver()),
+                #[cfg(not(feature = "getblocktemplate-rpcs"))]
+                None,
             )
             .in_current_span(),
         );
@@ -382,6 +397,7 @@ impl StartCmd {
         #[cfg(feature = "internal-miner")]
         let miner_task_handle = if config.mining.is_internal_miner_enabled() {
             info!("spawning Zcash miner");
+
             let rpc = zebra_rpc::methods::get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
                 &config.network.network,
                 config.mining.clone(),
@@ -391,6 +407,7 @@ impl StartCmd {
                 block_verifier_router,
                 sync_status,
                 address_book,
+                Some(submit_block_channel.sender()),
             );
 
             crate::components::miner::spawn_init(&config.network.network, &config.mining, rpc)

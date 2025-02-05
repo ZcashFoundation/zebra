@@ -162,8 +162,8 @@ use color_eyre::{
 };
 use semver::Version;
 use serde_json::Value;
-
 use tower::ServiceExt;
+
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, Height},
     parameters::Network::{self, *},
@@ -1726,8 +1726,6 @@ fn non_blocking_logger() -> Result<()> {
     let (done_tx, done_rx) = mpsc::channel();
 
     let test_task_handle: tokio::task::JoinHandle<Result<()>> = rt.spawn(async move {
-        let _init_guard = zebra_test::init();
-
         let mut config = os_assigned_rpc_port_config(false, &Mainnet)?;
         config.tracing.filter = Some("trace".to_string());
         config.tracing.buffer_limit = 100;
@@ -3272,8 +3270,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 fetch_state_tip_and_local_time, generate_coinbase_and_roots,
                 proposal_block_from_template, GetBlockTemplate, GetBlockTemplateRequestMode,
             },
-            types::get_block_template,
-            types::submit_block,
+            types::{
+                get_block_template,
+                submit_block::{self, SubmitBlockChannel},
+            },
         },
         hex_data::HexData,
         GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
@@ -3342,6 +3342,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
+    let submitblock_channel = SubmitBlockChannel::new();
+
     let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
         &network,
         mining_config,
@@ -3351,6 +3353,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_verifier_router,
         mock_sync_status,
         MockAddressBookPeers::default(),
+        Some(submitblock_channel.sender()),
     );
 
     let make_mock_mempool_request_handler = || async move {
@@ -3406,6 +3409,17 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         submit_block_response,
         submit_block::Response::Accepted,
         "valid block should be accepted"
+    );
+
+    // Check that the submitblock channel received the submitted block
+    let submit_block_channel_data = *submitblock_channel.receiver().borrow_and_update();
+    assert_eq!(
+        submit_block_channel_data,
+        (
+            proposal_block.hash(),
+            proposal_block.coinbase_height().unwrap()
+        ),
+        "submitblock channel should receive the submitted block"
     );
 
     // Use an invalid coinbase transaction (with an output value greater than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
