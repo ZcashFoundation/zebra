@@ -307,10 +307,10 @@ impl NonFinalizedState {
             self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
                 chain_set.retain(|c| !c.contains_block_hash(block_hash))
             });
-
-            self.update_metrics_for_chains();
-            self.update_metrics_bars();
         }
+            
+        self.update_metrics_for_chains();
+        self.update_metrics_bars();
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
