@@ -21,7 +21,7 @@ use zebra_network::{
         ADDR_RESPONSE_LIMIT_DENOMINATOR, DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK,
     },
     types::{MetaAddr, PeerServices},
-    AddressBook, InventoryResponse, Request, Response,
+    AddressBook, AddressBookType, InventoryResponse, Request, Response,
 };
 use zebra_node_services::mempool;
 #[cfg(feature = "getblocktemplate-rpcs")]
@@ -884,6 +884,7 @@ async fn setup(
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
+        AddressBookType::Outbound,
     );
     let address_book = Arc::new(std::sync::Mutex::new(address_book));
     let (sync_status, mut recent_syncs) = SyncStatus::new();

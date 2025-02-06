@@ -118,6 +118,7 @@ impl RpcServer {
         sync_status: SyncStatus,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         address_book: AddressBook,
+        inbound_address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
@@ -172,6 +173,7 @@ impl RpcServer {
             block_verifier_router,
             sync_status,
             address_book,
+            inbound_address_book,
             mined_block_sender,
         );
 

@@ -173,7 +173,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book) = zebra_network::init(
+        let (peer_set, address_book, inbound_address_book) = zebra_network::init(
             config.network.clone(),
             inbound,
             latest_chain_tip.clone(),
@@ -264,6 +264,7 @@ impl StartCmd {
                     block_verifier_router.clone(),
                     sync_status.clone(),
                     address_book.clone(),
+                    inbound_address_book.clone(),
                     latest_chain_tip.clone(),
                     config.network.network.clone(),
                     #[cfg(feature = "getblocktemplate-rpcs")]
@@ -407,6 +408,7 @@ impl StartCmd {
                 block_verifier_router,
                 sync_status,
                 address_book,
+                inbound_address_book,
                 Some(submit_block_channel.sender()),
             );
 

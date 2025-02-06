@@ -1194,6 +1194,7 @@ async fn rpc_getblockcount() {
         block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        MockAddressBookPeers::default(),
         None,
     );
 
@@ -1244,6 +1245,7 @@ async fn rpc_getblockcount_empty_state() {
         block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        MockAddressBookPeers::default(),
         None,
     );
 
@@ -1289,7 +1291,7 @@ async fn rpc_getpeerinfo() {
     )
     .await;
 
-    let mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
+    let outbound_mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
         std::net::SocketAddr::new(
             std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
@@ -1301,7 +1303,26 @@ async fn rpc_getpeerinfo() {
         zebra_chain::serialization::DateTime32::now(),
     );
 
-    let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address]);
+    let inbound_mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
+        std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(1, 1, 1, 1)),
+            11_111,
+        )
+        .into(),
+    )
+    .into_new_meta_addr(
+        std::time::Instant::now(),
+        zebra_chain::serialization::DateTime32::now(),
+    );
+
+    let mock_outbound_address_book = MockAddressBookPeers::new(
+        vec![outbound_mock_peer_address],
+        vec![outbound_mock_peer_address],
+    );
+    let mock_inbound_address_book = MockAddressBookPeers::new(
+        vec![inbound_mock_peer_address],
+        vec![inbound_mock_peer_address],
+    );
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1312,7 +1333,8 @@ async fn rpc_getpeerinfo() {
         latest_chain_tip.clone(),
         block_verifier_router,
         MockSyncStatus::default(),
-        mock_address_book,
+        mock_outbound_address_book,
+        mock_inbound_address_book,
         None,
     );
 
@@ -1322,12 +1344,20 @@ async fn rpc_getpeerinfo() {
         .await
         .expect("We should have an array of addresses");
 
+    let mut results = get_peer_info.into_iter();
+
     assert_eq!(
-        get_peer_info
-            .into_iter()
+        results
             .next()
-            .expect("there should be a mock peer address"),
-        mock_peer_address.into()
+            .expect("there should be an output mock peer address"),
+        outbound_mock_peer_address.into()
+    );
+
+    assert_eq!(
+        results
+            .next()
+            .expect("there should be an inbound mock peer address"),
+        get_block_template_rpcs::types::peer_info::PeerInfo::new(inbound_mock_peer_address, true)
     );
 
     mempool.expect_no_requests().await;
@@ -1373,6 +1403,7 @@ async fn rpc_getblockhash() {
         latest_chain_tip.clone(),
         tower::ServiceBuilder::new().service(block_verifier_router),
         MockSyncStatus::default(),
+        MockAddressBookPeers::default(),
         MockAddressBookPeers::default(),
         None,
     );
@@ -1431,6 +1462,7 @@ async fn rpc_getmininginfo() {
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        MockAddressBookPeers::default(),
         None,
     );
 
@@ -1467,6 +1499,7 @@ async fn rpc_getnetworksolps() {
         latest_chain_tip.clone(),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
+        MockAddressBookPeers::default(),
         MockAddressBookPeers::default(),
         None,
     );
@@ -1599,6 +1632,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         mock_chain_tip,
         block_verifier_router,
         mock_sync_status.clone(),
+        MockAddressBookPeers::default(),
         MockAddressBookPeers::default(),
         None,
     );
@@ -1876,6 +1910,7 @@ async fn rpc_submitblock_errors() {
         block_verifier_router,
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        MockAddressBookPeers::default(),
         None,
     );
 
@@ -1929,6 +1964,7 @@ async fn rpc_validateaddress() {
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
+        MockAddressBookPeers::default(),
         None,
     );
 
@@ -1974,6 +2010,7 @@ async fn rpc_z_validateaddress() {
         mock_chain_tip,
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
+        MockAddressBookPeers::default(),
         MockAddressBookPeers::default(),
         None,
     );
@@ -2063,6 +2100,7 @@ async fn rpc_getdifficulty() {
         mock_chain_tip,
         block_verifier_router,
         mock_sync_status.clone(),
+        MockAddressBookPeers::default(),
         MockAddressBookPeers::default(),
         None,
     );
@@ -2185,6 +2223,7 @@ async fn rpc_z_listunifiedreceivers() {
         mock_chain_tip,
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
+        MockAddressBookPeers::default(),
         MockAddressBookPeers::default(),
         None,
     );

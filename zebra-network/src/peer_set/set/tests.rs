@@ -339,6 +339,7 @@ impl PeerSetGuard {
             &Network::Mainnet,
             DEFAULT_MAX_CONNS_PER_IP,
             Span::none(),
+            crate::AddressBookType::Outbound,
         );
 
         Arc::new(std::sync::Mutex::new(address_book))

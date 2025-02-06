@@ -14,7 +14,7 @@ use crate::{
     constants::{DEFAULT_MAX_CONNS_PER_IP, MAX_ADDRS_IN_ADDRESS_BOOK},
     meta_addr::MetaAddr,
     protocol::external::types::PeerServices,
-    AddressBook,
+    AddressBook, AddressBookType,
 };
 
 /// Make sure an empty address book is actually empty.
@@ -25,6 +25,7 @@ fn address_book_empty() {
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::current(),
+        AddressBookType::Outbound,
     );
 
     assert_eq!(

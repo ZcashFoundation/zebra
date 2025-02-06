@@ -17,7 +17,7 @@ use zebra_test::mock_service::{MockService, PanicAssertion};
 use crate::{
     constants::{DEFAULT_MAX_CONNS_PER_IP, GET_ADDR_FANOUT, MIN_PEER_GET_ADDR_INTERVAL},
     types::{MetaAddr, PeerServices},
-    AddressBook, Request, Response,
+    AddressBook, AddressBookType, Request, Response,
 };
 
 use super::super::{validate_addrs, CandidateSet};
@@ -143,6 +143,7 @@ fn candidate_set_updates_are_rate_limited() {
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
+        AddressBookType::Outbound,
     );
     let mut peer_service = MockService::build().for_unit_tests();
     let mut candidate_set = CandidateSet::new(
@@ -189,6 +190,7 @@ fn candidate_set_update_after_update_initial_is_rate_limited() {
         &Mainnet,
         DEFAULT_MAX_CONNS_PER_IP,
         Span::none(),
+        AddressBookType::Outbound,
     );
     let mut peer_service = MockService::build().for_unit_tests();
     let mut candidate_set = CandidateSet::new(
