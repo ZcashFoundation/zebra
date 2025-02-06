@@ -351,10 +351,10 @@ pub(crate) fn transparent_output_address(
 
     match alt_addr {
         Some(zcash_primitives::legacy::TransparentAddress::PublicKeyHash(pub_key_hash)) => Some(
-            transparent::Address::from_pub_key_hash(network.kind(), pub_key_hash),
+            transparent::Address::from_pub_key_hash(network.t_addr_kind(), pub_key_hash),
         ),
         Some(zcash_primitives::legacy::TransparentAddress::ScriptHash(script_hash)) => Some(
-            transparent::Address::from_script_hash(network.kind(), script_hash),
+            transparent::Address::from_script_hash(network.t_addr_kind(), script_hash),
         ),
         None => None,
     }
