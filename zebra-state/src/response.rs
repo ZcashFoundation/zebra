@@ -241,7 +241,6 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainBlockHash`] with the specified block hash.
     BlockHash(Option<block::Hash>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::ChainInfo`] with the state
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
@@ -345,7 +344,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
-            | ReadResponse::AddressUtxos(_) => {
+            | ReadResponse::AddressUtxos(_)
+            | ReadResponse::ChainInfo(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
@@ -356,7 +356,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::ChainInfo(_) | ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
+            ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

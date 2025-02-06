@@ -1096,7 +1096,6 @@ pub enum ReadRequest {
     /// * [`ReadResponse::BlockHash(None)`](ReadResponse::BlockHash) otherwise.
     BestChainBlockHash(block::Height),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Get state information from the best block chain.
     ///
     /// Returns [`ReadResponse::ChainInfo(info)`](ReadResponse::ChainInfo) where `info` is a

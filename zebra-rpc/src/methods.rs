@@ -31,12 +31,14 @@ use zebra_chain::{
     transparent::{self, Address},
     value_balance::ValueBalance,
     work::{
-        difficulty::{CompactDifficulty, ExpandedDifficulty},
+        difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
         equihash::Solution,
     },
 };
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{
+    HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+};
 
 use crate::{
     methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
@@ -656,6 +658,11 @@ where
             ),
         };
 
+        let estimated_network_height = self
+            .latest_chain_tip
+            .estimate_network_chain_tip_height(&network, now)
+            .ok_or_misc_error("could not estimate network chain tip height")?;
+        let verification_progress = f64::from(tip_height.0) / f64::from(estimated_network_height.0);
         let response = GetBlockChainInfo {
             chain,
             blocks: tip_height,
@@ -664,10 +671,21 @@ where
             value_pools: types::ValuePoolBalance::from_value_balance(value_balance),
             upgrades,
             consensus,
+            headers: tip_height,
+            difficulty: chain_tip_difficulty(network, state).await?,
+            verification_progress,
+            // TODO: store work in the finalized state for each height (#7109)
+            chain_work: 0,
+            pruned: false,
+            // TODO: This one will require a new state svc request
+            size_on_disk: 0,
+            // TODO: Investigate whether this needs to be implemented (it's sprout-only in zcashd)
+            commitments: 0,
         };
 
         Ok(response)
     }
+
     async fn get_address_balance(&self, address_strings: AddressStrings) -> Result<AddressBalance> {
         let state = self.state.clone();
 
@@ -1522,13 +1540,37 @@ impl GetInfo {
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockChainInfo {
     /// Current network name as defined in BIP70 (main, test, regtest)
     chain: String,
 
     /// The current number of blocks processed in the server, numeric
     blocks: Height,
+
+    /// The current number of headers we have validated in the best chain, that is,
+    /// the height of the best chain.
+    headers: Height,
+
+    /// The estimated network solution rate in Sol/s.
+    difficulty: f64,
+
+    /// The verification progress relative to the estimated network chain tip.
+    #[serde(rename = "verificationprogress")]
+    verification_progress: f64,
+
+    /// The total amount of work in the best chain, hex-encoded.
+    #[serde(rename = "chainwork")]
+    chain_work: u64,
+
+    /// Whether this node is pruned, currently always false in Zebra.
+    pruned: bool,
+
+    /// The estimated size of the block and undo files on disk
+    size_on_disk: u64,
+
+    /// The current number of note commitments in the commitment tree
+    commitments: u64,
 
     /// The hash of the currently best block, in big-endian order, hex-encoded
     #[serde(rename = "bestblockhash", with = "hex")]
@@ -1564,12 +1606,20 @@ impl Default for GetBlockChainInfo {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
                 next_block: ConsensusBranchIdHex(ConsensusBranchId::default()),
             },
+            headers: Height(1),
+            difficulty: 0.0,
+            verification_progress: 0.0,
+            chain_work: 0,
+            pruned: false,
+            size_on_disk: 0,
+            commitments: 0,
         }
     }
 }
 
 impl GetBlockChainInfo {
     /// Creates a new [`GetBlockChainInfo`] instance.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: String,
         blocks: Height,
@@ -1578,6 +1628,13 @@ impl GetBlockChainInfo {
         value_pools: [types::ValuePoolBalance; 5],
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
+        headers: Height,
+        difficulty: f64,
+        verification_progress: f64,
+        chain_work: u64,
+        pruned: bool,
+        size_on_disk: u64,
+        commitments: u64,
     ) -> Self {
         Self {
             chain,
@@ -1587,6 +1644,13 @@ impl GetBlockChainInfo {
             value_pools,
             upgrades,
             consensus,
+            headers,
+            difficulty,
+            verification_progress,
+            chain_work,
+            pruned,
+            size_on_disk,
+            commitments,
         }
     }
 
@@ -2425,4 +2489,76 @@ mod opthex {
             None => serializer.serialize_none(),
         }
     }
+}
+/// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
+pub(crate) async fn chain_tip_difficulty<State>(network: Network, mut state: State) -> Result<f64>
+where
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+{
+    let request = ReadRequest::ChainInfo;
+
+    // # TODO
+    // - add a separate request like BestChainNextMedianTimePast, but skipping the
+    //   consistency check, because any block's difficulty is ok for display
+    // - return 1.0 for a "not enough blocks in the state" error, like `zcashd`:
+    // <https://github.com/zcash/zcash/blob/7b28054e8b46eb46a9589d0bdc8e29f9fa1dc82d/src/rpc/blockchain.cpp#L40-L41>
+    let response = state
+        .ready()
+        .and_then(|service| service.call(request))
+        .await
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+
+    let chain_info = match response {
+        ReadResponse::ChainInfo(info) => info,
+        _ => unreachable!("unmatched response to a chain info request"),
+    };
+
+    // This RPC is typically used for display purposes, so it is not consensus-critical.
+    // But it uses the difficulty consensus rules for its calculations.
+    //
+    // Consensus:
+    // https://zips.z.cash/protocol/protocol.pdf#nbits
+    //
+    // The zcashd implementation performs to_expanded() on f64,
+    // and then does an inverse division:
+    // https://github.com/zcash/zcash/blob/d6e2fada844373a8554ee085418e68de4b593a6c/src/rpc/blockchain.cpp#L46-L73
+    //
+    // But in Zebra we divide the high 128 bits of each expanded difficulty. This gives
+    // a similar result, because the lower 128 bits are insignificant after conversion
+    // to `f64` with a 53-bit mantissa.
+    //
+    // `pow_limit >> 128 / difficulty >> 128` is the same as the work calculation
+    // `(2^256 / pow_limit) / (2^256 / difficulty)`, but it's a bit more accurate.
+    //
+    // To simplify the calculation, we don't scale for leading zeroes. (Bitcoin's
+    // difficulty currently uses 68 bits, so even it would still have full precision
+    // using this calculation.)
+
+    // Get expanded difficulties (256 bits), these are the inverse of the work
+    let pow_limit: U256 = network.target_difficulty_limit().into();
+    let difficulty: U256 = chain_info
+        .expected_difficulty
+        .to_expanded()
+        .expect("valid blocks have valid difficulties")
+        .into();
+
+    // Shift out the lower 128 bits (256 bits, but the top 128 are all zeroes)
+    let pow_limit = pow_limit >> 128;
+    let difficulty = difficulty >> 128;
+
+    // Convert to u128 then f64.
+    // We could also convert U256 to String, then parse as f64, but that's slower.
+    let pow_limit = pow_limit.as_u128() as f64;
+    let difficulty = difficulty.as_u128() as f64;
+
+    // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
+    Ok(pow_limit / difficulty)
 }
