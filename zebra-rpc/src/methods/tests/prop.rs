@@ -15,13 +15,13 @@ use zebra_chain::{
     block::{self, Block, Height},
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
     value_balance::ValueBalance,
 };
 use zebra_node_services::mempool;
-use zebra_state::{BoxError, HashOrHeight};
+use zebra_state::{BoxError, GetBlockTemplateChainInfo, HashOrHeight};
 
 use zebra_test::mock_service::MockService;
 
@@ -410,6 +410,7 @@ proptest! {
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
         let block_time = block.header.time;
+        let expected_size_on_disk = 1_000;
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -446,6 +447,26 @@ proptest! {
                             height: Height::MIN,
                             next_block_hash: None,
                         });
+
+                    state
+                        .expect_request(zebra_state::ReadRequest::UsageInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
+                    state
+                        .expect_request(zebra_state::ReadRequest::ChainInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                            tip_hash: block_hash,
+                            tip_height: block_height,
+                            history_tree: Default::default(),
+                            expected_difficulty: Default::default(),
+                            cur_time: DateTime32::now(),
+                            min_time: DateTime32::now(),
+                            max_time: DateTime32::now()
+                        }));
                 }
             };
 
@@ -457,6 +478,7 @@ proptest! {
                     prop_assert_eq!(info.chain, network.bip70_network_name());
                     prop_assert_eq!(info.blocks, block_height);
                     prop_assert_eq!(info.best_block_hash, block_hash);
+                    prop_assert_eq!(info.size_on_disk, expected_size_on_disk);
                     prop_assert!(info.estimated_height < Height::MAX);
 
                     prop_assert_eq!(
@@ -480,8 +502,8 @@ proptest! {
                         prop_assert_eq!(u.1.status, status);
                     }
                 }
-                Err(_) => {
-                    unreachable!("Test should never error with the data we are feeding it")
+                Err(err) => {
+                    unreachable!("Test should never error with the data we are feeding it: {err}")
                 }
             };
 
@@ -528,6 +550,7 @@ proptest! {
         let block_nonce = genesis_block.header.nonce;
         let block_solution = genesis_block.header.solution;
         let block_hash = genesis_block.header.hash();
+        let expected_size_on_disk = 1_000;
 
         runtime.block_on(async move {
             let response_fut = rpc.get_blockchain_info();
@@ -559,6 +582,27 @@ proptest! {
                         height: Height::MIN,
                         next_block_hash: None,
                     });
+
+                state
+                    .expect_request(zebra_state::ReadRequest::UsageInfo)
+                    .await
+                    .expect("getblockchaininfo should call mock state service with correct request")
+                    .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
+                state
+                    .expect_request(zebra_state::ReadRequest::ChainInfo)
+                    .await
+                    .expect("getblockchaininfo should call mock state service with correct request")
+                    .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                        tip_hash: block_hash,
+                        tip_height: Height(0),
+                        history_tree: Default::default(),
+                        expected_difficulty: Default::default(),
+                        cur_time: DateTime32::now(),
+                        min_time: DateTime32::now(),
+                        max_time: DateTime32::now()
+                    }));
+
                 }
             };
 

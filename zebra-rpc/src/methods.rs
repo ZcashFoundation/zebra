@@ -658,12 +658,7 @@ where
             ),
         };
 
-        let estimated_network_height = self
-            .latest_chain_tip
-            .estimate_network_chain_tip_height(&network, now)
-            .ok_or_misc_error("could not estimate network chain tip height")?;
-        let verification_progress =
-            (f64::from(tip_height.0) / f64::from(estimated_network_height.0)).min(1.0);
+        let verification_progress = f64::from(tip_height.0) / f64::from(estimated_height.0);
         let zebra_state::ReadResponse::UsageInfo(size_on_disk) = state
             .ready()
             .and_then(|service| service.call(zebra_state::ReadRequest::UsageInfo))
@@ -2561,15 +2556,13 @@ where
 
     // Get expanded difficulties (256 bits), these are the inverse of the work
     let pow_limit: U256 = network.target_difficulty_limit().into();
-    let difficulty: U256 = chain_info
-        .expected_difficulty
-        .to_expanded()
-        .expect("valid blocks have valid difficulties")
-        .into();
+    let Some(difficulty) = chain_info.expected_difficulty.to_expanded() else {
+        return Ok(0.0);
+    };
 
     // Shift out the lower 128 bits (256 bits, but the top 128 are all zeroes)
     let pow_limit = pow_limit >> 128;
-    let difficulty = difficulty >> 128;
+    let difficulty = U256::from(difficulty) >> 128;
 
     // Convert to u128 then f64.
     // We could also convert U256 to String, then parse as f64, but that's slower.
