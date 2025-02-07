@@ -279,15 +279,13 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
         Network::Mainnet => assert!(
             invalidated_blocks_state_descendants
                 .iter()
-                .find(|block| block.height == block::Height(653601))
-                .is_some(),
+                .any(|block| block.height == block::Height(653601)),
             "invalidated descendants vec should contain block3"
         ),
         Network::Testnet(_parameters) => assert!(
             invalidated_blocks_state_descendants
                 .iter()
-                .find(|block| block.height == block::Height(584001))
-                .is_some(),
+                .any(|block| block.height == block::Height(584001)),
             "invalidated descendants vec should contain block3"
         ),
     }

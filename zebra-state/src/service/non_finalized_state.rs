@@ -18,7 +18,7 @@ use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
-    HashOrHeight, SemanticallyVerifiedBlock, ValidateContextError,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -270,45 +270,33 @@ impl NonFinalizedState {
         Ok(())
     }
 
-    /// Invalidate block with has `block_hash` and all descendants from the non-finalized state. Insert
+    /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
     pub fn invalidate_block(&mut self, block_hash: Hash) {
-        if !self.any_chain_contains(&block_hash) {
+        let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
             return;
-        }
+        };
 
-        let mut chain = self
-            .find_chain(|chain| chain.contains_block_hash(block_hash))
-            .expect("block hash exist in a chain");
-
-        // If the non-finalized chain root has the intended hash drop the chain
-        // and return early
-        let root = chain
-            .block(HashOrHeight::Height(chain.non_finalized_root_height()))
-            .unwrap();
-        if root.hash == block_hash {
+        let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
             self.chain_set.remove(&chain);
-            self.update_metrics_for_chains();
-            self.update_metrics_bars();
-            return;
-        }
+            chain.blocks.values().cloned().collect()
+        } else {
+            let (new_chain, invalidated_blocks) = chain
+                .invalidate_block(block_hash)
+                .expect("already checked that chain contains hash");
 
-        let new_chain = Arc::make_mut(&mut chain);
-        let block_height = new_chain.height_by_hash(block_hash).unwrap();
-
-        let invalidated_descendants = new_chain.invalidate_block_and_descendants(&block_height);
-        self.invalidated_blocks
-            .insert(block_hash, Arc::new(invalidated_descendants));
-
-        // If the new chain still contains blocks:
-        // - add the new chain fork or updated chain to the set of recent chains
-        // - remove the chain containing the hash of the block from the chain set
-        if !new_chain.is_empty() {
+            // Add the new chain fork or updated chain to the set of recent chains, and
+            // remove the chain containing the hash of the block from chain set
             self.insert_with(Arc::new(new_chain.clone()), |chain_set| {
                 chain_set.retain(|c| !c.contains_block_hash(block_hash))
             });
-        }
-            
+
+            invalidated_blocks
+        };
+
+        self.invalidated_blocks
+            .insert(block_hash, Arc::new(invalidated_blocks));
+
         self.update_metrics_for_chains();
         self.update_metrics_bars();
     }

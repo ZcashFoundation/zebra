@@ -343,18 +343,24 @@ impl Chain {
         (block, treestate)
     }
 
-    pub fn invalidate_block_and_descendants(
-        &mut self,
-        height: &block::Height,
-    ) -> Vec<ContextuallyVerifiedBlock> {
-        // Split the new chain at the the `block_hash` and invalidate the block with the
-        // block_hash along with the block's descendants
-        let invalidated_blocks = self.blocks.split_off(height);
-        for (_, ctx_block) in invalidated_blocks.iter().rev() {
-            self.revert_chain_with(ctx_block, RevertPosition::Tip);
-        }
+    // Returns the block at the provided height and all of its descendant blocks.
+    pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
+        self.blocks
+            .range(block_height..)
+            .map(|(_h, b)| b.clone())
+            .collect()
+    }
 
-        invalidated_blocks.into_values().collect()
+    // Returns a new chain without the invalidated block or its descendants.
+    pub fn invalidate_block(
+        &self,
+        block_hash: block::Hash,
+    ) -> Option<(Self, Vec<ContextuallyVerifiedBlock>)> {
+        let block_height = self.height_by_hash(block_hash)?;
+        let mut new_chain = self.fork(block_hash)?;
+        new_chain.pop_tip();
+        new_chain.last_fork_height = None;
+        Some((new_chain, self.child_blocks(&block_height)))
     }
 
     /// Returns the height of the chain root.
