@@ -23,12 +23,12 @@ pub struct Balance {
 }
 
 impl Balance {
-    /// Returns a list of [`ValuePoolBalance`]s converted from the default [`ValueBalance`].
+    /// Returns a list of [`Balance`]s converted from the default [`ValueBalance`].
     pub fn zero_pools() -> [Self; 5] {
         Self::value_pools(Default::default())
     }
 
-    /// Creates a new [`ValuePoolBalance`] from a pool name and its value balance.
+    /// Creates a new [`Balance`] from a pool name and its value balance.
     pub fn new(id: impl ToString, amount: Amount<NonNegative>) -> Self {
         Self {
             id: id.to_string(),
@@ -38,32 +38,32 @@ impl Balance {
         }
     }
 
-    /// Creates a [`ValuePoolBalance`] for the transparent pool.
+    /// Creates a [`Balance`] for the transparent pool.
     pub fn transparent(amount: Amount<NonNegative>) -> Self {
         Self::new("transparent", amount)
     }
 
-    /// Creates a [`ValuePoolBalance`] for the Sprout pool.
+    /// Creates a [`Balance`] for the Sprout pool.
     pub fn sprout(amount: Amount<NonNegative>) -> Self {
         Self::new("sprout", amount)
     }
 
-    /// Creates a [`ValuePoolBalance`] for the Sapling pool.
+    /// Creates a [`Balance`] for the Sapling pool.
     pub fn sapling(amount: Amount<NonNegative>) -> Self {
         Self::new("sapling", amount)
     }
 
-    /// Creates a [`ValuePoolBalance`] for the Orchard pool.
+    /// Creates a [`Balance`] for the Orchard pool.
     pub fn orchard(amount: Amount<NonNegative>) -> Self {
         Self::new("orchard", amount)
     }
 
-    /// Creates a [`ValuePoolBalance`] for the Deferred pool.
+    /// Creates a [`Balance`] for the Deferred pool.
     pub fn deferred(amount: Amount<NonNegative>) -> Self {
         Self::new("deferred", amount)
     }
 
-    /// Converts a [`ValueBalance`] to a list of [`ValuePoolBalance`]s.
+    /// Converts a [`ValueBalance`] to a list of [`Balance`]s.
     pub fn value_pools(value_balance: ValueBalance<NonNegative>) -> [Self; 5] {
         [
             Self::transparent(value_balance.transparent_amount()),
