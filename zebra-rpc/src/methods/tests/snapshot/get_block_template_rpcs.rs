@@ -132,14 +132,19 @@ pub async fn test_responses<State, ReadState>(
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
-    let mock_address_book = MockAddressBookPeers::new(vec![MetaAddr::new_initial_peer(
+    let recent_and_connected_peers = vec![MetaAddr::new_initial_peer(
         SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
         )
         .into(),
     )
-    .into_new_meta_addr(Instant::now(), DateTime32::now())]);
+    .into_new_meta_addr(Instant::now(), DateTime32::now())];
+
+    let mock_address_book = MockAddressBookPeers::new(
+        recent_and_connected_peers.clone(),
+        recent_and_connected_peers,
+    );
 
     // get an rpc instance with continuous blockchain state
     let get_block_template_rpc = GetBlockTemplateRpcImpl::new(
@@ -151,6 +156,7 @@ pub async fn test_responses<State, ReadState>(
         block_verifier_router.clone(),
         mock_sync_status.clone(),
         mock_address_book,
+        MockAddressBookPeers::default(),
         None,
     );
 
@@ -287,6 +293,7 @@ pub async fn test_responses<State, ReadState>(
         block_verifier_router,
         mock_sync_status.clone(),
         MockAddressBookPeers::default(),
+        MockAddressBookPeers::default(),
         None,
     );
 
@@ -396,6 +403,7 @@ pub async fn test_responses<State, ReadState>(
         mock_chain_tip,
         mock_block_verifier_router.clone(),
         mock_sync_status,
+        MockAddressBookPeers::default(),
         MockAddressBookPeers::default(),
         None,
     );

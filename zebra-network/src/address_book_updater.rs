@@ -10,7 +10,9 @@ use tokio::{
 use tracing::{Level, Span};
 
 use crate::{
-    address_book::AddressMetrics, meta_addr::MetaAddrChange, AddressBook, BoxError, Config,
+    address_book::{AddressBookType, AddressMetrics},
+    meta_addr::MetaAddrChange,
+    AddressBook, BoxError, Config,
 };
 
 /// The minimum size of the address book updater channel.
@@ -41,6 +43,7 @@ impl AddressBookUpdater {
     pub fn spawn(
         config: &Config,
         local_listener: SocketAddr,
+        book_type: AddressBookType,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
         mpsc::Sender<MetaAddrChange>,
@@ -59,26 +62,29 @@ impl AddressBookUpdater {
             &config.network,
             config.max_connections_per_ip,
             span!(Level::TRACE, "address book"),
+            book_type.clone(),
         );
         let address_metrics = address_book.address_metrics_watcher();
         let address_book = Arc::new(std::sync::Mutex::new(address_book));
 
         #[cfg(feature = "progress-bar")]
         let (mut address_info, address_bar, never_bar, failed_bar) = {
-            let address_bar = howudoin::new_root().label("Known Peers");
-            let never_bar =
-                howudoin::new_with_parent(address_bar.id()).label("Never Attempted Peers");
-            let failed_bar = howudoin::new_with_parent(never_bar.id()).label("Failed Peers");
+            let address_bar =
+                howudoin::new_root().label(format!("Known Peers ({})", book_type.as_str()));
+            let never_bar = howudoin::new_with_parent(address_bar.id())
+                .label(format!("Never Attempted Peers ({})", book_type.as_str()));
+            let failed_bar = howudoin::new_with_parent(never_bar.id())
+                .label(format!("Failed Peers ({})", book_type.as_str()));
 
             (address_metrics.clone(), address_bar, never_bar, failed_bar)
         };
 
         let worker_address_book = address_book.clone();
         let worker = move || {
-            info!("starting the address book updater");
+            info!("starting the {} address book updater", book_type.as_str());
 
             while let Some(event) = worker_rx.blocking_recv() {
-                trace!(?event, "got address book change");
+                trace!(?event, "got {} address book change", book_type.as_str());
 
                 // # Correctness
                 //

@@ -43,7 +43,7 @@ use crate::{
     },
     peer_cache_updater::peer_cache_updater,
     peer_set::{set::MorePeers, ActiveConnectionCounter, CandidateSet, ConnectionTracker, PeerSet},
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, AddressBookType, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 #[cfg(test)]
@@ -101,6 +101,7 @@ pub async fn init<S, C>(
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
+    Arc<std::sync::Mutex<AddressBook>>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -109,8 +110,17 @@ where
 {
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
+    // Create the outbound address book and related services.
     let (address_book, address_book_updater, address_metrics, address_book_updater_guard) =
-        AddressBookUpdater::spawn(&config, listen_addr);
+        AddressBookUpdater::spawn(&config, listen_addr, AddressBookType::Outbound);
+
+    // Create the inbound address book and related services.
+    let (
+        inbound_address_book,
+        inbound_address_book_updater,
+        _inbound_address_metrics,
+        inbound_address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, listen_addr, AddressBookType::Inbound);
 
     // Create a broadcast channel for peer inventory advertisements.
     // If it reaches capacity, this channel drops older inventory advertisements.
@@ -188,6 +198,7 @@ where
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
+        inbound_address_book_updater.clone(),
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
@@ -254,11 +265,12 @@ where
             listen_guard,
             crawl_guard,
             address_book_updater_guard,
+            inbound_address_book_updater_guard,
             peer_cache_updater_guard,
         ])
         .unwrap();
 
-    (peer_set, address_book)
+    (peer_set, address_book, inbound_address_book)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
@@ -550,6 +562,7 @@ async fn accept_inbound_connections<S>(
     min_inbound_peer_connection_interval: Duration,
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    inbound_address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
@@ -606,6 +619,11 @@ where
                 inbound_connections = ?active_inbound_connections.update_count(),
                 "handshaking on an open inbound peer connection"
             );
+
+            // Create a new entry in the inbound address book with the connected peer address.
+            let _ = inbound_address_book_updater
+                .send(MetaAddr::new_initial_peer(addr))
+                .await;
 
             let handshake_task = accept_inbound_handshake(
                 addr,

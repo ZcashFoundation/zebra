@@ -45,7 +45,7 @@ use crate::{
         ActiveConnectionCounter, CandidateSet,
     },
     protocol::types::PeerServices,
-    AddressBook, BoxError, Config, PeerSocketAddr, Request, Response,
+    AddressBook, AddressBookType, BoxError, Config, PeerSocketAddr, Request, Response,
 };
 
 use Network::*;
@@ -1444,7 +1444,7 @@ async fn local_listener_port_with(listen_addr: SocketAddr, network: Network) {
     let inbound_service =
         service_fn(|_| async { unreachable!("inbound service should never be called") });
 
-    let (_peer_service, address_book) = init(
+    let (_peer_service, address_book, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -1510,7 +1510,7 @@ where
         ..default_config
     };
 
-    let (_peer_service, address_book) = init(
+    let (_peer_service, address_book, _) = init(
         config,
         inbound_service,
         NoChainTip,
@@ -1548,7 +1548,7 @@ where
     }
 
     let (address_book, address_book_updater, _address_metrics, _address_book_updater_guard) =
-        AddressBookUpdater::spawn(&config, config.listen_addr);
+        AddressBookUpdater::spawn(&config, config.listen_addr, AddressBookType::Outbound);
 
     // Add enough fake peers to go over the limit, even if the limit is zero.
     let over_limit_peers = config.peerset_outbound_connection_limit() * 2 + 1;
@@ -1678,6 +1678,9 @@ where
     let over_limit_connections = config.peerset_inbound_connection_limit() * 2 + 1;
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(over_limit_connections);
 
+    let (_, inbound_address_book_updater, _, _) =
+        AddressBookUpdater::spawn(&config, listen_addr, AddressBookType::Inbound);
+
     // Start listening for connections.
     let listen_fut = accept_inbound_connections(
         config.clone(),
@@ -1685,6 +1688,7 @@ where
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
         listen_handshaker,
         peerset_tx.clone(),
+        inbound_address_book_updater,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
 
@@ -1790,7 +1794,7 @@ where
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(peer_count + 1);
 
     let (_address_book, address_book_updater, _address_metrics, address_book_updater_guard) =
-        AddressBookUpdater::spawn(&config, unused_v4);
+        AddressBookUpdater::spawn(&config, unused_v4, AddressBookType::Outbound);
 
     let add_fut = add_initial_peers(config, outbound_connector, peerset_tx, address_book_updater);
     let add_task_handle = tokio::spawn(add_fut);

@@ -32,14 +32,17 @@ mod tests;
 ///
 /// # Security
 ///
-/// Address book state must be based on outbound connections to peers.
+/// Address book state must be based on outbound connections to peers iff
+/// the book type is `AddressBookType::Outbound`. A separated address book
+/// state for inbound connections can be created by using the
+/// `AddressBookType::Inbound` book type.
 ///
 /// If the address book is updated incorrectly:
 /// - malicious peers can interfere with other peers' `AddressBook` state,
 ///   or
 /// - Zebra can advertise unreachable addresses to its own peers.
 ///
-/// ## Adding Addresses
+/// ## Adding addresses to an outbound book
 ///
 /// The address book should only contain Zcash listener port addresses from peers
 /// on the configured network. These addresses can come from:
@@ -48,20 +51,38 @@ mod tests;
 /// - the canonical address (`Version.address_from`) provided by each peer,
 ///   particularly peers on inbound connections.
 ///
-/// The remote addresses of inbound connections must not be added to the address
-/// book, because they contain ephemeral outbound ports, not listener ports.
+/// The remote addresses of inbound connections must not be added to this type
+/// of address book, because they contain ephemeral outbound ports, not listener
+/// ports.
 ///
-/// Isolated connections must not add addresses or update the address book.
+/// Isolated connections must not add addresses or update the address book in any
+/// case.
 ///
-/// ## Updating Address State
+/// ## Updating address state of an outbound book
 ///
 /// Updates to address state must be based on outbound connections to peers.
 ///
 /// Updates must not be based on:
 /// - the remote addresses of inbound connections, or
 /// - the canonical address of any connection.
+///
+/// ## Adding addresses to an inbound book
+///
+/// This type of address book should only contain remote peer addresses connected to
+/// Zebra's listener port.
+///
+/// ## Updating address state of an inbound book
+///
+/// Updates to address state must be based on inbound connections from peers.
+
 #[derive(Debug)]
 pub struct AddressBook {
+    /// The type of this address book.
+    ///
+    /// - An outbound book must only contain Zcash listener port addresses from peers on the configured network.
+    /// - An inbound book must only contain remote peer addresses connected to Zebra's listener port.
+    book_type: AddressBookType,
+
     /// Peer listener addresses, suitable for outbound connections,
     /// in connection attempt order.
     ///
@@ -102,6 +123,25 @@ pub struct AddressBook {
     last_address_log: Option<Instant>,
 }
 
+/// The type of an [`AddressBook`].
+#[derive(Clone, Debug)]
+pub enum AddressBookType {
+    /// The address book is used for outbound connections.
+    Outbound,
+    /// The address book is used for inbound connections.
+    Inbound,
+}
+
+impl AddressBookType {
+    /// Return a string representation of this address book type.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            AddressBookType::Outbound => "outbound",
+            AddressBookType::Inbound => "inbound",
+        }
+    }
+}
+
 /// Metrics about the states of the addresses in an [`AddressBook`].
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash)]
 pub struct AddressMetrics {
@@ -140,6 +180,7 @@ impl AddressBook {
         network: &Network,
         max_connections_per_ip: usize,
         span: Span,
+        book_type: AddressBookType,
     ) -> AddressBook {
         let constructor_span = span.clone();
         let _guard = constructor_span.enter();
@@ -154,6 +195,7 @@ impl AddressBook {
         // Avoid initiating outbound handshakes when max_connections_per_ip is 1.
         let should_limit_outbound_conns_per_ip = max_connections_per_ip == 1;
         let mut new_book = AddressBook {
+            book_type,
             by_addr: OrderedMap::new(|meta_addr| Reverse(*meta_addr)),
             local_listener: canonical_socket_addr(local_listener),
             network: network.clone(),
@@ -168,8 +210,8 @@ impl AddressBook {
         new_book
     }
 
-    /// Construct an [`AddressBook`] with the given `local_listener`, `network`,
-    /// `addr_limit`, [`tracing::Span`], and addresses.
+    /// Construct an outbound [`AddressBook`] with the given `local_listener`,
+    /// `network`, `addr_limit`, [`tracing::Span`], and addresses.
     ///
     /// `addr_limit` is enforced by this method, and by [`AddressBook::update`].
     ///
@@ -197,7 +239,13 @@ impl AddressBook {
         // The maximum number of addresses should be always greater than 0
         assert!(addr_limit > 0);
 
-        let mut new_book = AddressBook::new(local_listener, network, max_connections_per_ip, span);
+        let mut new_book = AddressBook::new(
+            local_listener,
+            network,
+            max_connections_per_ip,
+            span,
+            AddressBookType::Outbound,
+        );
         new_book.addr_limit = addr_limit;
 
         let addrs = addrs
@@ -763,6 +811,16 @@ impl AddressBookPeers for AddressBook {
             .cloned()
             .collect()
     }
+
+    fn currently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
+        let _guard = self.span.enter();
+
+        self.by_addr
+            .descending_values()
+            .filter(|peer| peer.has_connection_recently_responded(now))
+            .cloned()
+            .collect()
+    }
 }
 
 impl AddressBookPeers for Arc<Mutex<AddressBook>> {
@@ -770,6 +828,12 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .recently_live_peers(now)
+    }
+
+    fn currently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .currently_live_peers(now)
     }
 }
 
@@ -797,6 +861,7 @@ impl Clone for AddressBook {
             watch::channel(*self.address_metrics_tx.borrow());
 
         AddressBook {
+            book_type: self.book_type.clone(),
             by_addr: self.by_addr.clone(),
             local_listener: self.local_listener,
             network: self.network.clone(),

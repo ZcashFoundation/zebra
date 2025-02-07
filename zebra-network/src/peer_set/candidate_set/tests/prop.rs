@@ -21,7 +21,7 @@ use crate::{
     canonical_peer_addr,
     constants::{DEFAULT_MAX_CONNS_PER_IP, MIN_OUTBOUND_PEER_CONNECTION_INTERVAL},
     meta_addr::{MetaAddr, MetaAddrChange},
-    AddressBook, BoxError, Request, Response,
+    AddressBook, AddressBookType, BoxError, Request, Response,
 };
 
 use super::super::{validate_addrs, CandidateSet};
@@ -71,7 +71,7 @@ proptest! {
         });
 
         // Since the address book is empty, there won't be any available peers
-        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
+        let address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none(), AddressBookType::Outbound);
 
         let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);
 
@@ -113,7 +113,7 @@ proptest! {
             unreachable!("Mock peer service is never used");
         });
 
-        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none());
+        let mut address_book = AddressBook::new(SocketAddr::from_str("0.0.0.0:0").unwrap(), &Mainnet, DEFAULT_MAX_CONNS_PER_IP, Span::none(), AddressBookType::Outbound);
         address_book.extend(peers);
 
         let mut candidate_set = CandidateSet::new(Arc::new(std::sync::Mutex::new(address_book)), peer_service);

@@ -377,8 +377,11 @@ pub struct GetBlockTemplateRpcImpl<
     /// The chain sync status, used for checking if Zebra is likely close to the network chain tip.
     sync_status: SyncStatus,
 
-    /// Address book of peers, used for `getpeerinfo`.
+    /// Outbound connections address book of peers, used for `getpeerinfo`.
     address_book: AddressBook,
+
+    /// Inbound connections address book of peers, used for `getpeerinfo`.
+    inbound_address_book: AddressBook,
 
     /// A channel to send successful block submissions to the block gossip task,
     /// so they can be advertised to peers.
@@ -473,6 +476,7 @@ where
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
+        inbound_address_book: AddressBook,
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Prevent loss of miner funds due to an unsupported or incorrect address type.
@@ -536,6 +540,7 @@ where
             block_verifier_router,
             sync_status,
             address_book,
+            inbound_address_book,
             mined_block_sender: mined_block_sender
                 .unwrap_or(submit_block::SubmitBlockChannel::default().sender()),
         }
@@ -1101,12 +1106,20 @@ where
     }
 
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>> {
-        let address_book = self.address_book.clone();
-        Ok(address_book
-            .recently_live_peers(chrono::Utc::now())
+        let outbound_address_book = self.address_book.clone();
+        let inbound_address_book = self.inbound_address_book.clone();
+
+        let outbound_peers = outbound_address_book
+            .currently_live_peers(chrono::Utc::now())
             .into_iter()
-            .map(PeerInfo::from)
-            .collect())
+            .map(PeerInfo::from);
+
+        let inbound_peers = inbound_address_book
+            .currently_live_peers(chrono::Utc::now())
+            .into_iter()
+            .map(|addr| PeerInfo::new(addr, true));
+
+        Ok(outbound_peers.chain(inbound_peers).collect())
     }
 
     async fn validate_address(&self, raw_address: String) -> Result<validate_address::Response> {
