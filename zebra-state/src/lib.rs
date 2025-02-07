@@ -44,6 +44,10 @@ pub use error::{
 pub use request::{
     CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
 };
+
+#[cfg(feature = "indexer")]
+pub use request::Spend;
+
 pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},

@@ -13,6 +13,9 @@
 - [Getting Started](#getting-started)
   - [Docker](#docker)
   - [Manual Build](#manual-build)
+    - [General instructions for installing dependencies](#general-instructions-for-installing-dependencies)
+    - [Dependencies on Arch](#dependencies-on-arch)
+- [CI/CD Architecture](#cicd-architecture)
 - [Documentation](#documentation)
 - [User support](#user-support)
 - [Security](#security)
@@ -73,6 +76,7 @@ Below are quick summaries for installing the dependencies on your machine.
 <details><summary>
 
 #### General instructions for installing dependencies
+
 </summary>
 
 1. Install [`cargo` and `rustc`](https://www.rust-lang.org/tools/install).
@@ -98,6 +102,7 @@ Below are quick summaries for installing the dependencies on your machine.
 <details><summary>
 
 #### Dependencies on Arch
+
 </summary>
 
 ```sh
@@ -123,6 +128,17 @@ zebrad start
 Refer to the [Installing Zebra](https://zebra.zfnd.org/user/install.html) and
 [Running Zebra](https://zebra.zfnd.org/user/run.html) sections in the book for
 enabling optional features, detailed configuration and further details.
+
+## CI/CD Architecture
+
+Zebra uses a comprehensive CI/CD system built on GitHub Actions to ensure code quality, maintain stability, and automate routine tasks. Our CI/CD infrastructure:
+
+- Runs automated tests on every PR and commit
+- Manages deployments to various environments
+- Handles cross-platform compatibility checks
+- Automates release processes
+
+For a detailed understanding of our CI/CD system, including workflow diagrams, infrastructure details, and best practices, see our [CI/CD Architecture Documentation](.github/workflows/README.md).
 
 ## Documentation
 

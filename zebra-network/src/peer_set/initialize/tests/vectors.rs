@@ -1575,7 +1575,7 @@ where
     let nil_peer_set = service_fn(move |req| async move {
         let rsp = match req {
             // Return the correct response variant for Peers requests,
-            // re-using one of the peers we already provided.
+            // reusing one of the peers we already provided.
             Request::Peers => Response::Peers(vec![fake_peer.unwrap()]),
             _ => unreachable!("unexpected request: {:?}", req),
         };

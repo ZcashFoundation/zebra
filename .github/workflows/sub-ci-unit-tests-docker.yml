@@ -151,7 +151,7 @@ jobs:
       test_variables: '-e NETWORK'
       network: 'Mainnet'
 
-  # Test reconfiguring the the docker image for tesnet.
+  # Test reconfiguring the docker image for tesnet.
   test-configuration-file-testnet:
     name: Test CI testnet Docker config file
     # Make sure Zebra can sync the genesis block on testnet

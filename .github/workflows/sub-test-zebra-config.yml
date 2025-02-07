@@ -25,7 +25,7 @@ on:
       test_variables:
         required: true
         type: string
-        description: 'Environmental variables used to select and configure the test'
+        description: 'Environment variables used to select and configure the test'
       network:
         required: false
         type: string

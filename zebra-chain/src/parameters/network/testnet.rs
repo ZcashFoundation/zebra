@@ -7,7 +7,7 @@ use crate::{
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{funding_stream_address_period, FUNDING_STREAM_RECEIVER_DENOMINATOR},
-        Network, NetworkKind, NetworkUpgrade, NETWORK_UPGRADES_IN_ORDER,
+        Network, NetworkKind, NetworkUpgrade,
     },
     work::difficulty::{ExpandedDifficulty, U256},
 };
@@ -369,7 +369,7 @@ impl ParametersBuilder {
 
         // Check that the provided network upgrade activation heights are in the same order by height as the default testnet activation heights
         let mut activation_heights_iter = activation_heights.iter();
-        for expected_network_upgrade in NETWORK_UPGRADES_IN_ORDER {
+        for expected_network_upgrade in NetworkUpgrade::iter() {
             if !network_upgrades.contains(&expected_network_upgrade) {
                 continue;
             } else if let Some((&height, &network_upgrade)) = activation_heights_iter.next() {
@@ -381,7 +381,7 @@ impl ParametersBuilder {
 
                 assert!(
                     network_upgrade == expected_network_upgrade,
-                    "network upgrades must be activated in order, the correct order is {NETWORK_UPGRADES_IN_ORDER:?}"
+                    "network upgrades must be activated in order specified by the protocol"
                 );
             }
         }
