@@ -399,9 +399,13 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         });
 
     // make the api call
-    let get_raw_mempool = rpc.get_raw_mempool();
+    let get_raw_mempool = rpc.get_raw_mempool(None);
     let (response, _) = futures::join!(get_raw_mempool, mempool_req);
-    let get_raw_mempool = response.expect("We should have a GetRawTransaction struct");
+    let GetRawMempool::TxIds(get_raw_mempool) =
+        response.expect("We should have a GetRawTransaction struct")
+    else {
+        panic!("should return TxIds for non verbose");
+    };
 
     snapshot_rpc_getrawmempool(get_raw_mempool, &settings);
 

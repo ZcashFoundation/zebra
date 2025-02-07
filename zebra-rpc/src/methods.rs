@@ -6,7 +6,11 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
@@ -20,6 +24,7 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
+use types::{GetRawMempool, MempoolObject};
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
     block::{self, Height, SerializedBlock},
@@ -211,11 +216,15 @@ pub trait Rpc {
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
+    /// # Parameters
+    ///
+    /// - `verbose`: (boolean, optional, default=false) true for a json object, false for array of transaction ids.
+    ///
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     /// method: post
     /// tags: blockchain
     #[method(name = "getrawmempool")]
-    async fn get_raw_mempool(&self) -> Result<Vec<String>>;
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool>;
 
     /// Returns information about the given block's Sapling & Orchard tree state.
     ///
@@ -1042,7 +1051,9 @@ where
             .ok_or_misc_error("No blocks in state")
     }
 
-    async fn get_raw_mempool(&self) -> Result<Vec<String>> {
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool> {
+        let verbose = verbose.unwrap_or(false);
+
         #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
@@ -1053,7 +1064,7 @@ where
         let mut mempool = self.mempool.clone();
 
         #[cfg(feature = "getblocktemplate-rpcs")]
-        let request = if should_use_zcashd_order {
+        let request = if should_use_zcashd_order || verbose {
             mempool::Request::FullTransactions
         } else {
             mempool::Request::TransactionIds
@@ -1073,27 +1084,47 @@ where
             #[cfg(feature = "getblocktemplate-rpcs")]
             mempool::Response::FullTransactions {
                 mut transactions,
-                transaction_dependencies: _,
+                transaction_dependencies,
                 last_seen_tip_hash: _,
             } => {
-                // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
-                transactions.sort_by_cached_key(|tx| {
-                    // zcashd uses modified fee here but Zebra doesn't currently
-                    // support prioritizing transactions
-                    std::cmp::Reverse((
-                        i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
-                            / tx.transaction.size as u128,
-                        // transaction hashes are compared in their serialized byte-order.
-                        tx.transaction.id.mined_id(),
-                    ))
-                });
+                // verbose=true returns a map, where order does not matter,
+                // so we only need to sort when verbose=false.
+                if !verbose {
+                    // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
+                    transactions.sort_by_cached_key(|tx| {
+                        // zcashd uses modified fee here but Zebra doesn't currently
+                        // support prioritizing transactions
+                        std::cmp::Reverse((
+                            i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
+                                / tx.transaction.size as u128,
+                            // transaction hashes are compared in their serialized byte-order.
+                            tx.transaction.id.mined_id(),
+                        ))
+                    });
+                }
+                if verbose {
+                    let map = transactions
+                        .iter()
+                        .map(|unmined_tx| {
+                            (
+                                unmined_tx.transaction.id.mined_id().encode_hex(),
+                                MempoolObject::from_verified_unmined_tx(
+                                    unmined_tx,
+                                    &transactions,
+                                    &transaction_dependencies,
+                                ),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+                    Ok(GetRawMempool::Verbose(map))
+                } else {
+                    let tx_ids: Vec<String> = transactions
+                        .iter()
+                        .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
+                        .collect();
 
-                let tx_ids: Vec<String> = transactions
-                    .iter()
-                    .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
-                    .collect();
-
-                Ok(tx_ids)
+                    Ok(GetRawMempool::TxIds(tx_ids))
+                }
             }
 
             mempool::Response::TransactionIds(unmined_transaction_ids) => {
@@ -1105,7 +1136,7 @@ where
                 // Sort returned transaction IDs in numeric/string order.
                 tx_ids.sort();
 
-                Ok(tx_ids)
+                Ok(GetRawMempool::TxIds(tx_ids))
             }
 
             _ => unreachable!("unmatched response to a transactionids request"),
