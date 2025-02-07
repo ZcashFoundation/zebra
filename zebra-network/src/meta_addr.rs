@@ -835,7 +835,6 @@ impl MetaAddrChange {
             // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
-            // TODO: Review whether this will have unintended consequences
             UpdateConnected { .. } | UpdateResponded { .. } | UpdateMisbehavior { .. } => Responded,
             UpdateFailed { .. } => Failed,
         }
