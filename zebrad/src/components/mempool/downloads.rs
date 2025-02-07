@@ -50,7 +50,7 @@ use zebra_chain::{
     transparent,
 };
 use zebra_consensus::transaction as tx;
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_node_services::mempool::Gossip;
 use zebra_state::{self as zs, CloneError};
 
@@ -124,8 +124,11 @@ pub enum TransactionDownloadVerifyError {
     #[error("transaction download / verification was cancelled")]
     Cancelled,
 
-    #[error("transaction did not pass consensus validation: {0}")]
-    Invalid(#[from] zebra_consensus::error::TransactionError),
+    #[error("transaction did not pass consensus validation: {error}")]
+    Invalid {
+        error: zebra_consensus::error::TransactionError,
+        advertiser_addr: Option<PeerSocketAddr>,
+    },
 }
 
 /// Represents a [`Stream`] of download and verification tasks.
@@ -330,7 +333,7 @@ where
 
             trace!(?txid, ?next_height, "got next height");
 
-            let tx = match gossiped_tx {
+            let (tx, advertiser_addr) = match gossiped_tx {
                 Gossip::Id(txid) => {
                     let req = zn::Request::TransactionsById(std::iter::once(txid).collect());
 
@@ -348,7 +351,7 @@ where
                         _ => unreachable!("wrong response to transaction request"),
                     };
 
-                    let tx = tx.available().expect(
+                    let (tx, advertiser_addr) = tx.available().expect(
                         "unexpected missing tx status: single tx failures should be errors",
                     );
 
@@ -356,14 +359,14 @@ where
                         "mempool.downloaded.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    tx
+                    (tx, advertiser_addr)
                 }
                 Gossip::Tx(tx) => {
                     metrics::counter!(
                         "mempool.pushed.transactions.total",
                         "version" => format!("{}",tx.transaction.version()),
                     ).increment(1);
-                    tx
+                    (tx, None)
                 }
             };
 
@@ -386,7 +389,7 @@ where
             // Hide the transaction data to avoid filling the logs
             trace!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
 
-            result.map_err(|e| TransactionDownloadVerifyError::Invalid(e.into()))
+            result.map_err(|e| TransactionDownloadVerifyError::Invalid { error: e.into(), advertiser_addr } )
         }
         .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
             metrics::counter!(

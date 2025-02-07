@@ -36,6 +36,7 @@ fn sanitize_extremes() {
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
+        misbehavior_score: Default::default(),
     };
 
     let max_time_entry = MetaAddr {
@@ -46,6 +47,7 @@ fn sanitize_extremes() {
         last_attempt: None,
         last_failure: None,
         last_connection_state: Default::default(),
+        misbehavior_score: Default::default(),
     };
 
     if let Some(min_sanitized) = min_time_entry.sanitize(&Mainnet) {

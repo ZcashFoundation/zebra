@@ -340,7 +340,8 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
     // We respond with an unrelated transaction, so the peer gives up on the request.
     let unrelated_response: Transaction =
         zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
-    let unrelated_response = Response::Transactions(vec![Available(unrelated_response.into())]);
+    let unrelated_response =
+        Response::Transactions(vec![Available((unrelated_response.into(), None))]);
 
     let (
         // real services
@@ -487,8 +488,8 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
     let repeated_tx: Transaction = zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
     let repeated_tx: UnminedTx = repeated_tx.into();
     let repeated_response = Response::Transactions(vec![
-        Available(repeated_tx.clone()),
-        Available(repeated_tx.clone()),
+        Available((repeated_tx.clone(), None)),
+        Available((repeated_tx.clone(), None)),
     ]);
 
     let (
@@ -523,6 +524,7 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
         let available: Vec<UnminedTx> = tx_response
             .iter()
             .filter_map(InventoryResponse::available)
+            .map(|(tx, _)| tx)
             .collect();
         let missing: Vec<UnminedTxId> = tx_response
             .iter()
@@ -658,7 +660,7 @@ async fn setup(
 
         ..NetworkConfig::default()
     };
-    let (mut peer_set, address_book) = zebra_network::init(
+    let (mut peer_set, address_book, _) = zebra_network::init(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
@@ -694,6 +696,7 @@ async fn setup(
         .service(BoxService::new(mock_tx_verifier.clone()));
 
     // Mempool
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &mempool_config,
@@ -703,6 +706,7 @@ async fn setup(
         sync_status.clone(),
         latest_chain_tip.clone(),
         chain_tip_change.clone(),
+        misbehavior_tx,
     );
 
     // Enable the mempool
@@ -715,6 +719,7 @@ async fn setup(
         .service(mempool_service);
 
     // Initialize the inbound service
+    let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
         address_book,
         block_download_peer_set: peer_set.clone(),
@@ -722,6 +727,7 @@ async fn setup(
         mempool: mempool_service.clone(),
         state: state_service.clone(),
         latest_chain_tip,
+        misbehavior_sender,
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
@@ -862,7 +868,7 @@ mod submitblock_test {
             .buffer(10)
             .service(BoxService::new(inbound_service));
 
-        let (peer_set, _address_book) = zebra_network::init(
+        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
             network_config,
             inbound_service.clone(),
             latest_chain_tip.clone(),
