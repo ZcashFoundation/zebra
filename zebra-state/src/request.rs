@@ -866,6 +866,10 @@ impl Request {
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
+    /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
+    /// with the current disk space usage in bytes.
+    UsageInfo,
+
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
     /// with the current best chain tip.
     Tip,
@@ -1134,6 +1138,7 @@ pub enum ReadRequest {
 impl ReadRequest {
     fn variant_name(&self) -> &'static str {
         match self {
+            ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::Depth(_) => "depth",

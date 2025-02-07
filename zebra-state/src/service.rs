@@ -1173,6 +1173,24 @@ impl Service<ReadRequest> for ReadStateService {
         let span = Span::current();
 
         match req {
+            // Used by the `getblockchaininfo` RPC.
+            ReadRequest::UsageInfo => {
+                let db = self.db.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        // The work is done in the future.
+
+                        let db_size = db.size();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::UsageInfo");
+
+                        Ok(ReadResponse::UsageInfo(db_size))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the StateService.
             ReadRequest::Tip => {
                 let state = self.clone();

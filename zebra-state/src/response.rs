@@ -135,6 +135,9 @@ impl MinedTx {
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
+    /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
+    UsageInfo(u64),
+
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
 
@@ -336,7 +339,8 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
-            ReadResponse::TipPoolValues { .. }
+            ReadResponse::UsageInfo(_)
+            | ReadResponse::TipPoolValues { .. }
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)

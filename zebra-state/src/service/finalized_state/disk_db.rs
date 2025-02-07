@@ -570,6 +570,27 @@ impl DiskDb {
         );
     }
 
+    /// Returns the estimated total disk space usage of the database.
+    pub fn size(&self) -> u64 {
+        let db: &Arc<DB> = &self.db;
+        let db_options = DiskDb::options();
+        let mut total_size_on_disk = 0;
+        for cf_descriptor in DiskDb::construct_column_families(&db_options, db.path(), &[]).iter() {
+            let cf_name = &cf_descriptor.name();
+            let cf_handle = db
+                .cf_handle(cf_name)
+                .expect("Column family handle must exist");
+
+            total_size_on_disk += db
+                .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+        }
+
+        total_size_on_disk
+    }
+
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
