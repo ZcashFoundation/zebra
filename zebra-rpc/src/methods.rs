@@ -797,6 +797,7 @@ where
                 height,
                 version,
                 merkle_root,
+                block_commitments,
                 final_sapling_root,
                 sapling_tree_size,
                 time,
@@ -908,6 +909,7 @@ where
                 tx,
                 trees,
                 size: None,
+                block_commitments: Some(block_commitments),
                 final_sapling_root: Some(final_sapling_root),
                 final_orchard_root,
                 previous_block_hash: Some(previous_block_hash),
@@ -1011,6 +1013,7 @@ where
                 height,
                 version: header.version,
                 merkle_root: header.merkle_root,
+                block_commitments: header.commitment_bytes.0,
                 final_sapling_root,
                 sapling_tree_size,
                 time: header.time.timestamp(),
@@ -1850,7 +1853,12 @@ pub enum GetBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         merkle_root: Option<block::merkle::Root>,
 
-        // `blockcommitments` would be here. Undocumented. TODO: decide if we want to support it
+        /// The blockcommitments field of the requested block. Its interpretation changes
+        /// depending on the network and height.
+        #[serde(with = "opthex", rename = "blockcommitments")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        block_commitments: Option<[u8; 32]>,
+
         // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
         //
         /// The root of the Sapling commitment tree after applying this block.
@@ -1924,6 +1932,7 @@ impl Default for GetBlock {
             size: None,
             version: None,
             merkle_root: None,
+            block_commitments: None,
             final_sapling_root: None,
             final_orchard_root: None,
             nonce: None,
@@ -1982,6 +1991,11 @@ pub struct GetBlockHeaderObject {
     #[serde(with = "hex", rename = "merkleroot")]
     pub merkle_root: block::merkle::Root,
 
+    /// The blockcommitments field of the requested block. Its interpretation changes
+    /// depending on the network and height.
+    #[serde(with = "hex", rename = "blockcommitments")]
+    pub block_commitments: [u8; 32],
+
     /// The root of the Sapling commitment tree after applying this block.
     #[serde(with = "hex", rename = "finalsaplingroot")]
     pub final_sapling_root: [u8; 32],
@@ -2035,6 +2049,7 @@ impl Default for GetBlockHeaderObject {
             height: Height::MIN,
             version: 4,
             merkle_root: block::merkle::Root([0; 32]),
+            block_commitments: Default::default(),
             final_sapling_root: Default::default(),
             sapling_tree_size: Default::default(),
             time: 0,
