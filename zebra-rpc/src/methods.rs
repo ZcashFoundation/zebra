@@ -6,7 +6,11 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
@@ -211,11 +215,15 @@ pub trait Rpc {
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
+    /// # Parameters
+    ///
+    /// - `verbose`: (boolean, optional, default=false) true for a json object, false for array of transaction ids.
+    ///
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     /// method: post
     /// tags: blockchain
     #[method(name = "getrawmempool")]
-    async fn get_raw_mempool(&self) -> Result<Vec<String>>;
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool>;
 
     /// Returns information about the given block's Sapling & Orchard tree state.
     ///
@@ -1042,7 +1050,9 @@ where
             .ok_or_misc_error("No blocks in state")
     }
 
-    async fn get_raw_mempool(&self) -> Result<Vec<String>> {
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool> {
+        let verbose = verbose.unwrap_or(false);
+
         #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
@@ -1053,7 +1063,7 @@ where
         let mut mempool = self.mempool.clone();
 
         #[cfg(feature = "getblocktemplate-rpcs")]
-        let request = if should_use_zcashd_order {
+        let request = if should_use_zcashd_order || verbose {
             mempool::Request::FullTransactions
         } else {
             mempool::Request::TransactionIds
@@ -1073,27 +1083,90 @@ where
             #[cfg(feature = "getblocktemplate-rpcs")]
             mempool::Response::FullTransactions {
                 mut transactions,
-                transaction_dependencies: _,
+                transaction_dependencies,
                 last_seen_tip_hash: _,
             } => {
-                // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
-                transactions.sort_by_cached_key(|tx| {
-                    // zcashd uses modified fee here but Zebra doesn't currently
-                    // support prioritizing transactions
-                    std::cmp::Reverse((
-                        i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
-                            / tx.transaction.size as u128,
-                        // transaction hashes are compared in their serialized byte-order.
-                        tx.transaction.id.mined_id(),
-                    ))
-                });
+                // verbose=1 returns a map, where order does not matter,
+                // so we don't need to sort the transactions.
+                if !verbose {
+                    // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
+                    transactions.sort_by_cached_key(|tx| {
+                        // zcashd uses modified fee here but Zebra doesn't currently
+                        // support prioritizing transactions
+                        std::cmp::Reverse((
+                            i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
+                                / tx.transaction.size as u128,
+                            // transaction hashes are compared in their serialized byte-order.
+                            tx.transaction.id.mined_id(),
+                        ))
+                    });
+                }
+                if verbose {
+                    let transactions_by_id = transactions
+                        .iter()
+                        .map(|unmined_tx| (unmined_tx.transaction.id.mined_id(), unmined_tx))
+                        .collect::<HashMap<_, _>>();
+                    let map = transactions
+                        .iter()
+                        .map(|unmined_tx| {
+                            // Get txids of this transaction's descendants
+                            // (dependents)
+                            let empty_set = HashSet::new();
+                            let deps = transaction_dependencies
+                                .dependents()
+                                .get(&unmined_tx.transaction.id.mined_id())
+                                .unwrap_or(&empty_set);
+                            let deps_len = deps.len();
+                            // For each dependent: get the tx, its size and fee;
+                            // then sum them up
+                            let (deps_size, deps_fees) = deps
+                                .iter()
+                                .filter_map(|id| transactions_by_id.get(id))
+                                .map(|unmined_tx| {
+                                    (unmined_tx.transaction.size, unmined_tx.miner_fee)
+                                })
+                                .reduce(|(size1, fee1), (size2, fee2)| {
+                                    (size1 + size2, (fee1 + fee2).unwrap_or_default())
+                                })
+                                .unwrap_or((0, Default::default()));
+                            let mempool_object = MempoolObject {
+                                size: unmined_tx.transaction.size as u64,
+                                fee: unmined_tx.miner_fee.into(),
+                                // Change this if we ever support fee deltas (prioritisetransaction call)
+                                modified_fee: unmined_tx.miner_fee.into(),
+                                // TODO
+                                time: 0,
+                                // TODO
+                                height: 0,
+                                descendantcount: deps_len as u64 + 1,
+                                descendantsize: (deps_size + unmined_tx.transaction.size) as u64,
+                                descendantfees: (deps_fees + unmined_tx.miner_fee)
+                                    .unwrap_or_default()
+                                    .into(),
+                                depends: transaction_dependencies
+                                    .dependencies()
+                                    .get(&unmined_tx.transaction.id.mined_id())
+                                    .cloned()
+                                    .unwrap_or_else(HashSet::new)
+                                    .iter()
+                                    .map(|id| id.encode_hex())
+                                    .collect(),
+                            };
+                            (
+                                unmined_tx.transaction.id.mined_id().encode_hex(),
+                                mempool_object,
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+                    Ok(GetRawMempool::Verbose(map))
+                } else {
+                    let tx_ids: Vec<String> = transactions
+                        .iter()
+                        .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
+                        .collect();
 
-                let tx_ids: Vec<String> = transactions
-                    .iter()
-                    .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
-                    .collect();
-
-                Ok(tx_ids)
+                    Ok(GetRawMempool::TxIds(tx_ids))
+                }
             }
 
             mempool::Response::TransactionIds(unmined_transaction_ids) => {
@@ -1105,7 +1178,7 @@ where
                 // Sort returned transaction IDs in numeric/string order.
                 tx_ids.sort();
 
-                Ok(tx_ids)
+                Ok(GetRawMempool::TxIds(tx_ids))
             }
 
             _ => unreachable!("unmatched response to a transactionids request"),
@@ -2079,6 +2152,46 @@ impl Default for GetBlockHash {
     fn default() -> Self {
         GetBlockHash(block::Hash([0; 32]))
     }
+}
+
+/// Response to a `getrawmempool` RPC request.
+///
+/// See the notes for the [`Rpc::get_raw_mempool` method].
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(untagged)]
+pub enum GetRawMempool {
+    /// The transaction IDs, as hex strings (verbose=0)
+    TxIds(Vec<String>),
+    /// A map of transaction IDs to mempool transaction details objects
+    /// (verbose=1)
+    Verbose(HashMap<String, MempoolObject>),
+}
+
+/// A mempool transaction details object as returned by `getrawmempool` in
+/// verbose mode.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct MempoolObject {
+    /// Transaction size in bytes.
+    size: u64,
+    /// Transaction fee in zatoshi.
+    fee: u64,
+    /// Transaction fee with fee deltas used for mining priority.
+    #[serde(rename = "modifiedfee")]
+    modified_fee: u64,
+    /// Local time transaction entered pool in seconds since 1 Jan 1970 GMT
+    time: u64,
+    /// Block height when transaction entered pool.
+    height: u64,
+    /// Number of in-mempool descendant transactions (including this one).
+    descendantcount: u64,
+    /// Size of in-mempool descendants (including this one).
+    descendantsize: u64,
+    /// Modified fees (see "modifiedfee" above) of in-mempool descendants
+    /// (including this one).
+    descendantfees: u64,
+    /// Transaction IDs of unconfirmed transactions used as inputs for this
+    /// transaction.
+    depends: Vec<String>,
 }
 
 /// Response to a `getrawtransaction` RPC request.
