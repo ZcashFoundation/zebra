@@ -260,12 +260,17 @@ impl ConnectedAddr {
     /// `AddressBook` state.
     ///
     /// TODO: remove the `get_` from these methods (Rust style avoids `get` prefixes)
-    pub fn get_address_book_addr(&self) -> Option<PeerSocketAddr> {
+    pub fn get_address_book_addr(&self, network: Network) -> Option<PeerSocketAddr> {
         match self {
             OutboundDirect { addr } => Some(*addr),
             // TODO: consider using the canonical address of the peer to track
             //       outbound proxy connections
-            InboundDirect { .. } | OutboundProxy { .. } | InboundProxy { .. } | Isolated => None,
+            InboundDirect { addr } => {
+                let mut addr = *addr;
+                addr.set_port(network.default_port());
+                Some(addr)
+            }
+            OutboundProxy { .. } | InboundProxy { .. } | Isolated => None,
         }
     }
 
@@ -894,6 +899,7 @@ where
         let our_services = self.our_services;
         let relay = self.relay;
         let minimum_peer_version = self.minimum_peer_version.clone();
+        let network = self.config.network.clone();
 
         // # Security
         //
@@ -929,7 +935,7 @@ where
 
             // The handshake succeeded: update the peer status from AttemptPending to Responded,
             // and send initial connection info.
-            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+            if let Some(book_addr) = connected_addr.get_address_book_addr(network.clone()) {
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = address_book_updater
@@ -988,6 +994,7 @@ where
             let inbound_inv_collector = inv_collector.clone();
             let ts_inner_conn_span = connection_span.clone();
             let inv_inner_conn_span = connection_span.clone();
+            let network_clone = network.clone();
             let peer_rx = peer_rx
                 .then(move |msg| {
                     // Add a metric for inbound messages and errors.
@@ -995,6 +1002,7 @@ where
                     let inbound_ts_collector = inbound_ts_collector.clone();
                     let span =
                         debug_span!(parent: ts_inner_conn_span.clone(), "inbound_ts_collector");
+                    let network_clone = network_clone.clone();
 
                     async move {
                         match &msg {
@@ -1025,7 +1033,9 @@ where
                                 // - opening connections is rate-limited
                                 // - the number of connections is limited
                                 // - after the first error, the peer is disconnected
-                                if let Some(book_addr) = connected_addr.get_address_book_addr() {
+                                if let Some(book_addr) =
+                                    connected_addr.get_address_book_addr(network_clone)
+                                {
                                     let _ = inbound_ts_collector
                                         .send(MetaAddr::new_errored(book_addr, remote_services))
                                         .await;
@@ -1094,6 +1104,7 @@ where
                     shutdown_rx,
                     server_tx.clone(),
                     address_book_updater.clone(),
+                    network,
                 )
                 .instrument(tracing::debug_span!(parent: connection_span, "heartbeat"))
                 .boxed(),
@@ -1231,6 +1242,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
     shutdown_rx: oneshot::Receiver<CancelHeartbeatTask>,
     server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    network: Network,
 ) -> Result<(), BoxError> {
     use futures::future::Either;
 
@@ -1238,6 +1250,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
         connected_addr,
         server_tx,
         heartbeat_ts_collector.clone(),
+        network.clone(),
     );
 
     pin_mut!(shutdown_rx);
@@ -1259,6 +1272,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientCancelledHeartbeatTask,
                 &heartbeat_ts_collector,
                 &connected_addr,
+                network,
             )
             .await
         }
@@ -1268,6 +1282,7 @@ async fn send_periodic_heartbeats_with_shutdown_handle(
                 PeerError::ClientDropped,
                 &heartbeat_ts_collector,
                 &connected_addr,
+                network,
             )
             .await
         }
@@ -1288,6 +1303,7 @@ async fn send_periodic_heartbeats_run_loop(
     connected_addr: ConnectedAddr,
     mut server_tx: futures::channel::mpsc::Sender<ClientRequest>,
     heartbeat_ts_collector: tokio::sync::mpsc::Sender<MetaAddrChange>,
+    network: Network,
 ) -> Result<(), BoxError> {
     // Don't send the first heartbeat immediately - we've just completed the handshake!
     let mut interval = tokio::time::interval_at(
@@ -1304,7 +1320,13 @@ async fn send_periodic_heartbeats_run_loop(
         // We've reached another heartbeat interval without
         // shutting down, so do a heartbeat request.
         let heartbeat = send_one_heartbeat(&mut server_tx);
-        heartbeat_timeout(heartbeat, &heartbeat_ts_collector, &connected_addr).await?;
+        heartbeat_timeout(
+            heartbeat,
+            &heartbeat_ts_collector,
+            &connected_addr,
+            network.clone(),
+        )
+        .await?;
 
         // # Security
         //
@@ -1312,7 +1334,7 @@ async fn send_periodic_heartbeats_run_loop(
         // - opening connections is rate-limited
         // - the number of connections is limited
         // - Zebra initiates each heartbeat using a timer
-        if let Some(book_addr) = connected_addr.get_address_book_addr() {
+        if let Some(book_addr) = connected_addr.get_address_book_addr(network.clone()) {
             // the collector doesn't depend on network activity,
             // so this await should not hang
             let _ = heartbeat_ts_collector
@@ -1379,16 +1401,19 @@ async fn heartbeat_timeout<F, T>(
     fut: F,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
+    network: Network,
 ) -> Result<T, BoxError>
 where
     F: Future<Output = Result<T, BoxError>>,
 {
     let t = match timeout(constants::HEARTBEAT_INTERVAL, fut).await {
         Ok(inner_result) => {
-            handle_heartbeat_error(inner_result, address_book_updater, connected_addr).await?
+            handle_heartbeat_error(inner_result, address_book_updater, connected_addr, network)
+                .await?
         }
         Err(elapsed) => {
-            handle_heartbeat_error(Err(elapsed), address_book_updater, connected_addr).await?
+            handle_heartbeat_error(Err(elapsed), address_book_updater, connected_addr, network)
+                .await?
         }
     };
 
@@ -1400,6 +1425,7 @@ async fn handle_heartbeat_error<T, E>(
     result: Result<T, E>,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
+    network: Network,
 ) -> Result<T, E>
 where
     E: std::fmt::Debug,
@@ -1415,7 +1441,7 @@ where
             // - opening connections is rate-limited
             // - the number of connections is limited
             // - after the first error or shutdown, the peer is disconnected
-            if let Some(book_addr) = connected_addr.get_address_book_addr() {
+            if let Some(book_addr) = connected_addr.get_address_book_addr(network) {
                 let _ = address_book_updater
                     .send(MetaAddr::new_errored(book_addr, None))
                     .await;
@@ -1430,10 +1456,11 @@ async fn handle_heartbeat_shutdown(
     peer_error: PeerError,
     address_book_updater: &tokio::sync::mpsc::Sender<MetaAddrChange>,
     connected_addr: &ConnectedAddr,
+    network: Network,
 ) -> Result<(), BoxError> {
     tracing::debug!(?peer_error, "client shutdown, shutting down heartbeat");
 
-    if let Some(book_addr) = connected_addr.get_address_book_addr() {
+    if let Some(book_addr) = connected_addr.get_address_book_addr(network) {
         let _ = address_book_updater
             .send(MetaAddr::new_shutdown(book_addr))
             .await;

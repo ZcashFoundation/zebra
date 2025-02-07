@@ -237,6 +237,7 @@ where
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
+        address_book_updater.clone(),
         bans_receiver,
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
@@ -600,6 +601,7 @@ async fn accept_inbound_connections<S>(
     min_inbound_peer_connection_interval: Duration,
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    address_book_updater: tokio::sync::mpsc::Sender<MetaAddrChange>,
     bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
 ) -> Result<(), BoxError>
 where

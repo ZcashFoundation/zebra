@@ -1682,6 +1682,7 @@ where
     // Make the channels large enough to hold all the connections.
     let over_limit_connections = config.peerset_inbound_connection_limit() * 2 + 1;
     let (peerset_tx, peerset_rx) = mpsc::channel::<DiscoveredPeer>(over_limit_connections);
+    let (address_book_updater, _worker_rx) = tokio::sync::mpsc::channel(1);
 
     let (_bans_tx, bans_rx) = tokio::sync::watch::channel(Default::default());
 
@@ -1692,6 +1693,7 @@ where
         MIN_INBOUND_PEER_CONNECTION_INTERVAL_FOR_TESTS,
         listen_handshaker,
         peerset_tx.clone(),
+        address_book_updater,
         bans_rx,
     );
     let listen_task_handle = tokio::spawn(listen_fut);
