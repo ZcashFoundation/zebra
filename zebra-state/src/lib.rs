@@ -48,7 +48,7 @@ pub use request::{
 #[cfg(feature = "indexer")]
 pub use request::Spend;
 
-pub use response::{KnownBlock, MinedTx, ReadResponse, Response};
+pub use response::{GetBlockTemplateChainInfo, KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check, init, init_read_only,
@@ -72,9 +72,6 @@ pub use service::finalized_state::{
 };
 
 pub use service::{finalized_state::ZebraDb, ReadStateService};
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub use response::GetBlockTemplateChainInfo;
 
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]

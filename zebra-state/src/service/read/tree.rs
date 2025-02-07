@@ -197,7 +197,6 @@ where
     }
 }
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 /// Get the history tree of the provided chain.
 pub fn history_tree<C>(
     chain: Option<C>,

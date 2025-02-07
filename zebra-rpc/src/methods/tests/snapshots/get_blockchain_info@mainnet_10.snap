@@ -5,33 +5,50 @@ expression: info
 {
   "chain": "main",
   "blocks": 10,
+  "headers": 10,
+  "difficulty": 1.0,
+  "verificationprogress": "[f64]",
+  "chainwork": 0,
+  "pruned": false,
+  "size_on_disk": 0,
+  "commitments": 0,
   "bestblockhash": "00074c46a4aa8172df8ae2ad1848a2e084e1b6989b7d9e6132adc938bf835b36",
   "estimatedheight": "[Height]",
+  "chainSupply": {
+    "chainValue": 0.034375,
+    "chainValueZat": 3437500,
+    "monitored": true
+  },
   "valuePools": [
     {
       "id": "transparent",
       "chainValue": 0.034375,
-      "chainValueZat": 3437500
+      "chainValueZat": 3437500,
+      "monitored": true
     },
     {
       "id": "sprout",
       "chainValue": 0.0,
-      "chainValueZat": 0
+      "chainValueZat": 0,
+      "monitored": false
     },
     {
       "id": "sapling",
       "chainValue": 0.0,
-      "chainValueZat": 0
+      "chainValueZat": 0,
+      "monitored": false
     },
     {
       "id": "orchard",
       "chainValue": 0.0,
-      "chainValueZat": 0
+      "chainValueZat": 0,
+      "monitored": false
     },
     {
       "id": "deferred",
       "chainValue": 0.0,
-      "chainValueZat": 0
+      "chainValueZat": 0,
+      "monitored": false
     }
   ],
   "upgrades": {

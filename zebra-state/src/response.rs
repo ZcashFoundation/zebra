@@ -13,7 +13,6 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::work::difficulty::CompactDifficulty;
 
 // Allow *only* these unused imports, so that rustdoc link resolution
@@ -135,6 +134,9 @@ impl MinedTx {
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
+    /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
+    UsageInfo(u64),
+
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
 
@@ -241,7 +243,6 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainBlockHash`] with the specified block hash.
     BlockHash(Option<block::Hash>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::ChainInfo`] with the state
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
@@ -260,7 +261,6 @@ pub enum ReadResponse {
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
-#[cfg(feature = "getblocktemplate-rpcs")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
     // Data fetched directly from the state tip.
@@ -337,7 +337,8 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
-            ReadResponse::TipPoolValues { .. }
+            ReadResponse::UsageInfo(_)
+            | ReadResponse::TipPoolValues { .. }
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
@@ -345,7 +346,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
-            | ReadResponse::AddressUtxos(_) => {
+            | ReadResponse::AddressUtxos(_)
+            | ReadResponse::ChainInfo(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
@@ -356,7 +358,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
             #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::ChainInfo(_) | ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
+            ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

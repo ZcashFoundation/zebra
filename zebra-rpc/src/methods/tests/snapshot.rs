@@ -613,6 +613,12 @@ fn snapshot_rpc_getblockchaininfo(
                 // replace with:
                 "[Height]"
             }),
+            ".verificationprogress" => dynamic_redaction(|value, _path| {
+                // assert that the value looks like a valid verification progress here
+                assert!(value.as_f64().unwrap() < 1.0);
+                // replace with:
+                "[f64]"
+            }),
         })
     });
 }
