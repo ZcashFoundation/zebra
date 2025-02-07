@@ -662,13 +662,24 @@ where
             .latest_chain_tip
             .estimate_network_chain_tip_height(&network, now)
             .ok_or_misc_error("could not estimate network chain tip height")?;
-        let verification_progress = f64::from(tip_height.0) / f64::from(estimated_network_height.0);
+        let verification_progress =
+            (f64::from(tip_height.0) / f64::from(estimated_network_height.0)).min(1.0);
+        let zebra_state::ReadResponse::UsageInfo(size_on_disk) = state
+            .ready()
+            .and_then(|service| service.call(zebra_state::ReadRequest::UsageInfo))
+            .await
+            .map_misc_error()?
+        else {
+            unreachable!("unmatched response to a UsageInfo request")
+        };
+
         let response = GetBlockChainInfo {
             chain,
             blocks: tip_height,
             best_block_hash: tip_hash,
             estimated_height,
-            value_pools: types::ValuePoolBalance::from_value_balance(value_balance),
+            chain_supply: types::Balance::chain_supply(value_balance),
+            value_pools: types::Balance::value_pools(value_balance),
             upgrades,
             consensus,
             headers: tip_height,
@@ -677,8 +688,7 @@ where
             // TODO: store work in the finalized state for each height (#7109)
             chain_work: 0,
             pruned: false,
-            // TODO: This one will require a new state svc request
-            size_on_disk: 0,
+            size_on_disk,
             // TODO: Investigate whether this needs to be implemented (it's sprout-only in zcashd)
             commitments: 0,
         };
@@ -1582,9 +1592,13 @@ pub struct GetBlockChainInfo {
     #[serde(rename = "estimatedheight")]
     estimated_height: Height,
 
+    /// Chain supply balance
+    #[serde(rename = "chainSupply")]
+    chain_supply: types::Balance,
+
     /// Value pool balances
     #[serde(rename = "valuePools")]
-    value_pools: [types::ValuePoolBalance; 5],
+    value_pools: [types::Balance; 5],
 
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
@@ -1600,7 +1614,8 @@ impl Default for GetBlockChainInfo {
             blocks: Height(1),
             best_block_hash: block::Hash([0; 32]),
             estimated_height: Height(1),
-            value_pools: types::ValuePoolBalance::zero_pools(),
+            chain_supply: types::Balance::chain_supply(Default::default()),
+            value_pools: types::Balance::zero_pools(),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
@@ -1625,7 +1640,8 @@ impl GetBlockChainInfo {
         blocks: Height,
         best_block_hash: block::Hash,
         estimated_height: Height,
-        value_pools: [types::ValuePoolBalance; 5],
+        chain_supply: types::Balance,
+        value_pools: [types::Balance; 5],
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
         headers: Height,
@@ -1641,6 +1657,7 @@ impl GetBlockChainInfo {
             blocks,
             best_block_hash,
             estimated_height,
+            chain_supply,
             value_pools,
             upgrades,
             consensus,
@@ -1679,7 +1696,7 @@ impl GetBlockChainInfo {
     }
 
     /// Returns the value pool balances.
-    pub fn value_pools(&self) -> &[types::ValuePoolBalance; 5] {
+    pub fn value_pools(&self) -> &[types::Balance; 5] {
         &self.value_pools
     }
 

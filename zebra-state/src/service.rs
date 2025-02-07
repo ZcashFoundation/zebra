@@ -1831,8 +1831,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            // Used by get_block_template RPC.
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            // Used by get_block_template and getblockchaininfo RPCs.
             ReadRequest::ChainInfo => {
                 let state = self.clone();
                 let latest_non_finalized_state = self.latest_non_finalized_state();

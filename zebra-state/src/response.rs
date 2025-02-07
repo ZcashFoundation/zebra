@@ -13,7 +13,6 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::work::difficulty::CompactDifficulty;
 
 // Allow *only* these unused imports, so that rustdoc link resolution
@@ -262,7 +261,6 @@ pub enum ReadResponse {
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
-#[cfg(feature = "getblocktemplate-rpcs")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
     // Data fetched directly from the state tip.

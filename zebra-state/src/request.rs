@@ -1165,7 +1165,6 @@ impl ReadRequest {
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::ChainInfo => "chain_info",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { .. } => "solution_rate",

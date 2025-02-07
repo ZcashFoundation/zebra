@@ -25,7 +25,7 @@ use zebra_state::{BoxError, HashOrHeight};
 
 use zebra_test::mock_service::MockService;
 
-use crate::methods::{self, types::ValuePoolBalance};
+use crate::methods::{self, types::Balance};
 
 use super::super::{
     AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
@@ -569,7 +569,7 @@ proptest! {
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
-            prop_assert_eq!(response.value_pools, ValuePoolBalance::from_value_balance(ValueBalance::zero()));
+            prop_assert_eq!(response.value_pools, Balance::value_pools(ValueBalance::zero()));
 
             let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
             let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");

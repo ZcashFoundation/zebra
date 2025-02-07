@@ -10,19 +10,22 @@ use super::*;
 /// A value pool's balance in Zec and Zatoshis
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ValuePoolBalance {
+pub struct Balance {
     /// Name of the pool
+    #[serde(skip_serializing_if = "String::is_empty")]
     id: String,
     /// Total amount in the pool, in ZEC
     chain_value: Zec<NonNegative>,
     /// Total amount in the pool, in zatoshis
     chain_value_zat: Amount<NonNegative>,
+    /// Whether the value pool balance is being monitored.
+    monitored: bool,
 }
 
-impl ValuePoolBalance {
+impl Balance {
     /// Returns a list of [`ValuePoolBalance`]s converted from the default [`ValueBalance`].
     pub fn zero_pools() -> [Self; 5] {
-        Self::from_value_balance(Default::default())
+        Self::value_pools(Default::default())
     }
 
     /// Creates a new [`ValuePoolBalance`] from a pool name and its value balance.
@@ -31,6 +34,7 @@ impl ValuePoolBalance {
             id: id.to_string(),
             chain_value: Zec::from(amount),
             chain_value_zat: amount,
+            monitored: amount.zatoshis() != 0,
         }
     }
 
@@ -60,7 +64,7 @@ impl ValuePoolBalance {
     }
 
     /// Converts a [`ValueBalance`] to a list of [`ValuePoolBalance`]s.
-    pub fn from_value_balance(value_balance: ValueBalance<NonNegative>) -> [Self; 5] {
+    pub fn value_pools(value_balance: ValueBalance<NonNegative>) -> [Self; 5] {
         [
             Self::transparent(value_balance.transparent_amount()),
             Self::sprout(value_balance.sprout_amount()),
@@ -68,5 +72,19 @@ impl ValuePoolBalance {
             Self::orchard(value_balance.orchard_amount()),
             Self::deferred(value_balance.deferred_amount()),
         ]
+    }
+
+    /// Converts a [`ValueBalance`] to a [`Balance`] representing the total chain supply.
+    pub fn chain_supply(value_balance: ValueBalance<NonNegative>) -> Self {
+        Self::value_pools(value_balance)
+            .into_iter()
+            .reduce(|a, b| {
+                Balance::new(
+                    "",
+                    (a.chain_value_zat + b.chain_value_zat)
+                        .expect("sum of value balances should not overflow"),
+                )
+            })
+            .expect("at least one pool")
     }
 }
