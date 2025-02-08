@@ -9,9 +9,10 @@ use crate::{
     fmt::HexDebug,
     serialization::{TrustedPreallocate, MAX_PROTOCOL_MESSAGE_LEN},
     work::{difficulty::CompactDifficulty, equihash::Solution},
+    parameters::Network
 };
 
-use super::{merkle, Hash, Height};
+use super::{merkle, Hash, Height, Commitment, CommitmentError};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -122,6 +123,12 @@ impl Header {
                 two_hours_in_the_future,
             ))?
         }
+    }
+
+    /// Get the parsed block [`Commitment`] for this header.
+    /// Its interpretation depends on the given `network` and block `height`.
+    pub fn commitment(&self, network: &Network, height: Height) -> Result<Commitment, CommitmentError> {
+        Commitment::from_bytes(*self.commitment_bytes, network, height)
     }
 
     /// Compute the hash of this header.

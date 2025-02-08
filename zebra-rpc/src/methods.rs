@@ -22,7 +22,7 @@ use tracing::Instrument;
 
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
-    block::{self, Height, SerializedBlock},
+    block::{self, Commitment, Height, SerializedBlock},
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashSerialize},
@@ -1007,13 +1007,22 @@ where
 
             let difficulty = header.difficulty_threshold.relative_to_network(&network);
 
+            let block_commitments = match header.commitment(&network, height)
+                .expect("Unexpected failure while parsing the blockcommitments field in get_block_header") {
+                    Commitment::PreSaplingReserved(bytes) => bytes,
+                    Commitment::FinalSaplingRoot(_) => final_sapling_root,
+                    Commitment::ChainHistoryActivationReserved => [0; 32],
+                    Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+                    Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order()
+                };
+
             let block_header = GetBlockHeaderObject {
                 hash: GetBlockHash(hash),
                 confirmations,
                 height,
                 version: header.version,
                 merkle_root: header.merkle_root,
-                block_commitments: header.commitment_bytes.0,
+                block_commitments,
                 final_sapling_root,
                 sapling_tree_size,
                 time: header.time.timestamp(),
