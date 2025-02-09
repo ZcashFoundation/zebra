@@ -86,15 +86,21 @@ async fn get_block_data(
         [0; 32]
     };
 
-    let expected_block_commitments = match block.commitment(&Mainnet)
-        .expect("Unexpected failure while parsing the blockcommitments field in get_block_data") {
-            Commitment::PreSaplingReserved(bytes) => bytes,
-            Commitment::FinalSaplingRoot(_) => expected_final_sapling_root,
-            Commitment::ChainHistoryActivationReserved => [0; 32],
-            Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
-            Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order()
-        };
-    (expected_nonce, expected_final_sapling_root, expected_block_commitments)
+    let expected_block_commitments = match block
+        .commitment(&Mainnet)
+        .expect("Unexpected failure while parsing the blockcommitments field in get_block_data")
+    {
+        Commitment::PreSaplingReserved(bytes) => bytes,
+        Commitment::FinalSaplingRoot(_) => expected_final_sapling_root,
+        Commitment::ChainHistoryActivationReserved => [0; 32],
+        Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+        Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
+    };
+    (
+        expected_nonce,
+        expected_final_sapling_root,
+        expected_block_commitments,
+    )
 }
 
 #[tokio::test(flavor = "multi_thread")]

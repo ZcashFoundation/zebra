@@ -1007,14 +1007,17 @@ where
 
             let difficulty = header.difficulty_threshold.relative_to_network(&network);
 
-            let block_commitments = match header.commitment(&network, height)
-                .expect("Unexpected failure while parsing the blockcommitments field in get_block_header") {
-                    Commitment::PreSaplingReserved(bytes) => bytes,
-                    Commitment::FinalSaplingRoot(_) => final_sapling_root,
-                    Commitment::ChainHistoryActivationReserved => [0; 32],
-                    Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
-                    Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order()
-                };
+            let block_commitments = match header.commitment(&network, height).expect(
+                "Unexpected failure while parsing the blockcommitments field in get_block_header",
+            ) {
+                Commitment::PreSaplingReserved(bytes) => bytes,
+                Commitment::FinalSaplingRoot(_) => final_sapling_root,
+                Commitment::ChainHistoryActivationReserved => [0; 32],
+                Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+                Commitment::ChainHistoryBlockTxAuthCommitment(hash) => {
+                    hash.bytes_in_display_order()
+                }
+            };
 
             let block_header = GetBlockHeaderObject {
                 hash: GetBlockHash(hash),
