@@ -1,6 +1,6 @@
 # Platform Support
 
-Support for different platforms are organized into three tiers, each with a
+Support for different platforms is organized into three tiers, each with a
 different set of guarantees. For more information on the policies for platforms
 at each tier, see the [Platform Tier Policy](target-tier-policies.md).
 
