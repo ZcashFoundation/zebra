@@ -214,7 +214,7 @@ struct Spend<AnchorV: AnchorVariant> {
     // https://zips.z.cash/protocol/nu5.pdf#txnencodingandconsensus
     // parse using `zcash_deserialize_external_count` and `zcash_serialize_external_count`
     zkproof: Groth16Proof,
-    // This fields is stored in another separate array in v5 transactions
+    // This field is stored in another separate array in v5 transactions
     spend_auth_sig: redjubjub::Signature<SpendAuth>,
 }
 
