@@ -57,13 +57,13 @@ async fn rpc_getinfo() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
-// Helper function that returns the nonce and final sapling root of a given
-// Block.
+// Helper function that returns the nonce, final sapling root and
+// block commitments of a given Block.
 async fn get_block_data(
     read_state: &ReadStateService,
     block: Arc<Block>,
     height: usize,
-) -> ([u8; 32], [u8; 32]) {
+) -> ([u8; 32], [u8; 32], [u8; 32]) {
     let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
         .clone()
         .oneshot(zebra_state::ReadRequest::SaplingTree(HashOrHeight::Height(
@@ -85,7 +85,16 @@ async fn get_block_data(
     } else {
         [0; 32]
     };
-    (expected_nonce, expected_final_sapling_root)
+
+    let expected_block_commitments = match block.commitment(&Mainnet)
+        .expect("Unexpected failure while parsing the blockcommitments field in get_block_data") {
+            Commitment::PreSaplingReserved(bytes) => bytes,
+            Commitment::FinalSaplingRoot(_) => expected_final_sapling_root,
+            Commitment::ChainHistoryActivationReserved => [0; 32],
+            Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+            Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order()
+        };
+    (expected_nonce, expected_final_sapling_root, expected_block_commitments)
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -165,7 +174,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -184,7 +193,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(block.header.commitment_bytes.0),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -209,7 +218,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -228,7 +237,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(block.header.commitment_bytes.0),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -253,7 +262,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -276,7 +285,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(block.header.commitment_bytes.0),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -301,7 +310,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -324,7 +333,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(block.header.commitment_bytes.0),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -349,7 +358,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -368,7 +377,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(block.header.commitment_bytes.0),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -393,7 +402,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -412,7 +421,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(block.header.commitment_bytes.0),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
