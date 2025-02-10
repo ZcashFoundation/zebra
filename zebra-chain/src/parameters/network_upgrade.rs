@@ -227,7 +227,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
     // FIXME: use a proper value below
-    (Nu7, ConsensusBranchId(0xc8e71056)),
+    (Nu7, ConsensusBranchId(0x77777777)),
 ];
 
 /// The target block spacing before Blossom.
@@ -545,10 +545,12 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
+            // FIXME: remove this cfg
+            //#[cfg(zcash_unstable = "nu6")]
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
-            // FIXME: do we need the following cfg check?
-            #[cfg(zcash_unstable = "nu7")]
-            zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
+            // FIXME: remove this cfg and process Nu7 properly (uses Self::Nu6 for now)
+            //#[cfg(zcash_unstable = "nu6")]
+            zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu6,
         }
     }
 }

@@ -610,6 +610,7 @@ impl Parameters {
                 canopy: Some(1),
                 nu5: nu5_activation_height,
                 nu6: nu6_activation_height,
+                nu7: nu7_activation_height,
                 ..Default::default()
             })
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
