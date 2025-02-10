@@ -1,6 +1,6 @@
 //! Encrypted parts of Orchard notes.
 
-// FIXME: make it a generic and add support for OrchardZSA (encrypted tote size ofr it is not 580!)
+// FIXME: make it a generic and add support for OrchardZSA (where encrypted note size is not 580!)
 
 use std::{fmt, io};
 
