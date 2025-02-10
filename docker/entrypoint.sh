@@ -107,11 +107,12 @@ check_directory_files() {
 #
 # ## Positional Parameters
 #
-# - '$1' must contain cargo FEATURES as described here:
-#   https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options,
-#   or be empty
-# - the remaining params will be appended to a command starting with `exec cargo
-#   test ... -- ...`
+# - '$1' must contain
+#   - either cargo FEATURES as described here:
+#     https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options,
+#   - or be empty.
+# - The remaining params will be appended to a command starting with
+#   `exec cargo test ... -- ...`
 run_cargo_test() {
   # Start constructing the command, ensuring that $1 is enclosed in single
   # quotes as it's a feature list
