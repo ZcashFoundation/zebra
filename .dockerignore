@@ -21,3 +21,4 @@
 !zebra-*
 !zebrad
 !docker/entrypoint.sh
+!docker/default_zebra_config.toml

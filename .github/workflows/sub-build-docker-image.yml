@@ -32,12 +32,7 @@ on:
       rust_log:
         required: false
         type: string
-      # defaults to: vars.RUST_PROD_FEATURES
       features:
-        required: false
-        type: string
-      # defaults to: vars.RUST_TEST_FEATURES (and entrypoint.sh adds vars.RUST_PROD_FEATURES)
-      test_features:
         required: false
         type: string
       latest_tag:
@@ -48,20 +43,18 @@ on:
         required: false
         type: string
       no_cache:
-        description: 'Disable the Docker cache for this build'
+        description: "Disable the Docker cache for this build"
         required: false
         type: boolean
         default: false
 
     outputs:
       image_digest:
-        description: 'The image digest to be used on a caller workflow'
+        description: "The image digest to be used on a caller workflow"
         value: ${{ jobs.build.outputs.image_digest }}
 
-
 env:
-  FEATURES: ${{ inputs.features || vars.RUST_PROD_FEATURES }}
-  TEST_FEATURES: ${{ inputs.test_features || vars.RUST_TEST_FEATURES }}
+  FEATURES: ${{ inputs.features }}
   RUST_LOG: ${{ inputs.rust_log || vars.RUST_LOG }}
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
@@ -75,8 +68,8 @@ jobs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
       pull-requests: write # for `docker-scout` to be able to write the comment
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
@@ -129,9 +122,9 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.7
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_ARTIFACTS_SA }}'
-          token_format: 'access_token'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_ARTIFACTS_SA }}"
+          token_format: "access_token"
           # Some builds might take over an hour, and Google's default lifetime duration for
           # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
           # as some builds take over an hour.
@@ -173,7 +166,6 @@ jobs:
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
             RUST_LOG=${{ env.RUST_LOG }}
             FEATURES=${{ env.FEATURES }}
-            TEST_FEATURES=${{ env.TEST_FEATURES }}
           push: true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/

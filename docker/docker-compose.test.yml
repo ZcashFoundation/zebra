@@ -14,7 +14,7 @@ services:
           memory: 16G
     # Change this to the command you want to run, respecting the entrypoint.sh
     # For example, to run the tests, use the following command:
-    # command: ["cargo", "test", "--locked", "--release", "--features", "${TEST_FEATURES}", "--package", "zebrad", "--test", "acceptance", "--", "--nocapture", "--include-ignored", "sync_large_checkpoints_"]
+    # command: ["cargo", "test", "--locked", "--release", "--features", "${FEATURES}", "--package", "zebrad", "--test", "acceptance", "--", "--nocapture", "--include-ignored", "sync_large_checkpoints_"]
     volumes:
       - zebrad-cache:/var/cache/zebrad-cache
       - lwd-cache:/var/cache/lwd-cache

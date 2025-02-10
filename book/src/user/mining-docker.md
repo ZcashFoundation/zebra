@@ -20,9 +20,7 @@ meaning it is a Mainnet P2PKH address. Please remember to set your own address
 for the rewards.
 
 The port we mapped between the container and the host with the `-p` flag in the
-example above is Zebra's default Mainnet RPC port. If you want to use a
-different one, you can specify it in the `RPC_PORT` environment variable,
-similarly to `MINER_ADDRESS`, and then map it with the Docker's `-p` flag.
+example above is Zebra's default Mainnet RPC port.
 
 Instead of listing the environment variables on the command line, you can use
 Docker's `--env-file` flag to specify a file containing the variables. You

@@ -23,7 +23,7 @@ on:
         type: string
         description: 'Docker image to test'
       test_variables:
-        required: true
+        required: false
         type: string
         description: 'Environment variables used to select and configure the test'
       network:

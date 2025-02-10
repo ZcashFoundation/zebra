@@ -132,7 +132,7 @@ async fn scan_binary_starts() -> Result<()> {
 ///
 /// Needs a cache state close to the tip. A possible way to run it locally is:
 ///
-/// export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
+/// export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 /// cargo test scan_start_where_left -- --ignored --nocapture
 ///
 /// The test will run zebrad with a key to scan, scan the first few blocks after sapling and then stops.
@@ -145,9 +145,9 @@ async fn scan_start_where_left() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let Ok(zebrad_cachedir) = std::env::var("ZEBRA_CACHED_STATE_DIR") else {
+    let Ok(zebrad_cachedir) = std::env::var("ZEBRA_CACHE_DIR") else {
         tracing::info!("skipping scan_start_where_left test due to missing cached state, \
-                        please set a ZEBRA_CACHED_STATE_DIR env var with a populated and valid path to run this test");
+                        please set a ZEBRA_CACHE_DIR env var with a populated and valid path to run this test");
         return Ok(());
     };
 
@@ -244,7 +244,7 @@ async fn scan_start_where_left() -> Result<()> {
 /// Example of how to run the scan_task_commands test locally:
 ///
 /// ```console
-/// RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_task_commands -- --include-ignored --nocapture
+/// RUST_LOG=info ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test scan_task_commands -- --include-ignored --nocapture
 /// ```
 #[tokio::test]
 #[ignore]
