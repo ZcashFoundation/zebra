@@ -50,6 +50,19 @@ See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) fo
 
 You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like metrics with Prometheus.
 
+### Building with Custom Features
+
+Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
+
+```shell
+# Build with specific features
+docker build -f ./docker/Dockerfile --target runtime \
+    --build-arg FEATURES="default-release-binaries prometheus" \
+    --tag zebra:custom .
+```
+
+### Building with Metrics Support
+
 For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
 
 > [!IMPORTANT]

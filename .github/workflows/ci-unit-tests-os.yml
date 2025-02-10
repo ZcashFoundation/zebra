@@ -73,7 +73,7 @@ jobs:
   ### Build and test Zebra on all OSes ###
   ########################################
   test:
-    name: Test ${{ matrix.rust }} on ${{ matrix.os }}${{ matrix.features }}
+    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     # The large timeout is to accommodate:
     # - macOS and Windows builds (typically 50-90 minutes), and
     timeout-minutes: 120
@@ -83,11 +83,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         rust: [stable, beta]
-        # TODO: When vars.EXPERIMENTAL_FEATURES has features in it, add it here.
-        #       Or work out a way to trim the space from the variable: GitHub doesn't allow empty variables.
-        #       Or use `default` for the empty feature set and EXPERIMENTAL_FEATURES, and update the branch protection rules.
-        #features: ${{ fromJSON(format('["", "{0}"]', vars.EXPERIMENTAL_FEATURES)) }}
-        features: [""]
+        # We only test with default features in this workflow
+        # Other feature combinations are tested in specific workflows
+        features: ["default-release-binaries"]
         exclude:
         # We're excluding macOS beta for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
@@ -121,8 +119,7 @@ jobs:
         #with:
         #  workspaces: ". -> C:\\zebra-target"
         with:
-          # Split the experimental features cache from the regular cache, to avoid linker errors.
-          # (These might be "disk full" errors, or they might be dependency resolution issues.)
+          # Split the cache by feature set to avoid linker errors
           key: ${{ matrix.features }}
 
       - name: Change target output directory on Windows

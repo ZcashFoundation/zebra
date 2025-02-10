@@ -18,7 +18,6 @@
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
 ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-ARG EXPERIMENTAL_FEATURES=""
 
 ARG APP_HOME="/opt/zebrad"
 ARG RUST_VERSION=1.82.0
@@ -84,9 +83,7 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 # separately from the test and production image builds.
 ARG FEATURES
 ARG TEST_FEATURES
-ARG EXPERIMENTAL_FEATURES
-# TODO: add empty $EXPERIMENTAL_FEATURES when we can avoid adding an extra space to the end of the string
-ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
+ENV ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
 
 # Build Zebra test binaries, but don't run them
 
@@ -126,9 +123,6 @@ COPY ./ ./
 
 # Entrypoint environment variables
 ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
-# We repeat the ARGs here, so they are available in the entrypoint.sh script for $RUN_ALL_EXPERIMENTAL_TESTS
-ARG EXPERIMENTAL_FEATURES="journald prometheus filter-reload"
-ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # By default, runs the entrypoint tests specified by the environmental variables (if any are set)
 ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]

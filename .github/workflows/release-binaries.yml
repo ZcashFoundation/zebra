@@ -15,30 +15,9 @@ on:
       - released
 
 jobs:
-  # Each time this workflow is executed, a build will be triggered to create a new image
-  # with the corresponding tags using information from git
-
-  # The image will be named `zebra:<semver>-experimental`
-  build-experimental:
-    name: Build Experimental Features Release Docker
-    uses: ./.github/workflows/sub-build-docker-image.yml
-    with:
-      dockerfile_path: ./docker/Dockerfile
-      dockerfile_target: runtime
-      image_name: zebra
-      tag_suffix: -experimental
-      features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_EXPERIMENTAL_FEATURES) }}
-      rust_log: ${{ vars.RUST_LOG }}
-    # This step needs access to Docker Hub secrets to run successfully
-    secrets: inherit
-
   # The image will be named `zebra:<semver>`
-  # It should be built last, so tags with the same name point to the production build, not the experimental build.
   build:
     name: Build Release Docker
-    # Run this build last, regardless of whether experimental worked
-    needs: build-experimental
-    if: always()
     uses: ./.github/workflows/sub-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -53,7 +32,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build, build-experimental ]
+    needs: [ build ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest
