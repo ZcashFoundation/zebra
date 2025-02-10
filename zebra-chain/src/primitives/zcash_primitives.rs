@@ -288,10 +288,8 @@ impl<'a> PrecomputedTxData<'a> {
                 all_prev_outputs: all_previous_outputs,
             },
         };
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = alt_tx
-            .into_data()
-            // FIXME: do we need to pass another arg values or orchard_zsa and issue instead of IdentityMap?
-            .map_authorization(
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> =
+            alt_tx.into_data().map_authorization(
                 f_transparent,
                 IdentityMap,
                 IdentityMap,
