@@ -149,7 +149,7 @@ run_tests() {
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
-    exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" \
+    exec cargo test --locked --release --features "${FEATURES}" \
       --workspace -- --nocapture --include-ignored \
       --skip check_no_git_refs_in_cargo_lock
 
@@ -157,106 +157,108 @@ run_tests() {
     # Run unit, basic acceptance tests, and ignored tests with experimental
     # features. If the lightwalletd environment variables are set, we will
     # also run those tests.
-    exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES_EXPERIMENTAL}" \
-      --workspace -- --nocapture --include-ignored \
-      --skip check_no_git_refs_in_cargo_lock
+    exec cargo test --locked --release --workspace \
+      --features "${FEATURES} journald prometheus filter-reload" \
+      -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
   elif [[ "${RUN_CHECK_NO_GIT_REFS}" -eq "1" ]]; then
     # Run the check_no_git_refs_in_cargo_lock test.
-    exec cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" \
-      --workspace -- --nocapture --include-ignored check_no_git_refs_in_cargo_lock
+    exec cargo test --locked --release --workspace --features "${FEATURES}" \
+      -- --nocapture --include-ignored check_no_git_refs_in_cargo_lock
 
   elif [[ "${TEST_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
     # Run state tests with fake activation heights.
-    exec cargo test --locked --release --features "zebra-test" --package zebra-state \
-      --lib -- --nocapture --include-ignored with_fake_activation_heights
+    exec cargo test --locked --release --lib --features "zebra-test" \
+      --package zebra-state \
+      -- --nocapture --include-ignored with_fake_activation_heights
 
   elif [[ "${TEST_ZEBRA_EMPTY_SYNC}" -eq "1" ]]; then
-    # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "sync_large_checkpoints_"
+    # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
+    # state.
+    run_cargo_test "${FEATURES}" "sync_large_checkpoints_"
 
   elif [[ -n "${FULL_SYNC_MAINNET_TIMEOUT_MINUTES}" ]]; then
     # Run a Zebra full sync test on mainnet.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "full_sync_mainnet"
+    run_cargo_test "${FEATURES}" "full_sync_mainnet"
 
   elif [[ -n "${FULL_SYNC_TESTNET_TIMEOUT_MINUTES}" ]]; then
     # Run a Zebra full sync test on testnet.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "full_sync_testnet"
+    run_cargo_test "${FEATURES}" "full_sync_testnet"
 
   elif [[ "${TEST_DISK_REBUILD}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
-    #
-    # TODO: use environment variables instead of Rust features (part of #2995)
-    run_cargo_test "test_sync_to_mandatory_checkpoint_${NETWORK,,},${ENTRYPOINT_FEATURES}" \
-      "sync_to_mandatory_checkpoint_${NETWORK,,}"
+    run_cargo_test "sync_to_mandatory_checkpoint_${NETWORK,,}" \
+      "test_sync_to_mandatory_checkpoint_${NETWORK,,},${FEATURES}"
 
   elif [[ "${TEST_UPDATE_SYNC}" -eq "1" ]]; then
-    # Run a Zebra sync starting at the cached tip, and syncing to the latest tip.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "zebrad_update_sync"
+    # Run a Zebra sync starting at the cached tip, and syncing to the latest
+    # tip.
+    run_cargo_test "${FEATURES}" "zebrad_update_sync"
 
   elif [[ "${TEST_CHECKPOINT_SYNC}" -eq "1" ]]; then
-    # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing past it.
-    # TODO: use environment variables instead of Rust features (part of #2995)
-    run_cargo_test "test_sync_past_mandatory_checkpoint_${NETWORK,,},${ENTRYPOINT_FEATURES}" \
-      "sync_past_mandatory_checkpoint_${NETWORK,,}"
+    # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
+    # past it.
+    run_cargo_test "sync_past_mandatory_checkpoint_${NETWORK,,}" \
+      "test_sync_past_mandatory_checkpoint_${NETWORK,,},${FEATURES}"
 
   elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
     # Generate checkpoints after syncing Zebra from a cached state on mainnet.
     #
     # TODO: disable or filter out logs like:
     # test generate_checkpoints_mainnet has been running for over 60 seconds
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "generate_checkpoints_mainnet"
+    run_cargo_test "${FEATURES}" "generate_checkpoints_mainnet"
 
   elif [[ "${GENERATE_CHECKPOINTS_TESTNET}" -eq "1" ]]; then
     # Generate checkpoints after syncing Zebra on testnet.
     #
     # This test might fail if testnet is unstable.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "generate_checkpoints_testnet"
+    run_cargo_test "${FEATURES}" "generate_checkpoints_testnet"
 
   elif [[ "${TEST_LWD_RPC_CALL}" -eq "1" ]]; then
     # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
     # Run both the fully synced RPC test and the subtree snapshot test, one test
     # at a time. Since these tests use the same cached state, a state problem in
     # the first test can fail the second test.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "--test-threads" "1" "fully_synced_rpc_"
+    run_cargo_test "${FEATURES}" "--test-threads" "1" "fully_synced_rpc_"
 
   elif [[ "${TEST_LWD_INTEGRATION}" -eq "1" ]]; then
     # Test launching lightwalletd with an empty lightwalletd and Zebra state.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_integration"
+    run_cargo_test "${FEATURES}" "lightwalletd_integration"
 
   elif [[ "${TEST_LWD_FULL_SYNC}" -eq "1" ]]; then
     # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_full_sync"
+    run_cargo_test "${FEATURES}" "lightwalletd_full_sync"
 
   elif [[ "${TEST_LWD_UPDATE_SYNC}" -eq "1" ]]; then
     # Starting with a cached Zebra and lightwalletd tip, run a quick update sync.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_update_sync"
+    run_cargo_test "${FEATURES}" "lightwalletd_update_sync"
 
   # These tests actually use gRPC.
   elif [[ "${TEST_LWD_GRPC}" -eq "1" ]]; then
     # Starting with a cached Zebra and lightwalletd tip, test all gRPC calls to
     # lightwalletd, which calls Zebra.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "lightwalletd_wallet_grpc_tests"
+    run_cargo_test "${FEATURES}" "lightwalletd_wallet_grpc_tests"
 
   elif [[ "${TEST_LWD_TRANSACTIONS}" -eq "1" ]]; then
     # Starting with a cached Zebra and lightwalletd tip, test sending
     # transactions gRPC call to lightwalletd, which calls Zebra.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "sending_transactions_using_lightwalletd"
+    run_cargo_test "${FEATURES}" "sending_transactions_using_lightwalletd"
 
   # These tests use mining code, but don't use gRPC.
   elif [[ "${TEST_GET_BLOCK_TEMPLATE}" -eq "1" ]]; then
     # Starting with a cached Zebra tip, test getting a block template from
     # Zebra's RPC server.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "get_block_template"
+    run_cargo_test "${FEATURES}" "get_block_template"
 
   elif [[ "${TEST_SUBMIT_BLOCK}" -eq "1" ]]; then
     # Starting with a cached Zebra tip, test sending a block to Zebra's RPC
     # port.
-    run_cargo_test "${ENTRYPOINT_FEATURES}" "submit_block"
+    run_cargo_test "${FEATURES}" "submit_block"
 
   elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
     # Test that the scan task commands are working.
-    exec cargo test --locked --release --features "zebra-test" --package zebra-scan \
+    exec cargo test --locked --release --features "zebra-test"\
+      --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands
 
   else
