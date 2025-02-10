@@ -192,6 +192,7 @@ jobs:
       image_name: zebrad
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
+      features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 

@@ -145,15 +145,14 @@ run_cargo_test() {
 run_tests() {
   # Validate the test variables. For these tests, we activate the test features
   # to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
-  if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
+  if [[ "${RUN_BASIC_TESTS}" -eq "1" ]]; then
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
-    exec cargo test --locked --release --features "${FEATURES}" \
-      --workspace -- --nocapture --include-ignored \
-      --skip check_no_git_refs_in_cargo_lock
+    exec cargo test --locked --release --workspace --features "${FEATURES}" \
+      -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
-  elif [[ "${RUN_ALL_EXPERIMENTAL_TESTS}" -eq "1" ]]; then
+  elif [[ "${RUN_EXTRA_TESTS}" -eq "1" ]]; then
     # Run unit, basic acceptance tests, and ignored tests with experimental
     # features. If the lightwalletd environment variables are set, we will
     # also run those tests.
@@ -187,6 +186,7 @@ run_tests() {
 
   elif [[ "${TEST_DISK_REBUILD}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
+  # TODO: check if this test actually works
     run_cargo_test "sync_to_mandatory_checkpoint_${NETWORK,,}" \
       "test_sync_to_mandatory_checkpoint_${NETWORK,,},${FEATURES}"
 
@@ -257,7 +257,7 @@ run_tests() {
 
   elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
     # Test that the scan task commands are working.
-    exec cargo test --locked --release --features "zebra-test"\
+    exec cargo test --locked --release --features "zebra-test" \
       --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands
 

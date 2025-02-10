@@ -99,7 +99,7 @@ To run CI tests locally, which mimics the testing done in our CI pipelines on Gi
 
 1. **Setting Environment Variables**:
    - Modify the `test.env` file to set the desired test configurations.
-   - For running all tests, set `RUN_ALL_TESTS=1` in `test.env`.
+   - For running all tests, set `RUN_BASIC_TESTS=1` in `test.env`.
 
 2. **Starting the Test Environment**:
    - Use Docker Compose to start the testing environment:
@@ -129,7 +129,6 @@ This approach ensures you can run the same tests locally that are run in CI, pro
 #### Configuration
 
 - `FEATURES`: Specifies the features to build `zebrad` with. Example: `"default-release-binaries getblocktemplate-rpcs"`
-- `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
 
 #### Logging
 
@@ -140,9 +139,7 @@ This approach ensures you can run the same tests locally that are run in CI, pro
 
 #### Tests
 
-- `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
 - `ZEBRA_SKIP_IPV6_TESTS`: Skips IPv6 tests. Example: `1`
-- `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
 
 #### CI/CD
 

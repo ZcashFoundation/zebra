@@ -12,14 +12,6 @@
 #
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
-#
-# Build zebrad with these features
-#
-# Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES and vars.RUST_TEST_FEATURES
-# https://github.com/ZcashFoundation/zebra/settings/variables/actions
-ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-ARG EXPERIMENTAL_FEATURES=""
 
 ARG APP_HOME="/opt/zebrad"
 ARG RUST_VERSION=1.84.0
@@ -72,17 +64,12 @@ COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
+ARG FEATURES
+ENV FEATURES=${FEATURES}
+
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
-
-# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
-# separately from the test and production image builds.
-ARG FEATURES
-ARG TEST_FEATURES
-ARG EXPERIMENTAL_FEATURES
-# TODO: add empty $EXPERIMENTAL_FEATURES when we can avoid adding an extra space to the end of the string
-ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
 
 # Build Zebra test binaries, but don't run them
 
@@ -112,19 +99,13 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=cache,target=${APP_HOME}/target/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
-    cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run && \
+    cargo test --locked --release --features "${FEATURES}" --workspace --no-run && \
     cp ${APP_HOME}/target/release/zebrad /usr/local/bin && \
     cp ${APP_HOME}/target/release/zebra-checkpoints /usr/local/bin
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
 COPY ./ ./
-
-# Entrypoint environment variables
-ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
-# We repeat the ARGs here, so they are available in the entrypoint.sh script for $RUN_ALL_EXPERIMENTAL_TESTS
-ARG EXPERIMENTAL_FEATURES="journald prometheus filter-reload"
-ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
 
 # Run tests specified by the env vars
 ENTRYPOINT [ "entrypoint.sh", "test" ]
