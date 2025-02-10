@@ -75,7 +75,6 @@ pub type ItemVerifyingKey = VerifyingKey;
 
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key.
-    // FIXME: support OrchardZSA?
     pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
 }
 
@@ -144,7 +143,6 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
             .flags
             .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
 
-        // FIXME: support OrchardZSA?
         let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
             .expect("type should not have unexpected bits");
 
