@@ -144,14 +144,9 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
             .flags
             .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
 
-        // FIXME: simplify the flags creation - make `Flags::from_parts` method pub?
         // FIXME: support OrchardZSA?
-        let flags = match (enable_spend, enable_output) {
-            (false, false) => orchard::builder::BundleType::DISABLED.flags(),
-            (false, true) => orchard::bundle::Flags::SPENDS_DISABLED_WITHOUT_ZSA,
-            (true, false) => orchard::bundle::Flags::OUTPUTS_DISABLED,
-            (true, true) => orchard::bundle::Flags::ENABLED_WITHOUT_ZSA,
-        };
+        let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
+            .expect("type should not have unexpected bits");
 
         let instances = shielded_data
             .actions()
