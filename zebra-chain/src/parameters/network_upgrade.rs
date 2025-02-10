@@ -549,7 +549,7 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             //#[cfg(zcash_unstable = "nu6")]
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
             // FIXME: remove this cfg and process Nu7 properly (uses Self::Nu6 for now)
-            //#[cfg(zcash_unstable = "nu6")]
+            #[cfg(zcash_unstable = "nu7")]
             zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu6,
         }
     }
