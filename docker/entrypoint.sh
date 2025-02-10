@@ -267,7 +267,7 @@ run_tests() {
       -- --nocapture --include-ignored scan_task_commands
 
   else
-    if [[ "$1" == "zebrad" ]] && [[ -f "${ZEBRA_CONF_PATH}" ]]; then
+    if [[ "$1" == "zebrad" ]]; then
       shift
       exec zebrad -c "${ZEBRA_CONF_PATH}" "$@"
     else
