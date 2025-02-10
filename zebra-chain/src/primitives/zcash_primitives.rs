@@ -137,8 +137,7 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
     }
 }
 
-// FIXME: is this implemetation correct?
-#[cfg(zcash_unstable = "nu6")]
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
 impl zp_tx::components::issuance::MapIssueAuth<orchard::issuance::Signed, orchard::issuance::Signed>
     for IdentityMap
 {
@@ -157,12 +156,10 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    // FIXME: is this correct?
-    #[cfg(zcash_unstable = "nu6")]
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type OrchardZsaAuth = orchard::bundle::Authorized;
 
-    // FIXME: is this correct?
-    #[cfg(zcash_unstable = "nu6")]
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type IssueAuth = orchard::issuance::Signed;
 }
 
