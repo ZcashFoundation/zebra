@@ -198,6 +198,7 @@ run_tests() {
   elif [[ "${TEST_CHECKPOINT_SYNC}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
     # past it.
+  # TODO: check if this test actually works
     run_cargo_test "sync_past_mandatory_checkpoint_${NETWORK,,}" \
       "test_sync_past_mandatory_checkpoint_${NETWORK,,},${FEATURES}"
 
