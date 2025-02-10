@@ -68,9 +68,10 @@ jobs:
       - name: Run zebrad tests with experimental features
         env:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+          EXPERIMENTAL_FEATURES: ${{ vars.RUST_EXPERIMENTAL_FEATURES }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e NETWORK -e RUN_ALL_EXPERIMENTAL_TESTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty -e NETWORK -e RUN_ALL_EXPERIMENTAL_TESTS=1 -e EXPERIMENTAL_FEATURES ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Run state tests with fake activation heights.
   #
