@@ -71,7 +71,6 @@ ENV HOME="/home/zebra"
 ENV CARGO_HOME="${HOME}/.cargo/"
 
 RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
-RUN chown -R ${UID}:${GID} ${HOME}
 
 WORKDIR ${HOME}
 
@@ -120,7 +119,9 @@ ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
 COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY ./ ./
+COPY ./ ${HOME}
+
+RUN chown -R ${UID}:${GID} ${HOME}
 
 USER $USER
 
