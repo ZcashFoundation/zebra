@@ -29,8 +29,7 @@ pub enum NetworkKind {
     /// A test network.
     Testnet,
 
-    /// Regtest mode, not yet implemented
-    // TODO: Add `new_regtest()` and `is_regtest` methods on `Network`.
+    /// Regtest mode
     Regtest,
 }
 
@@ -182,6 +181,16 @@ impl Network {
         match self {
             Network::Mainnet => NetworkKind::Mainnet,
             Network::Testnet(params) if params.is_regtest() => NetworkKind::Regtest,
+            Network::Testnet(_) => NetworkKind::Testnet,
+        }
+    }
+
+    /// Returns [`NetworkKind::Testnet`] on Testnet and Regtest, or [`NetworkKind::Mainnet`] on Mainnet.
+    ///
+    /// This is used for transparent addresses, as the address prefix is the same on Regtest as it is on Testnet.
+    pub fn t_addr_kind(&self) -> NetworkKind {
+        match self {
+            Network::Mainnet => NetworkKind::Mainnet,
             Network::Testnet(_) => NetworkKind::Testnet,
         }
     }
