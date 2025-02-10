@@ -131,6 +131,7 @@ run_cargo_test() {
 
   # Run the command using eval. This will replace the current process with the
   # cargo command.
+  echo "running ${cmd}"
   eval "${cmd}" || {
     echo "Cargo test failed"
     exit 1
@@ -186,9 +187,12 @@ run_tests() {
 
   elif [[ "${TEST_DISK_REBUILD}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
-  # TODO: check if this test actually works
+    # TODO: check if this test actually works
+    echo "running test_disk_rebuild"
+    echo "sync_to_mandatory_checkpoint_${NETWORK,,}" "test_sync_to_mandatory_checkpoint_${NETWORK,,},${FEATURES}"
     run_cargo_test "sync_to_mandatory_checkpoint_${NETWORK,,}" \
       "test_sync_to_mandatory_checkpoint_${NETWORK,,},${FEATURES}"
+    echo "ran test_disk_rebuild"
 
   elif [[ "${TEST_UPDATE_SYNC}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached tip, and syncing to the latest
@@ -198,7 +202,7 @@ run_tests() {
   elif [[ "${TEST_CHECKPOINT_SYNC}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
     # past it.
-  # TODO: check if this test actually works
+    # TODO: check if this test actually works
     run_cargo_test "sync_past_mandatory_checkpoint_${NETWORK,,}" \
       "test_sync_past_mandatory_checkpoint_${NETWORK,,},${FEATURES}"
 
