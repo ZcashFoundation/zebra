@@ -64,10 +64,10 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 # is not very DRY as the same code repeats for the `runtime` target below, but I
 # didn't find a suitable way to share the setup between the two targets.
 
-ENV USER="zebra"
 ENV UID=101
 ENV GID=${UID}
-ENV HOME="/home/zebra"
+ENV USER="zebra"
+ENV HOME="/home/${USER}"
 ENV CARGO_HOME="${HOME}/.cargo/"
 
 RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
@@ -114,9 +114,16 @@ COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 COPY --chown=${UID}:${GID} ./docker/default_zebra_config.toml ${ZEBRA_CONF_PATH}
 
+ARG LWD_CACHE_DIR
+ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
+RUN mkdir -p ${LWD_CACHE_DIR}
+RUN chown -R ${UID}:${GID} ${LWD_CACHE_DIR}
+
 # Use the same cache dir as in the production environment.
+ARG ZEBRA_CACHE_DIR
 ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+RUN mkdir -p ${ZEBRA_CACHE_DIR}
+RUN chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
 COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY ./ ${HOME}
