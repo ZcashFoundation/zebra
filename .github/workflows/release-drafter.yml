@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Drafts your next Release notes
-      - uses: release-drafter/release-drafter@v6.0.0
+      - uses: release-drafter/release-drafter@v6.1.0
         with:
           config-name: release-drafter.yml
           commitish: main
