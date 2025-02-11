@@ -72,7 +72,7 @@
 //! - `ZEBRA_TEST_LIGHTWALLETD` env variable: Needs to be present to run any of the lightwalletd tests.
 //! - `ZEBRA_CACHE_DIR` env variable: The path to a Zebra cached state directory.
 //!   If not set, it defaults to `/zebrad-cache`.
-//! - `LIGHTWALLETD_DATA_DIR` env variable: The path to a lightwalletd database.
+//! - `LWD_CACHE_DIR` env variable: The path to a lightwalletd database.
 //! - `--features lightwalletd-grpc-tests` cargo flag: The flag given to cargo to build the source code of the running test.
 //!
 //! Here are some examples of running each test:
@@ -83,7 +83,7 @@
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
+//! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
 //! $ cargo test lightwalletd_update_sync -- --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
@@ -99,12 +99,12 @@
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
+//! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
 //! $ cargo test sending_transactions_using_lightwalletd --features lightwalletd-grpc-tests -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ export LIGHTWALLETD_DATA_DIR="/path/to/lightwalletd/database"
+//! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
 //! $ cargo test lightwalletd_wallet_grpc_tests --features lightwalletd-grpc-tests -- --ignored --nocapture
 //! ```
 //!
@@ -1804,7 +1804,7 @@ fn zebrad_update_sync() -> Result<()> {
 ///
 /// This test only runs when:
 /// - the `ZEBRA_TEST_LIGHTWALLETD`, `ZEBRA_CACHE_DIR`, and
-///   `LIGHTWALLETD_DATA_DIR` env vars are set, and
+///   `LWD_CACHE_DIR` env vars are set, and
 /// - Zebra is compiled with `--features=lightwalletd-grpc-tests`.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
@@ -1839,7 +1839,7 @@ fn lightwalletd_full_sync() -> Result<()> {
 /// - launch lightwalletd with empty states,
 /// - if `ZEBRA_CACHE_DIR` is set:
 ///   - run a full sync
-/// - if `ZEBRA_CACHE_DIR` and `LIGHTWALLETD_DATA_DIR` are set:
+/// - if `ZEBRA_CACHE_DIR` and `LWD_CACHE_DIR` are set:
 ///   - run a quick update sync,
 ///   - run a send transaction gRPC test,
 ///   - run read-only gRPC tests.
@@ -1863,10 +1863,10 @@ async fn lightwalletd_test_suite() -> Result<()> {
     {
         // Do the quick tests first
 
-        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHE_DIR are set
+        // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
         lightwalletd_integration_test(UpdateCachedState)?;
 
-        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHE_DIR are set
+        // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
         common::lightwalletd::wallet_grpc_test::run().await?;
 
         // Then do the slow tests
@@ -1877,7 +1877,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
             allow_lightwalletd_cached_state: true,
         })?;
 
-        // Only runs when LIGHTWALLETD_DATA_DIR and ZEBRA_CACHE_DIR are set
+        // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
         common::lightwalletd::send_transaction_test::run().await?;
     }
 

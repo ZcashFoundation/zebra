@@ -21,7 +21,7 @@ use super::{
         PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
     },
     launch::{LIGHTWALLETD_DELAY, LIGHTWALLETD_FULL_SYNC_TIP_DELAY, LIGHTWALLETD_UPDATE_TIP_DELAY},
-    lightwalletd::LIGHTWALLETD_DATA_DIR,
+    lightwalletd::LWD_CACHE_DIR,
     sync::FINISH_PARTIAL_SYNC_TIMEOUT,
 };
 
@@ -140,7 +140,7 @@ impl TestType {
         }
     }
 
-    /// Can this test create a new `LIGHTWALLETD_DATA_DIR` cached state?
+    /// Can this test create a new `LWD_CACHE_DIR` cached state?
     pub fn can_create_lightwalletd_cached_state(&self) -> bool {
         match self {
             LaunchWithEmptyState { .. } | UseAnyState => false,
@@ -235,24 +235,24 @@ impl TestType {
         if !self.launches_lightwalletd() || !use_or_create_lwd_cache {
             tracing::info!(
                 "running {test_name:?} {self:?} lightwalletd test, \
-                 ignoring any cached state in the {LIGHTWALLETD_DATA_DIR:?} environment variable",
+                 ignoring any cached state in the {LWD_CACHE_DIR:?} environment variable",
             );
 
             return None;
         }
 
-        match env::var_os(LIGHTWALLETD_DATA_DIR) {
+        match env::var_os(LWD_CACHE_DIR) {
             Some(path) => Some(path.into()),
             None => {
                 if self.needs_lightwalletd_cached_state() {
                     tracing::info!(
                         "skipped {test_name:?} {self:?} lightwalletd test, \
-                         set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run the test",
+                         set the {LWD_CACHE_DIR:?} environment variable to run the test",
                     );
                 } else if self.allow_lightwalletd_cached_state() {
                     tracing::info!(
                         "running {test_name:?} {self:?} lightwalletd test without cached state, \
-                         set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run with cached state",
+                         set the {LWD_CACHE_DIR:?} environment variable to run with cached state",
                     );
                 }
 
