@@ -209,7 +209,7 @@ jobs:
       test_id: "testnet-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK=Testnet'
+      test_variables: "-e NETWORK=Testnet"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -309,7 +309,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
+          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
@@ -421,7 +421,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file }},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
+          --container-env "NETWORK=${{ inputs.network }},LOG_FILE=${{ inputs.log_file }},SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --metadata google-logging-enabled=true,google-monitoring-enabled=true \
