@@ -130,8 +130,6 @@ COPY ./ ${HOME}
 
 RUN chown -R ${UID}:${GID} ${HOME}
 
-USER $USER
-
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
 # In this stage we build a release (generate the zebrad binary)
