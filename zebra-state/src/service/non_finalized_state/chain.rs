@@ -359,6 +359,26 @@ impl Chain {
         (block, treestate)
     }
 
+    // Returns the block at the provided height and all of its descendant blocks.
+    pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
+        self.blocks
+            .range(block_height..)
+            .map(|(_h, b)| b.clone())
+            .collect()
+    }
+
+    // Returns a new chain without the invalidated block or its descendants.
+    pub fn invalidate_block(
+        &self,
+        block_hash: block::Hash,
+    ) -> Option<(Self, Vec<ContextuallyVerifiedBlock>)> {
+        let block_height = self.height_by_hash(block_hash)?;
+        let mut new_chain = self.fork(block_hash)?;
+        new_chain.pop_tip();
+        new_chain.last_fork_height = None;
+        Some((new_chain, self.child_blocks(&block_height)))
+    }
+
     /// Returns the height of the chain root.
     pub fn non_finalized_root_height(&self) -> block::Height {
         self.blocks
@@ -1600,7 +1620,7 @@ impl DerefMut for Chain {
 
 /// The revert position being performed on a chain.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-enum RevertPosition {
+pub(crate) enum RevertPosition {
     /// The chain root is being reverted via [`Chain::pop_root`], when a block
     /// is finalized.
     Root,
@@ -1619,7 +1639,7 @@ enum RevertPosition {
 /// and [`Chain::pop_tip`] functions, and fear that it would be easy to
 /// introduce bugs when updating them, unless the code was reorganized to keep
 /// related operations adjacent to each other.
-trait UpdateWith<T> {
+pub(crate) trait UpdateWith<T> {
     /// When `T` is added to the chain tip,
     /// update [`Chain`] cumulative data members to add data that are derived from `T`.
     fn update_chain_tip_with(&mut self, _: &T) -> Result<(), ValidateContextError>;
