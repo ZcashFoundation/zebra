@@ -43,7 +43,7 @@ on:
       lwd_state_dir:
         required: false
         type: string
-        default: '/var/cache/lwd-cache'
+        default: '/home/zebra/.cache/lwd'
         description: 'Lightwalletd cached state directory and input image prefix to search in GCP'
       disk_prefix:
         required: false

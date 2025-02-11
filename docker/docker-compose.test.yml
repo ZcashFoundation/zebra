@@ -17,7 +17,7 @@ services:
     # command: ["cargo", "test", "--locked", "--release", "--features", "${FEATURES}", "--package", "zebrad", "--test", "acceptance", "--", "--nocapture", "--include-ignored", "sync_large_checkpoints_"]
     volumes:
       - zebrad-cache:/home/zebra/.cache/zebra
-      - lwd-cache:/var/cache/lwd-cache
+      - lwd-cache:/home/zebra/.cache/lwd
     ports:
       # Zebra uses the following inbound and outbound TCP ports
       - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
