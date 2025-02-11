@@ -27,7 +27,7 @@ docker volume create zebrad-cache
 docker run -d --platform linux/amd64 \
   --restart unless-stopped \
   --env-file .env \
-  --mount type=volume,source=zebrad-cache,target=/var/cache/zebrad-cache \
+  --mount type=volume,source=zebrad-cache,target=/home/zebra/.cache/zebra \
   -p 8233:8233 \
   --memory 16G \
   --cpus 4 \
@@ -78,7 +78,7 @@ Based on our actual `entrypoint.sh` script, the following configuration file wil
 network = "Mainnet"
 listen_addr = "0.0.0.0"
 [state]
-cache_dir = "/var/cache/zebrad-cache"
+cache_dir = "/home/zebra/.cache/zebra"
 [metrics]
 endpoint_addr = "127.0.0.1:9999"
 ```
@@ -151,7 +151,7 @@ This approach ensures you can run the same tests locally that are run in CI, pro
 
 #### Zebra Configuration
 
-- `ZEBRA_CACHE_DIR`: Directory for cached state. Example: `"/var/cache/zebrad-cache"`
+- `ZEBRA_CACHE_DIR`: Directory for cached state. Example: `"/home/zebra/.cache/zebra"`
 
 #### Mining Configuration
 

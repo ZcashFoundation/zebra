@@ -16,7 +16,7 @@ services:
     # For example, to run the tests, use the following command:
     # command: ["cargo", "test", "--locked", "--release", "--features", "${FEATURES}", "--package", "zebrad", "--test", "acceptance", "--", "--nocapture", "--include-ignored", "sync_large_checkpoints_"]
     volumes:
-      - zebrad-cache:/var/cache/zebrad-cache
+      - zebrad-cache:/home/zebra/.cache/zebra
       - lwd-cache:/var/cache/lwd-cache
     ports:
       # Zebra uses the following inbound and outbound TCP ports

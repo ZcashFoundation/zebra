@@ -38,7 +38,7 @@ on:
       zebra_state_dir:
         required: false
         type: string
-        default: '/var/cache/zebrad-cache'
+        default: '/home/zebra/.cache/zebra'
         description: 'Zebra cached state directory and input image prefix to search in GCP'
       lwd_state_dir:
         required: false
