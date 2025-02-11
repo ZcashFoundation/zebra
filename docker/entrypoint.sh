@@ -78,9 +78,7 @@ prepare_conf_file() {
   sed -i '/^#/d; /^$/d' "${1}"
 
   echo "Prepared the following Zebra config:"
-  echo ""
   cat "$1"
-  echo ""
 }
 
 # Checks if a directory contains subdirectories
@@ -131,7 +129,8 @@ run_cargo_test() {
 
   # Run the command using eval. This will replace the current process with the
   # cargo command.
-  echo "running ${cmd}"
+  echo "Running:"
+  echo "${cmd}"
   eval "${cmd}" || {
     echo "Cargo test failed"
     exit 1

@@ -170,7 +170,6 @@ jobs:
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v2.1.0.toml"'
       grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v2.1.0.toml"'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
@@ -199,8 +198,6 @@ jobs:
       test_id: "default-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: "-e NETWORK"
-      network: "Mainnet"
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
@@ -212,8 +209,7 @@ jobs:
       test_id: "testnet-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: "-e NETWORK"
-      network: "Testnet"
+      test_variables: '-e NETWORK=Testnet'
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
