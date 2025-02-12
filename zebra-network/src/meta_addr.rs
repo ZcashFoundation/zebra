@@ -445,6 +445,11 @@ impl MetaAddr {
         self.last_response.or(self.untrusted_last_seen)
     }
 
+    /// Returns whether the address is from an inbound peer connection
+    pub fn is_inbound(&self) -> bool {
+        self.is_inbound
+    }
+
     /// Returns the unverified "last seen time" gossiped by the remote peer that
     /// sent us this address.
     ///

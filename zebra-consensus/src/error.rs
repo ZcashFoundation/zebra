@@ -304,11 +304,9 @@ impl TransactionError {
             | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput
             | CoinbaseExpiryBlockHeight { .. }
-            | MaximumExpiryHeight { .. }
             | IncorrectFee
             | Subsidy(_)
             | WrongVersion
-            | UnsupportedByNetworkUpgrade(_, _)
             | NoInputs
             | NoOutputs
             | BadBalance
