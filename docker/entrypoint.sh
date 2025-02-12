@@ -157,7 +157,7 @@ run_tests() {
 
   elif [[ "${TEST_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
     # Run state tests with fake activation heights.
-    exec cargo test --locked --release --lib --features "zebra-test" \
+    exec cargo test --locked --release --lib --features "${FEATURES}" \
       --package zebra-state \
       -- --nocapture --include-ignored with_fake_activation_heights
 
