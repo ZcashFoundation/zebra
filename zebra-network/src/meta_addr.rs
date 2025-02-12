@@ -662,7 +662,7 @@ impl MetaAddr {
         }
 
         // Avoid responding to GetAddr requests with addresses of misbehaving peers.
-        if self.misbehavior_score != 0 {
+        if self.misbehavior_score != 0 || self.is_inbound {
             return None;
         }
 
@@ -675,16 +675,8 @@ impl MetaAddr {
             .checked_sub(remainder.into())
             .expect("unexpected underflow: rem_euclid is strictly less than timestamp");
 
-        let addr = if self.is_inbound {
-            let mut addr = self.addr;
-            addr.set_port(network.default_port());
-            addr
-        } else {
-            self.addr
-        };
-
         Some(MetaAddr {
-            addr: canonical_peer_addr(addr),
+            addr: canonical_peer_addr(self.addr),
             // initial peers are sanitized assuming they are `NODE_NETWORK`
             // TODO: split untrusted and direct services
             //       consider sanitizing untrusted services to NODE_NETWORK (#2324)
