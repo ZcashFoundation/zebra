@@ -26,14 +26,14 @@ incrementalmerkletree = { version = "0.7.1", features = ["legacy-api"] }
 orchard = "0.11.0"
 sapling-crypto = "0.5.0"
 # TODO: Revert to a release once librustzcash is released (#8749).
-zcash_address = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
-zcash_client_backend = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
-zcash_encoding = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
-zcash_history = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
-zcash_keys = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
-zcash_primitives = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
-zcash_proofs = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
-zcash_protocol = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm-zebra" }
+zcash_address = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_client_backend = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_encoding = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_history = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_keys = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_primitives = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_proofs = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_protocol = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
 zip32 = "0.2"
 abscissa_core = "0.7.0"
 atty = "0.2.14"

@@ -17,8 +17,6 @@ categories = ["asynchronous", "cryptography::cryptocurrencies"]
 [features]
 default = []
 
-nsm = []
-
 # Production features that activate extra dependencies, or extra features in dependencies
 
 progress-bar = [

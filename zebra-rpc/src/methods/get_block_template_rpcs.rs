@@ -282,7 +282,7 @@ pub trait GetBlockTemplateRpc {
     ///
     /// - `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.
     ///
-    /// - `burn_amount`: (numeric, optional) The amount of money to be burned in a transaction [ZIP-233]
+    /// - `zip233_amount`: (numeric, optional) The amount of money to be burned in a transaction [ZIP-233]
     /// # Notes
     ///
     /// Only works if the network of the running zebrad process is `Regtest`.
@@ -290,7 +290,11 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
     /// tags: generating
-    async fn generate(&self, num_blocks: u32,  burn_amount: Option<Amount<NonNegative>>) -> Result<Vec<GetBlockHash>>;
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>>;
 }
 
 /// RPC method implementations.
@@ -884,6 +888,12 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        let zip233_amount = if let Some(params) = parameters {
+            params.zip233_amount
+        } else {
+            None
+        };
+
         // Randomly select some mempool transactions.
         let mempool_txs = zip317::select_mempool_transactions(
             &network,
@@ -893,8 +903,7 @@ where
             mempool_tx_deps,
             debug_like_zcashd,
             extra_coinbase_data.clone(),
-            #[cfg(zcash_unstable = "nsm")]
-            burn_amount,
+            zip233_amount,
         );
 
         tracing::debug!(
@@ -916,6 +925,7 @@ where
             submit_old,
             debug_like_zcashd,
             extra_coinbase_data,
+            zip233_amount,
         );
 
         Ok(response.into())
@@ -1303,7 +1313,11 @@ where
         ))
     }
 
-    async fn generate(&self, num_blocks: u32, burn_amount: Option<Amount<NonNegative>>) -> Result<Vec<GetBlockHash>> {
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>> {
         let rpc: GetBlockTemplateRpcImpl<
             Mempool,
             State,
@@ -1323,11 +1337,8 @@ where
         }
 
         let mut block_hashes = Vec::new();
-        #[cfg(not(zcash_unstable = "nsm"))]
-        let params = None;
-        #[cfg(zcash_unstable = "nsm")]
         let params = Some(get_block_template::JsonParameters {
-            burn_amount,
+            zip233_amount,
             ..Default::default()
         });
         for _ in 0..num_blocks {

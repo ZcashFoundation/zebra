@@ -567,9 +567,9 @@ where
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
-            let burn_amount = match *tx {
-                #[cfg(feature="tx_v6")]
-                Transaction::V6{ .. } => tx.burn_amount(),
+            let zip233_amount = match *tx {
+            	#[cfg(feature="tx_v6")]
+                Transaction::V6{ .. } => tx.zip233_amount(),
                 _ => Amount::zero()
             };
 
@@ -579,7 +579,7 @@ where
                 // TODO: deduplicate this code with remaining_transaction_value()?
                 miner_fee = match value_balance {
                     Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(tx_rtv) => Some(tx_rtv) - burn_amount,
+                        Ok(tx_rtv) => Some(tx_rtv) - zip233_amount,
                         Err(_) => return Err(TransactionError::IncorrectFee),
                     },
                     Err(_) => return Err(TransactionError::IncorrectFee),

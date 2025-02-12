@@ -163,7 +163,7 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData>,
         /// The burn amount for this transaction, if any.
-        burn_amount: Amount<NonNegative>,
+        zip233_amount: Amount<NonNegative>,
     },
 }
 
@@ -191,8 +191,7 @@ impl fmt::Display for Transaction {
         fmter.field("sapling_spends", &self.sapling_spends_per_anchor().count());
         fmter.field("sapling_outputs", &self.sapling_outputs().count());
         fmter.field("orchard_actions", &self.orchard_actions().count());
-        #[cfg(zcash_unstable = "nsm")]
-        fmter.field("burn_amount", &self.burn_amount());
+        fmter.field("zip233_amount", &self.zip233_amount());
 
         fmter.field("unmined_id", &self.unmined_id());
 
@@ -317,9 +316,9 @@ impl Transaction {
                     .contains(orchard::Flags::ENABLE_SPENDS))
     }
 
-    #[cfg(zcash_unstable = "nsm")]
-    pub fn has_burn_amount(&self) -> bool {
-        self.burn_amount() > Amount::<NonNegative>::zero()
+    /// Does this transaction have zip233_amount output?
+    pub fn has_zip233_amount(&self) -> bool {
+        self.zip233_amount() > Amount::<NonNegative>::zero()
     }
     /// Does this transaction have shielded outputs?
     ///
@@ -1410,6 +1409,19 @@ impl Transaction {
     pub fn has_shielded_data(&self) -> bool {
         self.has_shielded_inputs() || self.has_shielded_outputs()
     }
+
+    /// Access the zip233 amount field of this transaction, regardless of version.
+    pub fn zip233_amount(&self) -> Amount<NonNegative> {
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. }
+            | Transaction::V5 { .. } => Amount::zero(),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { zip233_amount, .. } => *zip233_amount,
+        }
+    }
 }
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -1485,19 +1497,6 @@ impl Transaction {
             Transaction::V5 { ref mut inputs, .. } => inputs,
             #[cfg(feature = "tx_v6")]
             Transaction::V6 { ref mut inputs, .. } => inputs,
-        }
-    }
-    /// Access the transparent inputs of this transaction, regardless of version.
-    #[cfg(zcash_unstable = "nsm")]
-    pub fn burn_amount(&self) -> Amount<NonNegative> {
-        match self {
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. }
-            | Transaction::V5 { .. } => Amount::zero(),
-            #[cfg(feature = "tx_v6")]
-            Transaction::V6 { burn_amount, .. } => *burn_amount,
         }
     }
 

@@ -279,7 +279,7 @@ pub fn generate_coinbase_and_roots(
     chain_history_root: Option<ChainHistoryMmrRootHash>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
-    #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
+    zip233_amount: Option<Amount<NonNegative>>,
 ) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
     // Generate the coinbase transaction
     let miner_fee = calculate_miner_fee(mempool_txs);
@@ -290,8 +290,7 @@ pub fn generate_coinbase_and_roots(
         miner_fee,
         like_zcashd,
         extra_coinbase_data,
-        #[cfg(zcash_unstable = "nsm")]
-        burn_amount,
+        zip233_amount,
     );
 
     // Calculate block default roots
@@ -324,58 +323,27 @@ pub fn generate_coinbase_transaction(
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
-    #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
+    zip233_amount: Option<Amount<NonNegative>>,
 ) -> UnminedTx {
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee, like_zcashd);
 
     if like_zcashd {
-        #[cfg(zcash_unstable = "nsm")]
-        {
-            let network_upgrade = NetworkUpgrade::current(network, height);
-            if network_upgrade < NetworkUpgrade::ZFuture {
-                Transaction::new_v4_coinbase(
-                    network,
-                    height,
-                    outputs,
-                    like_zcashd,
-                    extra_coinbase_data,
-                )
-                .into()
-            } else {
-                Transaction::new_zfuture_coinbase(
-                    network,
-                    height,
-                    outputs,
-                    extra_coinbase_data,
-                    like_zcashd,
-                    burn_amount,
-                )
-                .into()
-            }
-        }
-        #[cfg(not(zcash_unstable = "nsm"))]
         Transaction::new_v4_coinbase(network, height, outputs, like_zcashd, extra_coinbase_data)
             .into()
     } else {
-        #[cfg(zcash_unstable = "nsm")]
-        {
-            let network_upgrade = NetworkUpgrade::current(network, height);
-            if network_upgrade < NetworkUpgrade::ZFuture {
-                Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
-            } else {
-                Transaction::new_zfuture_coinbase(
-                    network,
-                    height,
-                    outputs,
-                    extra_coinbase_data,
-                    like_zcashd,
-                    burn_amount,
-                )
-                .into()
-            }
+        let network_upgrade = NetworkUpgrade::current(network, height);
+        if network_upgrade < NetworkUpgrade::Nu7 {
+            Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
+        } else {
+            Transaction::new_v6_coinbase(
+                network,
+                height,
+                outputs,
+                extra_coinbase_data,
+                zip233_amount,
+            )
+            .into()
         }
-        #[cfg(not(zcash_unstable = "nsm"))]
-        Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
     }
 }
 

@@ -93,8 +93,7 @@ pub struct JsonParameters {
     pub _work_id: Option<String>,
 
     /// The amount of money to be burned in a transaction [ZIP-233]
-    #[cfg(zcash_unstable = "nsm")]
-    pub burn_amount: Option<Amount<NonNegative>>,
+    pub zip233_amount: Option<Amount<NonNegative>>,
 }
 
 impl JsonParameters {

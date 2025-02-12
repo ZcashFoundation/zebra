@@ -12,7 +12,6 @@ pub const SAPLING_VERSION_GROUP_ID: u32 = 0x892F_2085;
 /// group ID. Sapling transactions can use v4 or v5 transactions.
 pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 
-/// The version group ID for version ZFUTURE transactions.
-#[cfg(zcash_unstable = "nsm")]
-pub const TX_ZFUTURE_VERSION_GROUP_ID: u32 =
-    zcash_primitives::transaction::ZFUTURE_VERSION_GROUP_ID;
+// TODO: Change this
+/// The version group ID for version 6 transactions.
+pub const TX_V6_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;

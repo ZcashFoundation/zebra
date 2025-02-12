@@ -9,32 +9,15 @@ use crate::{
 };
 
 impl Transaction {
-    /// Returns a new version zfuture coinbase transaction for `network` and `height`,
+    /// Returns a new version 6 coinbase transaction for `network` and `height`,
     /// which contains the specified `outputs`.
-    #[cfg(zcash_unstable = "nsm")]
-    pub fn new_zfuture_coinbase(
+    pub fn new_v6_coinbase(
         network: &Network,
         height: Height,
         outputs: impl IntoIterator<Item = (Amount<NonNegative>, transparent::Script)>,
         extra_coinbase_data: Vec<u8>,
-        like_zcashd: bool,
-        burn_amount: Option<Amount<NonNegative>>,
+        zip233_amount: Option<Amount<NonNegative>>,
     ) -> Transaction {
-        let mut extra_data = None;
-        let mut sequence = None;
-
-        // `zcashd` includes an extra byte after the coinbase height in the coinbase data,
-        // and a sequence number of u32::MAX.
-        if like_zcashd {
-            extra_data = Some(vec![0x00]);
-            sequence = Some(u32::MAX);
-        }
-
-        // Override like_zcashd if extra_coinbase_data was supplied
-        if !extra_coinbase_data.is_empty() {
-            extra_data = Some(extra_coinbase_data);
-        }
-
         // # Consensus
         //
         // These consensus rules apply to v5 coinbase transactions after NU5 activation:
@@ -62,7 +45,9 @@ impl Transaction {
         //
         // <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
         let inputs = vec![transparent::Input::new_coinbase(
-            height, extra_data, sequence,
+            height,
+            Some(extra_coinbase_data),
+            None,
         )];
 
         // > The block subsidy is composed of a miner subsidy and a series of funding streams.
@@ -88,7 +73,7 @@ impl Transaction {
             "invalid coinbase transaction: must have at least one output"
         );
 
-        Transaction::ZFuture {
+        Transaction::V6 {
             // > The transaction version number MUST be 4 or 5. ...
             // > If the transaction version number is 5 then the version group ID
             // > MUST be 0x26A7270A.
@@ -117,8 +102,8 @@ impl Transaction {
             sapling_shielded_data: None,
             orchard_shielded_data: None,
 
-            // > The NSM burn_amount field [ZIP-233] must be set. It can be set to 0.
-            burn_amount: burn_amount.unwrap_or(Amount::zero()),
+            // > The NSM zip233_amount field [ZIP-233] must be set. It can be set to 0.
+            zip233_amount: zip233_amount.unwrap_or(Amount::zero()),
         }
     }
 

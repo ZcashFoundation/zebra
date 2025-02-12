@@ -18,10 +18,6 @@ categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
 
 default = []
 
-nsm = [
-    "zebra-chain/nsm",
-]
-
 # Production features that activate extra dependencies, or extra features in dependencies
 
 progress-bar = [

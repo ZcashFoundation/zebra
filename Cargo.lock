@@ -1333,7 +1333,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm#dd96084ceb4b64ba4640e8e1c092c65ea773bd6f"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -1367,8 +1367,8 @@ dependencies = [
 
 [[package]]
 name = "f4jumble"
-version = "0.1.1"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
+version = "0.1.0"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm#dd96084ceb4b64ba4640e8e1c092c65ea773bd6f"
 dependencies = [
  "blake2b_simd",
 ]
@@ -6083,14 +6083,14 @@ version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bca38087e6524e5f51a5b0fb3fc18f36d7b84bf67b2056f494ca0c281590953d"
 dependencies = [
- "core2",
+ "byteorder",
  "nonempty",
 ]
 
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra#5fcd3034e47d425df4846192abd4d84fb3752207"
+source = "git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm#dd96084ceb4b64ba4640e8e1c092c65ea773bd6f"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6148,7 +6148,7 @@ dependencies = [
  "bs58",
  "core2",
  "document-features",
- "equihash 0.2.0 (git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm-zebra)",
+ "equihash 0.2.0 (git+https://github.com/ShieldedLabs/librustzcash/?branch=nsm)",
  "ff",
  "fpe",
  "getset",

@@ -237,7 +237,7 @@ impl GetBlockTemplate {
         submit_old: Option<bool>,
         like_zcashd: bool,
         extra_coinbase_data: Vec<u8>,
-        #[cfg(zcash_unstable = "nsm")] burn_amount: Option<Amount<NonNegative>>,
+        zip233_amount: Option<Amount<NonNegative>>,
     ) -> Self {
         // Calculate the next block height.
         let next_block_height =
@@ -295,8 +295,7 @@ impl GetBlockTemplate {
             chain_tip_and_local_time.chain_history_root,
             like_zcashd,
             extra_coinbase_data,
-            #[cfg(zcash_unstable = "nsm")]
-            burn_amount,
+            zip233_amount,
         );
 
         // Convert difficulty

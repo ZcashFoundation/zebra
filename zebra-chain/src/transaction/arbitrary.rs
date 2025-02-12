@@ -1014,7 +1014,8 @@ pub fn v5_transactions<'b>(
         Transaction::V1 { .. }
         | Transaction::V2 { .. }
         | Transaction::V3 { .. }
-        | Transaction::V4 { .. } => None,
+        | Transaction::V4 { .. }
+        | Transaction::V6 { .. } => None,
         ref tx @ Transaction::V5 { .. } => Some(tx.clone()),
         #[cfg(feature = "tx_v6")]
         ref tx @ Transaction::V6 { .. } => Some(tx.clone()),

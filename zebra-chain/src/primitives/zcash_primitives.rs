@@ -8,7 +8,7 @@ use zcash_protocol::value::BalanceError;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::{Network, NetworkUpgrade},
+    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -159,9 +159,8 @@ impl TryFrom<&Transaction> for zp_tx::Transaction {
         let network_upgrade = match trans {
             Transaction::V5 {
                 network_upgrade, ..
-            } => network_upgrade,
-            #[cfg(zcash_unstable = "nsm")]
-            Transaction::ZFuture {
+            }
+            | Transaction::V6 {
                 network_upgrade, ..
             } => network_upgrade,
             Transaction::V1 { .. }
