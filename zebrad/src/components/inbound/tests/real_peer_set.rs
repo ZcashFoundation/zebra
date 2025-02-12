@@ -868,7 +868,7 @@ mod submitblock_test {
             .buffer(10)
             .service(BoxService::new(inbound_service));
 
-        let (peer_set, _address_book) = zebra_network::init(
+        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
             network_config,
             inbound_service.clone(),
             latest_chain_tip.clone(),
