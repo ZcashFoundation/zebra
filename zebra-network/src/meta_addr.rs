@@ -208,6 +208,10 @@ pub struct MetaAddr {
     // TODO: move the time and services fields into PeerAddrState?
     //       then some fields could be required in some states
     pub(crate) last_connection_state: PeerAddrState,
+
+    /// Whether this peer address was added to the address book
+    /// when the peer made an inbound connection.
+    is_inbound: bool,
 }
 
 /// A change to an existing `MetaAddr`.
@@ -264,6 +268,7 @@ pub enum MetaAddrChange {
         )]
         addr: PeerSocketAddr,
         services: PeerServices,
+        is_inbound: bool,
     },
 
     /// Updates an existing `MetaAddr` when a peer responds with a message.
@@ -319,6 +324,7 @@ impl MetaAddr {
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
             misbehavior_score: 0,
+            is_inbound: false,
         }
     }
 
@@ -351,10 +357,15 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
     ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_connected(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
+    pub fn new_connected(
+        addr: PeerSocketAddr,
+        services: &PeerServices,
+        is_inbound: bool,
+    ) -> MetaAddrChange {
         UpdateConnected {
             addr: canonical_peer_addr(*addr),
             services: *services,
+            is_inbound,
         }
     }
 
@@ -664,8 +675,16 @@ impl MetaAddr {
             .checked_sub(remainder.into())
             .expect("unexpected underflow: rem_euclid is strictly less than timestamp");
 
+        let addr = if self.is_inbound {
+            let mut addr = self.addr;
+            addr.set_port(network.default_port());
+            addr
+        } else {
+            self.addr
+        };
+
         Some(MetaAddr {
-            addr: canonical_peer_addr(self.addr),
+            addr: canonical_peer_addr(addr),
             // initial peers are sanitized assuming they are `NODE_NETWORK`
             // TODO: split untrusted and direct services
             //       consider sanitizing untrusted services to NODE_NETWORK (#2324)
@@ -679,6 +698,7 @@ impl MetaAddr {
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
             misbehavior_score: 0,
+            is_inbound: false,
         })
     }
 }
@@ -851,6 +871,7 @@ impl MetaAddrChange {
             last_failure: self.last_failure(instant_now),
             last_connection_state: self.peer_addr_state(),
             misbehavior_score: self.misbehavior_score(),
+            is_inbound: self.is_inbound(),
         }
     }
 
@@ -861,6 +882,15 @@ impl MetaAddrChange {
                 score_increment, ..
             } => *score_increment,
             _ => 0,
+        }
+    }
+
+    /// Returns whether this change was created for a new inbound connection.
+    pub fn is_inbound(&self) -> bool {
+        if let MetaAddrChange::UpdateConnected { is_inbound, .. } = self {
+            *is_inbound
+        } else {
+            false
         }
     }
 
@@ -884,6 +914,7 @@ impl MetaAddrChange {
             last_failure: None,
             last_connection_state: self.peer_addr_state(),
             misbehavior_score: self.misbehavior_score(),
+            is_inbound: self.is_inbound(),
         }
     }
 
@@ -1036,6 +1067,7 @@ impl MetaAddrChange {
                 last_failure: None,
                 last_connection_state: self.peer_addr_state(),
                 misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
+                is_inbound: previous.is_inbound || self.is_inbound(),
             })
         } else {
             // Existing entry and change are both Attempt, Responded, Failed,
@@ -1059,6 +1091,7 @@ impl MetaAddrChange {
                 // Replace the state with the updated state.
                 last_connection_state: self.peer_addr_state(),
                 misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
+                is_inbound: previous.is_inbound || self.is_inbound(),
             })
         }
     }
