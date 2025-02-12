@@ -51,7 +51,7 @@ proptest! {
 
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex).await });
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex, None).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
@@ -95,7 +95,7 @@ proptest! {
 
             let _rpc = rpc.clone();
             let _transaction_hex = transaction_hex.clone();
-            let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex).await });
+            let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex, None).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
@@ -111,7 +111,7 @@ proptest! {
 
             check_err_code(result, ErrorCode::ServerError(-1))?;
 
-            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex.clone()).await });
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex.clone(), None).await });
 
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
@@ -149,7 +149,7 @@ proptest! {
             let rsp = mempool::Response::Queued(vec![Err(DummyError.into())]);
             let mempool_query = mempool.expect_request(req).map_ok(|r| r.respond(rsp));
 
-            let (rpc_rsp, _) = tokio::join!(rpc.send_raw_transaction(tx), mempool_query);
+            let (rpc_rsp, _) = tokio::join!(rpc.send_raw_transaction(tx, None), mempool_query);
 
             check_err_code(rpc_rsp, ErrorCode::ServerError(-1))?;
 
@@ -177,7 +177,7 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let send_task = rpc.send_raw_transaction(non_hex_string);
+            let send_task = rpc.send_raw_transaction(non_hex_string, None);
 
             // Check that there are no further requests.
             mempool.expect_no_requests().await?;
@@ -208,7 +208,7 @@ proptest! {
         prop_assume!(Transaction::zcash_deserialize(&*random_bytes).is_err());
 
         runtime.block_on(async move {
-            let send_task = rpc.send_raw_transaction(hex::encode(random_bytes));
+            let send_task = rpc.send_raw_transaction(hex::encode(random_bytes), None);
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
@@ -718,7 +718,7 @@ proptest! {
             let tx_hex = hex::encode(&tx_bytes);
             let send_task = {
                 let rpc = rpc.clone();
-                tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex).await })
+                tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex, None).await })
             };
             let tx_unmined = UnminedTx::from(tx);
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
@@ -797,7 +797,7 @@ proptest! {
                 // send a transaction
                 let tx_bytes = tx.zcash_serialize_to_vec()?;
                 let tx_hex = hex::encode(&tx_bytes);
-                let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex).await });
+                let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex, None).await });
 
                 let tx_unmined = UnminedTx::from(tx.clone());
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
