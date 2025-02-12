@@ -16,11 +16,9 @@ use crate::service;
 
 pub mod address;
 pub mod block;
+pub mod difficulty;
 pub mod find;
 pub mod tree;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-pub mod difficulty;
 
 #[cfg(test)]
 mod tests;
