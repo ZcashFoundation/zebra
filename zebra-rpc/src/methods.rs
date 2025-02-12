@@ -576,9 +576,9 @@ where
                 Err(_) => ((Height::MIN, network.genesis_hash()), Default::default()),
             };
 
-            let difficulty = chain_tip_difficulty
-                .unwrap_or_else(|_| U256::from(network.target_difficulty_limit()).as_u128() as f64);
-
+            let difficulty = chain_tip_difficulty.unwrap_or_else(|_| {
+                (U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64
+            });
             (size_on_disk, tip, value_balance, difficulty)
         };
 

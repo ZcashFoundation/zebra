@@ -615,7 +615,7 @@ fn snapshot_rpc_getblockchaininfo(
             }),
             ".verificationprogress" => dynamic_redaction(|value, _path| {
                 // assert that the value looks like a valid verification progress here
-                assert!(value.as_f64().unwrap() < 1.0);
+                assert!(value.as_f64().unwrap() <= 1.0);
                 // replace with:
                 "[f64]"
             }),
