@@ -3719,8 +3719,13 @@ fn check_no_git_refs_in_cargo_lock() {
 /// Check that Zebra will disconnect from misbehaving peers.
 #[tokio::test]
 async fn disconnects_from_misbehaving_peers() -> Result<()> {
+    use zebra_chain::parameters::testnet;
+    use zebra_rpc::methods::{get_block_template_rpcs::types::peer_info::PeerInfo, GetBlockHash};
+
     let _init_guard = zebra_test::init();
-    let network = Network::new_default_testnet();
+    let network = testnet::Parameters::build()
+        .with_disable_pow(true)
+        .to_network();
 
     let test_type = UpdateZebraCachedStateWithRpc;
     let test_name = "disconnects_from_misbehaving_peers_test";
@@ -3733,7 +3738,9 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
     let mut config = test_type
         .zebrad_config(test_name, false, None, &network)
         .expect("already checked config")?;
-    config.network.listen_addr = "127.0.0.1:3000".parse()?;
+    config.network.listen_addr = format!("127.0.0.1:{}", random_known_port()).parse()?;
+
+    let rpc_client1 = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 
@@ -3748,7 +3755,10 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
         );
 
     config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
-    config.network.listen_addr = "127.0.0.1:3001".parse()?;
+    config.network.network = Network::new_default_testnet();
+    config.rpc.listen_addr = Some(format!("127.0.0.1:{}", random_known_port()).parse()?);
+
+    let rpc_client2 = RpcRequestClient::new(config.rpc.listen_addr.unwrap());
 
     let mut _zebrad_child_2 = testdir()?
         .with_exact_config(&config)?
@@ -3757,12 +3767,33 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    // TODO:
-    // - Correctly serialize testnet::Parameters into the toml config format
-    // - Configure one zebrad instance to disable the PoW check
-    // - Call `getpeerinfo` to check that the zebrad instances have connected
-    // - Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
-    // - Wait a few seconds then check that the peer connection has been dropped
+    // Wait a few seconds for Zebra to start up and make outbound peer connections
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    // Call `getpeerinfo` to check that the zebrad instances have connected
+    let peer_info: Vec<PeerInfo> = rpc_client2
+        .json_result_from_call("getpeerinfo", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    assert!(!peer_info.is_empty(), "should have outbound peer");
+
+    // Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
+    let _: Vec<GetBlockHash> = rpc_client1
+        .json_result_from_call("generate", "[10]")
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    // Wait a few seconds for Zebra to drop the peer connection
+    tokio::time::sleep(Duration::from_secs(5)).await;
+
+    // Call `getpeerinfo` to check that the zebrad instances have disconnected
+    let peer_info: Vec<PeerInfo> = rpc_client2
+        .json_result_from_call("getpeerinfo", "[]")
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    assert!(peer_info.is_empty(), "should have no peers");
 
     Ok(())
 }
