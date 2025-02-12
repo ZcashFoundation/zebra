@@ -131,6 +131,7 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `raw_transaction_hex`: (string, required, example="signedhex") The hex-encoded raw transaction bytes.
+    /// - `allow_high_fees`: (bool, optional) A legacy parameter accepted by zcashd but ignored by Zebra.
     ///
     /// # Notes
     ///
@@ -140,6 +141,7 @@ pub trait Rpc {
     async fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
+        _allow_high_fees: Option<bool>,
     ) -> Result<SentTransactionHash>;
 
     /// Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
@@ -688,6 +690,7 @@ where
     async fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
+        _allow_high_fees: Option<bool>,
     ) -> Result<SentTransactionHash> {
         let mempool = self.mempool.clone();
         let queue_sender = self.queue_sender.clone();
