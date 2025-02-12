@@ -1024,6 +1024,7 @@ fn setup() -> (
 
     let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
 
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (chain_sync, sync_status) = ChainSync::new(
         &config,
         Height(0),
@@ -1031,6 +1032,7 @@ fn setup() -> (
         block_verifier_router.clone(),
         state_service.clone(),
         mock_chain_tip,
+        misbehavior_tx,
     );
 
     let chain_sync_future = chain_sync.sync();

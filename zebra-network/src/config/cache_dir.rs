@@ -20,6 +20,18 @@ pub enum CacheDir {
     CustomPath(PathBuf),
 }
 
+impl From<bool> for CacheDir {
+    fn from(value: bool) -> Self {
+        CacheDir::IsEnabled(value)
+    }
+}
+
+impl From<PathBuf> for CacheDir {
+    fn from(value: PathBuf) -> Self {
+        CacheDir::CustomPath(value)
+    }
+}
+
 impl CacheDir {
     /// Returns a `CacheDir` enabled with the default path.
     pub fn default_path() -> Self {

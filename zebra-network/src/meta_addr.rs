@@ -973,10 +973,11 @@ impl MetaAddrChange {
 
         let previous_has_been_attempted = !previous.last_connection_state.is_never_attempted();
         let change_to_never_attempted = self.peer_addr_state().is_never_attempted();
+        let is_misbehavior_update = self.misbehavior_score() != 0;
 
         // Invalid changes
 
-        if change_to_never_attempted && previous_has_been_attempted {
+        if change_to_never_attempted && previous_has_been_attempted && !is_misbehavior_update {
             // Existing entry has been attempted, change is NeverAttempted
             // - ignore the change
             //
@@ -987,7 +988,7 @@ impl MetaAddrChange {
             return None;
         }
 
-        if change_is_out_of_order && !change_is_concurrent {
+        if change_is_out_of_order && !change_is_concurrent && !is_misbehavior_update {
             // Change is significantly out of order: ignore it.
             //
             // # Security
@@ -997,7 +998,7 @@ impl MetaAddrChange {
             return None;
         }
 
-        if change_is_concurrent && !connection_has_more_progress {
+        if change_is_concurrent && !connection_has_more_progress && !is_misbehavior_update {
             // Change is close together in time, and it would revert the connection to an earlier
             // state.
             //

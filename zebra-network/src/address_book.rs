@@ -414,6 +414,14 @@ impl AddressBook {
     /// peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+        if self.bans_by_ip.contains_key(&change.addr().ip()) {
+            tracing::warn!(
+                ?change,
+                "attempted to add a banned peer addr to address book"
+            );
+            return None;
+        }
+
         let previous = self.get(change.addr());
 
         let _guard = self.span.enter();
@@ -433,7 +441,7 @@ impl AddressBook {
         );
 
         if let Some(updated) = updated {
-            if updated.misbehavior() > constants::MAX_PEER_MISBEHAVIOR_SCORE {
+            if updated.misbehavior() >= constants::MAX_PEER_MISBEHAVIOR_SCORE {
                 // Ban and skip outbound connections with excessively misbehaving peers.
                 let banned_ip = updated.addr.ip();
                 let bans_by_ip = Arc::make_mut(&mut self.bans_by_ip);

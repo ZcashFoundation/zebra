@@ -200,6 +200,7 @@ impl StartCmd {
             block_verifier_router.clone(),
             state.clone(),
             latest_chain_tip.clone(),
+            misbehavior_sender.clone(),
         );
 
         info!("initializing mempool");

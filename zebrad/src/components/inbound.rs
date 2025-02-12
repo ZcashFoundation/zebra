@@ -338,7 +338,10 @@ impl Service<zn::Request> for Inbound {
                         continue;
                     };
 
-                    let _ = misbehavior_sender.try_send((advertiser_addr, err.misbehavior_score()));
+                    if err.misbehavior_score() != 0 {
+                        let _ =
+                            misbehavior_sender.try_send((advertiser_addr, err.misbehavior_score()));
+                    }
                 }
 
                 result = Ok(());

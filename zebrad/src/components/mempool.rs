@@ -633,9 +633,12 @@ impl Service<Request> for Mempool {
                             advertiser_addr: Some(advertiser_addr),
                         } = &error
                         {
-                            let _ = self
-                                .misbehavior_sender
-                                .try_send((*advertiser_addr, error.mempool_misbehavior_score()));
+                            if error.mempool_misbehavior_score() != 0 {
+                                let _ = self.misbehavior_sender.try_send((
+                                    *advertiser_addr,
+                                    error.mempool_misbehavior_score(),
+                                ));
+                            }
                         };
 
                         tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
