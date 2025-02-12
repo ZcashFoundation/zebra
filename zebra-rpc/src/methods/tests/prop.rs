@@ -12,20 +12,22 @@ use tower::buffer::Buffer;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block, Height},
+    block::{Block, Height},
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
     value_balance::ValueBalance,
 };
+
+use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::mempool;
-use zebra_state::{BoxError, HashOrHeight};
+use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 
 use zebra_test::mock_service::MockService;
 
-use crate::methods::{self, types::ValuePoolBalance};
+use crate::methods::{self, types::Balance};
 
 use super::super::{
     AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
@@ -355,10 +357,12 @@ proptest! {
     fn get_blockchain_info_response_without_a_chain_tip(network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
-        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network.clone(), NoChainTip);
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
         tokio::time::pause();
+
+        let genesis_hash = network.genesis_hash();
 
         runtime.block_on(async move {
             let response_fut = rpc.get_blockchain_info();
@@ -366,20 +370,38 @@ proptest! {
                 let mut state = state.clone();
                 async move {
                     state
+                        .expect_request(zebra_state::ReadRequest::UsageInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::UsageInfo(0));
+
+                    state
                         .expect_request(zebra_state::ReadRequest::TipPoolValues)
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
                         .respond(Err(BoxError::from("no chain tip available yet")));
 
-                    state.expect_request(zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(block::Height(0)))).await.expect("no chain tip available yet").respond(Err(BoxError::from("no chain tip available yet")));
+                    state
+                        .expect_request(zebra_state::ReadRequest::ChainInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                            tip_hash: genesis_hash,
+                            tip_height: Height::MIN,
+                            history_tree: Default::default(),
+                            expected_difficulty: Default::default(),
+                            cur_time: DateTime32::now(),
+                            min_time: DateTime32::now(),
+                            max_time: DateTime32::now()
+                        }));
                 }
             };
 
             let (response, _) = tokio::join!(response_fut, mock_state_handler);
 
             prop_assert_eq!(
-                response.err().unwrap().message().to_string(),
-                "no chain tip available yet".to_string()
+                response.unwrap().best_block_hash,
+                genesis_hash
             );
 
             mempool.expect_no_requests().await?;
@@ -409,7 +431,7 @@ proptest! {
         // get arbitrary chain tip data
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
-        let block_time = block.header.time;
+        let expected_size_on_disk = 1_000;
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -417,6 +439,12 @@ proptest! {
             let mock_state_handler = {
                 let mut state = state.clone();
                 async move {
+                    state
+                        .expect_request(zebra_state::ReadRequest::UsageInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
                     state
                         .expect_request(zebra_state::ReadRequest::TipPoolValues)
                         .await
@@ -428,24 +456,18 @@ proptest! {
                         });
 
                     state
-                        .expect_request(zebra_state::ReadRequest::BlockHeader(block_hash.into()))
+                        .expect_request(zebra_state::ReadRequest::ChainInfo)
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
-                        .respond(zebra_state::ReadResponse::BlockHeader {
-                            header: Arc::new(block::Header {
-                                time: block_time,
-                                version: Default::default(),
-                                previous_block_hash: Default::default(),
-                                merkle_root: Default::default(),
-                                commitment_bytes: Default::default(),
-                                difficulty_threshold: Default::default(),
-                                nonce: Default::default(),
-                                solution: Default::default()
-                            }),
-                            hash: block::Hash::from([0; 32]),
-                            height: Height::MIN,
-                            next_block_hash: None,
-                        });
+                        .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                            tip_hash: block_hash,
+                            tip_height: block_height,
+                            history_tree: Default::default(),
+                            expected_difficulty: Default::default(),
+                            cur_time: DateTime32::now(),
+                            min_time: DateTime32::now(),
+                            max_time: DateTime32::now()
+                        }));
                 }
             };
 
@@ -457,6 +479,7 @@ proptest! {
                     prop_assert_eq!(info.chain, network.bip70_network_name());
                     prop_assert_eq!(info.blocks, block_height);
                     prop_assert_eq!(info.best_block_hash, block_hash);
+                    prop_assert_eq!(info.size_on_disk, expected_size_on_disk);
                     prop_assert!(info.estimated_height < Height::MAX);
 
                     prop_assert_eq!(
@@ -480,8 +503,8 @@ proptest! {
                         prop_assert_eq!(u.1.status, status);
                     }
                 }
-                Err(_) => {
-                    unreachable!("Test should never error with the data we are feeding it")
+                Err(err) => {
+                    unreachable!("Test should never error with the data we are feeding it: {err}")
                 }
             };
 
@@ -512,53 +535,37 @@ proptest! {
                 block
             },
             Network::Testnet(_) => {
-                let block_bytes = &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES;
+                let block_bytes = &zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES;
                 let block: Arc<Block> = block_bytes.zcash_deserialize_into().expect("block is valid");
                 block
             },
         };
 
         // Genesis block fields
-        let block_time = genesis_block.header.time;
-        let block_version = genesis_block.header.version;
-        let block_prev_block_hash = genesis_block.header.previous_block_hash;
-        let block_merkle_root = genesis_block.header.merkle_root;
-        let block_commitment_bytes = genesis_block.header.commitment_bytes;
-        let block_difficulty_threshold = genesis_block.header.difficulty_threshold;
-        let block_nonce = genesis_block.header.nonce;
-        let block_solution = genesis_block.header.solution;
-        let block_hash = genesis_block.header.hash();
+        let expected_size_on_disk = 1_000;
 
         runtime.block_on(async move {
             let response_fut = rpc.get_blockchain_info();
             let mock_state_handler = {
                 let mut state = state.clone();
                 async move {
-                    state.expect_request(zebra_state::ReadRequest::TipPoolValues)
+                state
+                    .expect_request(zebra_state::ReadRequest::UsageInfo)
+                    .await
+                    .expect("getblockchaininfo should call mock state service with correct request")
+                    .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
+                state.expect_request(zebra_state::ReadRequest::TipPoolValues)
                     .await
                     .expect("getblockchaininfo should call mock state service with correct request")
                     .respond(Err(BoxError::from("tip values not available")));
 
-
-                    state
-                    .expect_request(zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(Height::MIN)))
+                state
+                    .expect_request(zebra_state::ReadRequest::ChainInfo)
                     .await
                     .expect("getblockchaininfo should call mock state service with correct request")
-                    .respond(zebra_state::ReadResponse::BlockHeader {
-                        header: Arc::new(block::Header {
-                            time: block_time,
-                            version: block_version,
-                            previous_block_hash: block_prev_block_hash,
-                            merkle_root: block_merkle_root,
-                            commitment_bytes: block_commitment_bytes,
-                            difficulty_threshold: block_difficulty_threshold,
-                            nonce: block_nonce,
-                            solution: block_solution
-                        }),
-                        hash: block_hash,
-                        height: Height::MIN,
-                        next_block_hash: None,
-                    });
+                    .respond(Err(BoxError::from("chain info not available")));
+
                 }
             };
 
@@ -569,7 +576,7 @@ proptest! {
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
-            prop_assert_eq!(response.value_pools, ValuePoolBalance::from_value_balance(ValueBalance::zero()));
+            prop_assert_eq!(response.value_pools, Balance::value_pools(ValueBalance::zero()));
 
             let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
             let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");

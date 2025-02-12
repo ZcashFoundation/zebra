@@ -343,6 +343,11 @@ impl ZebraDb {
     pub fn print_db_metrics(&self) {
         self.db.print_db_metrics();
     }
+
+    /// Returns the estimated total disk space usage of the database.
+    pub fn size(&self) -> u64 {
+        self.db.size()
+    }
 }
 
 impl Drop for ZebraDb {
