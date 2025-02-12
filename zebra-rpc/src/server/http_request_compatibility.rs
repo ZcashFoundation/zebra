@@ -299,11 +299,11 @@ impl JsonRpcRequest {
 struct JsonRpcResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     jsonrpc: Option<String>,
+    id: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<serde_json::Value>,
-    id: serde_json::Value,
 }
 
 impl JsonRpcResponse {
