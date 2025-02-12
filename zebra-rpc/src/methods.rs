@@ -29,12 +29,12 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
-    value_balance::ValueBalance,
     work::{
         difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
         equihash::Solution,
     },
 };
+use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
@@ -546,75 +546,65 @@ where
 
     #[allow(clippy::unwrap_in_result)]
     async fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
-        let network = self.network.clone();
         let debug_force_finished_sync = self.debug_force_finished_sync;
-        let mut state = self.state.clone();
+        let network = &self.network;
 
-        // `chain` field
-        let chain = network.bip70_network_name();
+        let (usage_info_rsp, tip_pool_values_rsp, chain_tip_difficulty) = {
+            use zebra_state::ReadRequest::*;
+            let state_call = |request| self.state.clone().oneshot(request);
+            tokio::join!(
+                state_call(UsageInfo),
+                state_call(TipPoolValues),
+                chain_tip_difficulty(network.clone(), self.state.clone())
+            )
+        };
 
-        let (tip_height, tip_hash, tip_block_time, value_balance) = match state
-            .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::TipPoolValues))
-            .await
-        {
-            Ok(zebra_state::ReadResponse::TipPoolValues {
-                tip_height,
-                tip_hash,
-                value_balance,
-            }) => {
-                let request = zebra_state::ReadRequest::BlockHeader(tip_hash.into());
-                let response: zebra_state::ReadResponse = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_misc_error()?;
+        let (size_on_disk, (tip_height, tip_hash), value_balance, difficulty) = {
+            use zebra_state::ReadResponse::*;
 
-                if let zebra_state::ReadResponse::BlockHeader { header, .. } = response {
-                    (tip_height, tip_hash, header.time, value_balance)
-                } else {
-                    unreachable!("unmatched response to a TipPoolValues request")
-                }
-            }
-            _ => {
-                let request =
-                    zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(Height::MIN));
-                let response: zebra_state::ReadResponse = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_misc_error()?;
+            let UsageInfo(size_on_disk) = usage_info_rsp.map_misc_error()? else {
+                unreachable!("unmatched response to a TipPoolValues request")
+            };
 
-                if let zebra_state::ReadResponse::BlockHeader {
-                    header,
-                    hash,
-                    height,
-                    ..
-                } = response
-                {
-                    (height, hash, header.time, ValueBalance::zero())
-                } else {
-                    unreachable!("unmatched response to a BlockHeader request")
-                }
-            }
+            let (tip, value_balance) = match tip_pool_values_rsp {
+                Ok(TipPoolValues {
+                    tip_height,
+                    tip_hash,
+                    value_balance,
+                }) => ((tip_height, tip_hash), value_balance),
+                Ok(_) => unreachable!("unmatched response to a TipPoolValues request"),
+                Err(_) => ((Height::MIN, network.genesis_hash()), Default::default()),
+            };
+
+            let difficulty = chain_tip_difficulty
+                .unwrap_or_else(|_| U256::from(network.target_difficulty_limit()).as_u128() as f64);
+
+            (size_on_disk, tip, value_balance, difficulty)
         };
 
         let now = Utc::now();
-        let zebra_estimated_height =
-            NetworkChainTipHeightEstimator::new(tip_block_time, tip_height, &network)
-                .estimate_height_at(now);
+        let (estimated_height, verification_progress) = self
+            .latest_chain_tip
+            .best_tip_height_and_block_time()
+            .map(|(tip_height, tip_block_time)| {
+                let height =
+                    NetworkChainTipHeightEstimator::new(tip_block_time, tip_height, network)
+                        .estimate_height_at(now);
 
-        // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
-        // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
-        // later than the current time on the local clock.
-        let estimated_height = if tip_block_time > now
-            || zebra_estimated_height < tip_height
-            || debug_force_finished_sync
-        {
-            tip_height
-        } else {
-            zebra_estimated_height
-        };
+                // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
+                // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
+                // later than the current time on the local clock.
+                let height =
+                    if tip_block_time > now || height < tip_height || debug_force_finished_sync {
+                        tip_height
+                    } else {
+                        height
+                    };
+
+                (height, f64::from(tip_height.0) / f64::from(height.0))
+            })
+            // TODO: Add a `genesis_block_time()` method on `Network` to use here.
+            .unwrap_or((Height::MIN, 0.0));
 
         // `upgrades` object
         //
@@ -647,29 +637,19 @@ where
             (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
         let consensus = TipConsensusBranch {
             chain_tip: ConsensusBranchIdHex(
-                NetworkUpgrade::current(&network, tip_height)
+                NetworkUpgrade::current(network, tip_height)
                     .branch_id()
                     .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),
             next_block: ConsensusBranchIdHex(
-                NetworkUpgrade::current(&network, next_block_height)
+                NetworkUpgrade::current(network, next_block_height)
                     .branch_id()
                     .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),
         };
 
-        let verification_progress = f64::from(tip_height.0) / f64::from(estimated_height.0);
-        let zebra_state::ReadResponse::UsageInfo(size_on_disk) = state
-            .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::UsageInfo))
-            .await
-            .map_misc_error()?
-        else {
-            unreachable!("unmatched response to a UsageInfo request")
-        };
-
         let response = GetBlockChainInfo {
-            chain,
+            chain: network.bip70_network_name(),
             blocks: tip_height,
             best_block_hash: tip_hash,
             estimated_height,
@@ -678,7 +658,7 @@ where
             upgrades,
             consensus,
             headers: tip_height,
-            difficulty: chain_tip_difficulty(network, state).await?,
+            difficulty,
             verification_progress,
             // TODO: store work in the finalized state for each height (#7109)
             chain_work: 0,
