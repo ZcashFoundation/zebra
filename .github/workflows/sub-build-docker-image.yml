@@ -153,7 +153,7 @@ jobs:
       # Setup Docker Buildx to use Docker Build Cloud
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v3.8.0
+        uses: docker/setup-buildx-action@v3.9.0
         with:
           version: "lab:latest"
           driver: cloud
@@ -194,7 +194,7 @@ jobs:
         # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@v1.16.1
+        uses: docker/scout-action@v1.16.3
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
