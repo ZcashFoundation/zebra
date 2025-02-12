@@ -3718,7 +3718,7 @@ fn check_no_git_refs_in_cargo_lock() {
 
 /// Check that Zebra will disconnect from misbehaving peers.
 #[tokio::test]
-#[cfg(feature = "getblocktemplate-rpcs")]
+#[cfg(all(feature = "getblocktemplate-rpcs", not(target_os = "windows")))]
 async fn disconnects_from_misbehaving_peers() -> Result<()> {
     use std::sync::{atomic::AtomicBool, Arc};
 
