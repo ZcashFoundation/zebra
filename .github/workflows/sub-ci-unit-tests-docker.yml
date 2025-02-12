@@ -52,25 +52,19 @@ jobs:
         with:
           short-length: 7
 
-      # Run unit, basic acceptance tests, and ignored tests, only showing command output if the test fails.
+      # Run unit, basic acceptance tests, and ignored tests, only showing
+      # command output if the test fails.
       #
-      # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
-      #
-      - name: Run zebrad tests
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      # If some tests hang, add "-- --nocapture" for just that test, or for all
+      # the tests.
+      - name: Run all tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e RUN_BASIC_TESTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-
-      # Run unit, basic acceptance tests, and ignored tests with experimental features.
-      #
-      - name: Run zebrad tests with experimental features
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e RUN_EXTRA_TESTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run -t \
+          -e RUN_ALL_TESTS=1 \
+          -e FEATURES="journald prometheus filter-reload" \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Run state tests with fake activation heights.
   #
@@ -158,7 +152,7 @@ jobs:
       test_id: "testnet-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK=Testnet'
+      test_variables: "-e NETWORK=Testnet"
 
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:

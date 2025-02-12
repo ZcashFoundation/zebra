@@ -99,7 +99,7 @@ To run CI tests locally, which mimics the testing done in our CI pipelines on Gi
 
 1. **Setting Environment Variables**:
    - Modify the `test.env` file to set the desired test configurations.
-   - For running all tests, set `RUN_BASIC_TESTS=1` in `test.env`.
+   - For running all tests, set `RUN_ALL_TESTS=1` in `test.env`.
 
 2. **Starting the Test Environment**:
    - Use Docker Compose to start the testing environment:

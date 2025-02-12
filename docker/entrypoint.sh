@@ -143,21 +143,11 @@ run_cargo_test() {
 #
 # - $@: Arbitrary command that will be executed if no test env var is set.
 run_tests() {
-  # Validate the test variables. For these tests, we activate the test features
-  # to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
-  if [[ "${RUN_BASIC_TESTS}" -eq "1" ]]; then
+  if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
     exec cargo test --locked --release --workspace --features "${FEATURES}" \
-      -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
-
-  elif [[ "${RUN_EXTRA_TESTS}" -eq "1" ]]; then
-    # Run unit, basic acceptance tests, and ignored tests with experimental
-    # features. If the lightwalletd environment variables are set, we will
-    # also run those tests.
-    exec cargo test --locked --release --workspace \
-      --features "${FEATURES} journald prometheus filter-reload" \
       -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
   elif [[ "${RUN_CHECK_NO_GIT_REFS}" -eq "1" ]]; then
