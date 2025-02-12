@@ -3716,8 +3716,53 @@ fn check_no_git_refs_in_cargo_lock() {
     }
 }
 
-// TODO: Add an acceptance test to check that two zebrad testchild instances on different and
-//       incompatible custom Testnets initially connect to each other, but then disconnect.
-//       (this may depend on reliably gossiping mined blocks)
-//
-// Note: It disconnects from entire IPs, but this is fine as it'll be tested with only one other local peer node.
+/// Check that Zebra will disconnect from misbehaving peers.
+#[tokio::test]
+async fn disconnects_from_misbehaving_peers() -> Result<()> {
+    let _init_guard = zebra_test::init();
+    let network = Network::new_default_testnet();
+
+    let test_type = UpdateZebraCachedStateWithRpc;
+    let test_name = "disconnects_from_misbehaving_peers_test";
+
+    if !common::launch::can_spawn_zebrad_for_test_type(test_name, test_type, false) {
+        return Ok(());
+    }
+
+    // Get the zebrad config
+    let mut config = test_type
+        .zebrad_config(test_name, false, None, &network)
+        .expect("already checked config")?;
+    config.network.listen_addr = "127.0.0.1:3000".parse()?;
+
+    let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
+
+    let mut _zebrad_child_1 = testdir()?
+        .with_exact_config(&config)?
+        .spawn_child(args!["start"])?
+        .bypass_test_capture(true)
+        .with_timeout(test_type.zebrad_timeout())
+        .with_failure_regex_iter(
+            zebrad_failure_messages.clone(),
+            zebrad_ignore_messages.clone(),
+        );
+
+    config.network.initial_testnet_peers = [config.network.listen_addr.to_string()].into();
+    config.network.listen_addr = "127.0.0.1:3001".parse()?;
+
+    let mut _zebrad_child_2 = testdir()?
+        .with_exact_config(&config)?
+        .spawn_child(args!["start"])?
+        .bypass_test_capture(true)
+        .with_timeout(test_type.zebrad_timeout())
+        .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
+
+    // TODO:
+    // - Correctly serialize testnet::Parameters into the toml config format
+    // - Configure one zebrad instance to disable the PoW check
+    // - Call `getpeerinfo` to check that the zebrad instances have connected
+    // - Call the `generate` method to mine blocks in the zebrad instance where PoW is disabled
+    // - Wait a few seconds then check that the peer connection has been dropped
+
+    Ok(())
+}
