@@ -9,7 +9,7 @@
 
 use std::{fs, time::Duration};
 
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::{ Result};
 use tokio::sync::mpsc::error::TryRecvError;
 use tower::{util::BoxService, Service};
 
@@ -61,7 +61,7 @@ pub(crate) async fn run() -> Result<()> {
 
     let zebrad_state_path = match std::env::var_os("ZEBRA_CACHED_STATE_DIR") {
         None => {
-            tracing::error!("ZEBRA_CACHED_STATE_DIR is not set");
+            tracing::warn!("env var ZEBRA_CACHED_STATE_DIR is not set, skipping test");
             return Ok(());
         }
         Some(path) => std::path::PathBuf::from(path),
@@ -87,9 +87,10 @@ pub(crate) async fn run() -> Result<()> {
 
     let (read_state, _, _) = zebra_state::init_read_only(state_config.clone(), &network);
 
-    let chain_tip_height = latest_chain_tip
-        .best_tip_height()
-        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
+    let Some(chain_tip_height) = latest_chain_tip.best_tip_height() else {
+        tracing::warn!("chain could not be loaded from cached state, skipping test");
+        return Ok(());
+    };
 
     let sapling_activation_height = NetworkUpgrade::Sapling
         .activation_height(&network)
