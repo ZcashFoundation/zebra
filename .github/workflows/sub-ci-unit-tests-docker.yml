@@ -32,14 +32,7 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
-#! IMPORTANT
-#!
-#! The job names in `ci-unit-tests-docker.yml`, `ci-unit-tests-docker.patch.yml` and
-#! `ci-unit-tests-docker.patch-external.yml` must be kept in sync.
 jobs:
-  # Run all the zebra tests, including tests that are ignored by default.
-  #
-  # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
   test-all:
     name: Test all
     timeout-minutes: 180
