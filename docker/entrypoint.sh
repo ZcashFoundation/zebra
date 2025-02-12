@@ -157,9 +157,14 @@ run_tests() {
 
   elif [[ "${TEST_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
     # Run state tests with fake activation heights.
-    exec cargo test --locked --release --lib --features "${FEATURES}" \
+    exec cargo test --locked --release --lib --features "zebra-test" \
       --package zebra-state \
       -- --nocapture --include-ignored with_fake_activation_heights
+
+  elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
+    # Test the scanner.
+    exec cargo test --locked --release --package zebra-scan \
+      -- --nocapture --include-ignored scan_task_commands scan_start_where_left
 
   elif [[ "${TEST_ZEBRA_EMPTY_SYNC}" -eq "1" ]]; then
     # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
@@ -244,12 +249,6 @@ run_tests() {
     # Starting with a cached Zebra tip, test sending a block to Zebra's RPC
     # port.
     run_cargo_test "${FEATURES}" "submit_block"
-
-  elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
-    # Test that the scan task commands are working.
-    exec cargo test --locked --release --features "zebra-test" \
-      --package zebra-scan \
-      -- --nocapture --include-ignored scan_task_commands
 
   else
     if [[ "$1" == "zebrad" ]]; then

@@ -488,16 +488,16 @@ jobs:
   #
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
-  scan-task-commands-test:
-    name: scan task commands
+  test-scanner:
+    name: Scanner tests
     needs: [test-full-sync, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.test-full-sync.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebra-scan
-      test_id: scan-task-commands
-      test_description: Test that the scan task registers keys, deletes keys, and subscribes to results for keys while running.
-      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCAN_TASK_COMMANDS=1"
+      test_id: scanner-tests
+      test_description: Tests the scanner.
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_SCANNER=1"
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false

@@ -87,7 +87,6 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run -t \
           -e TEST_FAKE_ACTIVATION_HEIGHTS=1 \
-          -e FEATURES="zebra-test" \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
