@@ -787,6 +787,7 @@ impl Network {
 
     /// Returns post-Canopy funding streams for this network at the provided height
     pub fn funding_streams(&self, height: Height) -> &FundingStreams {
+        // FIXME: Would this work after Nu7 activation?
         if NetworkUpgrade::current(self, height) < NetworkUpgrade::Nu6 {
             self.pre_nu6_funding_streams()
         } else {
