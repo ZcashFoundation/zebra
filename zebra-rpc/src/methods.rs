@@ -1087,21 +1087,6 @@ where
                 transaction_dependencies,
                 last_seen_tip_hash: _,
             } => {
-                // verbose=true returns a map, where order does not matter,
-                // so we only need to sort when verbose=false.
-                if !verbose {
-                    // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
-                    transactions.sort_by_cached_key(|tx| {
-                        // zcashd uses modified fee here but Zebra doesn't currently
-                        // support prioritizing transactions
-                        std::cmp::Reverse((
-                            i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
-                                / tx.transaction.size as u128,
-                            // transaction hashes are compared in their serialized byte-order.
-                            tx.transaction.id.mined_id(),
-                        ))
-                    });
-                }
                 if verbose {
                     let map = transactions
                         .iter()
@@ -1118,6 +1103,20 @@ where
                         .collect::<HashMap<_, _>>();
                     Ok(GetRawMempool::Verbose(map))
                 } else {
+                    // Sort transactions in descending order by fee/size, using
+                    // hash in serialized byte order as a tie-breaker. Note that
+                    // this is only done in not verbose because in verbose mode
+                    // a dictionary is returned, where order does not matter.
+                    transactions.sort_by_cached_key(|tx| {
+                        // zcashd uses modified fee here but Zebra doesn't currently
+                        // support prioritizing transactions
+                        std::cmp::Reverse((
+                            i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
+                                / tx.transaction.size as u128,
+                            // transaction hashes are compared in their serialized byte-order.
+                            tx.transaction.id.mined_id(),
+                        ))
+                    });
                     let tx_ids: Vec<String> = transactions
                         .iter()
                         .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
