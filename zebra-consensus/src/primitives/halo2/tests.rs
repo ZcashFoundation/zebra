@@ -63,7 +63,7 @@ fn generate_test_vectors() {
             }
 
             let bundle: Bundle<_, i64, <OrchardVanilla as OrchardFlavorExt>::Flavor> =
-                builder.build(rng).unwrap().unwrap().0;
+                builder.build(rng).unwrap().0;
 
             let bundle = bundle
                 .create_proof(&proving_key, rng)
