@@ -33,7 +33,7 @@ use zebra_test::mock_service::MockService;
 
 use crate::methods::{
     self,
-    types::{MempoolObject, Balance},
+    types::{Balance, MempoolObject},
 };
 
 use super::super::{
