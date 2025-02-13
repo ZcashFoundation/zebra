@@ -11,7 +11,7 @@ use std::{fs, time::Duration};
 
 use color_eyre::Result;
 use tokio::sync::mpsc::error::TryRecvError;
-use tower::{Service, util::BoxService};
+use tower::{util::BoxService, Service};
 
 use zebra_chain::{
     block::Height,
@@ -21,7 +21,7 @@ use zebra_chain::{
 
 use zebra_scan::{
     service::ScanTask,
-    storage::{Storage, db::SCANNER_DATABASE_KIND},
+    storage::{db::SCANNER_DATABASE_KIND, Storage},
 };
 
 use zebra_state::{ChainTipChange, LatestChainTip};
