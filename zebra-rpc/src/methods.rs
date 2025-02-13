@@ -6,11 +6,9 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    sync::Arc,
-};
+#[cfg(feature = "getblocktemplate-rpcs")]
+use std::collections::HashMap;
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
@@ -24,7 +22,6 @@ use tokio::{sync::broadcast, task::JoinHandle};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
-use types::{GetRawMempool, MempoolObject};
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
     block::{self, Commitment, Height, SerializedBlock},
@@ -60,6 +57,10 @@ pub mod hex_data;
 pub mod trees;
 
 pub mod types;
+
+use types::GetRawMempool;
+#[cfg(feature = "getblocktemplate-rpcs")]
+use types::MempoolObject;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
@@ -1073,6 +1074,7 @@ where
     }
 
     async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool> {
+        #[allow(unused)]
         let verbose = verbose.unwrap_or(false);
 
         #[cfg(feature = "getblocktemplate-rpcs")]

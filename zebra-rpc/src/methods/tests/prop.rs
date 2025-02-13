@@ -1,10 +1,8 @@
 //! Randomised property tests for RPC methods.
 
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Debug,
-    sync::Arc,
-};
+#[cfg(feature = "getblocktemplate-rpcs")]
+use std::collections::HashMap;
+use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
@@ -31,9 +29,11 @@ use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 
 use zebra_test::mock_service::MockService;
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use crate::methods::types::MempoolObject;
 use crate::methods::{
     self,
-    types::{Balance, MempoolObject},
+    types::{Balance, GetRawMempool},
 };
 
 use super::super::{
@@ -262,7 +262,7 @@ proptest! {
                     .expect_request(mempool::Request::TransactionIds)
                     .map_ok(|r|r.respond(mempool::Response::TransactionIds(transaction_ids)));
 
-                (expected_response, mempool_query)
+                (GetRawMempool::TxIds(expected_response), mempool_query)
             };
 
             // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
@@ -301,9 +301,9 @@ proptest! {
                             )
                         })
                         .collect::<HashMap<_, _>>();
-                    methods::types::GetRawMempool::Verbose(map)
+                    GetRawMempool::Verbose(map)
                 } else {
-                    methods::types::GetRawMempool::TxIds(expected_response)
+                    GetRawMempool::TxIds(expected_response)
                 };
 
                 let mempool_query = mempool
