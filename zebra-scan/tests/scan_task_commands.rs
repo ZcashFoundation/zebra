@@ -3,15 +3,15 @@
 //! This test requires a cached chain state that is partially synchronized past the
 //! Sapling activation height and [`REQUIRED_MIN_TIP_HEIGHT`]
 //!
-//! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
+//! export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 //! cargo test scan_task_commands --features="shielded-scan" -- --ignored --nocapture
 #![allow(dead_code, non_local_definitions)]
 
 use std::{fs, time::Duration};
 
-use color_eyre::{ Result};
+use color_eyre::Result;
 use tokio::sync::mpsc::error::TryRecvError;
-use tower::{util::BoxService, Service};
+use tower::{Service, util::BoxService};
 
 use zebra_chain::{
     block::Height,
@@ -21,7 +21,7 @@ use zebra_chain::{
 
 use zebra_scan::{
     service::ScanTask,
-    storage::{db::SCANNER_DATABASE_KIND, Storage},
+    storage::{Storage, db::SCANNER_DATABASE_KIND},
 };
 
 use zebra_state::{ChainTipChange, LatestChainTip};
@@ -59,9 +59,9 @@ pub(crate) async fn run() -> Result<()> {
     // This is currently needed for the 'Check startup logs' step in CI to pass.
     tracing::info!("Zcash network: {network}");
 
-    let zebrad_state_path = match std::env::var_os("ZEBRA_CACHED_STATE_DIR") {
+    let zebrad_state_path = match std::env::var_os("ZEBRA_CACHE_DIR") {
         None => {
-            tracing::warn!("env var ZEBRA_CACHED_STATE_DIR is not set, skipping test");
+            tracing::warn!("env var ZEBRA_CACHE_DIR is not set, skipping test");
             return Ok(());
         }
         Some(path) => std::path::PathBuf::from(path),
@@ -112,7 +112,9 @@ pub(crate) async fn run() -> Result<()> {
     let storage = Storage::new(&scan_config, &network, false);
     let mut scan_task = ScanTask::spawn(storage, read_state, chain_tip_change);
 
-    tracing::info!("started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",);
+    tracing::info!(
+        "started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",
+    );
 
     let keys = [ZECPAGES_SAPLING_VIEWING_KEY.to_string()];
     scan_task.register_keys(
