@@ -340,9 +340,9 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// This version of Zebra draws the current network protocol version from
 /// [ZIP-253](https://zips.z.cash/zip-0253).
-#[cfg(not(zcash_unstable = "nu6" /* TODO nu7 */ ))]
+#[cfg(not(zcash_unstable = "nu7"))]
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+#[cfg(zcash_unstable = "nu7")]
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_140);
 
 /// The default RTT estimate for peer responses.
