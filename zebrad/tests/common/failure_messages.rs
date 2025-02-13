@@ -81,6 +81,8 @@ pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     "error with",
     // Block error messages
     "error requesting block: 0: Block not found",
+    // This shouldn't happen unless lwd starts calling getblock with `verbosity = 2`
+    "error requesting block: 0: block hash or height not found",
     "error zcashd getblock rpc",
     "received overlong message",
     "received unexpected height block",

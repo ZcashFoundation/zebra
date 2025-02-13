@@ -424,6 +424,7 @@ proptest! {
                     .await?
                     .respond(mempool::Response::FullTransactions {
                         transactions,
+                        transaction_dependencies: Default::default(),
                         last_seen_tip_hash: [0; 32].into(),
                     });
 
@@ -663,16 +664,21 @@ proptest! {
                         .expect_request(zebra_state::ReadRequest::BlockHeader(block_hash.into()))
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
-                        .respond(zebra_state::ReadResponse::BlockHeader(Some(Arc::new(block::Header {
-                            time: block_time,
-                            version: Default::default(),
-                            previous_block_hash: Default::default(),
-                            merkle_root: Default::default(),
-                            commitment_bytes: Default::default(),
-                            difficulty_threshold: Default::default(),
-                            nonce: Default::default(),
-                            solution: Default::default()
-                        }))));
+                        .respond(zebra_state::ReadResponse::BlockHeader {
+                            header: Arc::new(block::Header {
+                                time: block_time,
+                                version: Default::default(),
+                                previous_block_hash: Default::default(),
+                                merkle_root: Default::default(),
+                                commitment_bytes: Default::default(),
+                                difficulty_threshold: Default::default(),
+                                nonce: Default::default(),
+                                solution: Default::default()
+                            }),
+                            hash: block::Hash::from([0; 32]),
+                            height: Height::MIN,
+                            next_block_hash: None,
+                        });
                 }
             };
 

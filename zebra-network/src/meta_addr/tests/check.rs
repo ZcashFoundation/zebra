@@ -67,7 +67,7 @@ pub(crate) fn sanitize_avoids_leaks(original: &MetaAddr, sanitized: &MetaAddr) {
 
     // check the other fields
 
-    // Sanitize to the the default state, even though it's not serialized
+    // Sanitize to the default state, even though it's not serialized
     assert_eq!(sanitized.last_connection_state, Default::default());
     // Sanitize to known flags
     let sanitized_peer_services =

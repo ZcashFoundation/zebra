@@ -65,7 +65,7 @@ scanner.Scanner.GetResults
 scanner.Scanner.RegisterKeys
 ```
 
-To see the the request and response types for a method, for example the `GetResults` method, try:
+To see the request and response types for a method, for example the `GetResults` method, try:
 
 
 ```bash

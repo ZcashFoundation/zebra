@@ -11,6 +11,10 @@ use jsonrpc_core::{Error, ErrorCode};
 /// <https://github.com/s-nomp/node-stratum-pool/blob/d86ae73f8ff968d9355bb61aac05e0ebef36ccb5/lib/pool.js#L459>
 pub const INVALID_PARAMETERS_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-1);
 
+/// The RPC error code used by `zcashd` for missing blocks, when looked up
+/// by hash.
+pub const INVALID_ADDRESS_OR_KEY_ERROR_CODE: ErrorCode = ErrorCode::ServerError(-5);
+
 /// The RPC error code used by `zcashd` for missing blocks.
 ///
 /// `lightwalletd` expects error code `-8` when a block is not found:

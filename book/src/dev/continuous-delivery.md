@@ -1,6 +1,6 @@
 # Zebra Continuous Delivery
 
-Zebra has an extension of it's continuous integration since it automatically deploys all
+Zebra has an extension of its continuous integration since it automatically deploys all
 code changes to a testing and/or pre-production environment after each PR gets merged
 into the `main` branch, and on each Zebra `release`.
 

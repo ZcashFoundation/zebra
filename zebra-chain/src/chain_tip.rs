@@ -139,7 +139,7 @@ impl<'f> BestTipChanged<'f> {
     }
 }
 
-impl<'f> Future for BestTipChanged<'f> {
+impl Future for BestTipChanged<'_> {
     type Output = Result<(), BoxError>;
 
     fn poll(

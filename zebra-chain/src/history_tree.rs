@@ -30,7 +30,7 @@ pub enum HistoryTreeError {
     #[non_exhaustive]
     InnerError { inner: zcash_history::Error },
 
-    #[error("I/O error")]
+    #[error("I/O error: {0}")]
     IOError(#[from] io::Error),
 }
 

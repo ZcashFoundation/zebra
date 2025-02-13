@@ -338,6 +338,34 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .expect("We should have a GetBlock struct");
     snapshot_rpc_getblock_verbose("hash_verbosity_default", get_block, &settings);
 
+    // `getblockheader(hash, verbose = false)`
+    let get_block_header = rpc
+        .get_block_header(block_hash.to_string(), Some(false))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblockheader("hash", get_block_header, &settings);
+
+    // `getblockheader(height, verbose = false)`
+    let get_block_header = rpc
+        .get_block_header(BLOCK_HEIGHT.to_string(), Some(false))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblockheader("height", get_block_header, &settings);
+
+    // `getblockheader(hash, verbose = true)`
+    let get_block_header = rpc
+        .get_block_header(block_hash.to_string(), Some(true))
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblockheader("hash_verbose", get_block_header, &settings);
+
+    // `getblockheader(height, verbose = true)` where verbose is the default value.
+    let get_block_header = rpc
+        .get_block_header(BLOCK_HEIGHT.to_string(), None)
+        .await
+        .expect("We should have a GetBlock struct");
+    snapshot_rpc_getblockheader("height_verbose", get_block_header, &settings);
+
     // `getbestblockhash`
     let get_best_block_hash = rpc
         .get_best_block_hash()
@@ -356,6 +384,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .map(|responder| {
             responder.respond(mempool::Response::FullTransactions {
                 transactions: vec![],
+                transaction_dependencies: Default::default(),
                 last_seen_tip_hash: blocks[blocks.len() - 1].hash(),
             });
         });
@@ -606,6 +635,15 @@ fn snapshot_rpc_getblock_verbose(
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!(format!("get_block_verbose_{variant}"), block));
+}
+
+/// Check valid `getblockheader` response using `cargo insta`.
+fn snapshot_rpc_getblockheader(
+    variant: &'static str,
+    block: GetBlockHeader,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!(format!("get_block_header_{variant}"), block));
 }
 
 /// Check invalid height `getblock` response using `cargo insta`.
