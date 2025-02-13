@@ -9,7 +9,7 @@
 
 use std::{fs, time::Duration};
 
-use color_eyre::{eyre::eyre, Result};
+use color_eyre::Result;
 use tokio::sync::mpsc::error::TryRecvError;
 use tower::{util::BoxService, Service};
 
@@ -61,7 +61,7 @@ pub(crate) async fn run() -> Result<()> {
 
     let zebrad_state_path = match std::env::var_os("ZEBRA_CACHE_DIR") {
         None => {
-            tracing::error!("ZEBRA_CACHE_DIR is not set");
+            tracing::warn!("env var ZEBRA_CACHE_DIR is not set, skipping test");
             return Ok(());
         }
         Some(path) => std::path::PathBuf::from(path),
@@ -87,9 +87,10 @@ pub(crate) async fn run() -> Result<()> {
 
     let (read_state, _, _) = zebra_state::init_read_only(state_config.clone(), &network);
 
-    let chain_tip_height = latest_chain_tip
-        .best_tip_height()
-        .ok_or_else(|| eyre!("State directory doesn't have a chain tip block"))?;
+    let Some(chain_tip_height) = latest_chain_tip.best_tip_height() else {
+        tracing::warn!("chain could not be loaded from cached state, skipping test");
+        return Ok(());
+    };
 
     let sapling_activation_height = NetworkUpgrade::Sapling
         .activation_height(&network)
@@ -111,7 +112,9 @@ pub(crate) async fn run() -> Result<()> {
     let storage = Storage::new(&scan_config, &network, false);
     let mut scan_task = ScanTask::spawn(storage, read_state, chain_tip_change);
 
-    tracing::info!("started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",);
+    tracing::info!(
+        "started scan task, sending register/subscribe keys messages with zecpages key to start scanning for a new key",
+    );
 
     let keys = [ZECPAGES_SAPLING_VIEWING_KEY.to_string()];
     scan_task.register_keys(
