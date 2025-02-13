@@ -12,7 +12,7 @@ use std::{fmt, panic};
 use cookie::Cookie;
 use jsonrpsee::server::middleware::rpc::RpcServiceBuilder;
 use jsonrpsee::server::{Server, ServerHandle};
-use tokio::task::JoinHandle;
+use tokio::{sync::watch, task::JoinHandle};
 use tower::Service;
 use tracing::*;
 
@@ -86,6 +86,10 @@ impl RpcServer {
     ///
     /// Returns [`JoinHandle`]s for the RPC server and `sendrawtransaction` queue tasks,
     /// and a [`RpcServer`] handle, which can be used to shut down the RPC server task.
+    ///
+    /// # Panics
+    ///
+    /// - If [`Config::listen_addr`] is `None`.
     //
     // TODO:
     // - put some of the configs or services in their own struct?
@@ -116,6 +120,8 @@ impl RpcServer {
         address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
+        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
+        mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -166,6 +172,7 @@ impl RpcServer {
             block_verifier_router,
             sync_status,
             address_book,
+            mined_block_sender,
         );
 
         // Initialize the rpc methods with the zebra version

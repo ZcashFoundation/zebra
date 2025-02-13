@@ -133,6 +133,7 @@ jobs:
       rust_backtrace: full
       rust_lib_backtrace: full
       rust_log: info
+      features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 

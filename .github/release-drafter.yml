@@ -77,7 +77,10 @@ autolabeler:
 name-template: 'Zebra $RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
 tag-prefix: 'v'
-prerelease: true
+# Do not mark the draft release as a pre-release
+prerelease: false
+# Do not include pre-releases in the draft release
+include-pre-releases: false
 
 # Categories in rough order of importance to users.
 # Based on https://keepachangelog.com/en/1.0.0/

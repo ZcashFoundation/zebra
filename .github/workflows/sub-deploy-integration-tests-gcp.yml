@@ -38,12 +38,12 @@ on:
       zebra_state_dir:
         required: false
         type: string
-        default: '/var/cache/zebrad-cache'
+        default: '/home/zebra/.cache/zebra'
         description: 'Zebra cached state directory and input image prefix to search in GCP'
       lwd_state_dir:
         required: false
         type: string
-        default: '/var/cache/lwd-cache'
+        default: '/home/zebra/.cache/lwd'
         description: 'Lightwalletd cached state directory and input image prefix to search in GCP'
       disk_prefix:
         required: false
@@ -172,13 +172,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME env as the source image to populate the disk cached state
@@ -250,7 +250,7 @@ jobs:
       # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root to both directories, Zebra and Lightwalletd, tests
-      # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
+      # will only respect the values from $ZEBRA_CACHE_DIR and $LWD_CACHE_DIR,
       # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
       # are only used to match those variables paths.
       - name: Launch ${{ inputs.test_id }} test
@@ -429,13 +429,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
@@ -695,13 +695,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.

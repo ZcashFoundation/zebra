@@ -1,5 +1,5 @@
 //! Types and implementation for Testnet consensus parameters
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use crate::{
     block::{self, Height, HeightDiff},
@@ -57,7 +57,7 @@ const TESTNET_GENESIS_HASH: &str =
 const PRE_BLOSSOM_REGTEST_HALVING_INTERVAL: HeightDiff = 144;
 
 /// Configurable funding stream recipient for configured Testnets.
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ConfiguredFundingStreamRecipient {
     /// Funding stream receiver, see [`FundingStreams::recipients`] for more details.
@@ -79,13 +79,78 @@ impl ConfiguredFundingStreamRecipient {
 }
 
 /// Configurable funding streams for configured Testnets.
-#[derive(Deserialize, Clone, Default, Debug)]
+#[derive(Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct ConfiguredFundingStreams {
     /// Start and end height for funding streams see [`FundingStreams::height_range`] for more details.
     pub height_range: Option<std::ops::Range<Height>>,
     /// Funding stream recipients, see [`FundingStreams::recipients`] for more details.
     pub recipients: Option<Vec<ConfiguredFundingStreamRecipient>>,
+}
+
+impl From<&FundingStreams> for ConfiguredFundingStreams {
+    fn from(value: &FundingStreams) -> Self {
+        Self {
+            height_range: Some(value.height_range().clone()),
+            recipients: Some(
+                value
+                    .recipients()
+                    .iter()
+                    .map(|(receiver, recipient)| ConfiguredFundingStreamRecipient {
+                        receiver: *receiver,
+                        numerator: recipient.numerator(),
+                        addresses: Some(
+                            recipient
+                                .addresses()
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect(),
+                        ),
+                    })
+                    .collect(),
+            ),
+        }
+    }
+}
+
+impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
+    fn from(activation_heights: &BTreeMap<Height, NetworkUpgrade>) -> Self {
+        let mut configured_activation_heights = ConfiguredActivationHeights::default();
+
+        for (height, network_upgrade) in activation_heights.iter() {
+            match network_upgrade {
+                NetworkUpgrade::BeforeOverwinter => {
+                    configured_activation_heights.before_overwinter = Some(height.0);
+                }
+                NetworkUpgrade::Overwinter => {
+                    configured_activation_heights.overwinter = Some(height.0);
+                }
+                NetworkUpgrade::Sapling => {
+                    configured_activation_heights.sapling = Some(height.0);
+                }
+                NetworkUpgrade::Blossom => {
+                    configured_activation_heights.blossom = Some(height.0);
+                }
+                NetworkUpgrade::Heartwood => {
+                    configured_activation_heights.heartwood = Some(height.0);
+                }
+                NetworkUpgrade::Canopy => {
+                    configured_activation_heights.canopy = Some(height.0);
+                }
+                NetworkUpgrade::Nu5 => {
+                    configured_activation_heights.nu5 = Some(height.0);
+                }
+                NetworkUpgrade::Nu6 => {
+                    configured_activation_heights.nu6 = Some(height.0);
+                }
+                NetworkUpgrade::Genesis => {
+                    continue;
+                }
+            }
+        }
+
+        configured_activation_heights
+    }
 }
 
 impl ConfiguredFundingStreams {
@@ -185,7 +250,7 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
 }
 
 /// Configurable activation heights for Regtest and configured Testnets.
-#[derive(Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Clone)]
 #[serde(rename_all = "PascalCase", deny_unknown_fields)]
 pub struct ConfiguredActivationHeights {
     /// Activation height for `BeforeOverwinter` network upgrade.
@@ -754,6 +819,15 @@ impl Parameters {
 }
 
 impl Network {
+    /// Returns the parameters of this network if it is a Testnet.
+    pub fn parameters(&self) -> Option<Arc<Parameters>> {
+        if let Self::Testnet(parameters) = self {
+            Some(parameters.clone())
+        } else {
+            None
+        }
+    }
+
     /// Returns true if proof-of-work validation should be disabled for this network
     pub fn disable_pow(&self) -> bool {
         if let Self::Testnet(params) = self {

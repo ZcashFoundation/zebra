@@ -204,7 +204,7 @@ pub enum TransactionError {
     #[error("could not find a mempool transaction input UTXO in the best chain")]
     TransparentInputNotFound,
 
-    #[error("could not validate nullifiers and anchors on best chain: {0}")]
+    #[error("could not contextually validate transaction on best chain: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // This error variant is at least 128 bytes
     ValidateContextError(Box<ValidateContextError>),
