@@ -328,10 +328,10 @@ pub fn check_sync_logs_until(
 
 /// Returns the cache directory for Zebra's state.
 ///
-/// It checks the `ZEBRA_CACHED_STATE_DIR` environment variable and returns its value if set.
+/// It checks the `ZEBRA_CACHE_DIR` environment variable and returns its value if set.
 /// Otherwise, it defaults to `"/zebrad-cache"`.
 fn get_zebra_cached_state_dir() -> PathBuf {
-    env::var("ZEBRA_CACHED_STATE_DIR")
+    env::var("ZEBRA_CACHE_DIR")
         .unwrap_or_else(|_| "/zebrad-cache".to_string())
         .into()
 }

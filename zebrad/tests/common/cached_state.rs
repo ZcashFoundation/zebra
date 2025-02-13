@@ -32,7 +32,7 @@ use crate::common::{
 };
 
 /// The environmental variable that holds the path to a directory containing a cached Zebra state.
-pub const ZEBRA_CACHED_STATE_DIR: &str = "ZEBRA_CACHED_STATE_DIR";
+pub const ZEBRA_CACHE_DIR: &str = "ZEBRA_CACHE_DIR";
 
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///
