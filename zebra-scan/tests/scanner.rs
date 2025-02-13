@@ -14,7 +14,7 @@ use zebra_test::{
 };
 
 #[cfg(not(target_os = "windows"))]
-use zebra_grpc::scanner::{Empty, scanner_client::ScannerClient};
+use zebra_grpc::scanner::{scanner_client::ScannerClient, Empty};
 
 mod scan_task_commands;
 
