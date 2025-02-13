@@ -223,7 +223,6 @@ docker run --rm -e TEST_LWD_INTEGRATION=1 zebra-tests
 #### Test Categories
 
 - Full suite (`RUN_ALL_TESTS`)
-- Experimental features (`RUN_ALL_EXPERIMENTAL_TESTS`)
 - Integration tests (`TEST_LWD_INTEGRATION`)
 - Network sync (`TEST_ZEBRA_EMPTY_SYNC`, `TEST_UPDATE_SYNC`)
 - State management (`TEST_DISK_REBUILD`)

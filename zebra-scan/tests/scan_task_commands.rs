@@ -3,7 +3,7 @@
 //! This test requires a cached chain state that is partially synchronized past the
 //! Sapling activation height and [`REQUIRED_MIN_TIP_HEIGHT`]
 //!
-//! export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
+//! export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 //! cargo test scan_task_commands --features="shielded-scan" -- --ignored --nocapture
 #![allow(dead_code, non_local_definitions)]
 
@@ -59,9 +59,9 @@ pub(crate) async fn run() -> Result<()> {
     // This is currently needed for the 'Check startup logs' step in CI to pass.
     tracing::info!("Zcash network: {network}");
 
-    let zebrad_state_path = match std::env::var_os("ZEBRA_CACHED_STATE_DIR") {
+    let zebrad_state_path = match std::env::var_os("ZEBRA_CACHE_DIR") {
         None => {
-            tracing::error!("ZEBRA_CACHED_STATE_DIR is not set");
+            tracing::error!("ZEBRA_CACHE_DIR is not set");
             return Ok(());
         }
         Some(path) => std::path::PathBuf::from(path),
