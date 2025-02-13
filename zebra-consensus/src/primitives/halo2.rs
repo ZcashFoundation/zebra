@@ -136,13 +136,6 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
 
-        let enable_spend = shielded_data
-            .flags
-            .contains(zebra_chain::orchard::Flags::ENABLE_SPENDS);
-        let enable_output = shielded_data
-            .flags
-            .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
-
         let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
             .expect("type should not have unexpected bits");
 
