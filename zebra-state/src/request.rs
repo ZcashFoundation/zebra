@@ -29,6 +29,51 @@ use crate::{
     ReadResponse, Response,
 };
 
+/// Identify a spend by a transparent outpoint or revealed nullifier.
+///
+/// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
+/// [`sapling::Nullifier`], and [`orchard::Nullifier`].
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg(feature = "indexer")]
+pub enum Spend {
+    /// A spend identified by a [`transparent::OutPoint`].
+    OutPoint(transparent::OutPoint),
+    /// A spend identified by a [`sprout::Nullifier`].
+    Sprout(sprout::Nullifier),
+    /// A spend identified by a [`sapling::Nullifier`].
+    Sapling(sapling::Nullifier),
+    /// A spend identified by a [`orchard::Nullifier`].
+    Orchard(orchard::Nullifier),
+}
+
+#[cfg(feature = "indexer")]
+impl From<transparent::OutPoint> for Spend {
+    fn from(outpoint: transparent::OutPoint) -> Self {
+        Self::OutPoint(outpoint)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<sprout::Nullifier> for Spend {
+    fn from(sprout_nullifier: sprout::Nullifier) -> Self {
+        Self::Sprout(sprout_nullifier)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<sapling::Nullifier> for Spend {
+    fn from(sapling_nullifier: sapling::Nullifier) -> Self {
+        Self::Sapling(sapling_nullifier)
+    }
+}
+
+#[cfg(feature = "indexer")]
+impl From<orchard::Nullifier> for Spend {
+    fn from(orchard_nullifier: orchard::Nullifier) -> Self {
+        Self::Orchard(orchard_nullifier)
+    }
+}
+
 /// Identify a block by hash or height.
 ///
 /// This enum implements `From` for [`block::Hash`] and [`block::Height`],
@@ -688,7 +733,8 @@ pub enum Request {
     ///
     /// This request is purely informational, and there are no guarantees about
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
-    /// Its purpose is to allow asynchronous script verification.
+    /// Its purpose is to allow asynchronous script verification or to wait until
+    /// the UTXO arrives in the state before validating dependant transactions.
     ///
     /// # Correctness
     ///
@@ -820,6 +866,10 @@ impl Request {
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
+    /// Returns [`ReadResponse::UsageInfo(num_bytes: u64)`](ReadResponse::UsageInfo)
+    /// with the current disk space usage in bytes.
+    UsageInfo,
+
     /// Returns [`ReadResponse::Tip(Option<(Height, block::Hash)>)`](ReadResponse::Tip)
     /// with the current best chain tip.
     Tip,
@@ -1020,6 +1070,13 @@ pub enum ReadRequest {
         height_range: RangeInclusive<block::Height>,
     },
 
+    /// Looks up a spending transaction id by its spent transparent input.
+    ///
+    /// Returns [`ReadResponse::TransactionId`] with the hash of the transaction
+    /// that spent the output at the provided [`transparent::OutPoint`].
+    #[cfg(feature = "indexer")]
+    SpendingTransactionId(Spend),
+
     /// Looks up utxos for the provided addresses.
     ///
     /// Returns a type with found utxos and transaction information.
@@ -1043,7 +1100,6 @@ pub enum ReadRequest {
     /// * [`ReadResponse::BlockHash(None)`](ReadResponse::BlockHash) otherwise.
     BestChainBlockHash(block::Height),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Get state information from the best block chain.
     ///
     /// Returns [`ReadResponse::ChainInfo(info)`](ReadResponse::ChainInfo) where `info` is a
@@ -1082,6 +1138,7 @@ pub enum ReadRequest {
 impl ReadRequest {
     fn variant_name(&self) -> &'static str {
         match self {
+            ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::Depth(_) => "depth",
@@ -1106,7 +1163,8 @@ impl ReadRequest {
             }
             ReadRequest::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             ReadRequest::BestChainBlockHash(_) => "best_chain_block_hash",
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            #[cfg(feature = "indexer")]
+            ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
             #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { .. } => "solution_rate",

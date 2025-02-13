@@ -15,7 +15,7 @@ use hex::{FromHex, ToHex};
 use proptest_derive::Arbitrary;
 
 /// A list of network upgrades in the order that they must be activated.
-pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
+const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
     Genesis,
     BeforeOverwinter,
     Overwinter,
@@ -61,6 +61,18 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the NU6 upgrade.
     #[serde(rename = "NU6")]
     Nu6,
+}
+
+impl TryFrom<u32> for NetworkUpgrade {
+    type Error = crate::Error;
+
+    fn try_from(branch_id: u32) -> Result<Self, Self::Error> {
+        CONSENSUS_BRANCH_IDS
+            .iter()
+            .find(|id| id.1 == ConsensusBranchId(branch_id))
+            .map(|nu| nu.0)
+            .ok_or(Self::Error::InvalidConsensusBranchId)
+    }
 }
 
 impl fmt::Display for NetworkUpgrade {
@@ -204,6 +216,15 @@ impl fmt::Display for ConsensusBranchId {
     }
 }
 
+impl TryFrom<ConsensusBranchId> for zcash_primitives::consensus::BranchId {
+    type Error = crate::Error;
+
+    fn try_from(id: ConsensusBranchId) -> Result<Self, Self::Error> {
+        zcash_primitives::consensus::BranchId::try_from(u32::from(id))
+            .map_err(|_| Self::Error::InvalidConsensusBranchId)
+    }
+}
+
 /// Network Upgrade Consensus Branch Ids.
 ///
 /// Branch ids are the same for mainnet and testnet. If there is a testnet
@@ -327,19 +348,14 @@ impl NetworkUpgrade {
             .expect("every height has a current network upgrade")
     }
 
-    /// Returns the next expected network upgrade after this network upgrade
+    /// Returns the next expected network upgrade after this network upgrade.
     pub fn next_upgrade(self) -> Option<Self> {
-        match self {
-            Genesis => Some(BeforeOverwinter),
-            BeforeOverwinter => Some(Overwinter),
-            Overwinter => Some(Sapling),
-            Sapling => Some(Blossom),
-            Blossom => Some(Heartwood),
-            Heartwood => Some(Canopy),
-            Canopy => Some(Nu5),
-            Nu5 => Some(Nu6),
-            Nu6 => None,
-        }
+        Self::iter().skip_while(|&nu| self != nu).nth(1)
+    }
+
+    /// Returns the previous network upgrade before this network upgrade.
+    pub fn previous_upgrade(self) -> Option<Self> {
+        Self::iter().rev().skip_while(|&nu| self != nu).nth(1)
     }
 
     /// Returns the next network upgrade for `network` and `height`.
@@ -518,12 +534,9 @@ impl NetworkUpgrade {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
     }
 
-    /// Returns the NetworkUpgrade given an u32 as ConsensusBranchId
-    pub fn from_branch_id(branch_id: u32) -> Option<NetworkUpgrade> {
-        CONSENSUS_BRANCH_IDS
-            .iter()
-            .find(|id| id.1 == ConsensusBranchId(branch_id))
-            .map(|nu| nu.0)
+    /// Returns an iterator over [`NetworkUpgrade`] variants.
+    pub fn iter() -> impl DoubleEndedIterator<Item = NetworkUpgrade> {
+        NETWORK_UPGRADES_IN_ORDER.into_iter()
     }
 }
 

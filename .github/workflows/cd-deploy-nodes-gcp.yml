@@ -1,6 +1,6 @@
 # Google Cloud node deployments and tests that run when Rust code or dependencies are modified,
 # but only on PRs from the ZcashFoundation/zebra repository.
-# (External PRs are tested/deployed by GitHub's Merge Queue.) 
+# (External PRs are tested/deployed by GitHub's Merge Queue.)
 #
 # 1. `versioning`: Extracts the major version from the release semver. Useful for segregating instances based on major versions.
 # 2. `build`: Builds a Docker image named `zebrad` with the necessary tags derived from Git.
@@ -28,13 +28,13 @@ concurrency:
 
 on:
   merge_group:
-    types: [ checks_requested ]
+    types: [checks_requested]
 
   workflow_dispatch:
     inputs:
       network:
         default: Mainnet
-        description: 'Network to deploy: Mainnet or Testnet'
+        description: "Network to deploy: Mainnet or Testnet"
         required: true
         type: choice
         options:
@@ -42,7 +42,7 @@ on:
           - Testnet
       cached_disk_type:
         default: tip
-        description: 'Type of cached disk to use'
+        description: "Type of cached disk to use"
         required: true
         type: choice
         options:
@@ -50,63 +50,63 @@ on:
           - checkpoint
       prefer_main_cached_state:
         default: false
-        description: 'Prefer cached state from the main branch'
+        description: "Prefer cached state from the main branch"
         required: false
         type: boolean
       need_cached_disk:
         default: true
-        description: 'Use a cached state disk'
+        description: "Use a cached state disk"
         required: false
         type: boolean
       no_cache:
-        description: 'Disable the Docker cache for this build'
+        description: "Disable the Docker cache for this build"
         required: false
         type: boolean
         default: false
       log_file:
-        default: ''
-        description: 'Log to a file path rather than standard output'
+        default: ""
+        description: "Log to a file path rather than standard output"
 
   push:
-   # Skip main branch updates where Rust code and dependencies aren't modified.
-   branches:
-     - main
-   paths:
-     # code and tests
-     - '**/*.rs'
-     # hard-coded checkpoints and proptest regressions
-     - '**/*.txt'
-     # dependencies
-     - '**/Cargo.toml'
-     - '**/Cargo.lock'
-     # configuration files
-     - '.cargo/config.toml'
-     - '**/clippy.toml'
-     # workflow definitions
-     - 'docker/**'
-     - '.dockerignore'
-     - '.github/workflows/cd-deploy-nodes-gcp.yml'
-     - '.github/workflows/sub-build-docker-image.yml'
+    # Skip main branch updates where Rust code and dependencies aren't modified.
+    branches:
+      - main
+    paths:
+      # code and tests
+      - "**/*.rs"
+      # hard-coded checkpoints and proptest regressions
+      - "**/*.txt"
+      # dependencies
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      # configuration files
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
+      # workflow definitions
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/cd-deploy-nodes-gcp.yml"
+      - ".github/workflows/sub-build-docker-image.yml"
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
     # Skip PRs where Rust code and dependencies aren't modified.
     paths:
       # code and tests
-      - '**/*.rs'
+      - "**/*.rs"
       # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
+      - "**/*.txt"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - 'docker/**'
-      - '.dockerignore'
-      - '.github/workflows/cd-deploy-nodes-gcp.yml'
-      - '.github/workflows/sub-build-docker-image.yml'
+      - "docker/**"
+      - ".dockerignore"
+      - ".github/workflows/cd-deploy-nodes-gcp.yml"
+      - ".github/workflows/sub-build-docker-image.yml"
 
   release:
     types:
@@ -160,6 +160,17 @@ jobs:
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
       prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
+  # Test that Zebra works using $ZEBRA_CONF_PATH config
+  test-zebra-conf-path:
+    name: Test CD custom Docker config file
+    needs: build
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: "custom-conf"
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v2.1.0.toml"'
+      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v2.1.0.toml"'
+
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
   #
@@ -174,6 +185,7 @@ jobs:
       image_name: zebrad
       no_cache: ${{ inputs.no_cache || false }}
       rust_log: info
+      features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 
@@ -183,11 +195,9 @@ jobs:
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'default-conf'
+      test_id: "default-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Mainnet'
 
   # Test reconfiguring the docker image for testnet.
   test-configuration-file-testnet:
@@ -196,23 +206,10 @@ jobs:
     # Make sure Zebra can sync the genesis block on testnet
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'testnet-conf'
+      test_id: "testnet-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
       grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Testnet'
-
-  # Test that Zebra works using $ZEBRA_CONF_PATH config
-  test-zebra-conf-path:
-    name: Test CD custom Docker config file
-    needs: build
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      test_id: 'custom-conf'
-      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      test_variables: "-e NETWORK=Testnet"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -232,7 +229,10 @@ jobs:
   # - on workflow_dispatch for manual deployments
   
   # Determine which networks to deploy based on the trigger
-  set-matrix:
+  
+  
+  
+  :
     runs-on: ubuntu-latest
     outputs:
       networks: ${{ steps.set-networks.outputs.matrix }}
@@ -251,20 +251,24 @@ jobs:
       matrix:
         network: ${{ fromJSON(needs.set-matrix.outputs.networks) }}
     name: Deploy ${{ matrix.network }} nodes
-    needs: [ set-matrix, build, versioning, test-configuration-file, test-zebra-conf-path, get-disk-name ]
+    needs:
+      [
+        set-matrix,
+        build,
+        versioning,
+        test-configuration-file,
+        test-zebra-conf-path,
+        get-disk-name,
+      ]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
-    if: ${{ !cancelled() && !failure() && (
-        (github.event_name == 'push' && github.ref_name == 'main') || 
-        github.event_name == 'release' ||
-        github.event_name == 'workflow_dispatch'
-      ) }}
+      contents: "read"
+      id-token: "write"
+    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
       - uses: actions/checkout@v4.2.2
@@ -290,13 +294,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       - name: Get static IP address for long-running nodes
         # Now runs when triggered by a release or a manual workflow_dispatch event.
@@ -344,11 +348,11 @@ jobs:
           --subnet=${{ vars.GCP_SUBNETWORK }} \
           ${IP_FLAG} \
           --create-disk="${DISK_PARAMS}" \
-          --container-mount-disk=mount-path='/var/cache/zebrad-cache',name=${DISK_NAME},mode=rw \
+          --container-mount-disk=mount-path='/home/zebra/.cache/zebra',name=${DISK_NAME},mode=rw \
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${LOG_FILE},LOG_COLOR=false,SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
+          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
@@ -387,6 +391,7 @@ jobs:
     name: Open or update issues for release failures
     # When a new job is added to this workflow, add it to this list.
     needs: [ versioning, build, deploy-nodes ]
+
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)

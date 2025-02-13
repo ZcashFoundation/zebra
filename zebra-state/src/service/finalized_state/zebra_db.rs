@@ -9,12 +9,11 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{
-    path::Path,
-    sync::{mpsc, Arc},
-};
+use std::{path::Path, sync::Arc};
 
+use crossbeam_channel::bounded;
 use semver::Version;
+
 use zebra_chain::parameters::Network;
 
 use crate::{
@@ -292,7 +291,7 @@ impl ZebraDb {
             if let Some(disk_version) = disk_version {
                 // We need to keep the cancel handle until the format check has finished,
                 // because dropping it cancels the format check.
-                let (_never_cancel_handle, never_cancel_receiver) = mpsc::sync_channel(1);
+                let (_never_cancel_handle, never_cancel_receiver) = bounded(1);
 
                 // We block here because the checks are quick and database validity is
                 // consensus-critical.
@@ -343,6 +342,11 @@ impl ZebraDb {
     /// such as disk usage, memory usage, and other performance-related metrics.
     pub fn print_db_metrics(&self) {
         self.db.print_db_metrics();
+    }
+
+    /// Returns the estimated total disk space usage of the database.
+    pub fn size(&self) -> u64 {
+        self.db.size()
     }
 }
 

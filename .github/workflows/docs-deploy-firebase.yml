@@ -92,7 +92,7 @@ jobs:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Setup mdBook
-        uses: jontze/action-mdbook@v3.0.1
+        uses: jontze/action-mdbook@v4.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           mdbook-version: '~0.4'
@@ -106,7 +106,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
@@ -164,7 +164,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'

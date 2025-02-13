@@ -32,7 +32,7 @@ use crate::common::{
 };
 
 /// The environmental variable that holds the path to a directory containing a cached Zebra state.
-pub const ZEBRA_CACHED_STATE_DIR: &str = "ZEBRA_CACHED_STATE_DIR";
+pub const ZEBRA_CACHE_DIR: &str = "ZEBRA_CACHE_DIR";
 
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///
@@ -167,13 +167,13 @@ pub async fn load_tip_height_from_state_directory(
 /// ## Panics
 ///
 /// If the provided `test_type` doesn't need an rpc server and cached state, or if `max_num_blocks` is 0
-pub async fn get_future_blocks(
+pub async fn future_blocks(
     network: &Network,
     test_type: TestType,
     test_name: &str,
     max_num_blocks: u32,
 ) -> Result<Vec<Block>> {
-    let blocks: Vec<Block> = get_raw_future_blocks(network, test_type, test_name, max_num_blocks)
+    let blocks: Vec<Block> = raw_future_blocks(network, test_type, test_name, max_num_blocks)
         .await?
         .into_iter()
         .map(hex::decode)
@@ -198,7 +198,7 @@ pub async fn get_future_blocks(
 /// ## Panics
 ///
 /// If the provided `test_type` doesn't need an rpc server and cached state, or if `max_num_blocks` is 0
-pub async fn get_raw_future_blocks(
+pub async fn raw_future_blocks(
     network: &Network,
     test_type: TestType,
     test_name: &str,
@@ -211,13 +211,13 @@ pub async fn get_raw_future_blocks(
 
     assert!(
         test_type.needs_zebra_cached_state() && test_type.needs_zebra_rpc_server(),
-        "get_raw_future_blocks needs zebra cached state and rpc server"
+        "raw_future_blocks needs zebra cached state and rpc server"
     );
 
     let should_sync = true;
     let (zebrad, zebra_rpc_address) =
         spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)?
-            .ok_or_else(|| eyre!("get_raw_future_blocks requires a cached state"))?;
+            .ok_or_else(|| eyre!("raw_future_blocks requires a cached state"))?;
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
 
     let mut zebrad = check_sync_logs_until(

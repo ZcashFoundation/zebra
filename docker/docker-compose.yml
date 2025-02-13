@@ -29,7 +29,7 @@ services:
     #     gid: '2001' # Rust's container default group gid
     #     mode: 0440
     volumes:
-      - zebrad-cache:/var/cache/zebrad-cache
+      - zebrad-cache:/home/zebra/.cache/zebra
     ports:
       # Zebra uses the following default inbound and outbound TCP ports
       - "8233:8233" # Mainnet Network (for peer connections)

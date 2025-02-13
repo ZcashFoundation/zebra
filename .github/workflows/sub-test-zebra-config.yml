@@ -23,14 +23,9 @@ on:
         type: string
         description: 'Docker image to test'
       test_variables:
-        required: true
-        type: string
-        description: 'Environmental variables used to select and configure the test'
-      network:
         required: false
         type: string
-        default: Mainnet
-        description: 'Zcash network to test against'
+        description: 'Environment variables used to select and configure the test'
 
 jobs:
   test-docker-config:
@@ -87,5 +82,3 @@ jobs:
           # Handle other potential errors here
           echo "An error occurred while processing the logs.";
           exit 1;
-        env:
-          NETWORK: '${{ inputs.network }}'

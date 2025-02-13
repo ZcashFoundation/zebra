@@ -5,7 +5,7 @@ updates:
     directory: '/'
     # serde, clap, and other dependencies sometimes have multiple updates in a week
     schedule:
-      interval: weekly
+      interval: monthly
       day: monday
       timezone: America/New_York
     # Limit dependabot to 1 PR per reviewer
