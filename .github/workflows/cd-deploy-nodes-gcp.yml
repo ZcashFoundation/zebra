@@ -265,7 +265,7 @@ jobs:
     permissions:
       contents: "read"
       id-token: "write"
-    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && !failure() && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
       - uses: actions/checkout@v4.2.2
