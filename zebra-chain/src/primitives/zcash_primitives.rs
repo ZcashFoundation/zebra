@@ -157,6 +157,9 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
     type OrchardAuth = orchard::bundle::Authorized;
 
     #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    type OrchardZsaAuth = orchard::bundle::Authorized;
+
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type IssueAuth = orchard::issuance::Signed;
 }
 
@@ -285,9 +288,14 @@ impl<'a> PrecomputedTxData<'a> {
                 all_prev_outputs: all_previous_outputs,
             },
         };
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = alt_tx
-            .into_data()
-            .map_authorization(f_transparent, IdentityMap, IdentityMap, IdentityMap);
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> =
+            alt_tx.into_data().map_authorization(
+                f_transparent,
+                IdentityMap,
+                IdentityMap,
+                IdentityMap,
+                IdentityMap,
+            );
 
         PrecomputedTxData {
             tx_data,
