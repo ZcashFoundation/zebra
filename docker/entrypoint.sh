@@ -161,7 +161,7 @@ run_tests() {
       --package zebra-state \
       -- --nocapture --include-ignored with_fake_activation_heights
 
-  elif [[ "${TEST_SCAN_TASK_COMMANDS}" -eq "1" ]]; then
+  elif [[ "${TEST_SCANNER}" -eq "1" ]]; then
     # Test the scanner.
     exec cargo test --locked --release --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands scan_start_where_left
