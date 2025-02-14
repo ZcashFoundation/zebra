@@ -227,12 +227,9 @@ jobs:
   # - on every push to the `main` branch
   # - on every release, when it's published
   # - on workflow_dispatch for manual deployments
-  
+
   # Determine which networks to deploy based on the trigger
-  
-  
-  
-  :
+  set-matrix:
     runs-on: ubuntu-latest
     outputs:
       networks: ${{ steps.set-networks.outputs.matrix }}
