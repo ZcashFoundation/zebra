@@ -290,7 +290,7 @@ impl TransactionError {
     pub fn mempool_misbehavior_score(&self) -> u32 {
         use TransactionError::*;
 
-        // TODO: Adjust these values based on zcashd.
+        // TODO: Adjust these values based on zcashd (#9258).
         match self {
             ImmatureTransparentCoinbaseSpend { .. }
             | UnshieldedTransparentCoinbaseSpend { .. }

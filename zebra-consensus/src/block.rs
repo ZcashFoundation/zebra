@@ -103,7 +103,7 @@ impl VerifyBlockError {
 
     /// Returns a suggested misbehaviour score increment for a certain error.
     pub fn misbehavior_score(&self) -> u32 {
-        // TODO: Adjust these values based on zcashd.
+        // TODO: Adjust these values based on zcashd (#9258).
         use VerifyBlockError::*;
         match self {
             Block { source } => source.misbehavior_score(),

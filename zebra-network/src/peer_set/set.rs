@@ -485,7 +485,7 @@ where
                     trace!(?key, "service became ready");
 
                     if self.bans_receiver.borrow().contains_key(&key.ip()) {
-                        debug!(?key, "service is banned, dropping service");
+                        warn!(?key, "service is banned, dropping service");
                         std::mem::drop(svc);
                         continue;
                     }

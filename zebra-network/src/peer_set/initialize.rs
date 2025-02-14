@@ -120,7 +120,9 @@ where
     ) = AddressBookUpdater::spawn(&config, listen_addr);
 
     let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
-        3 * config
+        // Leave enough room for a misbehaviour update on every peer connection
+        // before the channel is drained.
+        config
             .peerset_total_connection_limit()
             .max(MIN_CHANNEL_SIZE),
     );
@@ -129,8 +131,10 @@ where
     tokio::spawn(
         async move {
             let mut misbehaviors: HashMap<PeerSocketAddr, u32> = HashMap::new();
+            // Batch misbehaviour updates so peers can't keep the address book mutex locked
+            // by repeatedly sending invalid blocks or transactions.
             let mut flush_timer =
-                IntervalStream::new(tokio::time::interval(Duration::from_secs(60)));
+                IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
 
             loop {
                 tokio::select! {
