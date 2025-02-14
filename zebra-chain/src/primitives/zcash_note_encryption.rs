@@ -51,7 +51,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
     if let Some(bundle) = alt_tx.orchard_bundle() {
         for act in bundle.actions() {
             if zcash_note_encryption::try_output_recovery_with_ovk(
-                &orchard::domain::OrchardDomain::for_action(act),
+                &orchard::note_encryption::OrchardDomain::for_action(act),
                 &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
                 act,
                 act.cv_net(),
