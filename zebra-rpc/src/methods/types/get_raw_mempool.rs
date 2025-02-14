@@ -1,3 +1,5 @@
+//! Types used in `getrawmempool` RPC method.
+
 use std::collections::HashMap;
 #[cfg(feature = "getblocktemplate-rpcs")]
 use std::collections::HashSet;
