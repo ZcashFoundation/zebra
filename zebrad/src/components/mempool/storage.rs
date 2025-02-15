@@ -17,6 +17,7 @@ use std::{
 use thiserror::Error;
 
 use zebra_chain::{
+    block::Height,
     transaction::{self, Hash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
@@ -203,6 +204,7 @@ impl Storage {
         &mut self,
         tx: VerifiedUnminedTx,
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
+        height: Option<Height>,
     ) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -238,10 +240,12 @@ impl Storage {
 
         // Then, we try to insert into the pool. If this fails the transaction is rejected.
         let mut result = Ok(unmined_tx_id);
-        if let Err(rejection_error) =
-            self.verified
-                .insert(tx, spent_mempool_outpoints, &mut self.pending_outputs)
-        {
+        if let Err(rejection_error) = self.verified.insert(
+            tx,
+            spent_mempool_outpoints,
+            &mut self.pending_outputs,
+            height,
+        ) {
             tracing::debug!(
                 ?tx_id,
                 ?rejection_error,

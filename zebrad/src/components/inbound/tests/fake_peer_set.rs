@@ -1073,7 +1073,7 @@ fn add_some_stuff_to_mempool(
     // Insert the genesis block coinbase transaction into the mempool storage.
     mempool_service
         .storage()
-        .insert(genesis_transactions[0].clone(), Vec::new())
+        .insert(genesis_transactions[0].clone(), Vec::new(), None)
         .unwrap();
 
     genesis_transactions
