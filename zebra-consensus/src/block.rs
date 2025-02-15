@@ -100,6 +100,17 @@ impl VerifyBlockError {
             _ => false,
         }
     }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        // TODO: Adjust these values based on zcashd (#9258).
+        use VerifyBlockError::*;
+        match self {
+            Block { source } => source.misbehavior_score(),
+            Equihash { .. } => 100,
+            _other => 0,
+        }
+    }
 }
 
 /// The maximum allowed number of legacy signature check operations in a block.

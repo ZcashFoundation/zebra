@@ -805,7 +805,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
         .map(|responder| {
             responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available(tx.clone().into()),
+                zn::InventoryResponse::Available((tx.clone().into(), None)),
             ]));
         })
         .await;
@@ -864,7 +864,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
         .map(|responder| {
             responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available(tx.into()),
+                zn::InventoryResponse::Available((tx.into(), None)),
             ]));
         })
         .await;
@@ -1069,7 +1069,7 @@ async fn setup(
     let tx_verifier = MockService::build().for_unit_tests();
 
     let (sync_status, recent_syncs) = SyncStatus::new();
-
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mut mempool_transaction_receiver) = Mempool::new(
         &mempool::Config {
             tx_cost_limit,
@@ -1081,6 +1081,7 @@ async fn setup(
         sync_status,
         latest_chain_tip,
         chain_tip_change.clone(),
+        misbehavior_tx,
     );
 
     tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });

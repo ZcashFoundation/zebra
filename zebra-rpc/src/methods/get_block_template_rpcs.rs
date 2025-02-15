@@ -1319,10 +1319,10 @@ where
         > = self.clone();
         let network = self.network.clone();
 
-        if !network.is_regtest() {
+        if !network.disable_pow() {
             return Err(ErrorObject::borrowed(
                 0,
-                "generate is only supported on regtest",
+                "generate is only supported on networks where PoW is disabled",
                 None,
             ));
         }
