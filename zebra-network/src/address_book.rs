@@ -10,6 +10,7 @@ use std::{
 };
 
 use chrono::Utc;
+use indexmap::IndexMap;
 use ordered_map::OrderedMap;
 use tokio::sync::watch;
 use tracing::Span;
@@ -79,6 +80,9 @@ pub struct AddressBook {
     /// currently only supports a `max_connections_per_ip` of 1, and must be `None` when used with a greater `max_connections_per_ip`.
     // TODO: Replace with `by_ip: HashMap<IpAddr, BTreeMap<DateTime32, MetaAddr>>` to support configured `max_connections_per_ip` greater than 1
     most_recent_by_ip: Option<HashMap<IpAddr, MetaAddr>>,
+
+    /// A list of banned addresses, with the time they were banned.
+    bans_by_ip: Arc<IndexMap<IpAddr, Instant>>,
 
     /// The local listener address.
     local_listener: SocketAddr,
@@ -162,6 +166,7 @@ impl AddressBook {
             address_metrics_tx,
             last_address_log: None,
             most_recent_by_ip: should_limit_outbound_conns_per_ip.then(HashMap::new),
+            bans_by_ip: Default::default(),
         };
 
         new_book.update_metrics(instant_now, chrono_now);
@@ -409,6 +414,14 @@ impl AddressBook {
     /// peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn update(&mut self, change: MetaAddrChange) -> Option<MetaAddr> {
+        if self.bans_by_ip.contains_key(&change.addr().ip()) {
+            tracing::warn!(
+                ?change,
+                "attempted to add a banned peer addr to address book"
+            );
+            return None;
+        }
+
         let previous = self.get(change.addr());
 
         let _guard = self.span.enter();
@@ -428,6 +441,44 @@ impl AddressBook {
         );
 
         if let Some(updated) = updated {
+            if updated.misbehavior() >= constants::MAX_PEER_MISBEHAVIOR_SCORE {
+                // Ban and skip outbound connections with excessively misbehaving peers.
+                let banned_ip = updated.addr.ip();
+                let bans_by_ip = Arc::make_mut(&mut self.bans_by_ip);
+
+                bans_by_ip.insert(banned_ip, Instant::now());
+                if bans_by_ip.len() > constants::MAX_BANNED_IPS {
+                    // Remove the oldest banned IP from the address book.
+                    bans_by_ip.shift_remove_index(0);
+                }
+
+                self.most_recent_by_ip
+                    .as_mut()
+                    .expect("should be some when should_remove_most_recent_by_ip is true")
+                    .remove(&banned_ip);
+
+                let banned_addrs: Vec<_> = self
+                    .by_addr
+                    .descending_keys()
+                    .skip_while(|addr| addr.ip() != banned_ip)
+                    .take_while(|addr| addr.ip() == banned_ip)
+                    .cloned()
+                    .collect();
+
+                for addr in banned_addrs {
+                    self.by_addr.remove(&addr);
+                }
+
+                warn!(
+                    ?updated,
+                    total_peers = self.by_addr.len(),
+                    recent_peers = self.recently_live_peers(chrono_now).len(),
+                    "banned ip and removed banned peer addresses from address book",
+                );
+
+                return None;
+            }
+
             // Ignore invalid outbound addresses.
             // (Inbound connections can be monitored via Zebra's metrics.)
             if !updated.address_is_valid_for_outbound(&self.network) {
@@ -634,6 +685,11 @@ impl AddressBook {
             .cloned()
     }
 
+    /// Returns banned IP addresses.
+    pub fn bans(&self) -> Arc<IndexMap<IpAddr, Instant>> {
+        self.bans_by_ip.clone()
+    }
+
     /// Returns the number of entries in this address book.
     pub fn len(&self) -> usize {
         self.by_addr.len()
@@ -805,6 +861,7 @@ impl Clone for AddressBook {
             address_metrics_tx,
             last_address_log: None,
             most_recent_by_ip: self.most_recent_by_ip.clone(),
+            bans_by_ip: self.bans_by_ip.clone(),
         }
     }
 }

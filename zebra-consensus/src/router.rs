@@ -139,6 +139,15 @@ impl RouterError {
             RouterError::Block { source, .. } => source.is_duplicate_request(),
         }
     }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        // TODO: Adjust these values based on zcashd (#9258).
+        match self {
+            RouterError::Checkpoint { source } => source.misbehavior_score(),
+            RouterError::Block { source } => source.misbehavior_score(),
+        }
+    }
 }
 
 impl<S, V> Service<Request> for BlockVerifierRouter<S, V>
