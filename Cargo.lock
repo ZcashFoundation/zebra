@@ -6174,6 +6174,7 @@ dependencies = [
  "proptest",
  "prost",
  "rand 0.8.5",
+ "semver",
  "serde",
  "serde_json",
  "thiserror 2.0.11",

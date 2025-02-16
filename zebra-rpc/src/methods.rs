@@ -558,10 +558,17 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     async fn get_info(&self) -> Result<GetInfo> {
+        let version = GetInfo::version(&self.build_version).ok_or(ErrorObject::owned(
+            server::error::LegacyCode::Misc.into(),
+            "invalid version string",
+            None::<()>,
+        ))?;
+
         // TODO: Change to use `currently_live_peers()` after #9214
         let connections = self.address_book.recently_live_peers(Utc::now()).len();
 
         let response = GetInfo {
+            version,
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
             connections,
@@ -1691,6 +1698,26 @@ impl GetInfo {
             self.errors,
             self.errors_timestamp,
         )
+    }
+
+    /// Create the node version number.
+    pub fn version(build_string: &str) -> Option<u64> {
+        let semver_version = semver::Version::parse(build_string.strip_prefix('v')?).ok()?;
+        let build_number = semver_version
+            .build
+            .as_str()
+            .split('.')
+            .next()
+            .and_then(|num_str| num_str.parse::<u64>().ok())
+            .unwrap_or_default();
+
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/clientversion.h#L55-L59
+        let version_number = 1_000_000 * semver_version.major
+            + 10_000 * semver_version.minor
+            + 100 * semver_version.patch
+            + build_number;
+
+        Some(version_number)
     }
 }
 
