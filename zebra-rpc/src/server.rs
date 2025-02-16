@@ -171,7 +171,7 @@ impl RpcServer {
             latest_chain_tip.clone(),
             block_verifier_router,
             sync_status,
-            address_book,
+            address_book.clone(),
             mined_block_sender,
         );
 
@@ -188,6 +188,7 @@ impl RpcServer {
             mempool,
             state,
             latest_chain_tip,
+            address_book,
         );
 
         let http_middleware_layer = if config.enable_cookie_auth {

@@ -37,6 +37,7 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::ParameterCheckpoint;
+use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
@@ -358,7 +359,7 @@ pub trait Rpc {
 
 /// RPC method implementations.
 #[derive(Clone)]
-pub struct RpcImpl<Mempool, State, Tip>
+pub struct RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -379,6 +380,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Configuration
     //
@@ -414,9 +416,12 @@ where
     //
     /// A sender component of a channel used to send transactions to the mempool queue.
     queue_sender: broadcast::Sender<UnminedTx>,
+
+    /// Peer address book.
+    address_book: AddressBook,
 }
 
-impl<Mempool, State, Tip> Debug for RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, AddressBook> Debug for RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -437,6 +442,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Skip fields without Debug impls, and skip channels
@@ -450,7 +456,7 @@ where
     }
 }
 
-impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, AddressBook> RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -471,6 +477,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
     //
@@ -486,6 +493,7 @@ where
         mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
+        address_book: AddressBook,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -511,6 +519,7 @@ where
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             queue_sender,
+            address_book,
         };
 
         // run the process queue
@@ -525,7 +534,7 @@ where
 }
 
 #[async_trait]
-impl<Mempool, State, Tip> RpcServer for RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, AddressBook> RpcServer for RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -546,11 +555,16 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     async fn get_info(&self) -> Result<GetInfo> {
+        // TODO: Change to use `currently_live_peers()` after #9214
+        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+
         let response = GetInfo {
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
+            connections,
             ..Default::default()
         };
 
