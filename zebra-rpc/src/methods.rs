@@ -89,7 +89,7 @@ pub trait Rpc {
     /// Some fields from the zcashd reference are missing from Zebra's [`GetInfo`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95)
     #[method(name = "getinfo")]
-    fn get_info(&self) -> Result<GetInfo>;
+    async fn get_info(&self) -> Result<GetInfo>;
 
     /// Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
     ///
@@ -547,10 +547,11 @@ where
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    fn get_info(&self) -> Result<GetInfo> {
+    async fn get_info(&self) -> Result<GetInfo> {
         let response = GetInfo {
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
+            ..Default::default()
         };
 
         Ok(response)
@@ -1542,33 +1543,140 @@ where
 /// Response to a `getinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_info` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetInfo {
+    /// The node version
+    version: u64,
+
     /// The node version build number
     build: String,
 
     /// The server sub-version identifier, used as the network protocol user-agent
     subversion: String,
+
+    /// The protocol version
+    #[serde(rename = "protocolversion")]
+    protocol_version: u32,
+
+    /// The current number of blocks processed in the server
+    blocks: u32,
+
+    /// The total (inbound and outbound) number of connections the node has
+    connections: usize,
+
+    /// The proxy (if any) used by the server. Currently always `None` in Zebra.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy: Option<String>,
+
+    /// The current network difficulty
+    difficulty: f64,
+
+    /// True if the server is running in testnet mode, false otherwise
+    testnet: bool,
+
+    /// The minimum transaction fee in ZEC/kB
+    #[serde(rename = "paytxfee")]
+    pay_tx_fee: f64,
+
+    /// The minimum relay fee for non-free transactions in ZEC/kB
+    #[serde(rename = "relayfee")]
+    relay_fee: f64,
+
+    /// The last error or warning message, or "no errors" if there are no errors
+    errors: String,
+
+    /// The time of the last error or warning message, or "no errors timestamp" if there are no errors
+    #[serde(rename = "errorstimestamp")]
+    errors_timestamp: String,
 }
 
 impl Default for GetInfo {
     fn default() -> Self {
         GetInfo {
+            version: 0,
             build: "some build version".to_string(),
             subversion: "some subversion".to_string(),
+            protocol_version: 0,
+            blocks: 0,
+            connections: 0,
+            proxy: None,
+            difficulty: 0.0,
+            testnet: false,
+            pay_tx_fee: 0.0,
+            relay_fee: 0.0,
+            errors: "no errors".to_string(),
+            errors_timestamp: "no errors timestamp".to_string(),
         }
     }
 }
 
 impl GetInfo {
     /// Constructs [`GetInfo`] from its constituent parts.
-    pub fn from_parts(build: String, subversion: String) -> Self {
-        Self { build, subversion }
+    pub fn from_parts(
+        version: u64,
+        build: String,
+        subversion: String,
+        protocol_version: u32,
+        blocks: u32,
+        connections: usize,
+        proxy: Option<String>,
+        difficulty: f64,
+        testnet: bool,
+        pay_tx_fee: f64,
+        relay_fee: f64,
+        errors: String,
+        errors_timestamp: String,
+    ) -> Self {
+        Self {
+            version,
+            build,
+            subversion,
+            protocol_version,
+            blocks,
+            connections,
+            proxy,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors,
+            errors_timestamp,
+        }
     }
 
     /// Returns the contents of ['GetInfo'].
-    pub fn into_parts(self) -> (String, String) {
-        (self.build, self.subversion)
+    pub fn into_parts(
+        self,
+    ) -> (
+        u64,
+        String,
+        String,
+        u32,
+        u32,
+        usize,
+        Option<String>,
+        f64,
+        bool,
+        f64,
+        f64,
+        String,
+        String,
+    ) {
+        (
+            self.version,
+            self.build,
+            self.subversion,
+            self.protocol_version,
+            self.blocks,
+            self.connections,
+            self.proxy,
+            self.difficulty,
+            self.testnet,
+            self.pay_tx_fee,
+            self.relay_fee,
+            self.errors,
+            self.errors_timestamp,
+        )
     }
 }
 
