@@ -1674,6 +1674,7 @@ impl Default for GetInfo {
 
 impl GetInfo {
     /// Constructs [`GetInfo`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         version: u64,
         build: String,
