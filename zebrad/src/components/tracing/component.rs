@@ -444,11 +444,12 @@ struct MessageVisitor {
 impl Visit for MessageVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         if field.name() == "message" {
-            self.message = Some(format!("{:?}", value).trim_matches('"').to_string());
+            self.message = Some(format!("{:?}", value));
         }
     }
 }
 
+// Layer to store the last WARN or ERROR log event.
 #[derive(Debug, Clone)]
 struct LastWarnErrorLayer {
     last_event: Arc<Mutex<Option<(String, Level, chrono::DateTime<chrono::Utc>)>>>,

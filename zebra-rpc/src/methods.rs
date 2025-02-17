@@ -583,14 +583,33 @@ where
             Utc::now(),
         ));
 
+        let tip_height = self.latest_chain_tip.best_tip_height().unwrap_or(Height::MIN);
+        let testnet = self.network.is_a_test_network();
+
+        // This field is behind the `ENABLE_WALLET` feature flag in zcashd:
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/rpc/misc.cpp#L113
+        // However it is not documented as optional:
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/rpc/misc.cpp#L70
+        // For compatibility, we keep the field in the response, but always return 0.
+        let pay_tx_fee = 0.0;
+
+        let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64 / (zebra_chain::amount::COIN as f64);
+        let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone()).await?;
+
         let response = GetInfo {
             version,
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
+            protocol_version: zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION.0,
+            blocks: tip_height.0,
             connections,
+            proxy: None,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
             errors: last_event,
             errors_timestamp: last_event_time.to_string(),
-            ..Default::default()
         };
 
         Ok(response)
