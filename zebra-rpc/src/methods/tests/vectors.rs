@@ -1288,7 +1288,7 @@ async fn rpc_getblockcount_empty_state() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getpeerinfo() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_network::{address_book_peers::MockAddressBookPeers, types::PeerServices};
 
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -1311,7 +1311,7 @@ async fn rpc_getpeerinfo() {
     )
     .await;
 
-    let mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
+    let outbound_mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
         std::net::SocketAddr::new(
             std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
@@ -1323,7 +1323,22 @@ async fn rpc_getpeerinfo() {
         zebra_chain::serialization::DateTime32::now(),
     );
 
-    let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address]);
+    let inbound_mock_peer_address = zebra_network::types::MetaAddr::new_connected(
+        std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+            44444,
+        )
+        .into(),
+        &PeerServices::NODE_NETWORK,
+        true,
+    )
+    .into_new_meta_addr(
+        std::time::Instant::now(),
+        zebra_chain::serialization::DateTime32::now(),
+    );
+
+    let mock_address_book =
+        MockAddressBookPeers::new(vec![outbound_mock_peer_address, inbound_mock_peer_address]);
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1344,12 +1359,21 @@ async fn rpc_getpeerinfo() {
         .await
         .expect("We should have an array of addresses");
 
+    let mut res_iter = get_peer_info.into_iter();
+    // Check for the outbound peer
     assert_eq!(
-        get_peer_info
-            .into_iter()
+        res_iter
             .next()
             .expect("there should be a mock peer address"),
-        mock_peer_address.into()
+        outbound_mock_peer_address.into()
+    );
+
+    // Check for the inbound peer
+    assert_eq!(
+        res_iter
+            .next()
+            .expect("there should be a mock peer address"),
+        inbound_mock_peer_address.into()
     );
 
     mempool.expect_no_requests().await;

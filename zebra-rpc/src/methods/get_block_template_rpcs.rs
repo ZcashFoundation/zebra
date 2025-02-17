@@ -1101,10 +1101,11 @@ where
 
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>> {
         let address_book = self.address_book.clone();
+
         Ok(address_book
             .recently_live_peers(chrono::Utc::now())
             .into_iter()
-            .map(PeerInfo::from)
+            .map(|meta_addr| PeerInfo::new(meta_addr, meta_addr.is_inbound()))
             .collect())
     }
 
