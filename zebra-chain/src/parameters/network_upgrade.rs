@@ -94,9 +94,6 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_046_400), Canopy),
     (block::Height(1_687_104), Nu5),
     (block::Height(2_726_400), Nu6),
-    // FIXME: TODO: Use a proper value below.
-    #[cfg(zcash_unstable = "nu7")]
-    (block::Height(3_111_000), Nu7),
 ];
 
 /// Fake mainnet network upgrade activation heights, used in tests.
@@ -134,9 +131,6 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_028_500), Canopy),
     (block::Height(1_842_420), Nu5),
     (block::Height(2_976_000), Nu6),
-    // FIXME: TODO: Use a proper value below.
-    #[cfg(zcash_unstable = "nu7")]
-    (block::Height(3_222_000), Nu7),
 ];
 
 /// Fake testnet network upgrade activation heights, used in tests.
@@ -234,9 +228,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
-    // FIXME: TODO: Use a proper value below.
-    #[cfg(zcash_unstable = "nu7")]
-    (Nu7, ConsensusBranchId(0x77190ad8)),
+    // (Nu7, ConsensusBranchId(0x77190ad8)),
 ];
 
 /// The target block spacing before Blossom.
@@ -555,9 +547,7 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
-            // FIXME: TODO: Use a proper value below.
-            #[cfg(zcash_unstable = "nu7")]
-            zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
+            // zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
         }
     }
 }
