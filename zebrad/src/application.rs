@@ -36,6 +36,11 @@ fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
 
+lazy_static::lazy_static! {
+    /// The last log event that occurred in the application.
+    pub static ref LAST_LOG_EVENT: Arc<std::sync::Mutex<Option<(String, tracing::Level, chrono::DateTime<chrono::Utc>)>>> = Arc::new(std::sync::Mutex::new(None));
+}
+
 /// Returns the `zebrad` version for this build, in SemVer 2.0 format.
 ///
 /// Includes `git describe` build metatata if available:

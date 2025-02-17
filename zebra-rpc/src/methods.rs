@@ -419,7 +419,14 @@ where
 
     /// Peer address book.
     address_book: AddressBook,
+
+    /// The last warning or error event logged by the server.
+    last_event: LoggedLastEvent,
 }
+
+/// A type alias for the last event logged by the server.
+pub type LoggedLastEvent =
+    Arc<std::sync::Mutex<Option<(String, tracing::Level, chrono::DateTime<Utc>)>>>;
 
 impl<Mempool, State, Tip, AddressBook> Debug for RpcImpl<Mempool, State, Tip, AddressBook>
 where
@@ -494,6 +501,7 @@ where
         state: State,
         latest_chain_tip: Tip,
         address_book: AddressBook,
+        last_event: LoggedLastEvent,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -520,6 +528,7 @@ where
             latest_chain_tip: latest_chain_tip.clone(),
             queue_sender,
             address_book,
+            last_event,
         };
 
         // run the process queue
@@ -567,11 +576,20 @@ where
         // TODO: Change to use `currently_live_peers()` after #9214
         let connections = self.address_book.recently_live_peers(Utc::now()).len();
 
+        let last_error_recorded = self.last_event.lock().expect("mutex poisoned").clone();
+        let (last_event, _last_event_level, last_event_time) = last_error_recorded.unwrap_or((
+            GetInfo::default().errors,
+            tracing::Level::INFO,
+            Utc::now(),
+        ));
+
         let response = GetInfo {
             version,
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
             connections,
+            errors: last_event,
+            errors_timestamp: last_event_time.to_string(),
             ..Default::default()
         };
 
