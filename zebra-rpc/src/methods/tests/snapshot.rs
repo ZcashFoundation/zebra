@@ -25,6 +25,7 @@ use zebra_chain::{
     serialization::ZcashDeserializeInto,
     subtree::NoteCommitmentSubtreeData,
 };
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 use zebra_state::{ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
 use zebra_test::mock_service::MockService;
@@ -116,6 +117,8 @@ async fn test_z_get_treestate() {
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         state,
         tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Request the treestate by a hash.
@@ -198,7 +201,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // Init RPC
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "/Zebra:RPC test/",
         network.clone(),
         false,
@@ -206,6 +209,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // We only want a snapshot of the `getblocksubsidy` and `getblockchaininfo` methods for the non-default Testnet (with an NU6 activation height).
@@ -220,7 +225,10 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     }
 
     // `getinfo`
-    let get_info = rpc.get_info().expect("We should have a GetInfo struct");
+    let get_info = rpc
+        .get_info()
+        .await
+        .expect("We should have a GetInfo struct");
     snapshot_rpc_getinfo(get_info, &settings);
 
     // `getblockchaininfo`
@@ -522,7 +530,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     let mempool = MockService::build().for_unit_tests();
 
     let (rpc, _) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "/Zebra:RPC test/",
         network.clone(),
         false,
@@ -530,6 +538,8 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         mempool,
         state.clone(),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Test the response format from `z_getsubtreesbyindex` for Sapling.
@@ -598,6 +608,9 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
                 assert_eq!(value.as_str().unwrap(), format!("/Zebra:RPC test/"));
                 // replace with:
                 "[SubVersion]"
+            }),
+            ".errorstimestamp" => dynamic_redaction(|_value, _path| {
+                "[LastErrorTimestamp]"
             }),
         })
     });

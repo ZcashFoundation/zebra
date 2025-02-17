@@ -24,6 +24,7 @@ use zebra_chain::{
 };
 
 use zebra_consensus::ParameterCheckpoint;
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 
@@ -968,6 +969,7 @@ fn mock_services<Tip>(
             zebra_state::ReadRequest,
         >,
         Tip,
+        MockAddressBookPeers,
     >,
     tokio::task::JoinHandle<()>,
 )
@@ -978,7 +980,7 @@ where
     let state = MockService::build().for_prop_tests();
 
     let (rpc, mempool_tx_queue) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         network,
         false,
@@ -986,6 +988,8 @@ where
         mempool.clone(),
         Buffer::new(state.clone(), 1),
         chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     (mempool, state, rpc, mempool_tx_queue)

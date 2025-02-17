@@ -57,6 +57,7 @@ async fn rpc_server_spawn() {
         NoChainTip,
         Mainnet,
         None,
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     info!("spawned RPC server, checking services...");
@@ -117,6 +118,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         NoChainTip,
         Mainnet,
         None,
+        crate::methods::LoggedLastEvent::new(None.into()),
     )
     .await
     .expect("");
@@ -173,6 +175,7 @@ async fn rpc_server_spawn_port_conflict() {
         NoChainTip,
         Mainnet,
         None,
+        crate::methods::LoggedLastEvent::new(None.into()),
     )
     .await;
 
@@ -193,6 +196,7 @@ async fn rpc_server_spawn_port_conflict() {
         NoChainTip,
         Mainnet,
         None,
+        crate::methods::LoggedLastEvent::new(None.into()),
     )
     .await;
 

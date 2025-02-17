@@ -14,9 +14,10 @@ use zebra_chain::{
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::UnminedTxId,
 };
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 
-use zebra_state::{LatestChainTip, ReadStateService};
+use zebra_state::{GetBlockTemplateChainInfo, LatestChainTip, ReadStateService};
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -29,7 +30,7 @@ async fn rpc_getinfo() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "/Zebra:RPC test/",
         Mainnet,
         false,
@@ -37,13 +38,36 @@ async fn rpc_getinfo() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
-    let get_info = rpc.get_info().expect("We should have a GetInfo struct");
+    let getinfo_future = tokio::spawn(async move { rpc.get_info().await });
+
+    // Make the mock service respond with
+    let response_handler = state
+        .expect_request(zebra_state::ReadRequest::ChainInfo)
+        .await;
+    response_handler.respond(zebra_state::ReadResponse::ChainInfo(
+        GetBlockTemplateChainInfo {
+            tip_hash: Mainnet.genesis_hash(),
+            tip_height: Height::MIN,
+            history_tree: Default::default(),
+            expected_difficulty: Default::default(),
+            cur_time: zebra_chain::serialization::DateTime32::now(),
+            min_time: zebra_chain::serialization::DateTime32::now(),
+            max_time: zebra_chain::serialization::DateTime32::now(),
+        },
+    ));
+
+    let get_info = getinfo_future
+        .await
+        .expect("getinfo future should not panic")
+        .expect("getinfo future should not return an error");
 
     // make sure there is a `build` field in the response,
     // and that is equal to the provided string, with an added 'v' version prefix.
-    assert_eq!(get_info.build, "vRPC test");
+    assert_eq!(get_info.build, "v0.0.1");
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
@@ -120,7 +144,7 @@ async fn rpc_getblock() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -128,6 +152,8 @@ async fn rpc_getblock() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Make height calls with verbosity=0 and check response
@@ -461,7 +487,7 @@ async fn rpc_getblock_parse_error() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -469,6 +495,8 @@ async fn rpc_getblock_parse_error() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Make sure we get an error if Zebra can't parse the block height.
@@ -504,7 +532,7 @@ async fn rpc_getblock_missing_error() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -512,6 +540,8 @@ async fn rpc_getblock_missing_error() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
@@ -566,7 +596,7 @@ async fn rpc_getblockheader() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -574,6 +604,8 @@ async fn rpc_getblockheader() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Make height calls with verbose=false and check response
@@ -677,7 +709,7 @@ async fn rpc_getbestblockhash() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -685,6 +717,8 @@ async fn rpc_getbestblockhash() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Get the tip hash using RPC method `get_best_block_hash`
@@ -723,7 +757,7 @@ async fn rpc_getrawtransaction() {
 
     // Init RPC
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -731,6 +765,8 @@ async fn rpc_getrawtransaction() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // Test case where transaction is in mempool.
@@ -899,7 +935,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -907,6 +943,8 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // call the method with an invalid address string
@@ -1048,7 +1086,7 @@ async fn rpc_getaddresstxids_response_with(
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         network.clone(),
         false,
@@ -1056,6 +1094,8 @@ async fn rpc_getaddresstxids_response_with(
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip.clone(),
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // call the method with valid arguments
@@ -1100,7 +1140,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let rpc = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -1108,6 +1148,8 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // call the method with an invalid address string
@@ -1145,7 +1187,7 @@ async fn rpc_getaddressutxos_response() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let rpc = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -1153,6 +1195,8 @@ async fn rpc_getaddressutxos_response() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        crate::methods::LoggedLastEvent::new(None.into()),
     );
 
     // call the method with a valid address

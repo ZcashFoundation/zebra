@@ -583,7 +583,10 @@ where
             Utc::now(),
         ));
 
-        let tip_height = self.latest_chain_tip.best_tip_height().unwrap_or(Height::MIN);
+        let tip_height = self
+            .latest_chain_tip
+            .best_tip_height()
+            .unwrap_or(Height::MIN);
         let testnet = self.network.is_a_test_network();
 
         // This field is behind the `ENABLE_WALLET` feature flag in zcashd:
@@ -593,7 +596,8 @@ where
         // For compatibility, we keep the field in the response, but always return 0.
         let pay_tx_fee = 0.0;
 
-        let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64 / (zebra_chain::amount::COIN as f64);
+        let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
+            / (zebra_chain::amount::COIN as f64);
         let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone()).await?;
 
         let response = GetInfo {

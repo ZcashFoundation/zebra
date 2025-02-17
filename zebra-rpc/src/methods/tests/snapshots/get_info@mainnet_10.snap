@@ -1,9 +1,18 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
-assertion_line: 161
 expression: info
 ---
 {
-  "build": "vRPC test",
-  "subversion": "[SubVersion]"
+  "version": 100,
+  "build": "v0.0.1",
+  "subversion": "[SubVersion]",
+  "protocolversion": 170120,
+  "blocks": 10,
+  "connections": 0,
+  "difficulty": 1.0,
+  "testnet": false,
+  "paytxfee": 0.0,
+  "relayfee": 0.000001,
+  "errors": "no errors",
+  "errorstimestamp": "[LastErrorTimestamp]"
 }
