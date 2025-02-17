@@ -25,6 +25,11 @@ cache_dir = "/home/zebra/.cache/zebra"
 
 cookie_dir = "/home/zebra/.cache/zebra"
 
+# To disable cookie authentication, uncomment the line below and set the value
+# to false.
+
+# enable_cookie_auth = true
+
 [state]
 cache_dir = "/home/zebra/.cache/zebra"
 
