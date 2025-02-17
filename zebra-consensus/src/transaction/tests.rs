@@ -2600,7 +2600,10 @@ async fn v5_consensus_branch_ids() {
 
         while let Some(next_nu) = network_upgrade.next_upgrade() {
             // Check an outdated network upgrade.
-            let height = next_nu.activation_height(&network).expect("height");
+            let Some(height) = next_nu.activation_height(&network) else {
+                tracing::warn!(?next_nu, "missing activation height",);
+                continue;
+            };
 
             let block_req = verifier
                 .clone()

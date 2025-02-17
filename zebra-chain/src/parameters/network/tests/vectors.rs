@@ -147,7 +147,7 @@ fn activates_network_upgrades_correctly() {
         (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
         (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
         (
-            Network::new_regtest(None, None, None),
+            Network::new_regtest(Default::default()),
             expected_default_regtest_activation_heights,
         ),
     ] {
@@ -198,7 +198,7 @@ fn check_configured_network_name() {
         "Mainnet should be displayed as 'Mainnet'"
     );
     assert_eq!(
-        Network::new_regtest(None, None, None).to_string(),
+        Network::new_regtest(Default::default()).to_string(),
         "Regtest",
         "Regtest should be displayed as 'Regtest'"
     );

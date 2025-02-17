@@ -591,12 +591,10 @@ impl Parameters {
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     pub fn new_regtest(
-        nu5_activation_height: Option<u32>,
-        nu6_activation_height: Option<u32>,
-        nu7_activation_height: Option<u32>,
+        ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
     ) -> Self {
         #[cfg(any(test, feature = "proptest-impl"))]
-        let nu5_activation_height = nu5_activation_height.or(Some(100));
+        let nu5 = nu5.or(Some(100));
 
         let parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
@@ -608,9 +606,9 @@ impl Parameters {
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(ConfiguredActivationHeights {
                 canopy: Some(1),
-                nu5: nu5_activation_height,
-                nu6: nu6_activation_height,
-                nu7: nu7_activation_height,
+                nu5,
+                nu6,
+                nu7,
                 ..Default::default()
             })
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
@@ -654,7 +652,7 @@ impl Parameters {
             disable_pow,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
-        } = Self::new_regtest(None, None, None);
+        } = Self::new_regtest(Default::default());
 
         self.network_name == network_name
             && self.genesis_hash == genesis_hash
