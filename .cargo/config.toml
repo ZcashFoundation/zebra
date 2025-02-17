@@ -3,9 +3,6 @@
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [
-    # TODO: Remove later
-    "--cfg", "zcash_unstable=\"nu7\"",
-
     # Zebra standard lints for Rust 1.65+
 
     # High-risk code
