@@ -22,6 +22,9 @@ jobs:
       - name: Install dependencies on Ubuntu
         #run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
+      # Remove group/world write permissions so Cargo loads the config (insecure files are ignored)
+      - name: Secure .cargo config
+        run: chmod -R go-w .cargo
       - name: Run tests
         run: cargo test --verbose
       - name: Verify working directory is clean
