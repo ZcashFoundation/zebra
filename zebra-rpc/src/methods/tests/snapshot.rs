@@ -108,6 +108,7 @@ async fn test_z_get_treestate() {
 
     let (_, state, tip, _) = zebra_state::populated_state(blocks.clone(), &testnet).await;
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
         "",
         "",
@@ -118,7 +119,7 @@ async fn test_z_get_treestate() {
         state,
         tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Request the treestate by a hash.
@@ -200,6 +201,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     .await;
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "/Zebra:RPC test/",
@@ -210,7 +212,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         read_state,
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // We only want a snapshot of the `getblocksubsidy` and `getblockchaininfo` methods for the non-default Testnet (with an NU6 activation height).
@@ -529,6 +531,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     let mut state = MockService::build().for_unit_tests();
     let mempool = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
         "0.0.1",
         "/Zebra:RPC test/",
@@ -539,7 +542,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         state.clone(),
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Test the response format from `z_getsubtreesbyindex` for Sapling.

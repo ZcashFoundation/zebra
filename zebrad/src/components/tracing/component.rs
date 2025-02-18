@@ -3,11 +3,11 @@
 use std::{
     fs::{self, File},
     io::Write,
-    sync::{Arc, Mutex},
 };
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
 
+use tokio::sync::watch;
 use tracing::{field::Visit, Level};
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_error::ErrorLayer;
@@ -188,7 +188,7 @@ impl Tracing {
             let filter_handle = None;
 
             let warn_error_layer = LastWarnErrorLayer {
-                last_event: crate::application::LAST_LOG_EVENT.clone(),
+                last_warn_error_sender: crate::application::LAST_WARN_ERROR_LOG_SENDER.clone(),
             };
             let subscriber = logger
                 .finish()
@@ -452,7 +452,7 @@ impl Visit for MessageVisitor {
 // Layer to store the last WARN or ERROR log event.
 #[derive(Debug, Clone)]
 struct LastWarnErrorLayer {
-    last_event: Arc<Mutex<Option<(String, Level, chrono::DateTime<chrono::Utc>)>>>,
+    last_warn_error_sender: watch::Sender<Option<(String, Level, chrono::DateTime<chrono::Utc>)>>,
 }
 
 impl<S> Layer<S> for LastWarnErrorLayer
@@ -472,8 +472,9 @@ where
             event.record(&mut visitor);
 
             if let Some(message) = visitor.message {
-                let mut last_event = self.last_event.lock().expect("lock poisoned");
-                *last_event = Some((message, level, timestamp));
+                let _ = self
+                    .last_warn_error_sender
+                    .send(Some((message, level, timestamp)));
             }
         }
     }
