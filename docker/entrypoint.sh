@@ -257,12 +257,7 @@ run_tests() {
     run_cargo_test "${FEATURES}" "submit_block"
 
   else
-    if [[ "$1" == "zebrad" ]]; then
-      shift
-      exec zebrad -c "${ZEBRA_CONF_PATH}" "$@"
-    else
-      exec "$@"
-    fi
+    exec "$@"
   fi
 }
 
@@ -274,7 +269,9 @@ CONF_PATH=$(prepare_conf_file "${ZEBRA_CONF_PATH}")
 cat "${CONF_PATH}"
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
-# - If "$1" is "tests", run tests.
+# - If "$1" is "tests":
+#   - and "$2" is "zebrad", run `zebrad` with the remaining params,
+#   - else run tests with the remaining params.
 # - TODO: If "$1" is "monitoring", start a monitoring node.
 # - If "$1" doesn't match any of the above, run "$@" directly.
 case "$1" in
@@ -284,7 +281,12 @@ case "$1" in
   ;;
 test)
   shift
-  run_tests "$@"
+  if [[ "$1" == "zebrad" ]]; then
+    shift
+    exec zebrad --config "${CONF_PATH}" "$@"
+  else
+    run_tests "$@"
+  fi
   ;;
 monitoring)
   #  TODO: Impl logic for starting a monitoring node.
