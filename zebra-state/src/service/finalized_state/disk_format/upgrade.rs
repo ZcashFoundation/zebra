@@ -20,7 +20,7 @@ use zebra_chain::{
 
 use DbFormatChange::*;
 
-use crate::{constants::latest_version_for_adding_subtrees, service::finalized_state::ZebraDb};
+use crate::service::finalized_state::ZebraDb;
 
 pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
@@ -47,7 +47,7 @@ pub trait DiskFormatUpgrade {
         initial_tip_height: Height,
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
-    );
+    ) -> Result<(), CancelFormatChange>;
 
     /// Check that state has been upgraded to this format correctly.
     ///
@@ -61,13 +61,24 @@ pub trait DiskFormatUpgrade {
     ) -> Result<Result<(), String>, CancelFormatChange> {
         Ok(Ok(()))
     }
+
+    /// Prepare for disk format upgrade.
+    fn prepare(
+        &self,
+        _initial_tip_height: Height,
+        _upgrade_db: &ZebraDb,
+        _cancel_receiver: &Receiver<CancelFormatChange>,
+        _older_disk_version: &Version,
+    ) -> Result<(), CancelFormatChange> {
+        Ok(())
+    }
 }
 
 fn format_upgrades() -> Vec<Box<dyn DiskFormatUpgrade>> {
     vec![
         Box::new(prune_trees::PruneTrees),
+        Box::new(add_subtrees::AddSubtrees),
         // TODO:
-        // Box::new(add_subtrees::AddSubtrees),
         // Box::new(cache_genesis_roots::CacheGenesisRoots),
         // Box::new(fix_tree_key_type::FixTreeKeyType),
     ]
@@ -523,7 +534,8 @@ impl DbFormatChange {
 
             let timer = CodeTimer::start();
 
-            upgrade.run(initial_tip_height, db, cancel_receiver);
+            upgrade.prepare(initial_tip_height, db, cancel_receiver, older_disk_version)?;
+            upgrade.run(initial_tip_height, db, cancel_receiver)?;
 
             // Before marking the state as upgraded, check that the upgrade completed successfully.
             upgrade
@@ -539,34 +551,6 @@ impl DbFormatChange {
             Self::mark_as_upgraded_to(db, &upgrade.version());
 
             timer.finish(module_path!(), line!(), upgrade.description());
-        }
-
-        // Note commitment subtree creation database upgrade task.
-
-        let latest_version_for_adding_subtrees = latest_version_for_adding_subtrees();
-        let first_version_for_adding_subtrees =
-            Version::parse("25.2.0").expect("Hardcoded version string should be valid.");
-
-        // Check if we need to add or fix note commitment subtrees in the database.
-        if older_disk_version < &latest_version_for_adding_subtrees {
-            let timer = CodeTimer::start();
-
-            if older_disk_version >= &first_version_for_adding_subtrees {
-                // Clear previous upgrade data, because it was incorrect.
-                add_subtrees::reset(initial_tip_height, db, cancel_receiver)?;
-            }
-
-            add_subtrees::run(initial_tip_height, db, cancel_receiver)?;
-
-            // Before marking the state as upgraded, check that the upgrade completed successfully.
-            add_subtrees::subtree_format_validity_checks_detailed(db, cancel_receiver)?
-                .expect("database format is valid after upgrade");
-
-            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
-            // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(db, &latest_version_for_adding_subtrees);
-
-            timer.finish(module_path!(), line!(), "add subtrees upgrade");
         }
 
         // Sprout & history tree key formats, and cached genesis tree roots database upgrades.
@@ -666,10 +650,6 @@ impl DbFormatChange {
             results.push(upgrade.validate(db, cancel_receiver)?);
         }
 
-        results.push(add_subtrees::subtree_format_validity_checks_detailed(
-            db,
-            cancel_receiver,
-        )?);
         results.push(cache_genesis_roots::detailed_check(db, cancel_receiver)?);
         results.push(fix_tree_key_type::detailed_check(db, cancel_receiver)?);
 
