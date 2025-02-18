@@ -61,6 +61,7 @@ env:
 jobs:
   build:
     name: Build images
+    if: github.repository_owner == 'ZcashFoundation'
     timeout-minutes: 210
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
@@ -111,7 +112,7 @@ jobs:
             # DockerHub release and CI tags.
             # This tag makes sure tests are using exactly the right image, even when multiple PRs run at the same time.
             type=sha,event=push
-            # These CI-only tags support CI on PRs, the main branch, and scheduled full syncs. 
+            # These CI-only tags support CI on PRs, the main branch, and scheduled full syncs.
             # These tags do not appear on DockerHub, because DockerHub images are only published on the release event.
             type=ref,event=pr
             type=ref,event=branch
