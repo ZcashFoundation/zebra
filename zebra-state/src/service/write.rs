@@ -117,12 +117,31 @@ fn update_latest_chain_channels(
 /// `finalized_state` or `non_finalized_state`.
 struct WriteBlockWorkerTask {
     finalized_block_write_receiver: UnboundedReceiver<QueuedCheckpointVerified>,
-    non_finalized_block_write_receiver: UnboundedReceiver<QueuedSemanticallyVerified>,
+    non_finalized_block_write_receiver: UnboundedReceiver<NonFinalizedWriteMessage>,
     finalized_state: FinalizedState,
     non_finalized_state: NonFinalizedState,
     invalid_block_reset_sender: UnboundedSender<block::Hash>,
     chain_tip_sender: ChainTipSender,
     non_finalized_state_sender: watch::Sender<NonFinalizedState>,
+}
+
+/// The message type for the non-finalized block write task channel.
+pub enum NonFinalizedWriteMessage {
+    /// A newly downloaded and semantically verified block prepared for
+    /// contextual validation and insertion into the non-finalized state.
+    Commit(QueuedSemanticallyVerified),
+    /// The hash of a block that should be invalidated and removed from
+    /// the non-finalized state, if present.
+    Invalidate(block::Hash),
+    /// The hash of a block that was previously invalidated but should be
+    /// reconsidered and reinserted into the non-finalized state.
+    Reconsider(block::Hash),
+}
+
+impl From<QueuedSemanticallyVerified> for NonFinalizedWriteMessage {
+    fn from(block: QueuedSemanticallyVerified) -> Self {
+        NonFinalizedWriteMessage::Commit(block)
+    }
 }
 
 /// A worker with a task that reads, validates, and writes blocks to the
@@ -132,7 +151,7 @@ struct WriteBlockWorkerTask {
 pub(super) struct BlockWriteSender {
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`NonFinalizedState`].
-    pub non_finalized: Option<tokio::sync::mpsc::UnboundedSender<QueuedSemanticallyVerified>>,
+    pub non_finalized: Option<tokio::sync::mpsc::UnboundedSender<NonFinalizedWriteMessage>>,
 
     /// A channel to send blocks to the `block_write_task`,
     /// so they can be written to the [`FinalizedState`].
@@ -206,16 +225,16 @@ impl WriteBlockWorkerTask {
             network = %self.non_finalized_state.network
         )
     )]
-    pub fn run(self) {
+    pub fn run(mut self) {
         let Self {
-            mut finalized_block_write_receiver,
-            mut non_finalized_block_write_receiver,
-            mut finalized_state,
-            mut non_finalized_state,
+            finalized_block_write_receiver,
+            non_finalized_block_write_receiver,
+            finalized_state,
+            non_finalized_state,
             invalid_block_reset_sender,
-            mut chain_tip_sender,
+            chain_tip_sender,
             non_finalized_state_sender,
-        } = self;
+        } = &mut self;
 
         let mut last_zebra_mined_log_height = None;
         let mut prev_finalized_note_commitment_trees = None;
@@ -304,8 +323,30 @@ impl WriteBlockWorkerTask {
         // Save any errors to propagate down to queued child blocks
         let mut parent_error_map: IndexMap<block::Hash, CloneError> = IndexMap::new();
 
-        while let Some((queued_child, rsp_tx)) = non_finalized_block_write_receiver.blocking_recv()
-        {
+        while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
+            let queued_child_and_rsp_tx = match msg {
+                NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
+                NonFinalizedWriteMessage::Invalidate(hash) => {
+                    non_finalized_state.invalidate_block(hash);
+                    None
+                }
+                NonFinalizedWriteMessage::Reconsider(_hash) => {
+                    // TODO: Uncomment after #9260 has merged.
+                    // non_finalized_state.reconsider_block(hash);
+                    None
+                }
+            };
+
+            let Some((queued_child, rsp_tx)) = queued_child_and_rsp_tx else {
+                update_latest_chain_channels(
+                    non_finalized_state,
+                    chain_tip_sender,
+                    non_finalized_state_sender,
+                    &mut last_zebra_mined_log_height,
+                );
+                continue;
+            };
+
             let child_hash = queued_child.hash;
             let parent_hash = queued_child.block.header.previous_block_hash;
             let parent_error = parent_error_map.get(&parent_hash);
@@ -328,7 +369,7 @@ impl WriteBlockWorkerTask {
                 tracing::trace!(?child_hash, "validating queued child");
                 result = validate_and_commit_non_finalized(
                     &finalized_state.db,
-                    &mut non_finalized_state,
+                    non_finalized_state,
                     queued_child,
                 )
                 .map_err(CloneError::from);
@@ -362,9 +403,9 @@ impl WriteBlockWorkerTask {
             //       fix the `service::read` bugs,
             //       or do the channel update after the finalized state commit
             let tip_block_height = update_latest_chain_channels(
-                &non_finalized_state,
-                &mut chain_tip_sender,
-                &non_finalized_state_sender,
+                non_finalized_state,
+                chain_tip_sender,
+                non_finalized_state_sender,
                 &mut last_zebra_mined_log_height,
             );
 
@@ -405,7 +446,7 @@ impl WriteBlockWorkerTask {
         // We're finished receiving non-finalized blocks from the state, and
         // done writing to the finalized state, so we can force it to shut down.
         finalized_state.db.shutdown(true);
-        std::mem::drop(finalized_state);
+        std::mem::drop(self.finalized_state);
     }
 }
 
