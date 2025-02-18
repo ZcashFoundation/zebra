@@ -1060,6 +1060,24 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            req @ (Request::InvalidateBlock(_) | Request::ReconsiderBlock(_)) => {
+                use NonFinalizedWriteMessage::*;
+
+                let (msg, hash) = match req {
+                    Request::InvalidateBlock(hash) => (Invalidate(hash), hash),
+                    Request::ReconsiderBlock(hash) => (Reconsider(hash), hash),
+                    _ => unreachable!("Request::InvalidateBlock and Request::ReconsiderBlock"),
+                };
+
+                if let Some(non_finalized_block_write_sender) =
+                    &self.block_write_sender.non_finalized
+                {
+                    let _ = non_finalized_block_write_sender.send(msg);
+                }
+
+                async move { Ok(Response::Committed(hash)) }.boxed()
+            }
+
             // Runs concurrently using the ReadStateService
             Request::Tip
             | Request::Depth(_)
