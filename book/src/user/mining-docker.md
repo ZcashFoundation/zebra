@@ -28,7 +28,7 @@ find more info here
 https://docs.docker.com/engine/reference/commandline/run/#env.
 
 If you don't want to set any environment variables, you can edit the
-`docker/default_zebra_config.toml` file, and pass it to Zebra before starting
+`docker/default-zebra-config.toml` file, and pass it to Zebra before starting
 the container. There's an example in `docker/docker-compose.yml` of how to do
 that.
 

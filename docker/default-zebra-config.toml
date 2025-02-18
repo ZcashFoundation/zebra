@@ -34,9 +34,10 @@ cookie_dir = "/home/zebra/.cache/zebra"
 cache_dir = "/home/zebra/.cache/zebra"
 
 [tracing]
-# Zebra uses colored output if it is attached to a terminal. To disable colors,
-# set `use_color` to false. To enable colors even for non-terminal outputs, set
-# `use_color` to `true` and uncomment the line below.
+# Zebra recognizes whether its logs are being written to a terminal or a file,
+# and uses colored logs for terminals and uncolored logs for files. To force
+# colors even for files, uncomment the line below. To disable colors, set
+# `use_color` to false.
 
 # force_use_color = true
 use_color = true
