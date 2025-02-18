@@ -962,6 +962,14 @@ fn mock_services<Tip>(
         >,
         tower::buffer::Buffer<
             zebra_test::mock_service::MockService<
+                zebra_state::Request,
+                zebra_state::Response,
+                zebra_test::mock_service::PropTestAssertion,
+            >,
+            zebra_state::Request,
+        >,
+        tower::buffer::Buffer<
+            zebra_test::mock_service::MockService<
                 zebra_state::ReadRequest,
                 zebra_state::ReadResponse,
                 zebra_test::mock_service::PropTestAssertion,
@@ -978,6 +986,7 @@ where
 {
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
+    let read_state = MockService::build().for_prop_tests();
 
     let (rpc, mempool_tx_queue) = RpcImpl::new(
         "0.0.1",
@@ -986,11 +995,12 @@ where
         false,
         true,
         mempool.clone(),
-        Buffer::new(state.clone(), 1),
+        Buffer::new(state, 1),
+        Buffer::new(read_state.clone(), 1),
         chain_tip,
         MockAddressBookPeers::new(vec![]),
         crate::methods::LoggedLastEvent::new(None.into()),
     );
 
-    (mempool, state, rpc, mempool_tx_queue)
+    (mempool, read_state, rpc, mempool_tx_queue)
 }

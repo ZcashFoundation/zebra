@@ -106,7 +106,7 @@ async fn test_z_get_treestate() {
         .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
-    let (_, state, tip, _) = zebra_state::populated_state(blocks.clone(), &testnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &testnet).await;
 
     let (rpc, _) = RpcImpl::new(
         "",
@@ -116,6 +116,7 @@ async fn test_z_get_treestate() {
         true,
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         state,
+        read_state,
         tip,
         MockAddressBookPeers::new(vec![]),
         crate::methods::LoggedLastEvent::new(None.into()),
@@ -193,7 +194,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     get_block_template_rpcs::test_responses(
         network,
         mempool.clone(),
-        state,
+        state.clone(),
         read_state.clone(),
         settings.clone(),
     )
@@ -207,6 +208,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         false,
         true,
         Buffer::new(mempool.clone(), 1),
+        state,
         read_state,
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
@@ -526,7 +528,8 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     settings.set_snapshot_suffix(network_string(network));
 
     let (latest_chain_tip, _) = MockChainTip::new();
-    let mut state = MockService::build().for_unit_tests();
+    let state = MockService::build().for_unit_tests();
+    let mut read_state = MockService::build().for_unit_tests();
     let mempool = MockService::build().for_unit_tests();
 
     let (rpc, _) = RpcImpl::new(
@@ -537,6 +540,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         true,
         mempool,
         state.clone(),
+        read_state.clone(),
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
         crate::methods::LoggedLastEvent::new(None.into()),
@@ -554,7 +558,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     }
 
     // Prepare the response.
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::SaplingSubtrees { .. }))
         .map(|responder| responder.respond(ReadResponse::SaplingSubtrees(subtrees)));
 
@@ -582,7 +586,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     }
 
     // Prepare the response.
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::OrchardSubtrees { .. }))
         .map(|responder| responder.respond(ReadResponse::OrchardSubtrees(subtrees)));
 

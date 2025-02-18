@@ -359,7 +359,7 @@ pub trait Rpc {
 
 /// RPC method implementations.
 #[derive(Clone)]
-pub struct RpcImpl<Mempool, State, Tip, AddressBook>
+pub struct RpcImpl<Mempool, State, ReadState, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -371,6 +371,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -378,7 +387,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -409,6 +418,9 @@ where
     /// A handle to the state service.
     state: State,
 
+    /// A handle to the state service.
+    read_state: ReadState,
+
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
 
@@ -428,7 +440,8 @@ where
 pub type LoggedLastEvent =
     Arc<std::sync::Mutex<Option<(String, tracing::Level, chrono::DateTime<Utc>)>>>;
 
-impl<Mempool, State, Tip, AddressBook> Debug for RpcImpl<Mempool, State, Tip, AddressBook>
+impl<Mempool, State, ReadState, Tip, AddressBook> Debug
+    for RpcImpl<Mempool, State, ReadState, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -440,6 +453,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -447,7 +469,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -463,7 +485,8 @@ where
     }
 }
 
-impl<Mempool, State, Tip, AddressBook> RpcImpl<Mempool, State, Tip, AddressBook>
+impl<Mempool, State, ReadState, Tip, AddressBook>
+    RpcImpl<Mempool, State, ReadState, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -475,6 +498,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -482,7 +514,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -499,6 +531,7 @@ where
         debug_like_zcashd: bool,
         mempool: Mempool,
         state: State,
+        read_state: ReadState,
         latest_chain_tip: Tip,
         address_book: AddressBook,
         last_event: LoggedLastEvent,
@@ -524,7 +557,8 @@ where
             debug_force_finished_sync,
             debug_like_zcashd,
             mempool: mempool.clone(),
-            state: state.clone(),
+            state,
+            read_state: read_state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             queue_sender,
             address_book,
@@ -534,7 +568,7 @@ where
         // run the process queue
         let rpc_tx_queue_task_handle = tokio::spawn(
             runner
-                .run(mempool, state, latest_chain_tip, network)
+                .run(mempool, read_state, latest_chain_tip, network)
                 .in_current_span(),
         );
 
@@ -543,7 +577,8 @@ where
 }
 
 #[async_trait]
-impl<Mempool, State, Tip, AddressBook> RpcServer for RpcImpl<Mempool, State, Tip, AddressBook>
+impl<Mempool, State, ReadState, Tip, AddressBook> RpcServer
+    for RpcImpl<Mempool, State, ReadState, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -555,6 +590,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -562,7 +606,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
@@ -598,7 +642,8 @@ where
 
         let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
             / (zebra_chain::amount::COIN as f64);
-        let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone()).await?;
+        let difficulty =
+            chain_tip_difficulty(self.network.clone(), self.read_state.clone()).await?;
 
         let response = GetInfo {
             version,
@@ -626,11 +671,11 @@ where
 
         let (usage_info_rsp, tip_pool_values_rsp, chain_tip_difficulty) = {
             use zebra_state::ReadRequest::*;
-            let state_call = |request| self.state.clone().oneshot(request);
+            let state_call = |request| self.read_state.clone().oneshot(request);
             tokio::join!(
                 state_call(UsageInfo),
                 state_call(TipPoolValues),
-                chain_tip_difficulty(network.clone(), self.state.clone())
+                chain_tip_difficulty(network.clone(), self.read_state.clone())
             )
         };
 
@@ -747,7 +792,7 @@ where
     }
 
     async fn get_address_balance(&self, address_strings: AddressStrings) -> Result<AddressBalance> {
-        let state = self.state.clone();
+        let state = self.read_state.clone();
 
         let valid_addresses = address_strings.valid_addresses()?;
 
@@ -830,7 +875,7 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     async fn get_block(&self, hash_or_height: String, verbosity: Option<u8>) -> Result<GetBlock> {
-        let mut state = self.state.clone();
+        let mut state = self.read_state.clone();
         let verbosity = verbosity.unwrap_or(1);
         let network = self.network.clone();
         let original_hash_or_height = hash_or_height.clone();
@@ -1004,7 +1049,7 @@ where
         hash_or_height: String,
         verbose: Option<bool>,
     ) -> Result<GetBlockHeader> {
-        let state = self.state.clone();
+        let state = self.read_state.clone();
         let verbose = verbose.unwrap_or(true);
         let network = self.network.clone();
 
@@ -1233,7 +1278,7 @@ where
         txid: String,
         verbose: Option<u8>,
     ) -> Result<GetRawTransaction> {
-        let mut state = self.state.clone();
+        let mut state = self.read_state.clone();
         let mut mempool = self.mempool.clone();
         let verbose = verbose.unwrap_or(0) != 0;
 
@@ -1300,7 +1345,7 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestate> {
-        let mut state = self.state.clone();
+        let mut state = self.read_state.clone();
         let network = self.network.clone();
 
         // Reference for the legacy error code:
@@ -1389,7 +1434,7 @@ where
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> Result<GetSubtrees> {
-        let mut state = self.state.clone();
+        let mut state = self.read_state.clone();
 
         const POOL_LIST: &[&str] = &["sapling", "orchard"];
 
@@ -1455,7 +1500,7 @@ where
     }
 
     async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>> {
-        let mut state = self.state.clone();
+        let mut state = self.read_state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         let start = Height(request.start);
@@ -1512,7 +1557,7 @@ where
         &self,
         address_strings: AddressStrings,
     ) -> Result<Vec<GetAddressUtxos>> {
-        let mut state = self.state.clone();
+        let mut state = self.read_state.clone();
         let mut response_utxos = vec![];
 
         let valid_addresses = address_strings.valid_addresses()?;
