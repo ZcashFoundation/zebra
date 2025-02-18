@@ -90,7 +90,7 @@ use zebra_rpc::server::RpcServer;
 use zebra_rpc::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
 
 use crate::{
-    application::{build_version, user_agent, LAST_LOG_EVENT},
+    application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
@@ -273,7 +273,7 @@ impl StartCmd {
                     Some(submit_block_channel.sender()),
                     #[cfg(not(feature = "getblocktemplate-rpcs"))]
                     None,
-                    LAST_LOG_EVENT.clone(),
+                    LAST_WARN_ERROR_LOG_SENDER.subscribe(),
                 );
                 rpc_task_handle.await.unwrap()
             } else {
