@@ -25,7 +25,9 @@ use crate::service::finalized_state::ZebraDb;
 pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
+pub(crate) mod no_migration;
 pub(crate) mod prune_trees;
+pub(crate) mod tree_keys_and_caches_upgrade;
 
 #[cfg(not(feature = "indexer"))]
 pub(crate) mod drop_tx_locs_by_spends;
@@ -72,15 +74,21 @@ pub trait DiskFormatUpgrade {
     ) -> Result<(), CancelFormatChange> {
         Ok(())
     }
+
+    /// Returns true if the [`DiskFormatUpgrade`] needs to run a migration on existing data in the db.
+    fn needs_migration(&self) -> bool {
+        true
+    }
 }
 
 fn format_upgrades() -> Vec<Box<dyn DiskFormatUpgrade>> {
+    // Note: Disk format upgrades must be run in order.
     vec![
         Box::new(prune_trees::PruneTrees),
         Box::new(add_subtrees::AddSubtrees),
-        // TODO:
-        // Box::new(cache_genesis_roots::CacheGenesisRoots),
-        // Box::new(fix_tree_key_type::FixTreeKeyType),
+        Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
+        // Value balance upgrade
+        Box::new(no_migration::NoMigration::new(26, 0, 0)),
     ]
 }
 
@@ -532,6 +540,11 @@ impl DbFormatChange {
                 continue;
             }
 
+            if !upgrade.needs_migration() {
+                Self::mark_as_upgraded_to(db, &upgrade.version());
+                continue;
+            }
+
             let timer = CodeTimer::start();
 
             upgrade.prepare(initial_tip_height, db, cancel_receiver, older_disk_version)?;
@@ -553,32 +566,6 @@ impl DbFormatChange {
             timer.finish(module_path!(), line!(), upgrade.description());
         }
 
-        // Sprout & history tree key formats, and cached genesis tree roots database upgrades.
-
-        let version_for_tree_keys_and_caches =
-            Version::parse("25.3.0").expect("Hardcoded version string should be valid.");
-
-        // Check if we need to do the upgrade.
-        if older_disk_version < &version_for_tree_keys_and_caches {
-            let timer = CodeTimer::start();
-
-            // It shouldn't matter what order these are run in.
-            cache_genesis_roots::run(initial_tip_height, db, cancel_receiver)?;
-            fix_tree_key_type::run(initial_tip_height, db, cancel_receiver)?;
-
-            // Before marking the state as upgraded, check that the upgrade completed successfully.
-            cache_genesis_roots::detailed_check(db, cancel_receiver)?
-                .expect("database format is valid after upgrade");
-            fix_tree_key_type::detailed_check(db, cancel_receiver)?
-                .expect("database format is valid after upgrade");
-
-            // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
-            // database is marked, so the upgrade MUST be complete at this point.
-            Self::mark_as_upgraded_to(db, &version_for_tree_keys_and_caches);
-
-            timer.finish(module_path!(), line!(), "tree keys and caches upgrade");
-        }
-
         let version_for_upgrading_value_balance_format =
             Version::parse("26.0.0").expect("hard-coded version string should be valid");
 
@@ -586,14 +573,6 @@ impl DbFormatChange {
         if older_disk_version < &version_for_upgrading_value_balance_format {
             Self::mark_as_upgraded_to(db, &version_for_upgrading_value_balance_format)
         }
-
-        // # New Upgrades Usually Go Here
-        //
-        // New code goes above this comment!
-        //
-        // Run the latest format upgrade code after the other upgrades are complete,
-        // then mark the format as upgraded. The code should check `cancel_receiver`
-        // every time it runs its inner update loop.
 
         info!(
             %newer_running_version,
@@ -649,9 +628,6 @@ impl DbFormatChange {
         for upgrade in format_upgrades() {
             results.push(upgrade.validate(db, cancel_receiver)?);
         }
-
-        results.push(cache_genesis_roots::detailed_check(db, cancel_receiver)?);
-        results.push(fix_tree_key_type::detailed_check(db, cancel_receiver)?);
 
         // The work is done in the functions we just called.
         timer.finish(module_path!(), line!(), "format_validity_checks_detailed()");
