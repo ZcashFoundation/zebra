@@ -3377,7 +3377,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
     };
 
-    // FIXME: Would this work after Nu7 activation?
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
@@ -3486,7 +3485,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         ..(*block_template)
     };
 
-    // FIXME: Would this work after Nu7 activation?
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
     // Submit the invalid block with an excessive coinbase output value
@@ -3530,7 +3528,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         ..block_template
     };
 
-    // FIXME: Would this work after Nu7 activation?
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
     // Submit the invalid block with an excessive coinbase input value

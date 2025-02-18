@@ -118,35 +118,24 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
         let mut configured_activation_heights = ConfiguredActivationHeights::default();
 
         for (height, network_upgrade) in activation_heights.iter() {
-            match network_upgrade {
+            let field = match network_upgrade {
                 NetworkUpgrade::BeforeOverwinter => {
-                    configured_activation_heights.before_overwinter = Some(height.0);
+                    &mut configured_activation_heights.before_overwinter
                 }
-                NetworkUpgrade::Overwinter => {
-                    configured_activation_heights.overwinter = Some(height.0);
-                }
-                NetworkUpgrade::Sapling => {
-                    configured_activation_heights.sapling = Some(height.0);
-                }
-                NetworkUpgrade::Blossom => {
-                    configured_activation_heights.blossom = Some(height.0);
-                }
-                NetworkUpgrade::Heartwood => {
-                    configured_activation_heights.heartwood = Some(height.0);
-                }
-                NetworkUpgrade::Canopy => {
-                    configured_activation_heights.canopy = Some(height.0);
-                }
-                NetworkUpgrade::Nu5 => {
-                    configured_activation_heights.nu5 = Some(height.0);
-                }
-                NetworkUpgrade::Nu6 => {
-                    configured_activation_heights.nu6 = Some(height.0);
-                }
+                NetworkUpgrade::Overwinter => &mut configured_activation_heights.overwinter,
+                NetworkUpgrade::Sapling => &mut configured_activation_heights.sapling,
+                NetworkUpgrade::Blossom => &mut configured_activation_heights.blossom,
+                NetworkUpgrade::Heartwood => &mut configured_activation_heights.heartwood,
+                NetworkUpgrade::Canopy => &mut configured_activation_heights.canopy,
+                NetworkUpgrade::Nu5 => &mut configured_activation_heights.nu5,
+                NetworkUpgrade::Nu6 => &mut configured_activation_heights.nu6,
+                NetworkUpgrade::Nu7 => &mut configured_activation_heights.nu7,
                 NetworkUpgrade::Genesis => {
                     continue;
                 }
-            }
+            };
+
+            *field = Some(height.0)
         }
 
         configured_activation_heights
@@ -890,7 +879,6 @@ impl Network {
 
     /// Returns post-Canopy funding streams for this network at the provided height
     pub fn funding_streams(&self, height: Height) -> &FundingStreams {
-        // FIXME: Would this work after Nu7 activation?
         if NetworkUpgrade::current(self, height) < NetworkUpgrade::Nu6 {
             self.pre_nu6_funding_streams()
         } else {

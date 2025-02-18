@@ -17,7 +17,7 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
     orchard::{Action, AuthorizedAction, Flags},
-    parameters::{Network, NetworkUpgrade},
+    parameters::{testnet::ConfiguredActivationHeights, Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
     serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto},
@@ -1007,7 +1007,10 @@ async fn mempool_request_with_immature_spend_is_rejected() {
 async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(None, Some(1_000));
+    let network = Network::new_regtest(ConfiguredActivationHeights {
+        nu6: Some(1_000),
+        ..Default::default()
+    });
     let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
     let verifier = Verifier::new_for_tests(&network, state.clone());
 
