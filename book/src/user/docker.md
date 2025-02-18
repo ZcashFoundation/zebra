@@ -22,7 +22,7 @@ And mount it before you start the container:
 ```shell
 docker run \
   --mount type=volume,source=zebrad-cache,target=/home/zebra/.cache/zebra \
-  --name zebra
+  --name zebra \
   zfnd/zebra
 ```
 
