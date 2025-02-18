@@ -1173,6 +1173,24 @@ impl Service<ReadRequest> for ReadStateService {
         let span = Span::current();
 
         match req {
+            // Used by the `getblockchaininfo` RPC.
+            ReadRequest::UsageInfo => {
+                let db = self.db.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        // The work is done in the future.
+
+                        let db_size = db.size();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::UsageInfo");
+
+                        Ok(ReadResponse::UsageInfo(db_size))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the StateService.
             ReadRequest::Tip => {
                 let state = self.clone();
@@ -1378,6 +1396,35 @@ impl Service<ReadRequest> for ReadStateService {
                         );
 
                         Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            #[cfg(feature = "indexer")]
+            ReadRequest::SpendingTransactionId(spend) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let spending_transaction_id = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
+                                read::spending_transaction_hash(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    spend,
+                                )
+                            });
+
+                        // The work is done in the future.
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::TransactionIdForSpentOutPoint",
+                        );
+
+                        Ok(ReadResponse::TransactionId(spending_transaction_id))
                     })
                 })
                 .wait_for_panics()
@@ -1784,8 +1831,7 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            // Used by get_block_template RPC.
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            // Used by get_block_template and getblockchaininfo RPCs.
             ReadRequest::ChainInfo => {
                 let state = self.clone();
                 let latest_non_finalized_state = self.latest_non_finalized_state();

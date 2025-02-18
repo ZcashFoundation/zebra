@@ -132,7 +132,7 @@ async fn scan_binary_starts() -> Result<()> {
 ///
 /// Needs a cache state close to the tip. A possible way to run it locally is:
 ///
-/// export ZEBRA_CACHED_STATE_DIR="/path/to/zebra/state"
+/// export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 /// cargo test scan_start_where_left -- --ignored --nocapture
 ///
 /// The test will run zebrad with a key to scan, scan the first few blocks after sapling and then stops.
@@ -141,20 +141,22 @@ async fn scan_binary_starts() -> Result<()> {
 #[tokio::test]
 #[cfg(not(target_os = "windows"))]
 async fn scan_start_where_left() -> Result<()> {
-    use ZECPAGES_SAPLING_VIEWING_KEY;
-
     let _init_guard = zebra_test::init();
 
-    let Ok(zebrad_cachedir) = std::env::var("ZEBRA_CACHED_STATE_DIR") else {
-        tracing::info!("skipping scan_start_where_left test due to missing cached state, \
-                        please set a ZEBRA_CACHED_STATE_DIR env var with a populated and valid path to run this test");
+    let Ok(zebrad_cache_dir) = std::env::var("ZEBRA_CACHE_DIR") else {
+        tracing::warn!("env var ZEBRA_CACHE_DIR is not set, skipping test");
         return Ok(());
     };
 
+    if !Path::new(&zebrad_cache_dir).join("state").is_dir() {
+        tracing::warn!("cache dir does not contain cached state, skipping test");
+        return Ok(());
+    }
+
     // Logs the network as zebrad would as part of the metadata when starting up.
     // This is currently needed for the 'Check startup logs' step in CI to pass.
-    let network = zebra_chain::parameters::Network::Mainnet;
-    tracing::info!("Zcash network: {network}");
+    let mainnet = zebra_chain::parameters::Network::Mainnet;
+    tracing::info!("Zcash network: {mainnet}");
 
     let scanning_cache_dir = testdir()?.path().join("scanner").to_path_buf();
 
@@ -164,7 +166,7 @@ async fn scan_start_where_left() -> Result<()> {
     let rpc_listen_addr = "127.0.0.1:18232";
     let args = args![
         "--zebrad-cache-dir",
-        zebrad_cachedir,
+        zebrad_cache_dir,
         "--scanning-cache-dir",
         scanning_cache_dir.to_str().unwrap(),
         "--sapling-keys-to-scan",
@@ -244,7 +246,7 @@ async fn scan_start_where_left() -> Result<()> {
 /// Example of how to run the scan_task_commands test locally:
 ///
 /// ```console
-/// RUST_LOG=info ZEBRA_CACHED_STATE_DIR=/path/to/zebra/state cargo test scan_task_commands -- --include-ignored --nocapture
+/// RUST_LOG=info ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test scan_task_commands -- --include-ignored --nocapture
 /// ```
 #[tokio::test]
 #[ignore]

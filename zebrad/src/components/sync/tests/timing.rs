@@ -158,6 +158,7 @@ fn request_genesis_is_rate_limited() {
         );
 
     // start the sync
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mut chain_sync, _) = ChainSync::new(
         &ZebradConfig::default(),
         Height(0),
@@ -165,6 +166,7 @@ fn request_genesis_is_rate_limited() {
         verifier_service,
         state_service,
         latest_chain_tip,
+        misbehavior_tx,
     );
 
     // run `request_genesis()` with a timeout of 13 seconds

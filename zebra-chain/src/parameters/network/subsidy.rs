@@ -54,7 +54,7 @@ pub(crate) const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
 const FIRST_HALVING_REGTEST: Height = Height(287);
 
 /// The funding stream receiver categories.
-#[derive(Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FundingStreamReceiver {
     /// The Electric Coin Company (Bootstrap Foundation) funding stream.
     #[serde(rename = "ECC")]

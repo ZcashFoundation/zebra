@@ -9,7 +9,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use indexmap::IndexSet;
 use serde::{Deserialize, Serialize};
 use tokio::{
-    sync::watch,
+    sync::{mpsc, watch},
     task::JoinError,
     time::{sleep, timeout},
 };
@@ -23,7 +23,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
 };
 use zebra_consensus::ParameterCheckpoint as _;
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::{
@@ -380,6 +380,9 @@ where
     /// Receiver that is `true` when the downloader is past the lookahead limit.
     /// This is based on the downloaded block height and the state tip height.
     past_lookahead_limit_receiver: zs::WatchReceiver<bool>,
+
+    /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
+    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
 }
 
 /// Polls the network to determine whether further blocks are available and
@@ -425,6 +428,7 @@ where
         verifier: ZV,
         state: ZS,
         latest_chain_tip: ZSTip,
+        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
     ) -> (Self, SyncStatus) {
         let mut download_concurrency_limit = config.sync.download_concurrency_limit;
         let mut checkpoint_verify_concurrency_limit =
@@ -463,7 +467,7 @@ where
         // The Hedge middleware is the outermost layer, hedging requests
         // between two retry-wrapped networks.  The innermost timeout
         // layer is relatively unimportant, because slow requests will
-        // probably be pre-emptively hedged.
+        // probably be preemptively hedged.
         //
         // The Hedge goes outside the Retry, because the Retry layer
         // abstracts away spurious failures from individual peers
@@ -513,6 +517,7 @@ where
             prospective_tips: HashSet::new(),
             recent_syncs,
             past_lookahead_limit_receiver,
+            misbehavior_sender,
         };
 
         (new_syncer, sync_status)
@@ -1094,10 +1099,23 @@ where
             Ok((height, hash)) => {
                 trace!(?height, ?hash, "verified and committed block to state");
 
-                Ok(())
+                return Ok(());
             }
-            Err(_) => Self::handle_response(response),
-        }
+
+            Err(BlockDownloadVerifyError::Invalid {
+                ref error,
+                advertiser_addr: Some(advertiser_addr),
+                ..
+            }) if error.misbehavior_score() != 0 => {
+                let _ = self
+                    .misbehavior_sender
+                    .try_send((advertiser_addr, error.misbehavior_score()));
+            }
+
+            Err(_) => {}
+        };
+
+        Self::handle_response(response)
     }
 
     /// Handles a response to block hash submission, passing through any extra hashes.

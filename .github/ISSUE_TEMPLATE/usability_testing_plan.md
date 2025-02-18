@@ -31,7 +31,7 @@ assignees: ''
 
 ### Method
 
-<!-- Explain whether the tests will be co-located or reomte, moderated or unmoderated, and who will attend the sessions (e.g a moderator and a note-taker) -->
+<!-- Explain whether the tests will be co-located or remote, moderated or unmoderated, and who will attend the sessions (e.g a moderator and a note-taker) -->
 
 ### Test environment, equipment and logistics
 
@@ -56,7 +56,7 @@ assignees: ''
 
 ## Session Outline and timing
 
-<!-- The following sections provide some space to plan out the script and and tasks for your participants -->
+<!-- The following sections provide some space to plan out the script and tasks for your participants -->
 
 ### 1.Introduction to the session (5\')
 

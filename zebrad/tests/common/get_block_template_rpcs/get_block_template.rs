@@ -34,7 +34,7 @@ use crate::common::{
 /// This ensures that a new template can be deserialized and sent to interrupt the
 /// block proposal requests if the old template is no longer valid in edge-cases where
 /// an old template becomes invalid right after it's returned. We've seen the getblocktemplate
-/// respond within ~50ms of a request locallly, and this test is run on GCP compute instances
+/// respond within ~50ms of a request locally, and this test is run on GCP compute instances
 /// that should offer comparable latency in CI.
 pub const EXTRA_LONGPOLL_WAIT_TIME: Duration = Duration::from_millis(150);
 
@@ -162,7 +162,7 @@ pub(crate) async fn run() -> Result<()> {
 /// or `ProposalResponse` in 'proposal' mode.
 async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
     let mut response_json_result: GetBlockTemplate = client
-        .json_result_from_call("getblocktemplate", "[]".to_string())
+        .json_result_from_call("getblocktemplate", "[]")
         .await
         .expect("response should be success output with a serialized `GetBlockTemplate`");
 

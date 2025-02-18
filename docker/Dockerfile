@@ -3,25 +3,18 @@
 
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
-# We are using 4 stages:
-# - deps: install build dependencies and sets the needed variables
+# We are using 4 (TODO: 5) stages:
+# - deps: installs build dependencies and sets default values
 # - tests: builds tests binaries
 # - release: builds release binaries
 # - runtime: runs the release binaries
+# - TODO: Add a `monitoring` stage
 #
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
-#
-# Build zebrad with these features
-#
-# Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES and vars.RUST_TEST_FEATURES
-# https://github.com/ZcashFoundation/zebra/settings/variables/actions
-ARG FEATURES="default-release-binaries"
-ARG TEST_FEATURES="lightwalletd-grpc-tests zebra-checkpoints"
-ARG EXPERIMENTAL_FEATURES=""
 
-ARG APP_HOME="/opt/zebrad"
-ARG RUST_VERSION=1.82.0
+ARG RUST_VERSION=1.84.0
+
 # In this stage we download all system requirements to build the project
 #
 # It also captures all the build arguments to be used as environment variables.
@@ -29,25 +22,14 @@ ARG RUST_VERSION=1.82.0
 FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
-# Set the default path for the zebrad binary
-ARG APP_HOME
-ENV APP_HOME=${APP_HOME}
-WORKDIR ${APP_HOME}
-
-# Install zebra build deps and Dockerfile deps
+# Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
-    llvm \
     libclang-dev \
-    clang \
-    ca-certificates \
     protobuf-compiler \
-    rocksdb-tools \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Build arguments and variables set for tracelog levels and debug information
-#
-# We set defaults to all variables.
 ARG RUST_LOG
 ENV RUST_LOG=${RUST_LOG:-info}
 
@@ -65,38 +47,42 @@ ARG SHORT_SHA
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
 ENV SHORT_SHA=${SHORT_SHA:-}
 
-ENV CARGO_HOME="${APP_HOME}/.cargo/"
-
-# Copy the entrypoint script to be used on both images
-COPY ./docker/entrypoint.sh /etc/zebrad/entrypoint.sh
-
-# In this stage we build tests (without running then)
+# This stage builds tests without running them.
 #
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
+ARG FEATURES
+ENV FEATURES=${FEATURES}
+
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
-# Use ENTRYPOINT_FEATURES to override the specific features used to run tests in entrypoint.sh,
-# separately from the test and production image builds.
-ARG FEATURES
-ARG TEST_FEATURES
-ARG EXPERIMENTAL_FEATURES
-# TODO: add empty $EXPERIMENTAL_FEATURES when we can avoid adding an extra space to the end of the string
-ARG ENTRYPOINT_FEATURES="${FEATURES} ${TEST_FEATURES}"
+# Set up the test environment the same way the production environment is. This
+# is not very DRY as the same code repeats for the `runtime` target below, but I
+# didn't find a suitable way to share the setup between the two targets.
+
+ENV UID=101
+ENV GID=${UID}
+ENV USER="zebra"
+ENV HOME="/home/${USER}"
+ENV CARGO_HOME="${HOME}/.cargo/"
+
+RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+
+WORKDIR ${HOME}
 
 # Build Zebra test binaries, but don't run them
 
 # Leverage a cache mount to /usr/local/cargo/registry/
 # for downloaded dependencies, a cache mount to /usr/local/cargo/git/db
-# for git repository dependencies, and a cache mount to ${APP_HOME}/target/ for
+# for git repository dependencies, and a cache mount to ${HOME}/target/ for
 # compiled dependencies which will speed up subsequent builds.
 # Leverage a bind mount to each crate directory to avoid having to copy the
 # source code into the container. Once built, copy the executable to an
-# output directory before the cache mounted ${APP_HOME}/target/ is unmounted.
+# output directory before the cache mounted ${HOME}/target/ is unmounted.
 RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=zebra-chain,target=zebra-chain \
     --mount=type=bind,source=zebra-network,target=zebra-network \
@@ -113,25 +99,38 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${APP_HOME}/target/ \
+    --mount=type=cache,target=${HOME}/target/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
-cargo test --locked --release --features "${ENTRYPOINT_FEATURES}" --workspace --no-run && \
-cp ${APP_HOME}/target/release/zebrad /usr/local/bin && \
-cp ${APP_HOME}/target/release/zebra-checkpoints /usr/local/bin
+    cargo test --locked --release --workspace --no-run \
+    --features "${FEATURES} zebra-checkpoints" && \
+    cp ${HOME}/target/release/zebrad /usr/local/bin && \
+    cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
-COPY ./ ./
 
-# Entrypoint environment variables
-ENV ENTRYPOINT_FEATURES=${ENTRYPOINT_FEATURES}
-# We repeat the ARGs here, so they are available in the entrypoint.sh script for $RUN_ALL_EXPERIMENTAL_TESTS
-ARG EXPERIMENTAL_FEATURES="journald prometheus filter-reload"
-ENV ENTRYPOINT_FEATURES_EXPERIMENTAL="${ENTRYPOINT_FEATURES} ${EXPERIMENTAL_FEATURES}"
+# Use the same default config as in the production environment.
+ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
+COPY --chown=${UID}:${GID} ./docker/default_zebra_config.toml ${ZEBRA_CONF_PATH}
 
-# By default, runs the entrypoint tests specified by the environmental variables (if any are set)
-ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]
+ARG LWD_CACHE_DIR
+ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
+RUN mkdir -p ${LWD_CACHE_DIR}
+RUN chown -R ${UID}:${GID} ${LWD_CACHE_DIR}
+
+# Use the same cache dir as in the production environment.
+ARG ZEBRA_CACHE_DIR
+ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
+RUN mkdir -p ${ZEBRA_CACHE_DIR}
+RUN chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+
+COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY ./ ${HOME}
+
+RUN chown -R ${UID}:${GID} ${HOME}
+
+ENTRYPOINT [ "entrypoint.sh", "test" ]
 
 # In this stage we build a release (generate the zebrad binary)
 #
@@ -161,68 +160,67 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=cache,target=${APP_HOME}/target/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
-cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
-cp ${APP_HOME}/target/release/zebrad /usr/local/bin
+    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
+    cp ${APP_HOME}/target/release/zebrad /usr/local/bin
 
-# This stage is only used when deploying nodes or when only the resulting zebrad binary is needed
-#
-# To save space, this step starts from scratch using debian, and only adds the resulting
-# binary from the `release` stage
+# This step starts from scratch using Debian and only adds the resulting binary
+# from the `release` stage.
 FROM debian:bookworm-slim AS runtime
 
-# Set the default path for the zebrad binary
-ARG APP_HOME
-ENV APP_HOME=${APP_HOME}
-WORKDIR ${APP_HOME}
+COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
+COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    ca-certificates \
-    curl \
-    rocksdb-tools \
-    gosu \
-    && rm -rf /var/lib/apt/lists/* /tmp/*
-
-# Create a non-privileged user that the app will run under.
-# Running as root inside the container is running as root in the Docker host
-# If an attacker manages to break out of the container, they will have root access to the host
-# See https://docs.docker.com/go/dockerfile-user-best-practices/
-ARG USER=zebra
-ENV USER=${USER}
-ARG UID=10001
-ENV UID=${UID}
-ARG GID=10001
-ENV GID=${GID}
-
-RUN addgroup --system --gid ${GID} ${USER} \
-    && adduser \
-    --system \
-    --disabled-login \
-    --shell /bin/bash \
-    --home ${APP_HOME} \
-    --uid "${UID}" \
-    --gid "${GID}" \
-    ${USER}
-
-# Config settings for zebrad
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
-# Path and name of the config file
-# These are set to a default value when not defined in the environment
-ENV ZEBRA_CONF_DIR=${ZEBRA_CONF_DIR:-/etc/zebrad}
-ENV ZEBRA_CONF_FILE=${ZEBRA_CONF_FILE:-zebrad.toml}
+# Create a non-privileged system user for running `zebrad`.
+ARG USER="zebra"
+ENV USER=${USER}
 
-RUN mkdir -p ${ZEBRA_CONF_DIR} && chown ${UID}:${UID} ${ZEBRA_CONF_DIR} \
-    && chown ${UID}:${UID} ${APP_HOME}
+# System users have no home dirs, but we set one for users' convenience.
+ARG HOME="/home/zebra"
+WORKDIR ${HOME}
 
-COPY --from=release /usr/local/bin/zebrad /usr/local/bin
-COPY --from=release /etc/zebrad/entrypoint.sh /etc/zebrad
+# System UIDs should be set according to
+# https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/uidrange.html.
+#
+# In Debian, the default dynamic range for system UIDs is defined by
+# [FIRST_SYSTEM_UID, LAST_SYSTEM_UID], which is set to [100, 999] in
+# `etc/adduser.conf`:
+# https://manpages.debian.org/bullseye/adduser/adduser.8.en.html
+#
+# Debian assigns GID 100 to group `users`, so we set UID = GID = 101 as the
+# default value.
+ARG UID=101
+ENV UID=${UID}
+ARG GID=${UID}
+ENV GID=${GID}
 
-# Expose configured ports
-EXPOSE 8233 18233
+RUN addgroup --system --gid ${GID} ${USER}
+RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
-# Update the config file based on the Docker run variables,
-# and launch zebrad with it
-ENTRYPOINT [ "/etc/zebrad/entrypoint.sh" ]
+# We set the default locations of the conf and cache dirs according to the XDG
+# spec: https://specifications.freedesktop.org/basedir-spec/latest/
+
+ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
+ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${GID} ./docker/default_zebra_config.toml ${ZEBRA_CONF_PATH}
+
+ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
+ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
+RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+
+RUN chown -R ${UID}:${GID} ${HOME}
+USER $USER
+
+ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
+
+# TODO: Add a `monitoring` stage
+#
+# This stage will be based on `runtime`, and initially:
+#
+# - run `zebrad` on Testnet
+# - with mining enabled using S-nomp and `nheqminer`.
+#
+# We can add further functionality to this stage for further purposes.

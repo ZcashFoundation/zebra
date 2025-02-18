@@ -2,7 +2,8 @@
 
 use std::{collections::HashMap, iter, sync::Arc};
 
-use jsonrpc_core::{Error, ErrorCode, Result};
+use jsonrpsee::core::RpcResult as Result;
+use jsonrpsee_types::{ErrorCode, ErrorObject};
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{
@@ -25,12 +26,12 @@ use zebra_consensus::{
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
-use crate::methods::{
-    errors::OkOrServerError,
-    get_block_template_rpcs::{
+use crate::{
+    methods::get_block_template_rpcs::{
         constants::{MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, NOT_SYNCED_ERROR_CODE},
         types::{default_roots::DefaultRoots, transaction::TransactionTemplate},
     },
+    server::error::OkOrError,
 };
 
 pub use crate::methods::get_block_template_rpcs::types::get_block_template::*;
@@ -61,25 +62,23 @@ pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: None,
             ..
-        } => Err(Error {
-            code: ErrorCode::InvalidParams,
-            message: "\"data\" parameter must be \
-                          provided in \"proposal\" mode"
-                .to_string(),
-            data: None,
-        }),
+        } => Err(ErrorObject::borrowed(
+            ErrorCode::InvalidParams.code(),
+            "\"data\" parameter must be \
+                provided in \"proposal\" mode",
+            None,
+        )),
 
         JsonParameters {
             mode: GetBlockTemplateRequestMode::Template,
             data: Some(_),
             ..
-        } => Err(Error {
-            code: ErrorCode::InvalidParams,
-            message: "\"data\" parameter must be \
-                          omitted in \"template\" mode"
-                .to_string(),
-            data: None,
-        }),
+        } => Err(ErrorObject::borrowed(
+            ErrorCode::InvalidParams.code(),
+            "\"data\" parameter must be \
+                omitted in \"template\" mode",
+            None,
+        )),
     }
 }
 
@@ -87,13 +86,9 @@ pub fn check_parameters(parameters: &Option<JsonParameters>) -> Result<()> {
 pub fn check_miner_address(
     miner_address: Option<transparent::Address>,
 ) -> Result<transparent::Address> {
-    miner_address.ok_or_else(|| Error {
-        code: ErrorCode::ServerError(0),
-        message: "configure mining.miner_address in zebrad.toml \
-                  with a transparent address"
-            .to_string(),
-        data: None,
-    })
+    miner_address.ok_or_misc_error(
+        "set `mining.miner_address` in `zebrad.toml` to a transparent address".to_string(),
+    )
 }
 
 /// Attempts to validate block proposal against all of the server's
@@ -135,11 +130,7 @@ where
     let block_verifier_router_response = block_verifier_router
         .ready()
         .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
-        })?
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?
         .call(zebra_consensus::Request::CheckProposal(Arc::new(block)))
         .await;
 
@@ -170,10 +161,7 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    // TODO:
-    // - Add a `disable_peers` field to `Network` to check instead of `disable_pow()` (#8361)
-    // - Check the field in `sync_status` so it applies to the mempool as well.
-    if network.disable_pow() {
+    if network.is_a_test_network() {
         return Ok(());
     }
 
@@ -181,7 +169,7 @@ where
     // but this is ok for an estimate
     let (estimated_distance_to_chain_tip, local_tip_height) = latest_chain_tip
         .estimate_distance_to_network_chain_tip(network)
-        .ok_or_server_error("no chain tip available yet")?;
+        .ok_or_misc_error("no chain tip available yet")?;
 
     if !sync_status.is_close_to_tip()
         || estimated_distance_to_chain_tip > MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP
@@ -193,16 +181,14 @@ where
              Hint: check your network connection, clock, and time zone settings."
         );
 
-        return Err(Error {
-            code: NOT_SYNCED_ERROR_CODE,
-            message: format!(
-                "Zebra has not synced to the chain tip, \
+        return Err(ErrorObject::borrowed(
+            NOT_SYNCED_ERROR_CODE.code(),
+            "Zebra has not synced to the chain tip, \
                  estimated distance: {estimated_distance_to_chain_tip:?}, \
                  local tip: {local_tip_height:?}. \
-                 Hint: check your network connection, clock, and time zone settings."
-            ),
-            data: None,
-        });
+                 Hint: check your network connection, clock, and time zone settings.",
+            None,
+        ));
     }
 
     Ok(())
@@ -231,11 +217,7 @@ where
     let response = state
         .oneshot(request.clone())
         .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
-        })?;
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
     let chain_info = match response {
         zebra_state::ReadResponse::ChainInfo(chain_info) => chain_info,
@@ -265,11 +247,7 @@ where
     let response = mempool
         .oneshot(mempool::Request::FullTransactions)
         .await
-        .map_err(|error| Error {
-            code: ErrorCode::ServerError(0),
-            message: error.to_string(),
-            data: None,
-        })?;
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
     // TODO: Order transactions in block templates based on their dependencies
 

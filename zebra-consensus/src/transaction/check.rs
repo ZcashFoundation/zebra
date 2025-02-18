@@ -309,7 +309,7 @@ where
 /// # Consensus
 ///
 /// > [Heartwood onward] All Sapling and Orchard outputs in coinbase transactions MUST decrypt to a note
-/// > plaintext, i.e. the procedure in § 4.19.3 ‘Decryption using a Full Viewing Key ( Sapling and Orchard )’ on p. 67
+/// > plaintext, i.e. the procedure in § 4.20.3 ‘Decryption using a Full Viewing Key (Sapling and Orchard)’
 /// > does not return ⊥, using a sequence of 32 zero bytes as the outgoing viewing key. (This implies that before
 /// > Canopy activation, Sapling outputs of a coinbase transaction MUST have note plaintext lead byte equal to
 /// > 0x01.)
@@ -330,6 +330,14 @@ pub fn coinbase_outputs_are_decryptable(
     network: &Network,
     height: Height,
 ) -> Result<(), TransactionError> {
+    // Do quick checks first so we can avoid an expensive tx conversion
+    // in `zcash_note_encryption::decrypts_successfully`.
+
+    // The consensus rule only applies to coinbase txs with shielded outputs.
+    if !transaction.has_shielded_outputs() {
+        return Ok(());
+    }
+
     // The consensus rule only applies to Heartwood onward.
     if height
         < NetworkUpgrade::Heartwood
@@ -337,6 +345,11 @@ pub fn coinbase_outputs_are_decryptable(
             .expect("Heartwood height is known")
     {
         return Ok(());
+    }
+
+    // The passed tx should have been be a coinbase tx.
+    if !transaction.is_coinbase() {
+        return Err(TransactionError::NotCoinbase);
     }
 
     if !zcash_note_encryption::decrypts_successfully(transaction, network, height) {
@@ -476,6 +489,7 @@ fn validate_expiry_height_mined(
 /// Returns `Ok(())` if spent transparent coinbase outputs are
 /// valid for the block height, or a [`Err(TransactionError)`](TransactionError)
 pub fn tx_transparent_coinbase_spends_maturity(
+    network: &Network,
     tx: Arc<Transaction>,
     height: Height,
     block_new_outputs: Arc<HashMap<transparent::OutPoint, transparent::OrderedUtxo>>,
@@ -488,7 +502,7 @@ pub fn tx_transparent_coinbase_spends_maturity(
             .or_else(|| spent_utxos.get(&spend).cloned())
             .expect("load_spent_utxos_fut.await should return an error if a utxo is missing");
 
-        let spend_restriction = tx.coinbase_spend_restriction(height);
+        let spend_restriction = tx.coinbase_spend_restriction(network, height);
 
         zebra_state::check::transparent_coinbase_spend(spend, spend_restriction, &utxo)?;
     }

@@ -20,7 +20,7 @@ use zebra_chain::{
     block::{self, HeightDiff},
     chain_tip::ChainTip,
 };
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::MIN_CONCURRENCY_LIMIT;
@@ -107,7 +107,9 @@ where
     //
     /// A list of pending block download and verify tasks.
     #[pin]
-    pending: FuturesUnordered<JoinHandle<Result<block::Hash, (BoxError, block::Hash)>>>,
+    pending: FuturesUnordered<
+        JoinHandle<Result<block::Hash, (BoxError, block::Hash, Option<PeerSocketAddr>)>>,
+    >,
 
     /// A list of channels that can be used to cancel pending block download and
     /// verify tasks.
@@ -126,7 +128,7 @@ where
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
-    type Item = Result<block::Hash, BoxError>;
+    type Item = Result<block::Hash, (BoxError, Option<PeerSocketAddr>)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
         let this = self.project();
@@ -145,9 +147,9 @@ where
                     this.cancel_handles.remove(&hash);
                     Poll::Ready(Some(Ok(hash)))
                 }
-                Err((e, hash)) => {
+                Err((e, hash, advertiser_addr)) => {
                     this.cancel_handles.remove(&hash);
-                    Poll::Ready(Some(Err(e)))
+                    Poll::Ready(Some(Err((e, advertiser_addr))))
                 }
             }
         } else {
@@ -249,11 +251,13 @@ where
                 Ok(zs::Response::KnownBlock(Some(_))) => Err("already present".into()),
                 Ok(_) => unreachable!("wrong response"),
                 Err(e) => Err(e),
-            }?;
+            }
+            .map_err(|e| (e, None))?;
 
-            let block = if let zn::Response::Blocks(blocks) = network
+            let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = network
                 .oneshot(zn::Request::BlocksByHash(std::iter::once(hash).collect()))
-                .await?
+                .await
+                .map_err(|e| (e, None))?
             {
                 assert_eq!(
                     blocks.len(),
@@ -307,15 +311,18 @@ where
                 })
                 .unwrap_or(block::Height(0));
 
-            let block_height = block.coinbase_height().ok_or_else(|| {
-                debug!(
-                    ?hash,
-                    "gossiped block with no height: dropped downloaded block"
-                );
-                metrics::counter!("gossip.no.height.dropped.block.count").increment(1);
+            let block_height = block
+                .coinbase_height()
+                .ok_or_else(|| {
+                    debug!(
+                        ?hash,
+                        "gossiped block with no height: dropped downloaded block"
+                    );
+                    metrics::counter!("gossip.no.height.dropped.block.count").increment(1);
 
-                BoxError::from("gossiped block with no height")
-            })?;
+                    BoxError::from("gossiped block with no height")
+                })
+                .map_err(|e| (e, None))?;
 
             if block_height > max_lookahead_height {
                 debug!(
@@ -328,7 +335,7 @@ where
                 );
                 metrics::counter!("gossip.max.height.limit.dropped.block.count").increment(1);
 
-                Err("gossiped block height too far ahead")?;
+                Err("gossiped block height too far ahead").map_err(|e| (e.into(), None))?;
             } else if block_height < min_accepted_height {
                 debug!(
                     ?hash,
@@ -340,13 +347,15 @@ where
                 );
                 metrics::counter!("gossip.min.height.limit.dropped.block.count").increment(1);
 
-                Err("gossiped block height behind the finalized tip")?;
+                Err("gossiped block height behind the finalized tip")
+                    .map_err(|e| (e.into(), None))?;
             }
 
             verifier
                 .oneshot(zebra_consensus::Request::Commit(block))
                 .await
                 .map(|hash| (hash, block_height))
+                .map_err(|e| (e, advertiser_addr))
         }
         .map_ok(|(hash, height)| {
             info!(?height, "downloaded and verified gossiped block");
@@ -355,7 +364,7 @@ where
         })
         // Tack the hash onto the error so we can remove the cancel handle
         // on failure as well as on success.
-        .map_err(move |e| (e, hash))
+        .map_err(move |(e, advertiser_addr)| (e, hash, advertiser_addr))
         .in_current_span();
 
         let task = tokio::spawn(async move {
@@ -365,7 +374,7 @@ where
                 _ = &mut cancel_rx => {
                     trace!("task cancelled prior to completion");
                     metrics::counter!("gossip.cancelled.count").increment(1);
-                    Err(("canceled".into(), hash))
+                    Err(("canceled".into(), hash, None))
                 }
                 verification = fut => verification,
             }

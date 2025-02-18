@@ -15,9 +15,10 @@ use zebra_test::vectors::{
     BLOCK_MAINNET_1046400_BYTES, BLOCK_MAINNET_653599_BYTES, BLOCK_MAINNET_982681_BYTES,
     BLOCK_TESTNET_1116000_BYTES, BLOCK_TESTNET_583999_BYTES, BLOCK_TESTNET_925483_BYTES,
     CONTINUOUS_MAINNET_BLOCKS, CONTINUOUS_TESTNET_BLOCKS, MAINNET_BLOCKS,
-    MAINNET_FINAL_SAPLING_ROOTS, MAINNET_FINAL_SPROUT_ROOTS,
+    MAINNET_FINAL_ORCHARD_ROOTS, MAINNET_FINAL_SAPLING_ROOTS, MAINNET_FINAL_SPROUT_ROOTS,
     SAPLING_FINAL_ROOT_MAINNET_1046400_BYTES, SAPLING_FINAL_ROOT_TESTNET_1116000_BYTES,
-    TESTNET_BLOCKS, TESTNET_FINAL_SAPLING_ROOTS, TESTNET_FINAL_SPROUT_ROOTS,
+    TESTNET_BLOCKS, TESTNET_FINAL_ORCHARD_ROOTS, TESTNET_FINAL_SAPLING_ROOTS,
+    TESTNET_FINAL_SPROUT_ROOTS,
 };
 
 /// Network methods for fetching blockchain vectors.
@@ -34,6 +35,15 @@ impl Network {
         } else {
             TESTNET_BLOCKS.iter()
         }
+    }
+
+    /// Returns iterator over deserialized blocks.
+    pub fn block_parsed_iter(&self) -> impl Iterator<Item = Block> {
+        self.block_iter().map(|(_, block_bytes)| {
+            block_bytes
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid")
+        })
     }
 
     /// Returns iterator over verified unmined transactions in the provided block height range.
@@ -62,7 +72,7 @@ impl Network {
             .filter_map(|transaction| {
                 VerifiedUnminedTx::new(
                     transaction,
-                    Amount::try_from(1_000_000).expect("invalid value"),
+                    Amount::try_from(1_000_000).expect("valid amount"),
                     0,
                 )
                 .ok()
@@ -118,17 +128,21 @@ impl Network {
         }
     }
 
-    /// Returns iterator over blocks and sapling roots.
-    pub fn block_sapling_roots_iter(
-        &self,
-    ) -> (
-        std::collections::btree_map::Iter<'_, u32, &[u8]>,
-        std::collections::BTreeMap<u32, &[u8; 32]>,
-    ) {
+    /// Returns a [`BTreeMap`] of heights and Sapling anchors for this network.
+    pub fn sapling_anchors(&self) -> std::collections::BTreeMap<u32, &[u8; 32]> {
         if self.is_mainnet() {
-            (MAINNET_BLOCKS.iter(), MAINNET_FINAL_SAPLING_ROOTS.clone())
+            MAINNET_FINAL_SAPLING_ROOTS.clone()
         } else {
-            (TESTNET_BLOCKS.iter(), TESTNET_FINAL_SAPLING_ROOTS.clone())
+            TESTNET_FINAL_SAPLING_ROOTS.clone()
+        }
+    }
+
+    /// Returns a [`BTreeMap`] of heights and Orchard anchors for this network.
+    pub fn orchard_anchors(&self) -> std::collections::BTreeMap<u32, &[u8; 32]> {
+        if self.is_mainnet() {
+            MAINNET_FINAL_ORCHARD_ROOTS.clone()
+        } else {
+            TESTNET_FINAL_ORCHARD_ROOTS.clone()
         }
     }
 
