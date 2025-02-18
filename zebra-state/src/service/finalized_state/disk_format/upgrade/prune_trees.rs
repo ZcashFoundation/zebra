@@ -21,12 +21,13 @@ impl DiskFormatUpgrade for PruneTrees {
         "deduplicate trees upgrade"
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn run(
         &self,
         initial_tip_height: Height,
         db: &ZebraDb,
         cancel_receiver: &Receiver<CancelFormatChange>,
-    ) {
+    ) -> Result<(), CancelFormatChange> {
         // Prune duplicate Sapling note commitment trees.
 
         // The last tree we checked.
@@ -39,7 +40,7 @@ impl DiskFormatUpgrade for PruneTrees {
         for (height, tree) in db.sapling_tree_by_height_range(Height(1)..=initial_tip_height) {
             // Return early if there is a cancel signal.
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return;
+                return Err(CancelFormatChange);
             }
 
             // Delete any duplicate trees.
@@ -66,7 +67,7 @@ impl DiskFormatUpgrade for PruneTrees {
         for (height, tree) in db.orchard_tree_by_height_range(Height(1)..=initial_tip_height) {
             // Return early if there is a cancel signal.
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return;
+                return Err(CancelFormatChange);
             }
 
             // Delete any duplicate trees.
@@ -80,6 +81,8 @@ impl DiskFormatUpgrade for PruneTrees {
             // Compare against the last tree to find unique trees.
             last_tree = tree;
         }
+
+        Ok(())
     }
 
     /// Check that note commitment trees were correctly de-duplicated.
