@@ -40,7 +40,7 @@ pub(crate) async fn run() -> Result<()> {
 
     // call `getpeerinfo` RPC method
     let peer_info_result: Vec<PeerInfo> = RpcRequestClient::new(rpc_address)
-        .json_result_from_call("getpeerinfo", "[]".to_string())
+        .json_result_from_call("getpeerinfo", "[]")
         .await
         .map_err(|err| eyre!(err))?;
 

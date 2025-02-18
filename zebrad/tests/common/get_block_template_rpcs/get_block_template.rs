@@ -162,7 +162,7 @@ pub(crate) async fn run() -> Result<()> {
 /// or `ProposalResponse` in 'proposal' mode.
 async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
     let mut response_json_result: GetBlockTemplate = client
-        .json_result_from_call("getblocktemplate", "[]".to_string())
+        .json_result_from_call("getblocktemplate", "[]")
         .await
         .expect("response should be success output with a serialized `GetBlockTemplate`");
 

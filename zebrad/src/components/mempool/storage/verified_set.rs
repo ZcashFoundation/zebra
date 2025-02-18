@@ -7,6 +7,7 @@ use std::{
 };
 
 use zebra_chain::{
+    block::Height,
     orchard, sapling, sprout,
     transaction::{self, UnminedTx, VerifiedUnminedTx},
     transparent,
@@ -141,9 +142,10 @@ impl VerifiedSet {
     /// same nullifier.
     pub fn insert(
         &mut self,
-        transaction: VerifiedUnminedTx,
+        mut transaction: VerifiedUnminedTx,
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
         pending_outputs: &mut PendingOutputs,
+        height: Option<Height>,
     ) -> Result<(), SameEffectsTipRejectionError> {
         if self.has_spend_conflicts(&transaction.transaction) {
             return Err(SameEffectsTipRejectionError::SpendConflict);
@@ -176,6 +178,8 @@ impl VerifiedSet {
 
         self.transactions_serialized_size += transaction.transaction.size;
         self.total_cost += transaction.cost();
+        transaction.time = Some(chrono::Utc::now());
+        transaction.height = height;
         self.transactions.insert(tx_id, transaction);
 
         self.update_metrics();

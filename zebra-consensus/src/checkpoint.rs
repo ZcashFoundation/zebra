@@ -1037,6 +1037,21 @@ impl VerifyCheckpointError {
             _ => false,
         }
     }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        // TODO: Adjust these values based on zcashd (#9258).
+        match self {
+            VerifyCheckpointError::VerifyBlock(verify_block_error) => {
+                verify_block_error.misbehavior_score()
+            }
+            VerifyCheckpointError::SubsidyError(_)
+            | VerifyCheckpointError::CoinbaseHeight { .. }
+            | VerifyCheckpointError::DuplicateTransaction
+            | VerifyCheckpointError::AmountError(_) => 100,
+            _other => 0,
+        }
+    }
 }
 
 /// The CheckpointVerifier service implementation.

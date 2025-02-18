@@ -227,12 +227,9 @@ jobs:
   # - on every push to the `main` branch
   # - on every release, when it's published
   # - on workflow_dispatch for manual deployments
-  
+
   # Determine which networks to deploy based on the trigger
-  
-  
-  
-  :
+  set-matrix:
     runs-on: ubuntu-latest
     outputs:
       networks: ${{ steps.set-networks.outputs.matrix }}
@@ -268,7 +265,7 @@ jobs:
     permissions:
       contents: "read"
       id-token: "write"
-    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && !failure() && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
       - uses: actions/checkout@v4.2.2

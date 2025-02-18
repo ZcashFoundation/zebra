@@ -63,7 +63,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     let mut inserted_ids = HashSet::new();
     service
         .storage()
-        .insert(genesis_transaction.clone(), Vec::new())?;
+        .insert(genesis_transaction.clone(), Vec::new(), None)?;
     inserted_ids.insert(genesis_transaction.transaction.id);
 
     // Test `Request::TransactionIds`
@@ -133,7 +133,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         inserted_ids.insert(tx.transaction.id);
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new());
+        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
     }
 
     // Test `Request::RejectedTransactionIds`
@@ -214,7 +214,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
     for tx in transactions.iter() {
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new());
+        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
     }
 
     // Test `Request::Queue` for a new transaction
@@ -297,7 +297,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     // Insert the genesis block coinbase transaction into the mempool storage.
     service
         .storage()
-        .insert(genesis_transaction.clone(), Vec::new())?;
+        .insert(genesis_transaction.clone(), Vec::new(), None)?;
 
     // Test if the mempool answers correctly (i.e. is enabled)
     let response = service
@@ -805,7 +805,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
         .map(|responder| {
             responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available(tx.clone().into()),
+                zn::InventoryResponse::Available((tx.clone().into(), None)),
             ]));
         })
         .await;
@@ -864,7 +864,7 @@ async fn mempool_reverifies_after_tip_change() -> Result<(), Report> {
         .expect_request_that(|req| matches!(req, zn::Request::TransactionsById(_)))
         .map(|responder| {
             responder.respond(zn::Response::Transactions(vec![
-                zn::InventoryResponse::Available(tx.into()),
+                zn::InventoryResponse::Available((tx.into(), None)),
             ]));
         })
         .await;
@@ -1069,7 +1069,7 @@ async fn setup(
     let tx_verifier = MockService::build().for_unit_tests();
 
     let (sync_status, recent_syncs) = SyncStatus::new();
-
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let (mempool, mut mempool_transaction_receiver) = Mempool::new(
         &mempool::Config {
             tx_cost_limit,
@@ -1081,6 +1081,7 @@ async fn setup(
         sync_status,
         latest_chain_tip,
         chain_tip_change.clone(),
+        misbehavior_tx,
     );
 
     tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });

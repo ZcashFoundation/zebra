@@ -1,5 +1,7 @@
 //! Randomised property tests for RPC methods.
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use std::collections::HashMap;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use futures::{join, FutureExt, TryFutureExt};
@@ -22,12 +24,18 @@ use zebra_chain::{
 };
 
 use zebra_consensus::ParameterCheckpoint;
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 
 use zebra_test::mock_service::MockService;
 
-use crate::methods::{self, types::Balance};
+#[cfg(feature = "getblocktemplate-rpcs")]
+use crate::methods::types::MempoolObject;
+use crate::methods::{
+    self,
+    types::{Balance, GetRawMempool},
+};
 
 use super::super::{
     AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
@@ -228,7 +236,8 @@ proptest! {
     /// returns those IDs as hexadecimal strings.
     #[test]
     fn mempool_transactions_are_sent_to_caller(transactions in any::<Vec<VerifiedUnminedTx>>(),
-                                               network in any::<Network>()) {
+                                               network in any::<Network>(),
+                                               verbose in any::<Option<bool>>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -254,7 +263,7 @@ proptest! {
                     .expect_request(mempool::Request::TransactionIds)
                     .map_ok(|r|r.respond(mempool::Response::TransactionIds(transaction_ids)));
 
-                (expected_response, mempool_query)
+                (GetRawMempool::TxIds(expected_response), mempool_query)
             };
 
             // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
@@ -278,18 +287,38 @@ proptest! {
                     .map(|tx| tx.transaction.id.mined_id().encode_hex::<String>())
                     .collect::<Vec<_>>();
 
+                let transaction_dependencies = Default::default();
+                let expected_response = if verbose.unwrap_or(false) {
+                    let map = transactions
+                        .iter()
+                        .map(|unmined_tx| {
+                            (
+                                unmined_tx.transaction.id.mined_id().encode_hex(),
+                                MempoolObject::from_verified_unmined_tx(
+                                    unmined_tx,
+                                    &transactions,
+                                    &transaction_dependencies,
+                                ),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+                    GetRawMempool::Verbose(map)
+                } else {
+                    GetRawMempool::TxIds(expected_response)
+                };
+
                 let mempool_query = mempool
                     .expect_request(mempool::Request::FullTransactions)
                     .map_ok(|r| r.respond(mempool::Response::FullTransactions {
                         transactions,
-                        transaction_dependencies: Default::default(),
+                        transaction_dependencies,
                         last_seen_tip_hash: [0; 32].into(),
                     }));
 
                 (expected_response, mempool_query)
             };
 
-            let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(), mempool_query);
+            let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(verbose), mempool_query);
 
             prop_assert_eq!(rpc_rsp?, expected_response);
 
@@ -940,6 +969,7 @@ fn mock_services<Tip>(
             zebra_state::ReadRequest,
         >,
         Tip,
+        MockAddressBookPeers,
     >,
     tokio::task::JoinHandle<()>,
 )
@@ -949,8 +979,9 @@ where
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, mempool_tx_queue) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         network,
         false,
@@ -958,6 +989,8 @@ where
         mempool.clone(),
         Buffer::new(state.clone(), 1),
         chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     (mempool, state, rpc, mempool_tx_queue)

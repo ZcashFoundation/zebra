@@ -37,6 +37,15 @@ impl Network {
         }
     }
 
+    /// Returns iterator over deserialized blocks.
+    pub fn block_parsed_iter(&self) -> impl Iterator<Item = Block> {
+        self.block_iter().map(|(_, block_bytes)| {
+            block_bytes
+                .zcash_deserialize_into::<Block>()
+                .expect("block is structurally valid")
+        })
+    }
+
     /// Returns iterator over verified unmined transactions in the provided block height range.
     pub fn unmined_transactions_in_blocks(
         &self,

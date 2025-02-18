@@ -27,7 +27,7 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 
 use crate::components::sync::{
@@ -125,6 +125,7 @@ pub enum BlockDownloadVerifyError {
         error: zebra_consensus::router::RouterError,
         height: block::Height,
         hash: block::Hash,
+        advertiser_addr: Option<PeerSocketAddr>,
     },
 
     #[error("block validation request failed: {error:?} {height:?} {hash:?}")]
@@ -374,7 +375,7 @@ where
                     rsp = block_req => rsp.map_err(|error| BlockDownloadVerifyError::DownloadFailed { error, hash})?,
                 };
 
-                let block = if let zn::Response::Blocks(blocks) = rsp {
+                let (block, advertiser_addr) = if let zn::Response::Blocks(blocks) = rsp {
                     assert_eq!(
                         blocks.len(),
                         1,
@@ -550,7 +551,7 @@ where
                     .map(|hash| (block_height, hash))
                     .map_err(|err| {
                         match err.downcast::<zebra_consensus::router::RouterError>() {
-                            Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash },
+                            Ok(error) => BlockDownloadVerifyError::Invalid { error: *error, height: block_height, hash, advertiser_addr },
                             Err(error) => BlockDownloadVerifyError::ValidationRequestError { error, height: block_height, hash },
                         }
                     })
