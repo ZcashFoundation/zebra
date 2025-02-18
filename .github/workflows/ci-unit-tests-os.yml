@@ -309,7 +309,7 @@ jobs:
     needs: [ test,  install-from-lockfile-no-cache, check-cargo-lock, cargo-deny, unused-deps ]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
-    if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
+    if: (failure() || cancelled()) && github.repository_owner == 'ZcashFoundation' && github.event.pull_request == null
     runs-on: ubuntu-latest
     steps:
       - uses: jayqi/failed-build-issue-action@v1
