@@ -343,6 +343,24 @@ pub trait Rpc {
         address_strings: AddressStrings,
     ) -> Result<Vec<GetAddressUtxos>>;
 
+    /// Invalidates a block if it is not yet finalized, removing it from the non-finalized
+    /// state if it is present and rejecting it during contextual validation if it is submitted.
+    ///
+    /// # Parameters
+    ///
+    /// - `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.
+    // TODO: Invalidate block hashes even if they're not present in the non-finalized state.
+    #[method(name = "invalidateblock")]
+    async fn invalidate_block(&self, block_hash: GetBlockHash) -> Result<()>;
+
+    /// Reconsiders a previously invalidated block if it exists in the cache of previously invalidated blocks.
+    ///
+    /// # Parameters
+    ///
+    /// - `block_hash`: (hex-encoded block hash, required) The block hash to reconsider.
+    #[method(name = "reconsiderblock")]
+    async fn reconsider_block(&self, block_hash: GetBlockHash) -> Result<()>;
+
     /// Stop the running zebrad process.
     ///
     /// # Notes
@@ -1607,6 +1625,24 @@ where
         }
 
         Ok(response_utxos)
+    }
+
+    async fn invalidate_block(&self, GetBlockHash(block_hash): GetBlockHash) -> Result<()> {
+        self.state
+            .clone()
+            .oneshot(zebra_state::Request::InvalidateBlock(block_hash))
+            .await
+            .map(|rsp| assert_eq!(rsp, zebra_state::Response::Committed(block_hash)))
+            .map_misc_error()
+    }
+
+    async fn reconsider_block(&self, GetBlockHash(block_hash): GetBlockHash) -> Result<()> {
+        self.state
+            .clone()
+            .oneshot(zebra_state::Request::ReconsiderBlock(block_hash))
+            .await
+            .map(|rsp| assert_eq!(rsp, zebra_state::Response::Committed(block_hash)))
+            .map_misc_error()
     }
 
     fn stop(&self) -> Result<String> {
