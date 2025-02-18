@@ -523,7 +523,7 @@ jobs:
         lightwalletd-grpc-test,
         get-block-template-test,
         submit-block-test,
-        scan-task-commands-test,
+        test-scanner,
       ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
