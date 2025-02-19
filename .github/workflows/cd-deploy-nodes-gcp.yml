@@ -148,15 +148,16 @@ jobs:
   #
   # Passes the disk name to subsequent jobs using `cached_disk_name` output
   #
+  # For push events, this job always runs.
+  # For workflow_dispatch events, it runs only if inputs.need_cached_disk is true.
+  # PRs from forked repositories are skipped.
   get-disk-name:
     name: Get disk name
     uses: ./.github/workflows/sub-find-cached-disks.yml
-    # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them.
-    # This workflow also runs on release tags, the event name check will run it on releases.
-    if: ${{ inputs.need_cached_disk && github.event_name != 'release' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
+    if: ${{ (github.event_name != 'release' && !(github.event.pull_request.head.repo.fork)) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-      disk_prefix: zebrad-cache
+      disk_prefix: zebrad-cache 
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
       prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
@@ -265,7 +266,7 @@ jobs:
     permissions:
       contents: "read"
       id-token: "write"
-    if: ${{ !cancelled() && !failure() && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
       - uses: actions/checkout@v4.2.2
