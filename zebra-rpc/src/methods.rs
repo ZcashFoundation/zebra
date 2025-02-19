@@ -2733,7 +2733,7 @@ mod opthex {
     }
 }
 /// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
-pub(crate) async fn chain_tip_difficulty<State>(network: Network, mut state: State) -> Result<f64>
+pub async fn chain_tip_difficulty<State>(network: Network, mut state: State) -> Result<f64>
 where
     State: Service<
             zebra_state::ReadRequest,
