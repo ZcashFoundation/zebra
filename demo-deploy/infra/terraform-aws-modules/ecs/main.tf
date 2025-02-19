@@ -121,12 +121,12 @@ resource "aws_ecs_task_definition" "task" {
       healthCheck = {
         command = [
           "CMD-SHELL",
-          "curl --silent --user myusername --data-binary '{\"jsonrpc\": \"1.0\", \"id\":\"curltest\", \"method\": \"getinfo\", \"params\": [] }' -H 'content-type: text/plain;' http://127.0.0.1:8232/ | grep 'version'"
+          "curl -X POST -H 'Content-Type: application/json' -d '{\"jsonrpc\":\"2.0\",\"method\":\"getinfo\",\"params\":[],\"id\":1}' http://localhost:18232/ || exit 1"
         ]
-        interval           = 15
-        timeout            = 10
-        retries            = 3
-        startPeriod        = 120
+        interval     = 15     # Time between health checks in seconds
+        timeout      = 10     # Time before a health check is considered failed
+        retries      = 3      # Number of consecutive failures before marking as unhealthy
+        startPeriod  = 120    # Grace period for the service to start
       }
       
     mountPoints = var.enable_persistent ? [{

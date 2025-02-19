@@ -43,6 +43,7 @@ inputs = {
   task_cpu=1024
 
   enable_logging = true
+  enable_backup = false
 
   enable_domain = true
   domain = "zebra.zsa-test.net"
