@@ -979,6 +979,7 @@ where
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, mempool_tx_queue) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -989,7 +990,7 @@ where
         Buffer::new(state.clone(), 1),
         chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     (mempool, state, rpc, mempool_tx_queue)
