@@ -157,7 +157,7 @@ jobs:
     with:
       test_id: "custom-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v2.1.0.toml"'
+      grep_patterns: '-e "extra_coinbase_data: Some(\"do you even shield?\")"'
       test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v2.1.0.toml"'
 
   failure-issue:
