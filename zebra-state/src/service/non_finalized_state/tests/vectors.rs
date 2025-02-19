@@ -278,26 +278,36 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
     );
 
     let invalidated_blocks_state = &state.invalidated_blocks;
-    assert!(
-        invalidated_blocks_state.contains_key(&block2.hash()),
-        "invalidated blocks map should reference the hash of block2"
-    );
 
-    let invalidated_blocks_state_descendants =
-        invalidated_blocks_state.get(&block2.hash()).unwrap();
+    // Find an entry in the IndexMap that contains block2 hash
+    let (_, invalidated_blocks_state_descendants) = invalidated_blocks_state
+        .iter()
+        .find_map(|(height, blocks)| {
+            assert!(
+                blocks.iter().any(|block| block.hash == block2.hash()),
+                "invalidated_blocks should reference the hash of block2"
+            );
+
+            if blocks.iter().any(|block| block.hash == block2.hash()) {
+                Some((height, blocks))
+            } else {
+                None
+            }
+        })
+        .unwrap();
 
     match network {
         Network::Mainnet => assert!(
             invalidated_blocks_state_descendants
                 .iter()
                 .any(|block| block.height == block::Height(653601)),
-            "invalidated descendants vec should contain block3"
+            "invalidated descendants should contain block3"
         ),
         Network::Testnet(_parameters) => assert!(
             invalidated_blocks_state_descendants
                 .iter()
                 .any(|block| block.height == block::Height(584001)),
-            "invalidated descendants vec should contain block3"
+            "invalidated descendants should contain block3"
         ),
     }
 
