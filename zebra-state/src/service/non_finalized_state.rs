@@ -11,11 +11,13 @@ use std::{
 use zebra_chain::{
     block::{self, Block, Hash},
     parameters::Network,
-    sprout, transparent,
+    sprout::{self},
+    transparent,
 };
 
 use crate::{
     constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+    error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
     SemanticallyVerifiedBlock, ValidateContextError,
@@ -299,6 +301,57 @@ impl NonFinalizedState {
 
         self.update_metrics_for_chains();
         self.update_metrics_bars();
+    }
+
+    /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
+    /// based on a block_hash. Reconsidered blocks are inserted into the previous chain and re-inserted
+    /// into the chain_set.
+    pub fn reconsider_block(&mut self, block_hash: block::Hash) -> Result<(), ReconsiderError> {
+        // Get the invalidated blocks that were invalidated by the given block_hash
+        let Some(invalidated_blocks) = self.invalidated_blocks.get(&block_hash) else {
+            return Err(ReconsiderError::NonPreviouslyInvalidatedBlock(block_hash));
+        };
+
+        let mut blocks = invalidated_blocks.clone();
+        let mut_blocks = Arc::make_mut(&mut blocks);
+
+        let Some(invalidated_root) = mut_blocks.first() else {
+            return Err(ReconsiderError::NonPreviouslyInvalidatedBlock(block_hash));
+        };
+
+        // Find and fork the parent chain of the invalidated_root. Update the parent chain
+        // with the invalidated_descendants
+        let prev_block_hash = invalidated_root.block.header.previous_block_hash;
+        let Ok(parent_chain) = self.parent_chain(prev_block_hash) else {
+            return Err(ReconsiderError::ParentChainNotFound(block_hash));
+        };
+
+        let Some(new_chain) = parent_chain.fork(parent_chain.non_finalized_tip_hash()) else {
+            return Err(ReconsiderError::ValidationError(
+                ValidateContextError::NonSequentialBlock {
+                    candidate_height: invalidated_root.height,
+                    parent_height: parent_chain.non_finalized_tip_height(),
+                },
+            ));
+        };
+
+        let mut chain = new_chain
+            .push(mut_blocks.remove(0))
+            .map_err(ReconsiderError::ValidationError)?;
+        for block in mut_blocks {
+            chain = chain
+                .push(block.clone())
+                .map_err(ReconsiderError::ValidationError)?;
+        }
+
+        self.insert_with(Arc::new(chain), |chain_set| {
+            chain_set.retain(|c| c != &parent_chain)
+        });
+
+        self.update_metrics_for_chains();
+        self.update_metrics_bars();
+
+        Ok(())
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
