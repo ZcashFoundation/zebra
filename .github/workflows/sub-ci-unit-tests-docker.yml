@@ -158,7 +158,7 @@ jobs:
       test_id: "custom-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
       test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
-      grep_patterns: '-e "extra_coinbase_data: Some(\"do you even shield?\")"'
+      grep_patterns: '-e "extra_coinbase_data:\sSome\(\"do you even shield\?\"\)"'
 
   failure-issue:
     name: Open or update issues for main branch failures
