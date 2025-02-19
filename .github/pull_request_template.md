@@ -44,4 +44,3 @@
 - [ ] The PR has a priority label.
 - [ ] If the PR shouldn't be in release notes, it has the
       `C-exclude-from-changelog` label.
-
