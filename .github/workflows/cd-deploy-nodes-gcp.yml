@@ -168,7 +168,7 @@ jobs:
     with:
       test_id: "custom-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v2.1.0.toml"'
+      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
       grep_patterns: '-e "extra_coinbase_data: Some(\"do you even shield?\")"'
 
   # Each time this workflow is executed, a build will be triggered to create a new image
