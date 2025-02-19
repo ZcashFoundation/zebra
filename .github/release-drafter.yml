@@ -6,77 +6,44 @@
 # Automatically label PRs based on their branch, title, or changed files.
 # This helps categorise PRs in the CHANGELOG.
 autolabeler:
-  - label: 'C-security'
+  - label: "C-security"
     branch:
-      - '/secur/i'
+      - "/secur/i"
     title:
-      - '/secur/i'
-      - '/crash/i'
-      - '/destr/i'
-      - '/unsafe/i'
-  - label: 'C-deprecated'
+      - "/secur/i"
+      - "/crash/i"
+      - "/destr/i"
+      - "/unsafe/i"
+  - label: "C-deprecated"
     branch:
-      - '/deprecat/i'
+      - "/deprecat/i"
     title:
-      - '/deprecat/i'
-  - label: 'extra-reviews'
+      - "/deprecat/i"
+  - label: "extra-reviews"
     branch:
-      - '/remov/i'
-      - '/deprecat/i'
+      - "/remov/i"
+      - "/deprecat/i"
     title:
-      - '/remov/i'
-      - '/deprecat/i'
-      - '/crash/i'
-      - '/destr/i'
-      - '/unsafe/i'
-  - label: 'C-feature'
+      - "/remov/i"
+      - "/deprecat/i"
+      - "/crash/i"
+      - "/destr/i"
+      - "/unsafe/i"
+  - label: "C-feature"
     branch:
-      - '/feat/i'
+      - "/feat/i"
     title:
-      - '/feat/i'
-  - label: 'C-bug'
+      - "/feat/i"
+  - label: "C-bug"
     branch:
-      - '/bug/i'
+      - "/bug/i"
     title:
-      - '/bug/i'
-  # Changes that are almost always trivial for users
-  - label: 'C-trivial'
-    branch:
-      - '/clean/i'
-      - '/chore/i'
-      - '/clippy/i'
-      - '/test/i'
-    title:
-      - '/clean/i'
-      - '/chore/i'
-      - '/clippy/i'
-      - '/test/i'
-      - '/(ci)/i'
-      - '/(cd)/i'
-      - '/job/i'
-      - '/patch/i'
-      - '/actions/i'
-    files:
-      # Regular changes that don't need to go in the CHANGELOG
-      - 'CHANGELOG.md'
-      - 'zebra-consensus/src/checkpoint/*-checkpoints.txt'
-      # Developer-only changes
-      - '.gitignore'
-      - '.dockerignore'
-      # Test-only changes
-      - 'zebra-test'
-      - '.cargo/config.toml'
-      - 'clippy.toml'
-      # CI-only changes
-      - '.github'
-      - '.codespellrc'
-      - 'codecov.yml'
-      - 'deny.toml'
+      - "/bug/i"
 
 # The release name, tag, and settings for the draft CHANGELOG.
-name-template: 'Zebra $RESOLVED_VERSION'
-tag-template: 'v$RESOLVED_VERSION'
-tag-prefix: 'v'
+name-template: "Zebra $RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+tag-prefix: "v"
 # Do not mark the draft release as a pre-release
 prerelease: false
 # Do not include pre-releases in the draft release
