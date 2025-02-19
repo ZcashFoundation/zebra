@@ -39,7 +39,7 @@ inputs = {
   ephemeral_storage_size = 512
   tracing_config_mode    = "PassThrough"
 
-  # Add publish = true to create a version
+  # To create a version after the initial deployment
   publish = true
 
   # Add allowed triggers for API Gateway
