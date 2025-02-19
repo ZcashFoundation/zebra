@@ -18,7 +18,7 @@ use zebra_chain::{
 };
 
 use crate::{
-    constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+    constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
@@ -31,9 +31,6 @@ mod chain;
 mod tests;
 
 pub(crate) use chain::{Chain, SpendingTransactionId};
-
-/// Maxium number of invalidated blocks per entry.
-const MAX_INVALIDATED_BLOCKS: usize = 50;
 
 /// The state of the chains in memory, including queued blocks.
 ///

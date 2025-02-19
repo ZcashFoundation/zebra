@@ -117,6 +117,12 @@ pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 /// These database versions can be recreated from their directly preceding versions.
 pub const RESTORABLE_DB_VERSIONS: [u64; 1] = [26];
 
+/// The maximum number of invalidated blocks per entry.
+///
+/// This limits the memory for each entry to around:
+/// `256 blocks * 2 MB per block = 0.5 GB`
+pub const MAX_INVALIDATED_BLOCKS: usize = 256;
+
 lazy_static! {
     /// Regex that matches the RocksDB error when its lock file is already open.
     pub static ref LOCK_FILE_ERROR: Regex = Regex::new("(lock file).*(temporarily unavailable)|(in use)|(being used by another process)").expect("regex is valid");
