@@ -29,10 +29,9 @@
 ### Follow-up Work
 
 <!--
-- If there's anything missing from the solution, provide a description.
+- If there's anything missing from the solution, describe it here.
 - List any follow-up issues or PRs.
-- If this PR blocks or is blocked by any other work, provide a description, or
-  enumerate the related issues.
+- If this PR blocks or depends on other issues or PRs, enumerate them here.
 -->
 
 ### PR Checklist
