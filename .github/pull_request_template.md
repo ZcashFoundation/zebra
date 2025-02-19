@@ -1,20 +1,18 @@
 <!--
 - Use this template to quickly write the PR description.
-- Skip or delete the items that don't fit.
+- Skip or delete items that don't fit.
 -->
 
 ## Motivation
 
 <!--
 - Describe the goals of the PR.
-- If it closes any issues, list them here.
+- If it closes any issues, enumerate them here.
 -->
 
 ## Solution
 
-<!--
-- Summarize or list the changes in the PR.
--->
+<!-- Describe the changes in the PR. -->
 
 ### Tests
 
@@ -26,24 +24,20 @@
 
 ### Specifications & References
 
-<!--
-- Provide any references related to the PR.
--->
+<!-- Provide any relevant references. -->
 
 ### Follow-up Work
 
 <!--
-- Describe or list what's missing from the solution.
-- List any follow-up issues.
+- If there's anything missing from the solution, provide a description.
+- List any follow-up issues or PRs.
 - If this PR blocks or is blocked by any other work, provide a description, or
-  list the related issues.
+  enumerate the related issues.
 -->
 
 ### PR Checklist
 
-<!--
-- Aim to check as many boxes as possible.
--->
+<!-- Check as many boxes as possible. -->
 
 - [ ] The PR name is suitable for release notes.
 - [ ] The solution is tested.
