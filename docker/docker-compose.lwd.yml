@@ -1,15 +1,22 @@
-version: "3.8"
-
 services:
   zebra:
+    container_name: zebra
+    image: zfnd/zebra
+    platform: linux/amd64
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          cpus: "4"
+          memory: 16G
+    volumes:
+      - zebrad-cache:/home/zebra/.cache/zebra
+    tty: true
+    environment:
+      - ZEBRA_RPC_PORT=8232
+      - ENABLE_COOKIE_AUTH=false
     ports:
-      - "8232:8232" # Opens an RPC endpoint (for lightwalletd and mining)
-    healthcheck:
-      start_period: 1m
-      interval: 15s
-      timeout: 10s
-      retries: 3
-      test: ["CMD-SHELL", "curl --data-binary '{\"id\":\"curltest\", \"method\": \"getinfo\"}' -H 'content-type: application/json' 127.0.0.1:8232 || exit 1"]
+      - "8232:8232"
 
   lightwalletd:
     image: electriccoinco/lightwalletd
@@ -29,13 +36,11 @@ services:
     configs:
       - source: lwd_config
         target: /etc/lightwalletd/zcash.conf
-        uid: '2002' # Golang's container default user uid
-        gid: '2002' # Golang's container default group gid
-        mode: 0440
     volumes:
-      - litewalletd-data:/var/lib/lightwalletd/db
-    #! This setup with --no-tls-very-insecure is only for testing purposes
-    #! For production environments follow the guidelines here: https://github.com/zcash/lightwalletd#production-usage
+      - lwd-cache:/var/lib/lightwalletd/db
+    #! This setup with `--no-tls-very-insecure` is only for testing purposes.
+    #! For production environments, follow the guidelines here:
+    #! https://github.com/zcash/lightwalletd#production-usage
     command: >
       --no-tls-very-insecure
       --grpc-bind-addr=0.0.0.0:9067
@@ -50,10 +55,11 @@ services:
 
 configs:
   lwd_config:
-    # Change the following line to point to a zcash.conf on your host machine
-    # to allow for easy configuration changes without rebuilding the image
-    file: ./zcash-lightwalletd/zcash.conf
+    file: ./zcash.conf
 
 volumes:
-  litewalletd-data:
+  zebrad-cache:
+    driver: local
+
+  lwd-cache:
     driver: local
