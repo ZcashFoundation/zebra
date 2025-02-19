@@ -31,7 +31,7 @@ jobs:
   get-disk-name:
     name: Get disk name / Get Mainnet cached disk
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    if: ${{ (github.event_name != 'release' && !(github.event.pull_request.head.repo.fork)) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     steps:
       - run: 'echo "No build required"'
 
