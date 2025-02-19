@@ -51,9 +51,17 @@ pub struct CommitSemanticallyVerifiedError(#[from] ValidateContextError);
 #[derive(Debug, Error)]
 pub enum ReconsiderError {
     #[error("Block with hash {0} was not previously invalidated")]
-    NonPreviouslyInvalidatedBlock(block::Hash),
+    MissingInvalidatedBlock(block::Hash),
+
     #[error("Parent chain not found for block {0}")]
     ParentChainNotFound(block::Hash),
+
+    #[error("Invalidated blocks list is empty when it should contain at least one block")]
+    InvalidatedBlocksEmpty,
+
+    #[error("Invalid height {0:?}: parent height would be negative")]
+    InvalidHeight(block::Height),
+
     #[error("{0}")]
     ValidationError(#[from] ValidateContextError),
 }
@@ -63,6 +71,10 @@ pub enum ReconsiderError {
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
+    #[error("block hash {block_hash} was previously invalidated")]
+    #[non_exhaustive]
+    BlockPreviouslyInvalidated { block_hash: block::Hash },
+
     #[error("block parent not found in any chain, or not enough blocks in chain")]
     #[non_exhaustive]
     NotReadyToBeCommitted,
