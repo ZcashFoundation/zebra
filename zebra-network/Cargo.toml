@@ -27,8 +27,6 @@ categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding", "net
 [features]
 default = []
 
-nsm = []
-
 # Production features that activate extra dependencies, or extra features in dependencies
 
 progress-bar = [
@@ -97,6 +95,3 @@ toml = { workspace = true }
 
 zebra-chain = { path = "../zebra-chain", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/" }
-
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nsm"))'] }
