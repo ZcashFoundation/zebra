@@ -22,16 +22,17 @@ resolver = "2"
 # `cargo release` settings
 
 [workspace.dependencies]
-incrementalmerkletree = { version = "0.7.1", features = ["legacy-api"] }
-orchard = "0.10.0"
-sapling-crypto = "0.3.0"
+incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
+orchard = "0.10.1"
+sapling-crypto = "0.4.0"
 zcash_address = "0.6.0"
-zcash_client_backend = "0.14.0"
+zcash_client_backend = "0.16.0"
 zcash_encoding = "0.2.2"
 zcash_history = "0.4.0"
-zcash_keys = "0.4.0"
-zcash_primitives = "0.19.0"
-zcash_proofs = "0.19.0"
+zcash_keys = "0.6.0"
+zcash_primitives = "0.21.0"
+zcash_proofs = "0.21.0"
+zcash_transparent = "0.1.0"
 zcash_protocol = "0.4.0"
 abscissa_core = "0.7.0"
 atty = "0.2.14"
@@ -151,6 +152,23 @@ wagyu-zcash-parameters = "0.2.0"
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.2.0"
+
+# We can remove this patches after we get out of 2.0 release candidate and upgrade the ECC dependencies above.
+# This revisions are at the commit just before setting mainnet activation heights.
+[patch.crates-io]
+zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "7b61fe5025374f7d58d396e449d2b66e3340b749" }
+orchard = { git = "https://github.com/zcash/orchard.git", rev = "b1c22c07300db22239235d16dab096e23369948f" }
+redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub", rev = "eae848c5c14d9c795d000dd9f4c4762d1aee7ee1" }
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "6ca338532912adcd82369220faeea31aab4720c5" }
+bridgetree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "561a6dc29bbaaa32db7c81bbb5f98a3df7051643" }
 
 [workspace.metadata.release]
 
