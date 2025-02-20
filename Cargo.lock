@@ -565,14 +565,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bridgetree"
-version = "0.6.0"
-source = "git+https://github.com/zcash/incrementalmerkletree.git?rev=561a6dc29bbaaa32db7c81bbb5f98a3df7051643#561a6dc29bbaaa32db7c81bbb5f98a3df7051643"
-dependencies = [
- "incrementalmerkletree 0.7.1",
-]
-
-[[package]]
 name = "bs58"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2208,15 +2200,6 @@ dependencies = [
 
 [[package]]
 name = "incrementalmerkletree"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "216c71634ac6f6ed13c2102d64354c0a04dcbdc30e31692c5972d3974d8b6d97"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "incrementalmerkletree"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30821f91f0fa8660edca547918dc59812893b497d07c1144f326f07fdd94aba9"
@@ -2960,7 +2943,7 @@ dependencies = [
  "halo2_poseidon",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "lazy_static",
  "memuse",
  "nonempty",
@@ -4023,7 +4006,7 @@ dependencies = [
  "getset",
  "group",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -4343,7 +4326,7 @@ checksum = "637e95dcd06bc1bb3f86ed9db1e1832a70125f32daae071ef37dcb7701b7d4fe"
 dependencies = [
  "bitflags 2.8.0",
  "either",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "tracing",
 ]
 
@@ -5884,7 +5867,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "memuse",
  "nom",
  "nonempty",
@@ -5985,7 +5968,7 @@ dependencies = [
  "getset",
  "group",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "jubjub",
  "memuse",
  "nonempty",
@@ -6092,7 +6075,6 @@ dependencies = [
  "bitvec",
  "blake2b_simd",
  "blake2s_simd",
- "bridgetree",
  "bs58",
  "byteorder",
  "chrono",
@@ -6106,7 +6088,7 @@ dependencies = [
  "halo2_proofs",
  "hex",
  "humantime",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "itertools 0.14.0",
  "jubjub",
  "lazy_static",

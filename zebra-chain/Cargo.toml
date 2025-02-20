@@ -68,7 +68,6 @@ bitflags = { workspace = true }
 bitflags-serde-legacy = { workspace = true }
 blake2b_simd = { workspace = true }
 blake2s_simd = { workspace = true }
-bridgetree = { workspace = true }
 bs58 = { workspace = true, features = ["check"] }
 byteorder = { workspace = true }
 

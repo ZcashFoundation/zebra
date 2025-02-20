@@ -30,7 +30,7 @@ impl zp_tx::components::transparent::Authorization for TransparentAuth<'_> {
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
 impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
-    fn input_amounts(&self) -> Vec<zp_tx::components::amount::NonNegativeAmount> {
+    fn input_amounts(&self) -> Vec<zcash_protocol::value::Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
@@ -151,7 +151,7 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
 // End of (mostly) copied code
 
 /// Convert a Zebra transparent::Output into a librustzcash one.
-impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
+impl TryFrom<&transparent::Output> for zcash_transparent::bundle::TxOut {
     type Error = io::Error;
 
     #[allow(clippy::unwrap_in_result)]
@@ -160,12 +160,12 @@ impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
             .zcash_serialize_to_vec()
             .expect("zcash_primitives and Zebra transparent output formats must be compatible");
 
-        zp_tx::components::TxOut::read(&mut serialized_output_bytes.as_slice())
+        zcash_transparent::bundle::TxOut::read(&mut serialized_output_bytes.as_slice())
     }
 }
 
 /// Convert a Zebra transparent::Output into a librustzcash one.
-impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
+impl TryFrom<transparent::Output> for zcash_transparent::bundle::TxOut {
     type Error = io::Error;
 
     // The borrow is actually needed to use TryFrom<&transparent::Output>
@@ -176,11 +176,11 @@ impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
 }
 
 /// Convert a Zebra non-negative Amount into a librustzcash one.
-impl TryFrom<Amount<NonNegative>> for zp_tx::components::amount::NonNegativeAmount {
+impl TryFrom<Amount<NonNegative>> for zcash_protocol::value::Zatoshis {
     type Error = BalanceError;
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
-        zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64(amount.into())
+        zcash_protocol::value::Zatoshis::from_nonnegative_i64(amount.into())
     }
 }
 
@@ -344,7 +344,7 @@ pub(crate) fn transparent_output_address(
     output: &transparent::Output,
     network: &Network,
 ) -> Option<transparent::Address> {
-    let tx_out = zp_tx::components::TxOut::try_from(output)
+    let tx_out = zcash_transparent::bundle::TxOut::try_from(output)
         .expect("zcash_primitives and Zebra transparent output formats must be compatible");
 
     let alt_addr = tx_out.recipient_address();
