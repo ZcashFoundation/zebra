@@ -45,7 +45,6 @@ bitvec = "1.0.1"
 blake2b_simd = "1.0.2"
 blake2s_simd = "1.0.2"
 bls12_381 = "0.8.0"
-bridgetree = "0.6.0"
 bs58 = "0.5.1"
 byteorder = "1.5.0"
 bytes = "1.9.0"
@@ -168,7 +167,6 @@ zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "7b6
 orchard = { git = "https://github.com/zcash/orchard.git", rev = "b1c22c07300db22239235d16dab096e23369948f" }
 redjubjub = { git = "https://github.com/ZcashFoundation/redjubjub", rev = "eae848c5c14d9c795d000dd9f4c4762d1aee7ee1" }
 sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", rev = "6ca338532912adcd82369220faeea31aab4720c5" }
-bridgetree = { git = "https://github.com/zcash/incrementalmerkletree.git", rev = "561a6dc29bbaaa32db7c81bbb5f98a3df7051643" }
 
 [workspace.metadata.release]
 
