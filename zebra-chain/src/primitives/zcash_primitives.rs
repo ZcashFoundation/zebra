@@ -29,7 +29,7 @@ impl zp_tx::components::transparent::Authorization for TransparentAuth<'_> {
 
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
-impl zp_tx::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
+impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
     fn input_amounts(&self) -> Vec<zp_tx::components::amount::NonNegativeAmount> {
         self.all_prev_outputs
             .iter()
@@ -293,7 +293,7 @@ pub(crate) fn sighash(
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
             unlock_script = zcash_primitives::legacy::Script(script_code);
-            zp_tx::sighash::SignableInput::Transparent {
+            zp_tx::sighash::SignableInput::Transparent(zcash_transparent::sighash::SignableInput {
                 hash_type: hash_type.bits() as _,
                 index: input_index,
                 script_code: &unlock_script,
@@ -302,7 +302,7 @@ pub(crate) fn sighash(
                     .value
                     .try_into()
                     .expect("amount was previously validated"),
-            }
+            })
         }
         None => zp_tx::sighash::SignableInput::Shielded,
     };
