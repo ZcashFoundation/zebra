@@ -256,7 +256,8 @@ jobs:
         build,
         versioning,
         test-configuration-file,
-        test-zebra-conf-path,
+        # TODO: Re-enable this test once we have a way to mount a custom config file just for this test
+        # test-zebra-conf-path,
         get-disk-name,
       ]
     runs-on: ubuntu-latest
