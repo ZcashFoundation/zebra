@@ -161,17 +161,16 @@ jobs:
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
       prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
-  # TODO: Re-enable this test once we have a way to mount a custom config file just for this test
   # Test that Zebra works using $ZEBRA_CONF_PATH config
-  # test-zebra-conf-path:
-  #   name: Test CD custom Docker config file
-  #   needs: build
-  #   uses: ./.github/workflows/sub-test-zebra-config.yml
-  #   with:
-  #     test_id: "custom-conf"
-  #     docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-  #     test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
-  #     grep_patterns: '-e "extra_coinbase_data:\sSome\(\"do you even shield\?\"\)"'
+  test-zebra-conf-path:
+    name: Test CD custom Docker config file
+    needs: build
+    uses: ./.github/workflows/sub-test-zebra-config.yml
+    with:
+      test_id: "custom-conf"
+      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
+      grep_patterns: '-e "extra_coinbase_data:\sSome\(\"do you even shield\?\"\)"'
 
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
