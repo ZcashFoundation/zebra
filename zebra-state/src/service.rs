@@ -935,7 +935,6 @@ impl Service<Request> for StateService {
                         // https://github.com/rust-lang/rust/issues/70142
                         .and_then(convert::identity)
                         .map(Response::Committed)
-                        .map_err(Into::into)
                 }
                 .instrument(span)
                 .boxed()
@@ -983,7 +982,6 @@ impl Service<Request> for StateService {
                         // https://github.com/rust-lang/rust/issues/70142
                         .and_then(convert::identity)
                         .map(Response::Committed)
-                        .map_err(Into::into)
                 }
                 .instrument(span)
                 .boxed()
