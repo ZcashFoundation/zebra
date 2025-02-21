@@ -59,9 +59,6 @@ pub enum ReconsiderError {
     #[error("Invalidated blocks list is empty when it should contain at least one block")]
     InvalidatedBlocksEmpty,
 
-    #[error("Invalid height {0:?}: parent height would be negative")]
-    InvalidHeight(block::Height),
-
     #[error("{0}")]
     ValidationError(#[from] ValidateContextError),
 }
