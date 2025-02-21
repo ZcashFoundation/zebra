@@ -381,7 +381,7 @@ fn reconsider_block_inserts_block_and_descendants_into_chain_for_network(
 
     // Reconsider block2 and check that both block2 and block3 were `reconsidered` into the
     // best chain
-    state.reconsider_block(block2.hash())?;
+    state.reconsider_block(block2.hash(), &finalized_state.db)?;
 
     let best_chain = state.best_chain().unwrap();
 
