@@ -11,7 +11,7 @@ updates:
     # Limit dependabot to 1 PR per reviewer
     open-pull-requests-limit: 6
     labels:
-      - 'C-trivial'
+      - 'C-exclude-from-changelog'
       - 'A-rust'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
@@ -46,7 +46,7 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 4
     labels:
-      - 'C-trivial'
+      - 'C-exclude-from-changelog'
       - 'A-devops'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
