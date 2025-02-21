@@ -42,5 +42,5 @@
 - [ ] The solution is tested.
 - [ ] The documentation is up to date.
 - [ ] The PR has a priority label.
-- [ ] If the PR shouldn't be in release notes, it has the
+- [ ] If the PR shouldn't be in the release notes, it has the
       `C-exclude-from-changelog` label.
