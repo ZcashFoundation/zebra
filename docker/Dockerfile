@@ -60,12 +60,12 @@ ENV FEATURES=${FEATURES}
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
-# Set up the test environment the same way the production environment is. This
-# is not very DRY as the same code repeats for the `runtime` target below, but I
-# didn't find a suitable way to share the setup between the two targets.
+# This environment setup is almost identical to the `runtime` target so that the
+# `tests` target differs minimally. In fact, a subset of this setup is used for
+# the `runtime` target.
 
-ENV UID=101
-ENV GID=${UID}
+ARG UID=101
+ARG GID=${UID}
 ENV USER="zebra"
 ENV HOME="/home/${USER}"
 ENV CARGO_HOME="${HOME}/.cargo/"
@@ -114,13 +114,11 @@ COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
-ARG LWD_CACHE_DIR
 ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
 RUN mkdir -p ${LWD_CACHE_DIR}
 RUN chown -R ${UID}:${GID} ${LWD_CACHE_DIR}
 
 # Use the same cache dir as in the production environment.
-ARG ZEBRA_CACHE_DIR
 ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 RUN mkdir -p ${ZEBRA_CACHE_DIR}
 RUN chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
@@ -129,6 +127,8 @@ COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY ./ ${HOME}
 
 RUN chown -R ${UID}:${GID} ${HOME}
+
+USER $USER
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
@@ -192,25 +192,22 @@ WORKDIR ${HOME}
 # Debian assigns GID 100 to group `users`, so we set UID = GID = 101 as the
 # default value.
 ARG UID=101
-ENV UID=${UID}
-ARG GID=${UID}
-ENV GID=${GID}
 
-RUN addgroup --system --gid ${GID} ${USER}
-RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+RUN addgroup --system --gid ${UID} ${USER}
+RUN adduser --system --gid ${UID} --uid ${UID} --home ${HOME} ${USER}
 
 # We set the default locations of the conf and cache dirs according to the XDG
 # spec: https://specifications.freedesktop.org/basedir-spec/latest/
 
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
-COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${UID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
 ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${UID} ${ZEBRA_CACHE_DIR}
 
-RUN chown -R ${UID}:${GID} ${HOME}
+RUN chown -R ${UID}:${UID} ${HOME}
 USER $USER
 
 ENTRYPOINT [ "entrypoint.sh" ]
