@@ -14,7 +14,6 @@ use zebra_chain::{
     parameters::Network,
     sprout::{self},
     transparent,
-    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -239,7 +238,7 @@ impl NonFinalizedState {
 
         // Remove all invalidated_blocks at or below the finalized height
         self.invalidated_blocks
-            .retain(|height, _blocks| *height > best_chain_root.height);
+            .retain(|height, _blocks| *height >= best_chain_root.height);
 
         self.update_metrics_for_chains();
 
@@ -318,7 +317,11 @@ impl NonFinalizedState {
     /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
     /// based on a block_hash. Reconsidered blocks are inserted into the previous chain and re-inserted
     /// into the chain_set.
-    pub fn reconsider_block(&mut self, block_hash: block::Hash) -> Result<(), ReconsiderError> {
+    pub fn reconsider_block(
+        &mut self,
+        block_hash: block::Hash,
+        finalized_state: &ZebraDb,
+    ) -> Result<(), ReconsiderError> {
         // Get the invalidated blocks that were invalidated by the given block_hash
         let height = self
             .invalidated_blocks
@@ -348,44 +351,24 @@ impl NonFinalizedState {
         let root_parent_hash = invalidated_root.block.header.previous_block_hash;
         let parent_chain = self
             .parent_chain(root_parent_hash)
-            .map_err(|_| ReconsiderError::ParentChainNotFound(block_hash));
+            .map_err(|_| ReconsiderError::ParentChainNotFound(block_hash))?;
 
-        let modified_chain = match parent_chain {
-            // 1. If a parent chain exist use the parent chain
-            Ok(parent_chain) => {
-                let mut chain = Arc::unwrap_or_clone(parent_chain);
+        let mut modified_chain = Arc::unwrap_or_clone(parent_chain);
 
-                for block in Arc::unwrap_or_clone(invalidated_blocks) {
-                    chain = chain.push(block)?;
-                }
-
-                Arc::new(chain)
-            }
-            // 2. If a parent chain does not exist create a new chain from the non finalized state tip
-            Err(_) => {
-                let mut chain = Chain::new(
-                    &self.network,
-                    invalidated_root.height.previous().map_err(|_| {
-                        ReconsiderError::InvalidHeight(Height(invalidated_root.height.0 - 1))
-                    })?,
-                    Default::default(),
-                    Default::default(),
-                    Default::default(),
-                    Default::default(),
-                    ValueBalance::zero(),
-                );
-
-                for block in Arc::unwrap_or_clone(invalidated_blocks) {
-                    chain = chain.push(block)?;
-                }
-
-                Arc::new(chain)
-            }
-        };
+        for block in Arc::unwrap_or_clone(invalidated_blocks) {
+            modified_chain = modified_chain.push(block)?;
+        }
 
         let (height, hash) = modified_chain.non_finalized_tip();
 
-        self.insert_with(modified_chain, |chain_set| {
+        // Only track invalidated_blocks that are not yet finalized. Once blocks are finalized (below the best_chain_root_height)
+        // we can discard the block.
+        if let Some(best_chain_root_height) = finalized_state.finalized_tip_height() {
+            self.invalidated_blocks
+                .retain(|height, _blocks| *height >= best_chain_root_height);
+        }
+
+        self.insert_with(Arc::new(modified_chain), |chain_set| {
             chain_set.retain(|chain| chain.non_finalized_tip_hash() != root_parent_hash)
         });
 
