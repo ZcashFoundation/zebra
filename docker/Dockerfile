@@ -13,7 +13,7 @@
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
 
-ARG RUST_VERSION=1.84.0
+ARG RUST_VERSION=1.85.0
 
 # In this stage we download all system requirements to build the project
 #
