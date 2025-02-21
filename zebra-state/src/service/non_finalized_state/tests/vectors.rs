@@ -216,6 +216,17 @@ fn finalize_pops_from_best_chain_for_network(network: Network) -> Result<()> {
     Ok(())
 }
 
+#[test]
+fn invalidate_block_removes_block_and_descendants_from_chain() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    for network in Network::iter() {
+        invalidate_block_removes_block_and_descendants_from_chain_for_network(network)?;
+    }
+
+    Ok(())
+}
+
 fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
     network: Network,
 ) -> Result<()> {
@@ -267,26 +278,36 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
     );
 
     let invalidated_blocks_state = &state.invalidated_blocks;
-    assert!(
-        invalidated_blocks_state.contains_key(&block2.hash()),
-        "invalidated blocks map should reference the hash of block2"
-    );
 
-    let invalidated_blocks_state_descendants =
-        invalidated_blocks_state.get(&block2.hash()).unwrap();
+    // Find an entry in the IndexMap that contains block2 hash
+    let (_, invalidated_blocks_state_descendants) = invalidated_blocks_state
+        .iter()
+        .find_map(|(height, blocks)| {
+            assert!(
+                blocks.iter().any(|block| block.hash == block2.hash()),
+                "invalidated_blocks should reference the hash of block2"
+            );
+
+            if blocks.iter().any(|block| block.hash == block2.hash()) {
+                Some((height, blocks))
+            } else {
+                None
+            }
+        })
+        .unwrap();
 
     match network {
         Network::Mainnet => assert!(
             invalidated_blocks_state_descendants
                 .iter()
                 .any(|block| block.height == block::Height(653601)),
-            "invalidated descendants vec should contain block3"
+            "invalidated descendants should contain block3"
         ),
         Network::Testnet(_parameters) => assert!(
             invalidated_blocks_state_descendants
                 .iter()
                 .any(|block| block.height == block::Height(584001)),
-            "invalidated descendants vec should contain block3"
+            "invalidated descendants should contain block3"
         ),
     }
 
@@ -294,12 +315,84 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
 }
 
 #[test]
-fn invalidate_block_removes_block_and_descendants_from_chain() -> Result<()> {
+fn reconsider_block_and_reconsider_chain_correctly_reconsiders_blocks_and_descendants() -> Result<()>
+{
     let _init_guard = zebra_test::init();
 
     for network in Network::iter() {
-        invalidate_block_removes_block_and_descendants_from_chain_for_network(network)?;
+        reconsider_block_inserts_block_and_descendants_into_chain_for_network(network.clone())?;
     }
+
+    Ok(())
+}
+
+fn reconsider_block_inserts_block_and_descendants_into_chain_for_network(
+    network: Network,
+) -> Result<()> {
+    let block1: Arc<Block> = Arc::new(network.test_block(653599, 583999).unwrap());
+    let block2 = block1.make_fake_child().set_work(10);
+    let block3 = block2.make_fake_child().set_work(1);
+
+    let mut state = NonFinalizedState::new(&network);
+    let finalized_state = FinalizedState::new(
+        &Config::ephemeral(),
+        &network,
+        #[cfg(feature = "elasticsearch")]
+        false,
+    );
+
+    let fake_value_pool = ValueBalance::<NonNegative>::fake_populated_pool();
+    finalized_state.set_finalized_value_pool(fake_value_pool);
+
+    state.commit_new_chain(block1.clone().prepare(), &finalized_state)?;
+    state.commit_block(block2.clone().prepare(), &finalized_state)?;
+    state.commit_block(block3.clone().prepare(), &finalized_state)?;
+
+    assert_eq!(
+        state
+            .best_chain()
+            .unwrap_or(&Arc::new(Chain::default()))
+            .blocks
+            .len(),
+        3
+    );
+
+    // Invalidate block2 to update the invalidated_blocks NonFinalizedState
+    state.invalidate_block(block2.hash());
+
+    // Perform checks to ensure the invalidated_block and descendants were added to the invalidated_block
+    // state
+    let post_invalidated_chain = state.best_chain().unwrap();
+
+    assert_eq!(post_invalidated_chain.blocks.len(), 1);
+    assert!(
+        post_invalidated_chain.contains_block_hash(block1.hash()),
+        "the new modified chain should contain block1"
+    );
+
+    assert!(
+        !post_invalidated_chain.contains_block_hash(block2.hash()),
+        "the new modified chain should not contain block2"
+    );
+    assert!(
+        !post_invalidated_chain.contains_block_hash(block3.hash()),
+        "the new modified chain should not contain block3"
+    );
+
+    // Reconsider block2 and check that both block2 and block3 were `reconsidered` into the
+    // best chain
+    state.reconsider_block(block2.hash(), &finalized_state.db)?;
+
+    let best_chain = state.best_chain().unwrap();
+
+    assert!(
+        best_chain.contains_block_hash(block2.hash()),
+        "the best chain should again contain block2"
+    );
+    assert!(
+        best_chain.contains_block_hash(block3.hash()),
+        "the best chain should again contain block3"
+    );
 
     Ok(())
 }
