@@ -192,25 +192,22 @@ WORKDIR ${HOME}
 # Debian assigns GID 100 to group `users`, so we set UID = GID = 101 as the
 # default value.
 ARG UID=101
-ENV UID=${UID}
-ARG GID=${UID}
-ENV GID=${GID}
 
-RUN addgroup --system --gid ${GID} ${USER}
-RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+RUN addgroup --system --gid ${UID} ${USER}
+RUN adduser --system --gid ${UID} --uid ${UID} --home ${HOME} ${USER}
 
 # We set the default locations of the conf and cache dirs according to the XDG
 # spec: https://specifications.freedesktop.org/basedir-spec/latest/
 
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
-COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${UID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
 ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${UID} ${ZEBRA_CACHE_DIR}
 
-RUN chown -R ${UID}:${GID} ${HOME}
+RUN chown -R ${UID}:${UID} ${HOME}
 USER $USER
 
 ENTRYPOINT [ "entrypoint.sh" ]
