@@ -60,12 +60,12 @@ ENV FEATURES=${FEATURES}
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
-# Set up the test environment the same way the production environment is. This
-# is not very DRY as the same code repeats for the `runtime` target below, but I
-# didn't find a suitable way to share the setup between the two targets.
+# This environment setup is almost identical to the `runtime` target so that the
+# `tests` target differs minimally. In fact, a subset of this setup is used for
+# the `runtime` target.
 
-ENV UID=101
-ENV GID=${UID}
+ARG UID=101
+ARG GID=${UID}
 ENV USER="zebra"
 ENV HOME="/home/${USER}"
 ENV CARGO_HOME="${HOME}/.cargo/"
