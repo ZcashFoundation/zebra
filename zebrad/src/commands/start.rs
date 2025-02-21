@@ -263,6 +263,7 @@ impl StartCmd {
                     build_version(),
                     user_agent(),
                     mempool.clone(),
+                    state.clone(),
                     read_only_state_service.clone(),
                     block_verifier_router.clone(),
                     sync_status.clone(),
