@@ -1929,9 +1929,31 @@ impl GetBlockChainInfo {
 /// This is used for the input parameter of [`RpcServer::get_address_balance`],
 /// [`RpcServer::get_address_tx_ids`] and [`RpcServer::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[serde(from = "DAddressStrings")]
 pub struct AddressStrings {
     /// A list of transparent address strings.
     addresses: Vec<String>,
+}
+
+impl From<DAddressStrings> for AddressStrings {
+    fn from(address_strings: DAddressStrings) -> Self {
+        match address_strings {
+            DAddressStrings::Addresses(addresses) => AddressStrings { addresses },
+            DAddressStrings::Address(address) => AddressStrings {
+                addresses: vec![address],
+            },
+        }
+    }
+}
+
+/// An intermediate type used to serialize and deserialize the address strings.
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[serde(untagged)]
+enum DAddressStrings {
+    /// A list of address strings.
+    Addresses(Vec<String>),
+    /// A single address string.
+    Address(String),
 }
 
 impl AddressStrings {
