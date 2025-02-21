@@ -6,77 +6,44 @@
 # Automatically label PRs based on their branch, title, or changed files.
 # This helps categorise PRs in the CHANGELOG.
 autolabeler:
-  - label: 'C-security'
+  - label: "C-security"
     branch:
-      - '/secur/i'
+      - "/secur/i"
     title:
-      - '/secur/i'
-      - '/crash/i'
-      - '/destr/i'
-      - '/unsafe/i'
-  - label: 'C-deprecated'
+      - "/secur/i"
+      - "/crash/i"
+      - "/destr/i"
+      - "/unsafe/i"
+  - label: "C-deprecated"
     branch:
-      - '/deprecat/i'
+      - "/deprecat/i"
     title:
-      - '/deprecat/i'
-  - label: 'extra-reviews'
+      - "/deprecat/i"
+  - label: "extra-reviews"
     branch:
-      - '/remov/i'
-      - '/deprecat/i'
+      - "/remov/i"
+      - "/deprecat/i"
     title:
-      - '/remov/i'
-      - '/deprecat/i'
-      - '/crash/i'
-      - '/destr/i'
-      - '/unsafe/i'
-  - label: 'C-feature'
+      - "/remov/i"
+      - "/deprecat/i"
+      - "/crash/i"
+      - "/destr/i"
+      - "/unsafe/i"
+  - label: "C-feature"
     branch:
-      - '/feat/i'
+      - "/feat/i"
     title:
-      - '/feat/i'
-  - label: 'C-bug'
+      - "/feat/i"
+  - label: "C-bug"
     branch:
-      - '/bug/i'
+      - "/bug/i"
     title:
-      - '/bug/i'
-  # Changes that are almost always trivial for users
-  - label: 'C-trivial'
-    branch:
-      - '/clean/i'
-      - '/chore/i'
-      - '/clippy/i'
-      - '/test/i'
-    title:
-      - '/clean/i'
-      - '/chore/i'
-      - '/clippy/i'
-      - '/test/i'
-      - '/(ci)/i'
-      - '/(cd)/i'
-      - '/job/i'
-      - '/patch/i'
-      - '/actions/i'
-    files:
-      # Regular changes that don't need to go in the CHANGELOG
-      - 'CHANGELOG.md'
-      - 'zebra-consensus/src/checkpoint/*-checkpoints.txt'
-      # Developer-only changes
-      - '.gitignore'
-      - '.dockerignore'
-      # Test-only changes
-      - 'zebra-test'
-      - '.cargo/config.toml'
-      - 'clippy.toml'
-      # CI-only changes
-      - '.github'
-      - '.codespellrc'
-      - 'codecov.yml'
-      - 'deny.toml'
+      - "/bug/i"
 
 # The release name, tag, and settings for the draft CHANGELOG.
-name-template: 'Zebra $RESOLVED_VERSION'
-tag-template: 'v$RESOLVED_VERSION'
-tag-prefix: 'v'
+name-template: "Zebra $RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+tag-prefix: "v"
 # Do not mark the draft release as a pre-release
 prerelease: false
 # Do not include pre-releases in the draft release
@@ -84,48 +51,46 @@ include-pre-releases: false
 
 # Categories in rough order of importance to users.
 # Based on https://keepachangelog.com/en/1.0.0/
-category-template: '### $TITLE'
+category-template: "### $TITLE"
 categories:
-  - title: 'Security'
+  - title: "Security"
     labels:
-      - 'C-security'
+      - "C-security"
       # Other labels that are usually security issues
-      - 'I-invalid-data'
-      - 'I-consensus'
-      - 'I-crash'
-      - 'I-destructive'
-      - 'I-hang'
-      - 'I-lose-funds'
-      - 'I-privacy'
-      - 'I-remote-node-overload'
-      - 'I-unbounded-growth'
-      - 'I-memory-safety'
-  - title: 'Removed'
+      - "I-invalid-data"
+      - "I-consensus"
+      - "I-crash"
+      - "I-destructive"
+      - "I-hang"
+      - "I-lose-funds"
+      - "I-privacy"
+      - "I-remote-node-overload"
+      - "I-unbounded-growth"
+      - "I-memory-safety"
+  - title: "Removed"
     labels:
-      - 'C-removal'
-  - title: 'Deprecated'
+      - "C-removal"
+  - title: "Deprecated"
     labels:
-      - 'C-deprecation'
+      - "C-deprecation"
       # TODO: when release drafter has per-category templates, add this to the Deprecated category template:
       # 'These features might be removed in Zebra $NEXT_MINOR_VERSION'
-  - title: 'Added'
+  - title: "Added"
     labels:
-      - 'C-feature'
-  - title: 'Changed'
+      - "C-feature"
+  - title: "Changed"
     labels:
-      - 'C-enhancement'
-  - title: 'Fixed'  
+      - "C-enhancement"
+  - title: "Fixed"
     labels:
-      - 'C-bug'
+      - "C-bug"
       # Other labels that are usually bugs
-      - 'I-build-fail'
-      - 'I-integration-fail'
-      - 'I-panic'
-  # TODO: if we're happy with the trivial PRs, use "exclude-labels:" instead
-  - title: 'Trivial *TODO:* put this in a PR comment, not the CHANGELOG'
+      - "I-build-fail"
+      - "I-integration-fail"
+      - "I-panic"
+  - title: "Excluded *TODO:* put this in a PR comment, not the CHANGELOG"
     labels:
-      - 'C-trivial'
-      - 'C-cleanup'
+      - "C-exclude-from-changelog"
 
 # The next release's $RESOLVED_VERSION, based on the labels of the PRs in the release.
 #
@@ -139,15 +104,15 @@ version-resolver:
   #    - # network upgrade release PRs
   minor:
     labels:
-      - 'C-feature'
-      - 'C-breaking'
-      - 'C-removal'
-      - 'C-deprecation'
+      - "C-feature"
+      - "C-breaking"
+      - "C-removal"
+      - "C-deprecation"
   # We increment the patch version for every release
   default: patch
 
 # How PR names get turned into CHANGELOG entries.
-change-template: '- $TITLE ([#$NUMBER]($URL))'
+change-template: "- $TITLE ([#$NUMBER]($URL))"
 sort-by: title
 sort-direction: ascending
 # Characters escaped when converting PR titles to CHANGELOG entries.
@@ -156,31 +121,30 @@ change-title-escapes: '\<*_&#@'
 # Strip PR series numbers, leading spaces, and conventional commit prefixes from PR titles.
 replacers:
   - search: '/- [0-9\. ]*([a-zA-Z0-9\(\)!]+:)?/'
-    replace: '- '
+    replace: "- "
 
 # The list of contributors to each release.
 exclude-contributors:
-  - 'dependabot' # 'dependabot[bot]'
-  - 'mergifyio' # 'mergify[bot]'
+  - "dependabot" # 'dependabot[bot]'
+  - "mergifyio" # 'mergify[bot]'
 
 # The template for the draft CHANGELOG.
 template: |
   ## [Zebra $RESOLVED_VERSION](https://github.com/ZcashFoundation/zebra/releases/tag/v$RESOLVED_VERSION) - *TODO*: date
-  
+
   This release *TODO*: a summary of the significant user-visible changes in the release
-  
+
   ### Breaking Changes
-  
+
   This release has the following breaking changes:
   - *TODO*: Check the `Removed` and `Deprecated` sections for any breaking changes
   - *TODO*: Add a short description of the user impact of each breaking change, and any actions users need to take
-  
+
   $CHANGES
-  
+
   ### Contributors
-  
+
   Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
   $CONTRIBUTORS
-  
-  
+
 # the trailing newlines in the template are deliberate
