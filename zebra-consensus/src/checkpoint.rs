@@ -30,20 +30,20 @@ use tracing::instrument;
 use zebra_chain::{
     amount,
     block::{self, Block},
-    parameters::{subsidy::FundingStreamReceiver, Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    error::SubsidyError,
+    parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     work::equihash,
 };
 use zebra_state::{self as zs, CheckpointVerifiedBlock};
 
 use crate::{
     block::VerifyBlockError,
-    block_subsidy,
     checkpoint::types::{
         Progress::{self, *},
         TargetHeight::{self, *},
     },
-    error::{BlockError, SubsidyError},
-    funding_stream_values, BoxError, ParameterCheckpoint as _,
+    error::BlockError,
+    BoxError, ParameterCheckpoint as _,
 };
 
 pub(crate) mod list;
@@ -608,18 +608,8 @@ where
             crate::block::check::equihash_solution_is_valid(&block.header)?;
         }
 
-        // We can't get the block subsidy for blocks with heights in the slow start interval, so we
-        // omit the calculation of the expected deferred amount.
-        let expected_deferred_amount = if height > self.network.slow_start_interval() {
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
-                .remove(&FundingStreamReceiver::Deferred)
-        } else {
-            None
-        };
-
         // don't do precalculation until the block passes basic difficulty checks
-        let block = CheckpointVerifiedBlock::new(block, Some(hash), expected_deferred_amount);
+        let block = CheckpointVerifiedBlock::new(block, Some(hash), None);
 
         crate::block::check::merkle_root_validity(
             &self.network,

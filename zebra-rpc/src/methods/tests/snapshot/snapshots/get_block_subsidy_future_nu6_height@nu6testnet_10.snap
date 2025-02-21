@@ -5,24 +5,24 @@ expression: get_block_subsidy
 {
   "fundingstreams": [
     {
-      "recipient": "Zcash Community Grants NU6",
-      "specification": "https://zips.z.cash/zip-1015",
-      "value": 0.125,
-      "valueZat": 12500000,
+      "recipient": "Major Grants",
+      "specification": "https://zips.z.cash/zip-0214",
+      "value": 0.69316799,
+      "valueZat": 69316799,
       "address": "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"
     }
   ],
   "lockboxstreams": [
     {
       "recipient": "Lockbox NU6",
-      "specification": "https://zips.z.cash/zip-1015",
-      "value": 0.1875,
-      "valueZat": 18750000
+      "specification": "https://zips.z.cash/zip-0214",
+      "value": 1.03975199,
+      "valueZat": 103975199
     }
   ],
-  "miner": 1.25,
+  "miner": 6.93168001,
   "founders": 0.0,
-  "fundingstreamstotal": 0.125,
-  "lockboxtotal": 0.1875,
-  "totalblocksubsidy": 1.5625
+  "fundingstreamstotal": 0.69316799,
+  "lockboxtotal": 1.03975199,
+  "totalblocksubsidy": 8.66459999
 }

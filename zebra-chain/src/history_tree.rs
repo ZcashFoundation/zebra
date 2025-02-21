@@ -112,6 +112,16 @@ impl NonEmptyHistoryTree {
                 )?;
                 InnerHistoryTree::OrchardOnward(tree)
             }
+            NetworkUpgrade::Nu7 => {
+                let tree = Tree::<OrchardOnward>::new_from_cache(
+                    network,
+                    network_upgrade,
+                    size,
+                    &peaks,
+                    &Default::default(),
+                )?;
+                InnerHistoryTree::OrchardOnward(tree)
+            }
         };
         Ok(Self {
             network: network.clone(),
@@ -156,7 +166,7 @@ impl NonEmptyHistoryTree {
                 )?;
                 (InnerHistoryTree::PreOrchard(tree), entry)
             }
-            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => {
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu7 => {
                 let (tree, entry) = Tree::<OrchardOnward>::new_from_block(
                     network,
                     block,
