@@ -148,28 +148,30 @@ jobs:
   #
   # Passes the disk name to subsequent jobs using `cached_disk_name` output
   #
+  # For push events, this job always runs.
+  # For workflow_dispatch events, it runs only if inputs.need_cached_disk is true.
+  # PRs from forked repositories are skipped.
   get-disk-name:
     name: Get disk name
     uses: ./.github/workflows/sub-find-cached-disks.yml
-    # Skip PRs from external repositories, let them pass, and then GitHub's Merge Queue will check them.
-    # This workflow also runs on release tags, the event name check will run it on releases.
-    if: ${{ inputs.need_cached_disk && github.event_name != 'release' && !(github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork) }}
+    if: ${{ (github.event_name != 'release' && !(github.event.pull_request.head.repo.fork)) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-      disk_prefix: zebrad-cache
+      disk_prefix: zebrad-cache 
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
       prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
+  # TODO: Re-enable this test once we have a way to mount a custom config file just for this test
   # Test that Zebra works using $ZEBRA_CONF_PATH config
-  test-zebra-conf-path:
-    name: Test CD custom Docker config file
-    needs: build
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      test_id: "custom-conf"
-      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v2.1.0.toml"'
-      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v2.1.0.toml"'
+  # test-zebra-conf-path:
+  #   name: Test CD custom Docker config file
+  #   needs: build
+  #   uses: ./.github/workflows/sub-test-zebra-config.yml
+  #   with:
+  #     test_id: "custom-conf"
+  #     docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+  #     test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
+  #     grep_patterns: '-e "extra_coinbase_data:\sSome\(\"do you even shield\?\"\)"'
 
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
@@ -227,12 +229,9 @@ jobs:
   # - on every push to the `main` branch
   # - on every release, when it's published
   # - on workflow_dispatch for manual deployments
-  
+
   # Determine which networks to deploy based on the trigger
-  
-  
-  
-  :
+  set-matrix:
     runs-on: ubuntu-latest
     outputs:
       networks: ${{ steps.set-networks.outputs.matrix }}
@@ -257,7 +256,8 @@ jobs:
         build,
         versioning,
         test-configuration-file,
-        test-zebra-conf-path,
+        # TODO: Re-enable this test once we have a way to mount a custom config file just for this test
+        # test-zebra-conf-path,
         get-disk-name,
       ]
     runs-on: ubuntu-latest
@@ -268,7 +268,7 @@ jobs:
     permissions:
       contents: "read"
       id-token: "write"
-    if: ${{ !cancelled() && !failure() && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
       - uses: actions/checkout@v4.2.2

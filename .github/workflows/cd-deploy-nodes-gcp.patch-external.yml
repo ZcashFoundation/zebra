@@ -15,7 +15,7 @@ jobs:
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   get-disk-name:
     name: Get disk name / Get Mainnet cached disk
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+    if: ${{ (github.event_name != 'release' && !(github.event.pull_request.head.repo.fork)) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'

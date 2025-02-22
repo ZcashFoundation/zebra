@@ -112,7 +112,7 @@ COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/
 
 # Use the same default config as in the production environment.
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-COPY --chown=${UID}:${GID} ./docker/default_zebra_config.toml ${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
 ARG LWD_CACHE_DIR
 ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
@@ -204,7 +204,7 @@ RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
-COPY --chown=${UID}:${GID} ./docker/default_zebra_config.toml ${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
 ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}

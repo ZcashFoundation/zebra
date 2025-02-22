@@ -18,7 +18,10 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, watch},
+    task::JoinHandle,
+};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
@@ -37,6 +40,7 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::ParameterCheckpoint;
+use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
@@ -89,7 +93,7 @@ pub trait Rpc {
     /// Some fields from the zcashd reference are missing from Zebra's [`GetInfo`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95)
     #[method(name = "getinfo")]
-    fn get_info(&self) -> Result<GetInfo>;
+    async fn get_info(&self) -> Result<GetInfo>;
 
     /// Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
     ///
@@ -358,7 +362,7 @@ pub trait Rpc {
 
 /// RPC method implementations.
 #[derive(Clone)]
-pub struct RpcImpl<Mempool, State, Tip>
+pub struct RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -379,6 +383,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Configuration
     //
@@ -414,9 +419,18 @@ where
     //
     /// A sender component of a channel used to send transactions to the mempool queue.
     queue_sender: broadcast::Sender<UnminedTx>,
+
+    /// Peer address book.
+    address_book: AddressBook,
+
+    /// The last warning or error event logged by the server.
+    last_warn_error_log_rx: LoggedLastEvent,
 }
 
-impl<Mempool, State, Tip> Debug for RpcImpl<Mempool, State, Tip>
+/// A type alias for the last event logged by the server.
+pub type LoggedLastEvent = watch::Receiver<Option<(String, tracing::Level, chrono::DateTime<Utc>)>>;
+
+impl<Mempool, State, Tip, AddressBook> Debug for RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -437,6 +451,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Skip fields without Debug impls, and skip channels
@@ -450,7 +465,7 @@ where
     }
 }
 
-impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, AddressBook> RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -471,6 +486,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
     //
@@ -486,6 +502,8 @@ where
         mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
+        address_book: AddressBook,
+        last_warn_error_log_rx: LoggedLastEvent,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -511,6 +529,8 @@ where
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             queue_sender,
+            address_book,
+            last_warn_error_log_rx,
         };
 
         // run the process queue
@@ -525,7 +545,7 @@ where
 }
 
 #[async_trait]
-impl<Mempool, State, Tip> RpcServer for RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, AddressBook> RpcServer for RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -546,11 +566,51 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    fn get_info(&self) -> Result<GetInfo> {
+    async fn get_info(&self) -> Result<GetInfo> {
+        let version = GetInfo::version(&self.build_version).expect("invalid version string");
+
+        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+
+        let last_error_recorded = self.last_warn_error_log_rx.borrow().clone();
+        let (last_error_log, _level, last_error_log_time) = last_error_recorded.unwrap_or((
+            GetInfo::default().errors,
+            tracing::Level::INFO,
+            Utc::now(),
+        ));
+
+        let tip_height = self
+            .latest_chain_tip
+            .best_tip_height()
+            .unwrap_or(Height::MIN);
+        let testnet = self.network.is_a_test_network();
+
+        // This field is behind the `ENABLE_WALLET` feature flag in zcashd:
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/rpc/misc.cpp#L113
+        // However it is not documented as optional:
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/rpc/misc.cpp#L70
+        // For compatibility, we keep the field in the response, but always return 0.
+        let pay_tx_fee = 0.0;
+
+        let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
+            / (zebra_chain::amount::COIN as f64);
+        let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone()).await?;
+
         let response = GetInfo {
+            version,
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
+            protocol_version: zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION.0,
+            blocks: tip_height.0,
+            connections,
+            proxy: None,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors: last_error_log,
+            errors_timestamp: last_error_log_time.to_string(),
         };
 
         Ok(response)
@@ -1542,33 +1602,161 @@ where
 /// Response to a `getinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_info` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetInfo {
+    /// The node version
+    version: u64,
+
     /// The node version build number
     build: String,
 
     /// The server sub-version identifier, used as the network protocol user-agent
     subversion: String,
+
+    /// The protocol version
+    #[serde(rename = "protocolversion")]
+    protocol_version: u32,
+
+    /// The current number of blocks processed in the server
+    blocks: u32,
+
+    /// The total (inbound and outbound) number of connections the node has
+    connections: usize,
+
+    /// The proxy (if any) used by the server. Currently always `None` in Zebra.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy: Option<String>,
+
+    /// The current network difficulty
+    difficulty: f64,
+
+    /// True if the server is running in testnet mode, false otherwise
+    testnet: bool,
+
+    /// The minimum transaction fee in ZEC/kB
+    #[serde(rename = "paytxfee")]
+    pay_tx_fee: f64,
+
+    /// The minimum relay fee for non-free transactions in ZEC/kB
+    #[serde(rename = "relayfee")]
+    relay_fee: f64,
+
+    /// The last error or warning message, or "no errors" if there are no errors
+    errors: String,
+
+    /// The time of the last error or warning message, or "no errors timestamp" if there are no errors
+    #[serde(rename = "errorstimestamp")]
+    errors_timestamp: String,
 }
 
 impl Default for GetInfo {
     fn default() -> Self {
         GetInfo {
+            version: 0,
             build: "some build version".to_string(),
             subversion: "some subversion".to_string(),
+            protocol_version: 0,
+            blocks: 0,
+            connections: 0,
+            proxy: None,
+            difficulty: 0.0,
+            testnet: false,
+            pay_tx_fee: 0.0,
+            relay_fee: 0.0,
+            errors: "no errors".to_string(),
+            errors_timestamp: "no errors timestamp".to_string(),
         }
     }
 }
 
 impl GetInfo {
     /// Constructs [`GetInfo`] from its constituent parts.
-    pub fn from_parts(build: String, subversion: String) -> Self {
-        Self { build, subversion }
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        version: u64,
+        build: String,
+        subversion: String,
+        protocol_version: u32,
+        blocks: u32,
+        connections: usize,
+        proxy: Option<String>,
+        difficulty: f64,
+        testnet: bool,
+        pay_tx_fee: f64,
+        relay_fee: f64,
+        errors: String,
+        errors_timestamp: String,
+    ) -> Self {
+        Self {
+            version,
+            build,
+            subversion,
+            protocol_version,
+            blocks,
+            connections,
+            proxy,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors,
+            errors_timestamp,
+        }
     }
 
     /// Returns the contents of ['GetInfo'].
-    pub fn into_parts(self) -> (String, String) {
-        (self.build, self.subversion)
+    pub fn into_parts(
+        self,
+    ) -> (
+        u64,
+        String,
+        String,
+        u32,
+        u32,
+        usize,
+        Option<String>,
+        f64,
+        bool,
+        f64,
+        f64,
+        String,
+        String,
+    ) {
+        (
+            self.version,
+            self.build,
+            self.subversion,
+            self.protocol_version,
+            self.blocks,
+            self.connections,
+            self.proxy,
+            self.difficulty,
+            self.testnet,
+            self.pay_tx_fee,
+            self.relay_fee,
+            self.errors,
+            self.errors_timestamp,
+        )
+    }
+
+    /// Create the node version number.
+    pub fn version(build_string: &str) -> Option<u64> {
+        let semver_version = semver::Version::parse(build_string.strip_prefix('v')?).ok()?;
+        let build_number = semver_version
+            .build
+            .as_str()
+            .split('.')
+            .next()
+            .and_then(|num_str| num_str.parse::<u64>().ok())
+            .unwrap_or_default();
+
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/clientversion.h#L55-L59
+        let version_number = 1_000_000 * semver_version.major
+            + 10_000 * semver_version.minor
+            + 100 * semver_version.patch
+            + build_number;
+
+        Some(version_number)
     }
 }
 
@@ -2545,7 +2733,7 @@ mod opthex {
     }
 }
 /// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
-pub(crate) async fn chain_tip_difficulty<State>(network: Network, mut state: State) -> Result<f64>
+pub async fn chain_tip_difficulty<State>(network: Network, mut state: State) -> Result<f64>
 where
     State: Service<
             zebra_state::ReadRequest,

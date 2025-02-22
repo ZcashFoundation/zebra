@@ -1600,6 +1600,9 @@ async fn rpc_endpoint(parallel_cpu_threads: bool) -> Result<()> {
     // Create an http client
     let client = RpcRequestClient::new(rpc_address);
 
+    // Run `zebrad` for a few seconds before testing the endpoint
+    std::thread::sleep(LAUNCH_DELAY);
+
     // Make the call to the `getinfo` RPC method
     let res = client.call("getinfo", "[]".to_string()).await?;
 

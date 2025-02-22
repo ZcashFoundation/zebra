@@ -6,7 +6,7 @@
 #
 # ## Notes
 #
-# - `$ZEBRA_CONF_PATH` must point to a Zebra conf file writable by `$USER`.
+# - `$ZEBRA_CONF_PATH` must point to a Zebra conf file.
 
 set -eo pipefail
 
@@ -16,25 +16,32 @@ if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   exit 1
 fi
 
-# Populates the config file for Zebra, using the env vars set by the Dockerfile
-# or user.
-#
-# Also prints the content of the generated config file.
+# Generates a config file for Zebra using env vars set in "docker/.env" and
+# prints the location of the generated config file.
 #
 # ## Positional Parameters
 #
-# - "$1": the file to write the config to
+# - "$1": the file to read the default config from
 prepare_conf_file() {
-  # Set a custom `network`.
+  # Copy the default config to a new location for writing.
+  CONF=~/zebrad.toml
+  cp "${1}" "${CONF}"
+
+  # Set a custom network.
   if [[ "${NETWORK}" ]]; then
-    sed -i '/network = ".*"/s/".*"/"'"${NETWORK//\"/}"'"/' "${1}"
+    sed -i '/network = ".*"/s/".*"/"'"${NETWORK//\"/}"'"/' "${CONF}"
   fi
 
   # Enable the RPC server by setting its port.
   if [[ "${ZEBRA_RPC_PORT}" ]]; then
-    sed -i '/# listen_addr = "0.0.0.0:18232" # Testnet/d' "${1}"
-    sed -i 's/ *# Mainnet$//' "${1}"
-    sed -i '/# listen_addr = "0.0.0.0:8232"/s/^# //; s/8232/'"${ZEBRA_RPC_PORT//\"/}"'/' "${1}"
+    sed -i '/# listen_addr = "0.0.0.0:18232" # Testnet/d' "${CONF}"
+    sed -i 's/ *# Mainnet$//' "${CONF}"
+    sed -i '/# listen_addr = "0.0.0.0:8232"/s/^# //; s/8232/'"${ZEBRA_RPC_PORT//\"/}"'/' "${CONF}"
+  fi
+
+  # Disable or enable cookie authentication.
+  if [[ "${ENABLE_COOKIE_AUTH}" ]]; then
+    sed -i '/# enable_cookie_auth = true/s/^# //; s/true/'"${ENABLE_COOKIE_AUTH//\"/}"'/' "${CONF}"
   fi
 
   # Set a custom state, network and cookie cache dirs.
@@ -44,41 +51,40 @@ prepare_conf_file() {
   # use them to set the cache dirs separately if needed.
   if [[ "${ZEBRA_CACHE_DIR}" ]]; then
     mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
-    sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${1}"
+    sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${CONF}"
   fi
 
   # Enable the Prometheus metrics endpoint.
   if [[ "${FEATURES}" == *"prometheus"* ]]; then
-    sed -i '/# endpoint_addr = "0.0.0.0:9999" # Prometheus/s/^# //' "${1}"
+    sed -i '/# endpoint_addr = "0.0.0.0:9999" # Prometheus/s/^# //' "${CONF}"
   fi
 
   # Enable logging to a file by setting a custom log file path.
   if [[ "${LOG_FILE}" ]]; then
     mkdir -p "$(dirname "${LOG_FILE//\"/}")"
-    sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${1}"
+    sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${CONF}"
   fi
 
   # Enable or disable colored logs.
   if [[ "${LOG_COLOR}" ]]; then
-    sed -i '/# force_use_color = true/s/^# //' "${1}"
-    sed -i '/use_color = true/s/true/'"${LOG_COLOR//\"/}"'/' "${1}"
+    sed -i '/# force_use_color = true/s/^# //' "${CONF}"
+    sed -i '/use_color = true/s/true/'"${LOG_COLOR//\"/}"'/' "${CONF}"
   fi
 
   # Enable or disable logging to systemd-journald.
   if [[ "${USE_JOURNALD}" ]]; then
-    sed -i '/# use_journald = true/s/^# //; s/true/'"${USE_JOURNALD//\"/}"'/' "${1}"
+    sed -i '/# use_journald = true/s/^# //; s/true/'"${USE_JOURNALD//\"/}"'/' "${CONF}"
   fi
 
   # Set a mining address.
   if [[ "${MINER_ADDRESS}" ]]; then
-    sed -i '/# miner_address = ".*"/{s/^# //; s/".*"/"'"${MINER_ADDRESS//\"/}"'"/}' "${1}"
+    sed -i '/# miner_address = ".*"/{s/^# //; s/".*"/"'"${MINER_ADDRESS//\"/}"'"/}' "${CONF}"
   fi
 
   # Trim all comments and empty lines.
-  sed -i '/^#/d; /^$/d' "${1}"
+  sed -i '/^#/d; /^$/d' "${CONF}"
 
-  echo "Prepared the following Zebra config:"
-  cat "$1"
+  echo "${CONF}"
 }
 
 # Checks if a directory contains subdirectories
@@ -251,31 +257,36 @@ run_tests() {
     run_cargo_test "${FEATURES}" "submit_block"
 
   else
-    if [[ "$1" == "zebrad" ]]; then
-      shift
-      exec zebrad -c "${ZEBRA_CONF_PATH}" "$@"
-    else
-      exec "$@"
-    fi
+    exec "$@"
   fi
 }
 
 # Main Script Logic
 
-prepare_conf_file "$ZEBRA_CONF_PATH"
+echo "Prepared the following Zebra config:"
+
+CONF_PATH=$(prepare_conf_file "${ZEBRA_CONF_PATH}")
+cat "${CONF_PATH}"
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
-# - If "$1" is "tests", run tests.
+# - If "$1" is "tests":
+#   - and "$2" is "zebrad", run `zebrad` with the remaining params,
+#   - else run tests with the remaining params.
 # - TODO: If "$1" is "monitoring", start a monitoring node.
 # - If "$1" doesn't match any of the above, run "$@" directly.
 case "$1" in
 --* | -* | zebrad)
   shift
-  exec zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+  exec zebrad --config "${CONF_PATH}" "$@"
   ;;
 test)
   shift
-  run_tests "$@"
+  if [[ "$1" == "zebrad" ]]; then
+    shift
+    exec zebrad --config "${CONF_PATH}" "$@"
+  else
+    run_tests "$@"
+  fi
   ;;
 monitoring)
   #  TODO: Impl logic for starting a monitoring node.
