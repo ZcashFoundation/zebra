@@ -1,4 +1,4 @@
-//! Benchmarks for batch verifiication of RedPallas signatures.
+//! Benchmarks for batch verification of RedPallas signatures.
 
 // Disabled due to warnings in criterion macros
 #![allow(missing_docs)]
