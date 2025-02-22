@@ -87,7 +87,7 @@ fn blockheader_serialization() {
             .zcash_serialize_to_vec()
             .expect("blockheader test vector should serialize");
 
-        // deserialiation errors
+        // deserialization errors
 
         let header_bytes = [&[255; 4], &header_bytes[4..]].concat();
 
