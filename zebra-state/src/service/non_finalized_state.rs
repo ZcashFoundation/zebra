@@ -349,12 +349,30 @@ impl NonFinalizedState {
             .ok_or(ReconsiderError::InvalidatedBlocksEmpty)?;
 
         let root_parent_hash = invalidated_root.block.header.previous_block_hash;
-        let parent_chain = self
-            .parent_chain(root_parent_hash)
-            .map_err(|_| ReconsiderError::ParentChainNotFound(block_hash))?;
 
-        let mut modified_chain = Arc::unwrap_or_clone(parent_chain);
+        // If the parent is the tip of the finalized_state we create a new chain and insert it
+        // into the non finalized state
+        let chain_result = if root_parent_hash == finalized_state.finalized_tip_hash() {
+            let chain = Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .ok_or(ReconsiderError::ParentChainNotFound(block_hash))?,
+                finalized_state.sprout_tree_for_tip(),
+                finalized_state.sapling_tree_for_tip(),
+                finalized_state.orchard_tree_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            );
+            Arc::new(chain)
+        } else {
+            // The parent is not the finalized_tip and still exist in the NonFinalizedState
+            // or else we return an error due to the parent not existing in the NonFinalizedState
+            self.parent_chain(root_parent_hash)
+                .map_err(|_| ReconsiderError::ParentChainNotFound(block_hash))?
+        };
 
+        let mut modified_chain = Arc::unwrap_or_clone(chain_result);
         for block in Arc::unwrap_or_clone(invalidated_blocks) {
             modified_chain = modified_chain.push(block)?;
         }
