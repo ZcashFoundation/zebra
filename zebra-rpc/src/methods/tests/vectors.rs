@@ -1434,7 +1434,7 @@ async fn rpc_getpeerinfo() {
         .await
         .expect("We should have an array of addresses");
 
-    // Response of lenght should be 2. We have 2 connected peers and 1 unconnected peer in the address book.
+    // Response of length should be 2. We have 2 connected peers and 1 unconnected peer in the address book.
     assert_eq!(get_peer_info.len(), 2);
 
     let mut res_iter = get_peer_info.into_iter();
