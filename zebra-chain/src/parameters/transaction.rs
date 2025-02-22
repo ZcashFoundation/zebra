@@ -18,4 +18,4 @@ pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 /// group ID.
 // FIXME: use a proper value!
 #[cfg(feature = "tx-v6")]
-pub const TX_V6_VERSION_GROUP_ID: u32 = 0x124A_69F8;
+pub const TX_V6_VERSION_GROUP_ID: u32 = 0x7777_7777;

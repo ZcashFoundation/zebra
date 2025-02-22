@@ -227,7 +227,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
     // FIXME: use a proper value below
-    (Nu7, ConsensusBranchId(0x77777777)),
+    (Nu7, ConsensusBranchId(0x77190ad8)),
 ];
 
 /// The target block spacing before Blossom.
