@@ -119,7 +119,7 @@ impl NetworkChainTipHeightEstimator {
         }
 
         // Euclidean division is used so that the number is rounded towards negative infinity,
-        // so that fractionary values always round down to the previous height when going back
+        // so that fractional values always round down to the previous height when going back
         // in time (i.e., when the dividend is negative). This works because the divisor (the
         // target spacing) is always positive.
         let block_difference: HeightDiff =
