@@ -196,6 +196,21 @@ async fn rpc_getblock() {
         assert_eq!(get_block, expected_result);
     }
 
+    // Test negative heights: -1 should return block 10, -2 block 9, etc.
+    for neg_height in (-10..=-1).rev() {
+        // Convert negative height to corresponding index
+        let index = (neg_height + (blocks.len() as i32)) as usize;
+
+        let expected_result = GetBlock::Raw(blocks[index].clone().into());
+
+        let get_block = rpc
+            .get_block(neg_height.to_string(), Some(0u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
+    }
+
     // Create empty note commitment tree information.
     let sapling = SaplingTrees { size: 0 };
     let orchard = OrchardTrees { size: 0 };
