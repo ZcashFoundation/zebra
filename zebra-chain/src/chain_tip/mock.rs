@@ -49,7 +49,7 @@ pub struct MockChainTip {
 impl MockChainTip {
     /// Create a new [`MockChainTip`].
     ///
-    /// Returns the [`MockChainTip`] instance and the endpoint to modiy the current best tip
+    /// Returns the [`MockChainTip`] instance and the endpoint to modify the current best tip
     /// height.
     ///
     /// Initially, the best tip height is [`None`].
