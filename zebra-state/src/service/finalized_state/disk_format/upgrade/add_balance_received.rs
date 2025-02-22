@@ -202,6 +202,9 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
                     continue;
                 }
 
+                // TODO: Retain items that don't have the right received balance instead?
+                //       Note: This would require ignoring outputs sent to addresses that are not being tracked
+                //             after the first disk write.
                 let is_updated_on_disk =
                     address_received_map.par_iter().all(|(address, &received)| {
                         // short-circuit iteration and immediately return an error in the next iteration of the outer loop

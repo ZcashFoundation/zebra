@@ -89,11 +89,14 @@ impl ZebraDb {
         self.db.zs_get(&balance_by_transparent_addr, address)
     }
 
-    /// Returns the balance for a [`transparent::Address`],
+    /// Returns the balance and received balance for a [`transparent::Address`],
     /// if it is in the finalized state.
-    pub fn address_balance(&self, address: &transparent::Address) -> Option<Amount<NonNegative>> {
+    pub fn address_balance(
+        &self,
+        address: &transparent::Address,
+    ) -> Option<(Amount<NonNegative>, Amount<NonNegative>)> {
         self.address_balance_location(address)
-            .map(|abl| abl.balance())
+            .map(|abl| (abl.balance(), abl.received()))
     }
 
     /// Returns the first output that sent funds to a [`transparent::Address`],
@@ -304,11 +307,17 @@ impl ZebraDb {
     pub fn partial_finalized_transparent_balance(
         &self,
         addresses: &HashSet<transparent::Address>,
-    ) -> Amount<NonNegative> {
-        let balance: amount::Result<Amount<NonNegative>> = addresses
+    ) -> (Amount<NonNegative>, Amount<NonNegative>) {
+        let balance: amount::Result<(Amount<NonNegative>, Amount<NonNegative>)> = addresses
             .iter()
             .filter_map(|address| self.address_balance(address))
-            .sum();
+            .fold(
+                Ok((Amount::zero(), Amount::zero())),
+                |acc, (b_balance, b_received)| {
+                    let (a_balance, a_received) = acc?;
+                    Ok(((a_balance + b_balance)?, (a_received + b_received)?))
+                },
+            );
 
         balance.expect(
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
