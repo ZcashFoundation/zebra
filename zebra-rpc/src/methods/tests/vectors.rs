@@ -1311,18 +1311,22 @@ async fn rpc_getpeerinfo() {
     )
     .await;
 
-    let outbound_mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
+    // Add a connected outbound peer
+    let outbound_mock_peer_address = zebra_network::types::MetaAddr::new_connected(
         std::net::SocketAddr::new(
             std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
         )
         .into(),
+        &PeerServices::NODE_NETWORK,
+        false,
     )
     .into_new_meta_addr(
         std::time::Instant::now(),
         zebra_chain::serialization::DateTime32::now(),
     );
 
+    // Add a connected inbound peer
     let inbound_mock_peer_address = zebra_network::types::MetaAddr::new_connected(
         std::net::SocketAddr::new(
             std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
@@ -1337,10 +1341,24 @@ async fn rpc_getpeerinfo() {
         zebra_chain::serialization::DateTime32::now(),
     );
 
-    let mock_address_book = MockAddressBookPeers::new(
-        vec![],
-        vec![outbound_mock_peer_address, inbound_mock_peer_address],
+    // Add a peer that is not connected and will not be displayed in the RPC output
+    let not_connected_mock_peer_adderess = zebra_network::types::MetaAddr::new_initial_peer(
+        std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+            55555,
+        )
+        .into(),
+    )
+    .into_new_meta_addr(
+        std::time::Instant::now(),
+        zebra_chain::serialization::DateTime32::now(),
     );
+
+    let mock_address_book = MockAddressBookPeers::new(vec![
+        outbound_mock_peer_address,
+        inbound_mock_peer_address,
+        not_connected_mock_peer_adderess,
+    ]);
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1360,6 +1378,9 @@ async fn rpc_getpeerinfo() {
         .get_peer_info()
         .await
         .expect("We should have an array of addresses");
+
+    // Response of lenght should be 2. We have 2 connected peers and 1 unconnected peer in the address book.
+    assert_eq!(get_peer_info.len(), 2);
 
     let mut res_iter = get_peer_info.into_iter();
     // Check for the outbound peer

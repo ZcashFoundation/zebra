@@ -14,7 +14,4 @@ pub use mock::MockAddressBookPeers;
 pub trait AddressBookPeers {
     /// Return an Vec of peers we've seen recently, in reconnection attempt order.
     fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr>;
-
-    /// Return an Vec of peers that are likely to be live, in reconnection attempt order.
-    fn currently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr>;
 }

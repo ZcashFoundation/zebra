@@ -7,17 +7,13 @@ use crate::{meta_addr::MetaAddr, AddressBookPeers};
 pub struct MockAddressBookPeers {
     /// Return value for mock `recently_live_peers` method.
     recently_live_peers: Vec<MetaAddr>,
-
-    /// Return value for mock `currently_live_peers` method.
-    currently_live_peers: Vec<MetaAddr>,
 }
 
 impl MockAddressBookPeers {
     /// Creates a new [`MockAddressBookPeers`]
-    pub fn new(recently_live_peers: Vec<MetaAddr>, currently_live_peers: Vec<MetaAddr>) -> Self {
+    pub fn new(recently_live_peers: Vec<MetaAddr>) -> Self {
         Self {
             recently_live_peers,
-            currently_live_peers,
         }
     }
 }
@@ -25,9 +21,5 @@ impl MockAddressBookPeers {
 impl AddressBookPeers for MockAddressBookPeers {
     fn recently_live_peers(&self, _now: chrono::DateTime<chrono::Utc>) -> Vec<MetaAddr> {
         self.recently_live_peers.clone()
-    }
-
-    fn currently_live_peers(&self, _now: chrono::DateTime<chrono::Utc>) -> Vec<MetaAddr> {
-        self.currently_live_peers.clone()
     }
 }

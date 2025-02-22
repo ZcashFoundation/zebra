@@ -1103,8 +1103,9 @@ where
         let address_book = self.address_book.clone();
 
         Ok(address_book
-            .currently_live_peers(chrono::Utc::now())
+            .recently_live_peers(chrono::Utc::now())
             .into_iter()
+            .filter(|meta_addr| meta_addr.has_connection_recently_responded(chrono::Utc::now()))
             .map(|meta_addr| PeerInfo::new(meta_addr, meta_addr.is_inbound()))
             .collect())
     }

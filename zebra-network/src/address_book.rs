@@ -819,16 +819,6 @@ impl AddressBookPeers for AddressBook {
             .cloned()
             .collect()
     }
-
-    fn currently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
-        let _guard = self.span.enter();
-
-        self.by_addr
-            .descending_values()
-            .filter(|peer| peer.has_connection_recently_responded(now))
-            .cloned()
-            .collect()
-    }
 }
 
 impl AddressBookPeers for Arc<Mutex<AddressBook>> {
@@ -836,12 +826,6 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .recently_live_peers(now)
-    }
-
-    fn currently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr> {
-        self.lock()
-            .expect("panic in a previous thread that was holding the mutex")
-            .currently_live_peers(now)
     }
 }
 
