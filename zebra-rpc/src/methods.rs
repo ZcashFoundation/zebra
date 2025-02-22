@@ -752,8 +752,9 @@ where
         let response = state.oneshot(request).await.map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+            zebra_state::ReadResponse::AddressBalance { balance, received } => Ok(AddressBalance {
                 balance: u64::from(balance),
+                received: u64::from(received),
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
         }
@@ -2003,6 +2004,8 @@ impl AddressStrings {
 pub struct AddressBalance {
     /// The total transparent balance.
     pub balance: u64,
+    /// The total received balance, including change.
+    pub received: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.

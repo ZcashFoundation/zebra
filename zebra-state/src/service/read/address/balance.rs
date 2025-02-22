@@ -26,14 +26,14 @@ use crate::{
     BoxError,
 };
 
-/// Returns the total transparent balance for the supplied [`transparent::Address`]es.
+/// Returns the total transparent balance and received balance for the supplied [`transparent::Address`]es.
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`, returns zero.
 pub fn transparent_balance(
     chain: Option<Arc<Chain>>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-) -> Result<Amount<NonNegative>, BoxError> {
+) -> Result<(Amount<NonNegative>, Amount<NonNegative>), BoxError> {
     let mut balance_result = finalized_transparent_balance(db, &addresses);
 
     // Retry the finalized balance query if it was interrupted by a finalizing block
@@ -54,7 +54,7 @@ pub fn transparent_balance(
         let chain_balance_change =
             chain_transparent_balance_change(chain, &addresses, finalized_tip);
 
-        balance = apply_balance_change(balance, chain_balance_change).expect(
+        balance = apply_balance_change(balance, (chain_balance_change, Amount::zero())).expect(
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
         );
     }
@@ -71,7 +71,7 @@ pub fn transparent_balance(
 fn finalized_transparent_balance(
     db: &ZebraDb,
     addresses: &HashSet<transparent::Address>,
-) -> Result<(Amount<NonNegative>, Option<Height>), BoxError> {
+) -> Result<((Amount<NonNegative>, Amount<NonNegative>), Option<Height>), BoxError> {
     // # Correctness
     //
     // The StateService can commit additional blocks while we are querying address balances.
@@ -139,10 +139,11 @@ fn chain_transparent_balance_change(
 /// Add the supplied finalized and non-finalized balances together,
 /// and return the result.
 fn apply_balance_change(
-    finalized_balance: Amount<NonNegative>,
-    chain_balance_change: Amount<NegativeAllowed>,
-) -> amount::Result<Amount<NonNegative>> {
+    (finalized_balance, finalized_received): (Amount<NonNegative>, Amount<NonNegative>),
+    (chain_balance_change, chain_received_change): (Amount<NegativeAllowed>, Amount<NonNegative>),
+) -> amount::Result<(Amount<NonNegative>, Amount<NonNegative>)> {
     let balance = finalized_balance.constrain()? + chain_balance_change;
+    let received = finalized_received.constrain()? + chain_received_change;
 
-    balance?.constrain()
+    Ok((balance?.constrain()?, received?.constrain()?))
 }
