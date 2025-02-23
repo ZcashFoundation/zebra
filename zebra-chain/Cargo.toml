@@ -75,6 +75,7 @@ bitflags = "2.5.0"
 bitflags-serde-legacy = "0.1.1"
 blake2b_simd = "1.0.2"
 blake2s_simd = "1.0.2"
+# TODO: Revert to "0.6.0" (or appropriate version) when the ZSA orchard fork is updated.
 bridgetree = "0.4.0"
 bs58 = { version = "0.5.1", features = ["check"] }
 byteorder = "1.5.0"
@@ -191,6 +192,5 @@ required-features = ["bench"]
 name = "redpallas"
 harness = false
 
-# FIXME: remove this and all zcash_unstable usage in the code after updating librustzcash
-#[lints.rust]
-#unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }

@@ -272,6 +272,7 @@ pub fn miner_fees_are_valid(
     // input.
     //
     // > [NU6 onward] The total output of a coinbase transaction MUST be equal to its total input.
+    // FIXME: Would this work after Nu7 activation?
     if if NetworkUpgrade::current(network, height) < NetworkUpgrade::Nu6 {
         total_output_value > total_input_value
     } else {

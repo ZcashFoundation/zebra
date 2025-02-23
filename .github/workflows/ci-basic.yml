@@ -16,10 +16,6 @@ jobs:
       ROCKSDB_LIB_DIR: /usr/lib
       # Use system-installed Snappy library for compression in RocksDB
       SNAPPY_LIB_DIR: /usr/lib/x86_64-linux-gnu
-      # FIXME: remove the following commented lines
-      # Enable the `nu6` feature in `zcash_protocol`
-      #RUSTFLAGS: '--cfg zcash_unstable="nu6"'
-      #RUSTDOCFLAGS: '--cfg zcash_unstable="nu6"'
 
     steps:
       - uses: actions/checkout@v4
