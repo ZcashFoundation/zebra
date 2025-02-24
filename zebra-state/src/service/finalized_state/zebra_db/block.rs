@@ -139,7 +139,14 @@ impl ZebraDb {
     #[allow(clippy::unwrap_in_result)]
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<Arc<Block>> {
         // Block
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let height = match hash_or_height {
+            HashOrHeight::Hash(hash) => self.height(hash),
+            HashOrHeight::Height(height) => Some(height),
+            HashOrHeight::NegativeHeight(_) => {
+                hash_or_height.height_from_negative_height(self.tip()?.0)
+            }
+        }?;
+
         let header = self.block_header(height.into())?;
 
         // Transactions
