@@ -371,7 +371,7 @@ fn fake_v5_round_trip_for_network(network: Network) {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(|t| arbitrary::transaction_to_fake_min_v5(t, &network, Height(*height)))
+            .map(|t| arbitrary::transaction_to_fake_v5(t, &network, Height(*height)))
             .map(Into::into)
             .collect();
 
@@ -516,7 +516,7 @@ fn fake_v5_librustzcash_round_trip_for_network(network: Network) {
             .transactions
             .iter()
             .map(AsRef::as_ref)
-            .map(|t| arbitrary::transaction_to_fake_min_v5(t, &network, Height(*height)))
+            .map(|t| arbitrary::transaction_to_fake_v5(t, &network, Height(*height)))
             .map(Into::into)
             .collect();
 
