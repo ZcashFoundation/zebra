@@ -851,7 +851,7 @@ impl Arbitrary for VerifiedUnminedTx {
 
 /// Convert `trans` into a fake v5 transaction,
 /// converting sapling shielded data from v4 to v5 if possible.
-pub fn transaction_to_fake_v5(
+pub fn transaction_to_fake_min_v5(
     trans: &Transaction,
     network: &Network,
     height: block::Height,
@@ -921,25 +921,7 @@ pub fn transaction_to_fake_v5(
         },
         v5 @ V5 { .. } => v5.clone(),
         #[cfg(feature = "tx-v6")]
-        V6 {
-            inputs,
-            outputs,
-            lock_time,
-            sapling_shielded_data,
-            orchard_shielded_data: _,
-            ..
-        } => V5 {
-            network_upgrade: block_nu,
-            inputs: inputs.clone(),
-            outputs: outputs.clone(),
-            lock_time: *lock_time,
-            expiry_height: height,
-            sapling_shielded_data: sapling_shielded_data.clone(),
-            // FIXME: is it possible to convert V6 shielded data to V5?
-            // FIXME: add another function for V6, like transaction_to_fake_v6?
-            //orchard_shielded_data: orchard_shielded_data.clone(),
-            orchard_shielded_data: None,
-        },
+        V6 => panic!("V6 transactions are not supported in this test!"),
     }
 }
 
@@ -1023,7 +1005,7 @@ pub fn fake_v5_transactions_for_network<'b>(
     blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
 ) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
     transactions_from_blocks(blocks)
-        .map(move |(height, transaction)| transaction_to_fake_v5(&transaction, network, height))
+        .map(move |(height, transaction)| transaction_to_fake_min_v5(&transaction, network, height))
 }
 
 /// Generate an iterator over ([`block::Height`], [`Arc<Transaction>`]).

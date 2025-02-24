@@ -24,7 +24,7 @@ use zebra_chain::{
 
 use crate::primitives::halo2::*;
 
-// FIXME: add support for OrchardZSA (see OrchardVanilla and AssetBase::native() usage below)
+// TODO: Add support for OrchardZSA (see OrchardVanilla and AssetBase::native() usage below)
 #[allow(dead_code, clippy::print_stdout)]
 fn generate_test_vectors() {
     let proving_key = ProvingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();

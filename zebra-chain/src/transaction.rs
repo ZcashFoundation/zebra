@@ -210,9 +210,8 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     },
-    // FIXME: implement V6 properly (now it's just a coipy of V5)
-    /// A `version = 6` transaction , which supports Orchard ZSA, Orchard Vanille, Sapling and
-    /// transparent, but not Sprout.
+    // FIXME: implement V6 properly (now it's just a copy of V5)
+    /// A `version = 6` transaction , OrchardZSA, Orchard, Sapling and transparent, but not Sprout.
     #[cfg(feature = "tx-v6")]
     V6 {
         /// The Network Upgrade for this transaction.
@@ -231,10 +230,8 @@ pub enum Transaction {
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
         /// The ZSA orchard shielded data for this transaction, if any.
-        #[cfg(feature = "tx-v6")]
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardZSA>>,
         /// The ZSA issuance data for this transaction, if any.
-        #[cfg(feature = "tx-v6")]
         orchard_zsa_issue_data: Option<orchard::IssueData>,
     },
 }
