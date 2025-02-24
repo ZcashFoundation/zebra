@@ -132,7 +132,7 @@ pub struct SaplingScannedDatabaseIndex {
 impl SaplingScannedDatabaseIndex {
     /// The minimum value of a sapling scanned database index.
     ///
-    /// This value is guarateed to be the minimum, and not correspond to a valid key.
+    /// This value is guaranteed to be the minimum, and not correspond to a valid key.
     //
     // Note: to calculate the maximum value, we need a key length.
     pub const fn min() -> Self {
