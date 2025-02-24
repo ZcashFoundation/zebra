@@ -3,9 +3,9 @@ source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
 expression: get_block_subsidy
 ---
 {
-  "miner": 0.00610351,
+  "miner": 8.66459999,
   "founders": 0.0,
   "fundingstreamstotal": 0.0,
   "lockboxtotal": 0.0,
-  "totalblocksubsidy": 0.00610351
+  "totalblocksubsidy": 8.66459999
 }

@@ -16,6 +16,7 @@ use tower::{buffer::Buffer, service_fn, ServiceExt};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
+    error::CoinbaseTransactionError,
     orchard::{Action, AuthorizedAction, Flags},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
@@ -1227,7 +1228,9 @@ fn v5_coinbase_transaction_with_enable_spends_flag_fails_validation() {
 
         assert_eq!(
             check::coinbase_tx_no_prevout_joinsplit_spend(&tx),
-            Err(TransactionError::CoinbaseHasEnableSpendsOrchard)
+            Err(TransactionError::Coinbase(
+                CoinbaseTransactionError::HasEnableSpendsOrchard
+            ))
         );
     }
 }
@@ -2079,11 +2082,13 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     assert_eq!(
         result,
-        Err(TransactionError::CoinbaseExpiryBlockHeight {
-            expiry_height: Some(new_expiry_height),
-            block_height,
-            transaction_hash: new_transaction.hash(),
-        })
+        Err(TransactionError::Coinbase(
+            CoinbaseTransactionError::ExpiryBlockHeight {
+                expiry_height: Some(new_expiry_height),
+                block_height,
+                transaction_hash: new_transaction.hash(),
+            }
+        ))
     );
 
     // Decrement the expiry height so that it becomes invalid.
@@ -2110,11 +2115,13 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     assert_eq!(
         result,
-        Err(TransactionError::CoinbaseExpiryBlockHeight {
-            expiry_height: Some(new_expiry_height),
-            block_height,
-            transaction_hash: new_transaction.hash(),
-        })
+        Err(TransactionError::Coinbase(
+            CoinbaseTransactionError::ExpiryBlockHeight {
+                expiry_height: Some(new_expiry_height),
+                block_height,
+                transaction_hash: new_transaction.hash(),
+            }
+        ))
     );
 
     // Test with matching heights again, but using a very high value
@@ -2128,7 +2135,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     // Setting the new expiry height as the block height will activate NU6, so we need to set NU6
     // for the tx as well.
     new_transaction
-        .update_network_upgrade(NetworkUpgrade::Nu6)
+        .update_network_upgrade(NetworkUpgrade::Nu7)
         .expect("updating the network upgrade for a V5 tx should succeed");
 
     let verification_result = verifier
@@ -2231,7 +2238,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         expiry_height,
         sapling_shielded_data: None,
         orchard_shielded_data: None,
-        network_upgrade: NetworkUpgrade::Nu6,
+        network_upgrade: NetworkUpgrade::Nu7,
     };
 
     let transaction_hash = transaction.hash();
@@ -3470,7 +3477,9 @@ fn shielded_outputs_are_not_decryptable_for_fake_v5_blocks() {
                     &net,
                     NetworkUpgrade::Nu5.activation_height(&net).unwrap(),
                 ),
-                Err(TransactionError::CoinbaseOutputsNotDecryptable)
+                Err(TransactionError::Coinbase(
+                    CoinbaseTransactionError::OutputsNotDecryptable
+                ))
             );
         }
     }
