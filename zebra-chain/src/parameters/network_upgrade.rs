@@ -94,7 +94,7 @@ pub(super) const MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_046_400), Canopy),
     (block::Height(1_687_104), Nu5),
     (block::Height(2_726_400), Nu6),
-    // FIXME: TODO: Add NU7 with a correct value
+    // TODO: FIXME: Add NU7 with a correct value
     // (block::Height(2_726_401), Nu7),
 ];
 
@@ -133,7 +133,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_028_500), Canopy),
     (block::Height(1_842_420), Nu5),
     (block::Height(2_976_000), Nu6),
-    // FIXME: TODO: Set a correct value for NU7
+    // TODO: FIXME: Set a correct value for NU7
     (block::Height(2_942_001), Nu7),
 ];
 
@@ -226,7 +226,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
-    // FIXME: use a proper value below
+    // TODO: FIXME: Use a proper value below.
     (Nu7, ConsensusBranchId(0x77777777)),
 ];
 
