@@ -446,7 +446,7 @@ enum SpendConflictTestInput {
 
         conflict: SpendConflictForTransactionV5,
     },
-    // FIXME: add V6 test
+    // FIXME: add and use V6?
 }
 
 impl SpendConflictTestInput {
