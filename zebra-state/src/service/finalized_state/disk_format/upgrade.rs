@@ -81,15 +81,21 @@ pub trait DiskFormatUpgrade {
     }
 }
 
-fn format_upgrades() -> Vec<Box<dyn DiskFormatUpgrade>> {
-    // Note: Disk format upgrades must be run in order.
-    vec![
+fn format_upgrades(
+    min_version: Option<Version>,
+) -> impl Iterator<Item = Box<dyn DiskFormatUpgrade>> {
+    let min_version = move || min_version.clone().unwrap_or(Version::new(0, 0, 0));
+
+    // Note: Disk format upgrades must be run in order of database version.
+    ([
         Box::new(prune_trees::PruneTrees),
         Box::new(add_subtrees::AddSubtrees),
         Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
         // Value balance upgrade
         Box::new(no_migration::NoMigration::new(26, 0, 0)),
-    ]
+    ] as [Box<dyn DiskFormatUpgrade>; 4])
+        .into_iter()
+        .filter(move |upgrade| upgrade.version() > min_version())
 }
 
 /// The kind of database format change or validity check we're performing.
@@ -532,28 +538,20 @@ impl DbFormatChange {
         };
 
         // Apply or validate format upgrades
-        for upgrade in format_upgrades() {
-            if older_disk_version >= &upgrade.version() {
+        for upgrade in format_upgrades(Some(older_disk_version.clone())) {
+            if upgrade.needs_migration() {
+                let timer = CodeTimer::start();
+
+                upgrade.prepare(initial_tip_height, db, cancel_receiver, older_disk_version)?;
+                upgrade.run(initial_tip_height, db, cancel_receiver)?;
+
+                // Before marking the state as upgraded, check that the upgrade completed successfully.
                 upgrade
                     .validate(db, cancel_receiver)?
-                    .expect("failed to validate db format");
-                continue;
+                    .expect("db should be valid after upgrade");
+
+                timer.finish(module_path!(), line!(), upgrade.description());
             }
-
-            if !upgrade.needs_migration() {
-                Self::mark_as_upgraded_to(db, &upgrade.version());
-                continue;
-            }
-
-            let timer = CodeTimer::start();
-
-            upgrade.prepare(initial_tip_height, db, cancel_receiver, older_disk_version)?;
-            upgrade.run(initial_tip_height, db, cancel_receiver)?;
-
-            // Before marking the state as upgraded, check that the upgrade completed successfully.
-            upgrade
-                .validate(db, cancel_receiver)?
-                .expect("db should be valid after upgrade");
 
             // Mark the database as upgraded. Zebra won't repeat the upgrade anymore once the
             // database is marked, so the upgrade MUST be complete at this point.
@@ -562,22 +560,7 @@ impl DbFormatChange {
                 "Zebra automatically upgraded the database format"
             );
             Self::mark_as_upgraded_to(db, &upgrade.version());
-
-            timer.finish(module_path!(), line!(), upgrade.description());
         }
-
-        let version_for_upgrading_value_balance_format =
-            Version::parse("26.0.0").expect("hard-coded version string should be valid");
-
-        // Check if we need to do the upgrade.
-        if older_disk_version < &version_for_upgrading_value_balance_format {
-            Self::mark_as_upgraded_to(db, &version_for_upgrading_value_balance_format)
-        }
-
-        info!(
-            %newer_running_version,
-            "Zebra automatically upgraded the database format to:"
-        );
 
         Ok(())
     }
@@ -625,7 +608,7 @@ impl DbFormatChange {
         // Do the quick checks first, so we don't have to do this in every detailed check.
         results.push(Self::format_validity_checks_quick(db));
 
-        for upgrade in format_upgrades() {
+        for upgrade in format_upgrades(None) {
             results.push(upgrade.validate(db, cancel_receiver)?);
         }
 
@@ -840,5 +823,14 @@ impl Drop for DbFormatChangeThreadHandle {
         } else {
             self.check_for_panics();
         }
+    }
+}
+
+#[test]
+fn format_upgrades_are_in_version_order() {
+    let mut last_version = Version::new(0, 0, 0);
+    for upgrade in format_upgrades(None) {
+        assert!(upgrade.version() > last_version);
+        last_version = upgrade.version();
     }
 }
