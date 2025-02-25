@@ -295,7 +295,7 @@ pub(crate) fn sighash(
             unlock_script = zcash_primitives::legacy::Script(script_code);
             zp_tx::sighash::SignableInput::Transparent(
                 zcash_transparent::sighash::SignableInput::from_parts(
-                    hash_type.bits() as _,
+                    hash_type.try_into().expect("hash type should be ALL"),
                     input_index,
                     &unlock_script,
                     &lock_script,
