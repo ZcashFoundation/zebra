@@ -9,7 +9,8 @@ use crate::service::finalized_state::ZebraDb;
 
 use super::{CancelFormatChange, DiskFormatUpgrade};
 
-/// Implements [`DiskFormatUpgrade`] for pruning duplicate Sapling and Orchard note commitment trees from database
+/// Implements [`DiskFormatUpgrade`] for in-place upgrades that do not involve any migration
+/// of existing data into the new format.
 pub struct NoMigration {
     version: Version,
 }
