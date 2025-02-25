@@ -9,29 +9,8 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 /// A ciphertext component for encrypted output notes.
 ///
 /// Corresponds to the Orchard 'encCiphertext's
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Copy, Clone, Debug, Eq, PartialEq)]
 pub struct EncryptedNote<const N: usize>(#[serde(with = "BigArray")] pub(crate) [u8; N]);
-
-// These impls all only exist because of array length restrictions.
-// TODO: use const generics https://github.com/ZcashFoundation/zebra/issues/2042
-
-impl<const N: usize> Copy for EncryptedNote<N> {}
-
-impl<const N: usize> Clone for EncryptedNote<N> {
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-
-impl<const N: usize> fmt::Debug for EncryptedNote<N> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("EncryptedNote")
-            .field(&hex::encode(&self.0[..]))
-            .finish()
-    }
-}
-
-impl<const N: usize> Eq for EncryptedNote<N> {}
 
 impl<const N: usize> From<[u8; N]> for EncryptedNote<N> {
     fn from(bytes: [u8; N]) -> Self {
@@ -42,12 +21,6 @@ impl<const N: usize> From<[u8; N]> for EncryptedNote<N> {
 impl<const N: usize> From<EncryptedNote<N>> for [u8; N] {
     fn from(enc_ciphertext: EncryptedNote<N>) -> Self {
         enc_ciphertext.0
-    }
-}
-
-impl<const N: usize> PartialEq for EncryptedNote<N> {
-    fn eq(&self, other: &Self) -> bool {
-        self.0[..] == other.0[..]
     }
 }
 
