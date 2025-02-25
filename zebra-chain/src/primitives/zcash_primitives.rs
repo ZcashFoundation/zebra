@@ -293,16 +293,18 @@ pub(crate) fn sighash(
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
             unlock_script = zcash_primitives::legacy::Script(script_code);
-            zp_tx::sighash::SignableInput::Transparent(zcash_transparent::sighash::SignableInput {
-                hash_type: hash_type.bits() as _,
-                index: input_index,
-                script_code: &unlock_script,
-                script_pubkey: &lock_script,
-                value: output
-                    .value
-                    .try_into()
-                    .expect("amount was previously validated"),
-            })
+            zp_tx::sighash::SignableInput::Transparent(
+                zcash_transparent::sighash::SignableInput::from_parts(
+                    hash_type.bits() as _,
+                    input_index,
+                    &unlock_script,
+                    &lock_script,
+                    output
+                        .value
+                        .try_into()
+                        .expect("amount was previously validated"),
+                ),
+            )
         }
         None => zp_tx::sighash::SignableInput::Shielded,
     };
