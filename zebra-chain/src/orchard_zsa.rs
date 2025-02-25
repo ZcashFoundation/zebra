@@ -1,4 +1,4 @@
-//! Orchard ZSA related functionality.
+//! OrchardZSA related functionality.
 
 pub mod burn;
 pub mod issuance;

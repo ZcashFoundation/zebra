@@ -20,7 +20,6 @@ use crate::orchard_zsa::burn::BurnItem;
 /// the transactions `V5` and `V6`.
 pub trait OrchardFlavorExt: Clone + Debug {
     /// A type representing an encrypted note for this protocol version.
-    /// A type representing an encrypted note for this protocol version.
     type EncryptedNote: Clone
         + Debug
         + PartialEq
@@ -59,26 +58,26 @@ pub struct OrchardZSA;
 pub struct NoBurn;
 
 impl ZcashSerialize for NoBurn {
-    fn zcash_serialize<W: io::Write>(&self, mut _writer: W) -> Result<(), io::Error> {
+    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
         Ok(())
     }
 }
 
 impl ZcashDeserialize for NoBurn {
-    fn zcash_deserialize<R: io::Read>(mut _reader: R) -> Result<Self, SerializationError> {
+    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
         Ok(Self)
     }
 }
 
 impl OrchardFlavorExt for OrchardVanilla {
-    type Flavor = orchard_flavor::OrchardVanilla;
     type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
+    type Flavor = orchard_flavor::OrchardVanilla;
     type BurnType = NoBurn;
 }
 
 #[cfg(feature = "tx-v6")]
 impl OrchardFlavorExt for OrchardZSA {
-    type Flavor = orchard_flavor::OrchardZSA;
     type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
+    type Flavor = orchard_flavor::OrchardZSA;
     type BurnType = Vec<BurnItem>;
 }
