@@ -65,29 +65,9 @@ pub struct OrchardVanilla;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct OrchardZSA;
 
-/// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5` transactions.
-/// Useful for unifying ShieldedData serialization and deserialization implementations across various
-/// Orchard protocol variants (i.e. various transaction versions).
-#[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
-pub struct NoBurn;
-
-impl ZcashSerialize for NoBurn {
-    fn zcash_serialize<W: io::Write>(&self, _writer: W) -> Result<(), io::Error> {
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for NoBurn {
-    fn zcash_deserialize<R: io::Read>(_reader: R) -> Result<Self, SerializationError> {
-        Ok(Self)
-    }
-}
-
 impl OrchardFlavorExt for OrchardVanilla {
     type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
-
     type Flavor = orchard_flavor::OrchardVanilla;
-
     #[cfg(feature = "tx-v6")]
     type BurnType = NoBurn;
 }
@@ -95,7 +75,6 @@ impl OrchardFlavorExt for OrchardVanilla {
 #[cfg(feature = "tx-v6")]
 impl OrchardFlavorExt for OrchardZSA {
     type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
-
     type Flavor = orchard_flavor::OrchardZSA;
-    type BurnType = Vec<BurnItem>;
+    type BurnType = Burn;
 }
