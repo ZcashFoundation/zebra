@@ -84,8 +84,6 @@ pub enum HashOrHeight {
     Hash(block::Hash),
     /// A block identified by height.
     Height(block::Height),
-    /// A block identified by a negative height.
-    NegativeHeight(i64),
 }
 
 impl HashOrHeight {
@@ -98,7 +96,6 @@ impl HashOrHeight {
         match self {
             HashOrHeight::Hash(hash) => op(hash),
             HashOrHeight::Height(height) => Some(height),
-            HashOrHeight::NegativeHeight(_) => None,
         }
     }
 
@@ -116,7 +113,6 @@ impl HashOrHeight {
         match self {
             HashOrHeight::Hash(hash) => Some(hash),
             HashOrHeight::Height(height) => op(height),
-            HashOrHeight::NegativeHeight(_) => None,
         }
     }
 
@@ -137,16 +133,6 @@ impl HashOrHeight {
             None
         }
     }
-
-    /// Returns the height if this is a [`HashOrHeight::NegativeHeight`] and no overflow occurs.
-    pub fn height_from_negative_height(&self, tip: block::Height) -> Option<block::Height> {
-        if let HashOrHeight::NegativeHeight(index) = self {
-            let new_height = i64::from(tip.0).checked_add(index + 1)?;
-            u32::try_from(new_height).ok().map(block::Height)
-        } else {
-            None
-        }
-    }
 }
 
 impl std::fmt::Display for HashOrHeight {
@@ -154,7 +140,6 @@ impl std::fmt::Display for HashOrHeight {
         match self {
             HashOrHeight::Hash(hash) => write!(f, "{hash}"),
             HashOrHeight::Height(height) => write!(f, "{}", height.0),
-            HashOrHeight::NegativeHeight(index) => write!(f, "{}", index),
         }
     }
 }
@@ -191,6 +176,47 @@ impl std::str::FromStr for HashOrHeight {
         s.parse()
             .map(Self::Hash)
             .or_else(|_| s.parse().map(Self::Height))
+            .map_err(|_| {
+                SerializationError::Parse("could not convert the input string to a hash or height")
+            })
+    }
+}
+
+/// Identify a block by hash or height, or a negative height.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum HashHeightOrNegativeHeight {
+    /// A block identified by hash or height.
+    HashOrHeight(HashOrHeight),
+    /// A block identified by a negative height.
+    NegativeHeight(i64),
+}
+
+impl HashHeightOrNegativeHeight {
+    /// Convert the enum into a [`HashOrHeight`].
+    pub fn into_hash_or_height(self, tip: Option<block::Height>) -> Option<HashOrHeight> {
+        match self {
+            HashHeightOrNegativeHeight::HashOrHeight(hash_or_height) => Some(hash_or_height),
+            HashHeightOrNegativeHeight::NegativeHeight(index) => {
+                let new_height = i64::from(tip?.0).checked_add(index + 1)?;
+                u32::try_from(new_height)
+                    .ok()
+                    .map(|h| HashOrHeight::Height(block::Height(h)))
+            }
+        }
+    }
+
+    /// Returns `true` if the enum is a negative height.
+    pub fn is_negative_height(&self) -> bool {
+        matches!(self, HashHeightOrNegativeHeight::NegativeHeight(_))
+    }
+}
+
+impl std::str::FromStr for HashHeightOrNegativeHeight {
+    type Err = SerializationError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse()
+            .map(Self::HashOrHeight)
             .or_else(|_| s.parse().map(|index: i64| Self::NegativeHeight(index)))
             .map_err(|_| {
                 SerializationError::Parse("could not convert the input string to a hash or height")

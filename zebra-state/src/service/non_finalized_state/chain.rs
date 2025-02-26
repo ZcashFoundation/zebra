@@ -415,13 +415,8 @@ impl Chain {
     /// Returns the [`ContextuallyVerifiedBlock`] with [`block::Hash`] or
     /// [`Height`], if it exists in this chain.
     pub fn block(&self, hash_or_height: HashOrHeight) -> Option<&ContextuallyVerifiedBlock> {
-        let height = match hash_or_height {
-            HashOrHeight::Hash(hash) => self.height_by_hash.get(&hash).cloned(),
-            HashOrHeight::Height(height) => Some(height),
-            HashOrHeight::NegativeHeight(_) => {
-                hash_or_height.height_from_negative_height(self.non_finalized_tip_height())
-            }
-        }?;
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
         self.blocks.get(&height)
     }
@@ -512,7 +507,6 @@ impl Chain {
         match hash_or_height {
             Hash(hash) => self.contains_block_hash(hash),
             Height(height) => self.contains_block_height(height),
-            NegativeHeight(_) => false,
         }
     }
 

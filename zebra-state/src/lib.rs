@@ -42,7 +42,8 @@ pub use error::{
     ValidateContextError,
 };
 pub use request::{
-    CheckpointVerifiedBlock, HashOrHeight, ReadRequest, Request, SemanticallyVerifiedBlock,
+    CheckpointVerifiedBlock, HashHeightOrNegativeHeight, HashOrHeight, ReadRequest, Request,
+    SemanticallyVerifiedBlock,
 };
 
 #[cfg(feature = "indexer")]
