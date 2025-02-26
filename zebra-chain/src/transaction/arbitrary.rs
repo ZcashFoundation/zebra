@@ -1023,7 +1023,7 @@ pub fn transaction_to_fake_min_v5(
         },
         v5 @ V5 { .. } => v5.clone(),
         #[cfg(feature = "tx-v6")]
-        V6 => panic!("V6 transactions are not supported in this test!"),
+        _v6 @ V6 { .. } => panic!("V6 transactions are not supported in this test!"),
     }
 }
 
