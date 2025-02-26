@@ -89,11 +89,14 @@ impl ZebraDb {
         self.db.zs_get(&balance_by_transparent_addr, address)
     }
 
-    /// Returns the balance for a [`transparent::Address`],
+    /// Returns the balance and received balance for a [`transparent::Address`],
     /// if it is in the finalized state.
-    pub fn address_balance(&self, address: &transparent::Address) -> Option<Amount<NonNegative>> {
+    pub fn address_balance(
+        &self,
+        address: &transparent::Address,
+    ) -> Option<(Amount<NonNegative>, u64)> {
         self.address_balance_location(address)
-            .map(|abl| abl.balance())
+            .map(|abl| (abl.balance(), abl.received()))
     }
 
     /// Returns the first output that sent funds to a [`transparent::Address`],
@@ -291,24 +294,31 @@ impl ZebraDb {
 
     // Address index queries
 
-    /// Returns the total transparent balance for `addresses` in the finalized chain.
+    /// Returns the total transparent balance and received balance for `addresses` in the finalized chain.
     ///
-    /// If none of the addresses has a balance, returns zero.
+    /// If none of the addresses have a balance, returns zeroes.
     ///
     /// # Correctness
     ///
-    /// Callers should apply the non-finalized balance change for `addresses` to the returned balance.
+    /// Callers should apply the non-finalized balance change for `addresses` to the returned balances.
     ///
-    /// The total balance will only be correct if the non-finalized chain matches the finalized state.
+    /// The total balances will only be correct if the non-finalized chain matches the finalized state.
     /// Specifically, the root of the partial non-finalized chain must be a child block of the finalized tip.
     pub fn partial_finalized_transparent_balance(
         &self,
         addresses: &HashSet<transparent::Address>,
-    ) -> Amount<NonNegative> {
-        let balance: amount::Result<Amount<NonNegative>> = addresses
+    ) -> (Amount<NonNegative>, u64) {
+        let balance: amount::Result<(Amount<NonNegative>, u64)> = addresses
             .iter()
             .filter_map(|address| self.address_balance(address))
-            .sum();
+            .try_fold(
+                (Amount::zero(), 0),
+                |(a_balance, a_received): (Amount<NonNegative>, u64), (b_balance, b_received)| {
+                    // Addresses could receive more than the max money supply by sending to themselves, use u64::MAX if the addition overflows.
+                    let received = a_received.checked_add(b_received).unwrap_or(u64::MAX);
+                    Ok(((a_balance + b_balance)?, received))
+                },
+            );
 
         balance.expect(
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",

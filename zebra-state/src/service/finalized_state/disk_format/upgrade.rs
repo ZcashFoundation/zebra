@@ -22,6 +22,7 @@ use DbFormatChange::*;
 
 use crate::service::finalized_state::ZebraDb;
 
+pub(crate) mod add_balance_received;
 pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
@@ -91,9 +92,9 @@ fn format_upgrades(
         Box::new(prune_trees::PruneTrees),
         Box::new(add_subtrees::AddSubtrees),
         Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
-        // Value balance upgrade
-        Box::new(no_migration::NoMigration::new(26, 0, 0)),
-    ] as [Box<dyn DiskFormatUpgrade>; 4])
+        Box::new(no_migration::NoMigration::new(26, 0, 0)), // Value balance upgrade
+        Box::new(add_balance_received::AddAddressBalanceReceived),
+    ] as [Box<dyn DiskFormatUpgrade>; 5])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
