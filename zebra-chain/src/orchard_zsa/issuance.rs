@@ -59,7 +59,8 @@ impl IssueData {
     }
 }
 
-// FIXME: are those values correct (43, 32 etc.)?
+// Sizes of the types, in bytes
+// FIXME: import from orchard
 const ADDRESS_SIZE: u64 = 43;
 const NULLIFIER_SIZE: u64 = 32;
 const NOTE_VALUE_SIZE: u64 = 4;
