@@ -53,31 +53,28 @@ pub trait OrchardFlavorExt: Clone + Debug {
     type BurnType: Clone + Debug + Default + ZcashDeserialize + ZcashSerialize + TestArbitrary;
 }
 
-/// A structure representing a tag for Orchard protocol variant used for the transaction version `V5`.
+/// A structure representing a tag for Orchard protocol variant used for the transaction version 5.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct OrchardVanilla;
 
-/// A structure representing a tag for Orchard protocol variant used for the transaction version `V6`
-/// (which ZSA features support).
+/// A structure representing a tag for Orchard protocol variant used for the transaction version 6
+/// (which support for ZSAs).
 #[cfg(feature = "tx-v6")]
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct OrchardZSA;
 
 impl OrchardFlavorExt for OrchardVanilla {
-    type Flavor = orchard_flavor::OrchardVanilla;
     type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
-
+    type Flavor = orchard_flavor::OrchardVanilla;
     #[cfg(feature = "tx-v6")]
     type BurnType = NoBurn;
 }
 
 #[cfg(feature = "tx-v6")]
 impl OrchardFlavorExt for OrchardZSA {
-    type Flavor = orchard_flavor::OrchardZSA;
     type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
-
-    #[cfg(feature = "tx-v6")]
+    type Flavor = orchard_flavor::OrchardZSA;
     type BurnType = Burn;
 }
