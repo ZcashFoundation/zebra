@@ -15,11 +15,11 @@ keywords = ["zebra", "zcash"]
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 # Settings that impact compilation
-edition = "2021"
+edition = "2024"
 
 # Zebra is only supported on the latest stable Rust version. See the README for details.
 # Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.81.0"
+rust-version = "1.85.0"
 
 # Settings that impact runtime behaviour
 
