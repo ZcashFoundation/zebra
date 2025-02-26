@@ -12,13 +12,12 @@ use orchard::{note::AssetBase, value::NoteValue};
 
 use super::common::ASSET_BASE_SIZE;
 
-// Sizes of the serialized values for types in bytes (used for TrustedPreallocate impls)
+// The size of the Amount type, in bytes
 const AMOUNT_SIZE: u64 = 8;
 
-// FIXME: is this a correct way to calculate (simple sum of sizes of components)?
 const BURN_ITEM_SIZE: u64 = ASSET_BASE_SIZE + AMOUNT_SIZE;
 
-/// Orchard ZSA burn item.
+/// Represents an OrchardZSA burn item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, Amount);
 
@@ -53,9 +52,6 @@ impl ZcashDeserialize for BurnItem {
 
 impl TrustedPreallocate for BurnItem {
     fn max_allocation() -> u64 {
-        // FIXME: is this a correct calculation way?
-        // The longest Vec<BurnItem> we receive from an honest peer must fit inside a valid block.
-        // Since encoding the length of the vec takes at least one byte, we use MAX_BLOCK_BYTES - 1
         (MAX_BLOCK_BYTES - 1) / BURN_ITEM_SIZE
     }
 }
@@ -65,7 +61,6 @@ impl serde::Serialize for BurnItem {
     where
         S: serde::Serializer,
     {
-        // FIXME: return a custom error with a meaningful description?
         (self.0.to_bytes(), &self.1).serialize(serializer)
     }
 }
@@ -75,11 +70,8 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
     where
         D: serde::Deserializer<'de>,
     {
-        // FIXME: consider another implementation (explicit specifying of [u8; 32] may not look perfect)
         let (asset_base_bytes, amount) = <([u8; 32], Amount)>::deserialize(deserializer)?;
-        // FIXME: return custom error with a meaningful description?
         Ok(BurnItem(
-            // FIXME: duplicates the body of AssetBase::zcash_deserialize?
             Option::from(AssetBase::from_bytes(&asset_base_bytes))
                 .ok_or_else(|| serde::de::Error::custom("Invalid orchard_zsa AssetBase"))?,
             amount,
