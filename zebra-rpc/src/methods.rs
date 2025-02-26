@@ -1947,7 +1947,7 @@ impl From<DAddressStrings> for AddressStrings {
     }
 }
 
-/// An intermediate type used to serialize and deserialize the address strings.
+/// An intermediate type used to deserialize [`AddressStrings`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
 #[serde(untagged)]
 enum DAddressStrings {

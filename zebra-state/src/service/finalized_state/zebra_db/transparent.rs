@@ -294,15 +294,15 @@ impl ZebraDb {
 
     // Address index queries
 
-    /// Returns the total transparent balance for `addresses` in the finalized chain.
+    /// Returns the total transparent balance and received balance for `addresses` in the finalized chain.
     ///
-    /// If none of the addresses has a balance, returns zero.
+    /// If none of the addresses have a balance, returns zeroes.
     ///
     /// # Correctness
     ///
-    /// Callers should apply the non-finalized balance change for `addresses` to the returned balance.
+    /// Callers should apply the non-finalized balance change for `addresses` to the returned balances.
     ///
-    /// The total balance will only be correct if the non-finalized chain matches the finalized state.
+    /// The total balances will only be correct if the non-finalized chain matches the finalized state.
     /// Specifically, the root of the partial non-finalized chain must be a child block of the finalized tip.
     pub fn partial_finalized_transparent_balance(
         &self,
@@ -314,6 +314,7 @@ impl ZebraDb {
             .try_fold(
                 (Amount::zero(), 0),
                 |(a_balance, a_received): (Amount<NonNegative>, u64), (b_balance, b_received)| {
+                    // Addresses could receive more than the max money supply by sending to themselves, use u64::MAX if the addition overflows.
                     let received = a_received.checked_add(b_received).unwrap_or(u64::MAX);
                     Ok(((a_balance + b_balance)?, received))
                 },

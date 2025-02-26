@@ -54,7 +54,7 @@ pub fn transparent_balance(
         let chain_balance_change =
             chain_transparent_balance_change(chain, &addresses, finalized_tip);
 
-        balance = apply_balance_change(balance, (chain_balance_change, 0)).expect(
+        balance = apply_balance_change(balance, chain_balance_change).expect(
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
         );
     }
@@ -101,7 +101,7 @@ fn chain_transparent_balance_change(
     mut chain: Arc<Chain>,
     addresses: &HashSet<transparent::Address>,
     finalized_tip: Option<Height>,
-) -> Amount<NegativeAllowed> {
+) -> (Amount<NegativeAllowed>, u64) {
     // # Correctness
     //
     // Find the balance adjustment that corrects for overlapping finalized and non-finalized blocks.
@@ -123,7 +123,7 @@ fn chain_transparent_balance_change(
     // If we've already committed this entire chain, ignore its balance changes.
     // This is more likely if the non-finalized state is just getting started.
     if chain_tip < required_chain_root {
-        return Amount::zero();
+        return (Amount::zero(), 0);
     }
 
     // Correctness: some balances might have duplicate creates or spends,
@@ -133,7 +133,10 @@ fn chain_transparent_balance_change(
         chain.pop_root();
     }
 
-    chain.partial_transparent_balance_change(addresses)
+    (
+        chain.partial_transparent_balance_change(addresses),
+        chain.partial_transparent_received_change(addresses),
+    )
 }
 
 /// Add the supplied finalized and non-finalized balances together,
@@ -143,6 +146,8 @@ fn apply_balance_change(
     (chain_balance_change, chain_received_change): (Amount<NegativeAllowed>, u64),
 ) -> amount::Result<(Amount<NonNegative>, u64)> {
     let balance = finalized_balance.constrain()? + chain_balance_change;
+    // Addresses could receive more than the max money supply by sending to themselves,
+    // use u64::MAX if the addition overflows.
     let received = finalized_received
         .checked_add(chain_received_change)
         .unwrap_or(u64::MAX);

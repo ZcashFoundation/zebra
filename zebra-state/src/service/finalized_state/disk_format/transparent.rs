@@ -238,6 +238,7 @@ impl std::ops::Add for AddressBalanceLocation {
     fn add(self, rhs: Self) -> Self::Output {
         Ok(AddressBalanceLocation {
             balance: (self.balance + rhs.balance)?,
+            // Addresses could receive more than the max money supply by sending to themselves, use u64::MAX if the addition overflows.
             received: self.received.checked_add(rhs.received).unwrap_or(u64::MAX),
             location: self.location,
         })
@@ -286,6 +287,7 @@ impl AddressBalanceLocation {
         self.received = self
             .received
             .checked_add(unspent_output.value().into())
+            // Addresses could receive more than the max money supply by sending to themselves.
             .unwrap_or(u64::MAX);
 
         Ok(())
@@ -675,12 +677,12 @@ impl FromDisk for OutputLocation {
 }
 
 impl IntoDisk for AddressBalanceLocation {
-    type Bytes = [u8; (2 * BALANCE_DISK_BYTES) + OUTPUT_LOCATION_DISK_BYTES];
+    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
 
     fn as_bytes(&self) -> Self::Bytes {
         let balance_bytes = self.balance().as_bytes().to_vec();
-        let received_bytes = self.received().to_be_bytes().to_vec();
         let address_location_bytes = self.address_location().as_bytes().to_vec();
+        let received_bytes = self.received().to_be_bytes().to_vec();
 
         [balance_bytes, address_location_bytes, received_bytes]
             .concat()
@@ -696,6 +698,9 @@ impl FromDisk for AddressBalanceLocation {
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
         let address_location = AddressLocation::from_bytes(address_location_bytes);
+        // # Backwards Compatibility
+        //
+        // If the value is missing a `received` field, default to 0.
         let received = u64::from_be_bytes(received_bytes.try_into().unwrap_or_default());
 
         let mut address_balance_location = AddressBalanceLocation::new(address_location);
