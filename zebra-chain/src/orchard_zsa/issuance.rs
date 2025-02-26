@@ -1,4 +1,4 @@
-//! Orchard ZSA issuance related functionality.
+//! OrchardZSA issuance related functionality.
 
 use std::{fmt::Debug, io};
 
@@ -55,9 +55,8 @@ impl IssueData {
     }
 }
 
-// Sizes of the serialized values for types in bytes (used for TrustedPreallocate impls)
-// FIXME: are those values correct (43, 32 etc.)?
-//const ISSUANCE_VALIDATING_KEY_SIZE: u64 = 32;
+// Sizes of the types, in bytes
+// FIXME: import from orchard
 const ADDRESS_SIZE: u64 = 43;
 const NULLIFIER_SIZE: u64 = 32;
 const NOTE_VALUE_SIZE: u64 = 4;
@@ -68,17 +67,13 @@ const NOTE_SIZE: u64 =
 
 impl TrustedPreallocate for Note {
     fn max_allocation() -> u64 {
-        // FIXME: is this a correct calculation way?
-        // The longest Vec<Note> we receive from an honest peer must fit inside a valid block.
-        // Since encoding the length of the vec takes at least one byte, we use MAX_BLOCK_BYTES - 1
         (MAX_BLOCK_BYTES - 1) / NOTE_SIZE
     }
 }
 
 impl TrustedPreallocate for IssueAction {
     fn max_allocation() -> u64 {
-        // FIXME: impl correct calculation
-        10
+        (MAX_BLOCK_BYTES - 1) / 3
     }
 }
 

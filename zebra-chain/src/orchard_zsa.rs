@@ -1,4 +1,4 @@
-//! Orchard ZSA related functionality.
+//! OrchardZSA related functionality.
 
 // FIXME: remove pub(crate) later if possible
 #[cfg(any(test, feature = "proptest-impl"))]

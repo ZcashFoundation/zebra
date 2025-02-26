@@ -20,13 +20,7 @@ use crate::{
     },
 };
 
-use super::OrchardFlavorExt;
-
-#[cfg(not(feature = "tx-v6"))]
-use super::OrchardVanilla;
-
-#[cfg(feature = "tx-v6")]
-use super::OrchardZSA;
+use super::{OrchardFlavorExt, OrchardVanilla};
 
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -79,7 +73,8 @@ impl<V: OrchardFlavorExt> ShieldedData<V> {
         self.actions.actions()
     }
 
-    /// FIXME: add a doc comment
+    /// Return an iterator for the [`ActionCommon`] copy of the Actions in this
+    /// transaction, in the order they appear in it.
     pub fn action_commons(&self) -> impl Iterator<Item = ActionCommon> + '_ {
         self.actions.actions().map(|action| action.into())
     }
@@ -220,19 +215,15 @@ impl<V: OrchardFlavorExt> AuthorizedAction<V> {
     }
 }
 
-// TODO: FIXME: Consider moving it to transaction.rs as it's not used here. Or move its usage here from transaction.rs.
-/// A struct that contains values of several fields of an `Action` struct.
-/// Those fields are used in other parts of the code that call the `orchard_actions()` method of the `Transaction`.
-/// The goal of using `ActionCommon` is that it's not a generic, unlike `Action`, so it can be returned from Transaction methods
-/// (the fields of `ActionCommon` do not depend on the generic parameter `Version` of `Action`).
+/// Non-generic fields of an `Action` used in `Transaction` methods.
 pub struct ActionCommon {
-    /// A reference to the value commitment to the net value of the input note minus the output note.
-    pub cv: super::commitment::ValueCommitment,
-    /// A reference to the nullifier of the input note being spent.
+    /// A value commitment to net value of the input note minus the output note
+    pub cv: ValueCommitment,
+    /// The nullifier of the input note being spent.
     pub nullifier: super::note::Nullifier,
-    /// A reference to the randomized validating key for `spendAuthSig`.
+    /// The randomized validating key for spendAuthSig,
     pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
-    /// A reference to the x-coordinate of the note commitment for the output note.
+    /// The x-coordinate of the note commitment for the output note.
     pub cm_x: pallas::Base,
 }
 
@@ -246,14 +237,6 @@ impl<V: OrchardFlavorExt> From<&Action<V>> for ActionCommon {
         }
     }
 }
-
-/*
-struct AssertBlockSizeLimit<const N: u64>;
-
-impl<const N: u64> AssertBlockSizeLimit<N> {
-    const OK: () = assert!(N < (1 << 16), "must be less than 2^16");
-}
-*/
 
 /// The maximum number of orchard actions in a valid Zcash on-chain transaction V5.
 ///
@@ -283,16 +266,7 @@ impl<V: OrchardFlavorExt> TrustedPreallocate for Action<V> {
 
 impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
-        // Each signature must have a corresponding action.
-        #[cfg(not(feature = "tx-v6"))]
-        let result = Action::<OrchardVanilla>::max_allocation();
-
-        // TODO: FIXME: Check this: V6 is used as it provides the max size of the action.
-        // So it's used even for V5 - is this correct?
-        #[cfg(feature = "tx-v6")]
-        let result = Action::<OrchardZSA>::max_allocation();
-
-        result
+        Action::<OrchardVanilla>::max_allocation()
     }
 }
 
