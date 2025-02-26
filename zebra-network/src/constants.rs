@@ -340,6 +340,8 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// This version of Zebra draws the current network protocol version from
 /// [ZIP-253](https://zips.z.cash/zip-0253).
+// TODO: Update this constant to the correct value after NU7 activation,
+// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_140);
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
 
 /// The default RTT estimate for peer responses.
@@ -410,7 +412,7 @@ lazy_static! {
 
         hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu6));
         hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu6));
-        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(None, None), Nu6));
+        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(Default::default()), Nu6));
 
         hash_map
     };

@@ -73,6 +73,7 @@ Heartwood = 903_800
 Canopy = 1_028_500
 NU5 = 1_842_420
 NU6 = 2_000_000
+NU7 = 2_000_001
 
 [network.testnet_parameters.pre_nu6_funding_streams.height_range]
 start = 0
