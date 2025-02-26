@@ -226,8 +226,8 @@ pub enum ReadResponse {
     AddressBalance {
         /// The total balance of the addresses.
         balance: Amount<NonNegative>,
-        /// The total received funds, including change.
-        received: Amount<NonNegative>,
+        /// The total received funds in zatoshis, including change.
+        received: u64,
     },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]

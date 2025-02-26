@@ -10,10 +10,7 @@ use crossbeam_channel::{Receiver, TryRecvError};
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
 use semver::Version;
 
-use zebra_chain::{
-    amount::{Amount, NonNegative},
-    block::Height,
-};
+use zebra_chain::block::Height;
 
 use crate::{service::finalized_state::ZebraDb, DiskWriteBatch, TransactionLocation, WriteDisk};
 
@@ -46,9 +43,9 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
         let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
         let initial_tx_loc_range = ..=TransactionLocation::max_for_height(initial_tip_height);
 
-        let make_modifier = |received: Amount<NonNegative>| {
-            move |received_acc: &mut Amount<NonNegative>| {
-                *received_acc = (*received_acc + received).expect("should be valid");
+        let make_modifier = |received: u64| {
+            move |received_acc: &mut u64| {
+                *received_acc = received_acc.checked_add(received).unwrap_or(u64::MAX);
             }
         };
 
@@ -62,8 +59,8 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
                     Err(CancelFormatChange)
                 } else {
                     acc.entry(output.address(network).expect("should be valid"))
-                        .and_modify(make_modifier(output.value))
-                        .or_insert(output.value);
+                        .and_modify(make_modifier(output.value.into()))
+                        .or_insert(output.value.into());
 
                     Ok(acc)
                 }
@@ -99,8 +96,8 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
                         } else {
                             address_received_map
                                 .entry(output.address(network).expect("should be valid"))
-                                .and_modify(make_modifier(output.value))
-                                .or_insert(output.value);
+                                .and_modify(make_modifier(output.value.into()))
+                                .or_insert(output.value.into());
                         }
                     }
 
@@ -188,8 +185,8 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
                         } else {
                             address_received_map
                                 .entry(output.address(network).expect("should be valid"))
-                                .and_modify(make_modifier(output.value))
-                                .or_insert(output.value);
+                                .and_modify(make_modifier(output.value.into()))
+                                .or_insert(output.value.into());
                         }
                     }
                 }

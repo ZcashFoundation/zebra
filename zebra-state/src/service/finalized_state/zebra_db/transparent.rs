@@ -94,7 +94,7 @@ impl ZebraDb {
     pub fn address_balance(
         &self,
         address: &transparent::Address,
-    ) -> Option<(Amount<NonNegative>, Amount<NonNegative>)> {
+    ) -> Option<(Amount<NonNegative>, u64)> {
         self.address_balance_location(address)
             .map(|abl| (abl.balance(), abl.received()))
     }
@@ -307,15 +307,15 @@ impl ZebraDb {
     pub fn partial_finalized_transparent_balance(
         &self,
         addresses: &HashSet<transparent::Address>,
-    ) -> (Amount<NonNegative>, Amount<NonNegative>) {
-        let balance: amount::Result<(Amount<NonNegative>, Amount<NonNegative>)> = addresses
+    ) -> (Amount<NonNegative>, u64) {
+        let balance: amount::Result<(Amount<NonNegative>, u64)> = addresses
             .iter()
             .filter_map(|address| self.address_balance(address))
-            .fold(
-                Ok((Amount::zero(), Amount::zero())),
-                |acc, (b_balance, b_received)| {
-                    let (a_balance, a_received) = acc?;
-                    Ok(((a_balance + b_balance)?, (a_received + b_received)?))
+            .try_fold(
+                (Amount::zero(), 0),
+                |(a_balance, a_received): (Amount<NonNegative>, u64), (b_balance, b_received)| {
+                    let received = a_received.checked_add(b_received).unwrap_or(u64::MAX);
+                    Ok(((a_balance + b_balance)?, received))
                 },
             );
 

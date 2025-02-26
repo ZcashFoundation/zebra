@@ -226,7 +226,7 @@ pub struct AddressBalanceLocation {
     balance: Amount<NonNegative>,
 
     /// The total balance of all spent and unspent outputs sent to an address.
-    received: Amount<NonNegative>,
+    received: u64,
 
     /// The location of the first [`transparent::Output`] sent to an address.
     location: AddressLocation,
@@ -238,7 +238,7 @@ impl std::ops::Add for AddressBalanceLocation {
     fn add(self, rhs: Self) -> Self::Output {
         Ok(AddressBalanceLocation {
             balance: (self.balance + rhs.balance)?,
-            received: (self.received + rhs.received)?,
+            received: self.received.checked_add(rhs.received).unwrap_or(u64::MAX),
             location: self.location,
         })
     }
@@ -252,7 +252,7 @@ impl AddressBalanceLocation {
     pub fn new(first_output: OutputLocation) -> AddressBalanceLocation {
         AddressBalanceLocation {
             balance: Amount::zero(),
-            received: Amount::zero(),
+            received: 0,
             location: first_output,
         }
     }
@@ -263,7 +263,7 @@ impl AddressBalanceLocation {
     }
 
     /// Returns the current received balance for the address.
-    pub fn received(&self) -> Amount<NonNegative> {
+    pub fn received(&self) -> u64 {
         self.received
     }
 
@@ -273,7 +273,7 @@ impl AddressBalanceLocation {
     }
 
     /// Returns a mutable reference to the current received balance for the address.
-    pub fn received_mut(&mut self) -> &mut Amount<NonNegative> {
+    pub fn received_mut(&mut self) -> &mut u64 {
         &mut self.received
     }
 
@@ -283,7 +283,10 @@ impl AddressBalanceLocation {
         unspent_output: &transparent::Output,
     ) -> Result<(), amount::Error> {
         self.balance = (self.balance + unspent_output.value())?;
-        self.received = (self.received + unspent_output.value())?;
+        self.received = self
+            .received
+            .checked_add(unspent_output.value().into())
+            .unwrap_or(u64::MAX);
 
         Ok(())
     }
@@ -676,7 +679,7 @@ impl IntoDisk for AddressBalanceLocation {
 
     fn as_bytes(&self) -> Self::Bytes {
         let balance_bytes = self.balance().as_bytes().to_vec();
-        let received_bytes = self.received().as_bytes().to_vec();
+        let received_bytes = self.received().to_be_bytes().to_vec();
         let address_location_bytes = self.address_location().as_bytes().to_vec();
 
         [balance_bytes, address_location_bytes, received_bytes]
@@ -693,7 +696,7 @@ impl FromDisk for AddressBalanceLocation {
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
         let address_location = AddressLocation::from_bytes(address_location_bytes);
-        let received = Amount::from_bytes(received_bytes.try_into().unwrap_or_default()).unwrap();
+        let received = u64::from_be_bytes(received_bytes.try_into().unwrap_or_default());
 
         let mut address_balance_location = AddressBalanceLocation::new(address_location);
         *address_balance_location.balance_mut() = balance;

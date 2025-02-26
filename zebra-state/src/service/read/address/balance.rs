@@ -33,7 +33,7 @@ pub fn transparent_balance(
     chain: Option<Arc<Chain>>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-) -> Result<(Amount<NonNegative>, Amount<NonNegative>), BoxError> {
+) -> Result<(Amount<NonNegative>, u64), BoxError> {
     let mut balance_result = finalized_transparent_balance(db, &addresses);
 
     // Retry the finalized balance query if it was interrupted by a finalizing block
@@ -54,7 +54,7 @@ pub fn transparent_balance(
         let chain_balance_change =
             chain_transparent_balance_change(chain, &addresses, finalized_tip);
 
-        balance = apply_balance_change(balance, (chain_balance_change, Amount::zero())).expect(
+        balance = apply_balance_change(balance, (chain_balance_change, 0)).expect(
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
         );
     }
@@ -71,7 +71,7 @@ pub fn transparent_balance(
 fn finalized_transparent_balance(
     db: &ZebraDb,
     addresses: &HashSet<transparent::Address>,
-) -> Result<((Amount<NonNegative>, Amount<NonNegative>), Option<Height>), BoxError> {
+) -> Result<((Amount<NonNegative>, u64), Option<Height>), BoxError> {
     // # Correctness
     //
     // The StateService can commit additional blocks while we are querying address balances.
@@ -139,11 +139,13 @@ fn chain_transparent_balance_change(
 /// Add the supplied finalized and non-finalized balances together,
 /// and return the result.
 fn apply_balance_change(
-    (finalized_balance, finalized_received): (Amount<NonNegative>, Amount<NonNegative>),
-    (chain_balance_change, chain_received_change): (Amount<NegativeAllowed>, Amount<NonNegative>),
-) -> amount::Result<(Amount<NonNegative>, Amount<NonNegative>)> {
+    (finalized_balance, finalized_received): (Amount<NonNegative>, u64),
+    (chain_balance_change, chain_received_change): (Amount<NegativeAllowed>, u64),
+) -> amount::Result<(Amount<NonNegative>, u64)> {
     let balance = finalized_balance.constrain()? + chain_balance_change;
-    let received = finalized_received.constrain()? + chain_received_change;
+    let received = finalized_received
+        .checked_add(chain_received_change)
+        .unwrap_or(u64::MAX);
 
-    Ok((balance?.constrain()?, received?.constrain()?))
+    Ok((balance?.constrain()?, received))
 }

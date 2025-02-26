@@ -754,7 +754,7 @@ where
         match response {
             zebra_state::ReadResponse::AddressBalance { balance, received } => Ok(AddressBalance {
                 balance: u64::from(balance),
-                received: u64::from(received),
+                received,
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
         }
