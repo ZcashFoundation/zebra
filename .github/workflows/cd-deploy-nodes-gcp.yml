@@ -6,7 +6,6 @@
 # 2. `build`: Builds a Docker image named `zebrad` with the necessary tags derived from Git.
 # 3. `test-configuration-file`: Validates Zebra using the default config with the latest version.
 # 4. `test-configuration-file-testnet`: Tests the Docker image for the testnet configuration.
-# 5. `test-zebra-conf-path`: Verifies Zebra with a custom Docker config file.
 # 6. `deploy-nodes`: Deploys Managed Instance Groups (MiGs) for Mainnet and Testnet. If triggered by main branch pushes, it always replaces the MiG. For releases, MiGs are replaced only if deploying the same major version; otherwise, a new major version is deployed.
 # 7. `deploy-instance`: Deploys a single node in a specified GCP zone for testing specific commits. Instances from this job aren't auto-replaced or deleted.
 #
@@ -157,21 +156,9 @@ jobs:
     if: ${{ (github.event_name != 'release' && !(github.event.pull_request.head.repo.fork)) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
-      disk_prefix: zebrad-cache 
+      disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
       prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
-
-  # TODO: Re-enable this test once we have a way to mount a custom config file just for this test
-  # Test that Zebra works using $ZEBRA_CONF_PATH config
-  # test-zebra-conf-path:
-  #   name: Test CD custom Docker config file
-  #   needs: build
-  #   uses: ./.github/workflows/sub-test-zebra-config.yml
-  #   with:
-  #     test_id: "custom-conf"
-  #     docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-  #     test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
-  #     grep_patterns: '-e "extra_coinbase_data:\sSome\(\"do you even shield\?\"\)"'
 
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
@@ -256,8 +243,6 @@ jobs:
         build,
         versioning,
         test-configuration-file,
-        # TODO: Re-enable this test once we have a way to mount a custom config file just for this test
-        # test-zebra-conf-path,
         get-disk-name,
       ]
     runs-on: ubuntu-latest
@@ -390,7 +375,7 @@ jobs:
   failure-issue:
     name: Open or update issues for release failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ versioning, build, deploy-nodes ]
+    needs: [versioning, build, deploy-nodes]
 
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
