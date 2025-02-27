@@ -412,10 +412,10 @@ impl ZcashSerialize for Option<orchard::ShieldedData<OrchardZSA>> {
 
 // FIXME: Try to avoid duplication with OrchardVanilla version
 #[cfg(feature = "tx-v6")]
+#[allow(clippy::unwrap_in_result)]
 impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         // Exactly one action group for NU7
-        #[allow(clippy::unwrap_in_result)]
         CompactSizeMessage::try_from(1)
             .expect("1 should convert to CompactSizeMessage")
             .zcash_serialize(&mut writer)?;
