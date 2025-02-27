@@ -10,11 +10,21 @@
 
 set -eo pipefail
 
-# Exit early if `ZEBRA_CONF_PATH` does not point to a file.
+# Check if `ZEBRA_CONF_PATH` points to a file, and WARN if not.
+# This is unlikely to happen because the Dockerfile copies the file.
 if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
-  echo "the ZEBRA_CONF_PATH env var does not point to a Zebra conf file"
-  exit 1
+  echo "WARNING: the ZEBRA_CONF_PATH env var does not point to a Zebra conf file."
+  echo "This is unexpected and may indicate a problem with the container."
 fi
+
+# Define function to execute commands as the specified user
+exec_as_user() {
+  if [[ "$(id -u)" = '0' ]]; then
+    exec gosu "${USER}" "$@"
+  else
+    exec "$@"
+  fi
+}
 
 # Generates a config file for Zebra using env vars set in "docker/.env" and
 # prints the location of the generated config file.
@@ -24,24 +34,24 @@ fi
 # - "$1": the file to read the default config from
 prepare_conf_file() {
   # Copy the default config to a new location for writing.
-  CONF=~/zebrad.toml
+  CONF="${ZEBRA_CONF_PATH}"
   cp "${1}" "${CONF}"
 
   # Set a custom network.
-  if [[ "${NETWORK}" ]]; then
-    sed -i '/network = ".*"/s/".*"/"'"${NETWORK//\"/}"'"/' "${CONF}"
+  if [[ -n "${NETWORK}" ]]; then
+    sed -i '/network = ".*"/s/".*"/"'"${NETWORK//\"/}"'"/' "${ZEBRA_CONF_PATH}"
   fi
 
   # Enable the RPC server by setting its port.
-  if [[ "${ZEBRA_RPC_PORT}" ]]; then
-    sed -i '/# listen_addr = "0.0.0.0:18232" # Testnet/d' "${CONF}"
-    sed -i 's/ *# Mainnet$//' "${CONF}"
-    sed -i '/# listen_addr = "0.0.0.0:8232"/s/^# //; s/8232/'"${ZEBRA_RPC_PORT//\"/}"'/' "${CONF}"
+  if [[ -n "${ZEBRA_RPC_PORT}" ]]; then
+    sed -i '/# listen_addr = "0.0.0.0:18232" # Testnet/d' "${ZEBRA_CONF_PATH}"
+    sed -i 's/ *# Mainnet$//' "${ZEBRA_CONF_PATH}"
+    sed -i '/# listen_addr = "0.0.0.0:8232"/s/^# //; s/8232/'"${ZEBRA_RPC_PORT//\"/}"'/' "${ZEBRA_CONF_PATH}"
   fi
 
   # Disable or enable cookie authentication.
-  if [[ "${ENABLE_COOKIE_AUTH}" ]]; then
-    sed -i '/# enable_cookie_auth = true/s/^# //; s/true/'"${ENABLE_COOKIE_AUTH//\"/}"'/' "${CONF}"
+  if [[ -n "${ENABLE_COOKIE_AUTH}" ]]; then
+    sed -i '/# enable_cookie_auth = true/s/^# //; s/true/'"${ENABLE_COOKIE_AUTH//\"/}"'/' "${ZEBRA_CONF_PATH}"
   fi
 
   # Set a custom state, network and cookie cache dirs.
@@ -49,42 +59,52 @@ prepare_conf_file() {
   # We're pointing all three cache dirs at the same location, so users will find
   # all cached data in that single location. We can introduce more env vars and
   # use them to set the cache dirs separately if needed.
-  if [[ "${ZEBRA_CACHE_DIR}" ]]; then
+  if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
     mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
-    sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${CONF}"
+    sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${ZEBRA_CONF_PATH}"
+    # Fix permissions right after creating/configuring the directory
+    if [[ "$(id -u)" = '0' ]]; then
+      # "Setting permissions for the cache directory
+      chown -R "${USER}:${USER}" "${ZEBRA_CACHE_DIR//\"/}"
+    fi
   fi
 
   # Enable the Prometheus metrics endpoint.
   if [[ "${FEATURES}" == *"prometheus"* ]]; then
-    sed -i '/# endpoint_addr = "0.0.0.0:9999" # Prometheus/s/^# //' "${CONF}"
+    sed -i '/# endpoint_addr = "0.0.0.0:9999" # Prometheus/s/^# //' "${ZEBRA_CONF_PATH}"
   fi
 
   # Enable logging to a file by setting a custom log file path.
-  if [[ "${LOG_FILE}" ]]; then
+  if [[ -n "${LOG_FILE}" ]]; then
     mkdir -p "$(dirname "${LOG_FILE//\"/}")"
-    sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${CONF}"
+    sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${ZEBRA_CONF_PATH}"
+    # Fix permissions right after creating/configuring the log directory
+    if [[ "$(id -u)" = '0' ]]; then
+      # "Setting permissions for the log directory
+      chown -R "${USER}:${USER}" "$(dirname "${LOG_FILE//\"/}")"
+    fi
   fi
 
   # Enable or disable colored logs.
-  if [[ "${LOG_COLOR}" ]]; then
-    sed -i '/# force_use_color = true/s/^# //' "${CONF}"
-    sed -i '/use_color = true/s/true/'"${LOG_COLOR//\"/}"'/' "${CONF}"
+  if [[ -n "${LOG_COLOR}" ]]; then
+    sed -i '/# force_use_color = true/s/^# //' "${ZEBRA_CONF_PATH}"
+    sed -i '/use_color = true/s/true/'"${LOG_COLOR//\"/}"'/' "${ZEBRA_CONF_PATH}"
   fi
 
   # Enable or disable logging to systemd-journald.
-  if [[ "${USE_JOURNALD}" ]]; then
-    sed -i '/# use_journald = true/s/^# //; s/true/'"${USE_JOURNALD//\"/}"'/' "${CONF}"
+  if [[ -n "${USE_JOURNALD}" ]]; then
+    sed -i '/# use_journald = true/s/^# //; s/true/'"${USE_JOURNALD//\"/}"'/' "${ZEBRA_CONF_PATH}"
   fi
 
   # Set a mining address.
-  if [[ "${MINER_ADDRESS}" ]]; then
-    sed -i '/# miner_address = ".*"/{s/^# //; s/".*"/"'"${MINER_ADDRESS//\"/}"'"/}' "${CONF}"
+  if [[ -n "${MINER_ADDRESS}" ]]; then
+    sed -i '/# miner_address = ".*"/{s/^# //; s/".*"/"'"${MINER_ADDRESS//\"/}"'"/}' "${ZEBRA_CONF_PATH}"
   fi
 
   # Trim all comments and empty lines.
-  sed -i '/^#/d; /^$/d' "${CONF}"
+  sed -i '/^#/d; /^$/d' "${ZEBRA_CONF_PATH}"
 
-  echo "${CONF}"
+  echo "${ZEBRA_CONF_PATH}"
 }
 
 # Checks if a directory contains subdirectories
@@ -116,11 +136,11 @@ check_directory_files() {
 #     https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options,
 #   - or be empty.
 # - The remaining params will be appended to a command starting with
-#   `exec cargo test ... -- ...`
+#   `exec_as_user cargo test ... -- ...`
 run_cargo_test() {
   # Start constructing the command, ensuring that $1 is enclosed in single
   # quotes as it's a feature list
-  local cmd="exec cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
+  local cmd="exec_as_user cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
 
   # Shift the first argument, as it's already included in the cmd
   shift
@@ -153,23 +173,23 @@ run_tests() {
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
-    exec cargo test --locked --release --workspace --features "${FEATURES}" \
+    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
       -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
   elif [[ "${RUN_CHECK_NO_GIT_REFS}" -eq "1" ]]; then
     # Run the check_no_git_refs_in_cargo_lock test.
-    exec cargo test --locked --release --workspace --features "${FEATURES}" \
+    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
       -- --nocapture --include-ignored check_no_git_refs_in_cargo_lock
 
   elif [[ "${TEST_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
     # Run state tests with fake activation heights.
-    exec cargo test --locked --release --lib --features "zebra-test" \
+    exec_as_user cargo test --locked --release --lib --features "zebra-test" \
       --package zebra-state \
       -- --nocapture --include-ignored with_fake_activation_heights
 
   elif [[ "${TEST_SCANNER}" -eq "1" ]]; then
     # Test the scanner.
-    exec cargo test --locked --release --package zebra-scan \
+    exec_as_user cargo test --locked --release --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands scan_start_where_left
 
   elif [[ "${TEST_ZEBRA_EMPTY_SYNC}" -eq "1" ]]; then
@@ -257,15 +277,22 @@ run_tests() {
     run_cargo_test "${FEATURES}" "submit_block"
 
   else
-    exec "$@"
+    exec_as_user "$@"
   fi
 }
 
 # Main Script Logic
 
-echo "Prepared the following Zebra config:"
+# Check if the config file already exists.  If it does, we assume it's a
+# user-provided config and skip preparing the default config.
+if [[ -f "${ZEBRA_CONF_PATH}" ]]; then
+  echo "INFO: Using existing configuration file at ${ZEBRA_CONF_PATH}."
+  CONF_PATH="${ZEBRA_CONF_PATH}"
+else
+  echo "Prepared the following Zebra config:"
+  CONF_PATH=$(prepare_conf_file "${DEFAULT_CONFIG_PATH}")
+fi
 
-CONF_PATH=$(prepare_conf_file "${ZEBRA_CONF_PATH}")
 cat "${CONF_PATH}"
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
@@ -277,13 +304,13 @@ cat "${CONF_PATH}"
 case "$1" in
 --* | -* | zebrad)
   shift
-  exec zebrad --config "${CONF_PATH}" "$@"
+  exec_as_user zebrad --config "${CONF_PATH}" "$@"
   ;;
 test)
   shift
   if [[ "$1" == "zebrad" ]]; then
     shift
-    exec zebrad --config "${CONF_PATH}" "$@"
+    exec_as_user zebrad --config "${CONF_PATH}" "$@"
   else
     run_tests "$@"
   fi
@@ -293,6 +320,6 @@ monitoring)
   :
   ;;
 *)
-  exec "$@"
+  exec_as_user "$@"
   ;;
 esac
