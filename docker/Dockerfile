@@ -85,6 +85,7 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 ARG UID
 ARG GID
 ARG HOME
+ARG USER
 
 RUN addgroup --system --gid ${GID} ${USER} && \
     adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
