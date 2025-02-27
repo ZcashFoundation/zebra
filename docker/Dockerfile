@@ -20,8 +20,8 @@
 ARG FEATURES="default-release-binaries"
 
 ARG USER="zebra"
-ARG UID=1001
-ARG GID=1001
+ARG UID=101
+ARG GID=101
 ARG HOME="/home/${USER}"
 
 ARG RUST_VERSION=1.85.0
