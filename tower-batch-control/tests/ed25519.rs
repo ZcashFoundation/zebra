@@ -33,7 +33,7 @@ type VerifyResult = Result<(), Error>;
 type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
-/// This is a newtype around a `Ed25519Item`.
+/// This is a newtype around an `Ed25519Item`.
 #[derive(Clone, Debug)]
 struct Item(batch::Item);
 

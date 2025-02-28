@@ -16,7 +16,7 @@ use rand::{thread_rng, CryptoRng, RngCore};
 use thiserror::Error;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, ItemSize};
 use tower_fallback::Fallback;
 
 use crate::BoxError;
@@ -90,6 +90,12 @@ lazy_static::lazy_static! {
 pub struct Item {
     instances: Vec<orchard::circuit::Instance>,
     proof: orchard::circuit::Proof,
+}
+
+impl ItemSize for Item {
+    fn item_size(&self) -> usize {
+        self.instances.len()
+    }
 }
 
 impl Item {
