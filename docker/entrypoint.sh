@@ -10,11 +10,11 @@
 
 set -eo pipefail
 
-# Check if `ZEBRA_CONF_PATH` points to a file, and WARN if not.
-# This is unlikely to happen because the Dockerfile copies the file.
+# Check if `ZEBRA_CONF_PATH` points to a file, and FAIL if not.
 if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
-  echo "WARNING: the ZEBRA_CONF_PATH env var does not point to a Zebra conf file."
-  echo "This is unexpected and may indicate a problem with the container."
+  echo "ERROR: No Zebra config file found at ZEBRA_CONF_PATH (${ZEBRA_CONF_PATH})."
+  echo "Please ensure the file exists or mount your custom config file and set ZEBRA_CONF_PATH accordingly."
+  exit 1
 fi
 
 # Define function to execute commands as the specified user
@@ -26,16 +26,12 @@ exec_as_user() {
   fi
 }
 
-# Generates a config file for Zebra using env vars set in "docker/.env" and
-# prints the location of the generated config file.
+# Modifies the existing Zebra config file at ZEBRA_CONF_PATH using environment variables.
 #
-# ## Positional Parameters
+# Environment variables are typically set in "docker/.env".
 #
-# - "$1": the file to read the default config from
+# This function modifies the existing file in-place and prints its location.
 prepare_conf_file() {
-  # Copy the default config to a new location for writing.
-  CONF="${ZEBRA_CONF_PATH}"
-  cp "${1}" "${CONF}"
 
   # Set a custom network.
   if [[ -n "${NETWORK}" ]]; then
@@ -283,17 +279,9 @@ run_tests() {
 
 # Main Script Logic
 
-# Check if the config file already exists.  If it does, we assume it's a
-# user-provided config and skip preparing the default config.
-if [[ -f "${ZEBRA_CONF_PATH}" ]]; then
-  echo "INFO: Using existing configuration file at ${ZEBRA_CONF_PATH}."
-  CONF_PATH="${ZEBRA_CONF_PATH}"
-else
-  echo "Prepared the following Zebra config:"
-  CONF_PATH=$(prepare_conf_file "${DEFAULT_CONFIG_PATH}")
-fi
-
-cat "${CONF_PATH}"
+prepare_conf_file "${ZEBRA_CONF_PATH}"
+echo "Prepared the following Zebra config:"
+cat "${ZEBRA_CONF_PATH}"
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
 # - If "$1" is "tests":
@@ -304,13 +292,13 @@ cat "${CONF_PATH}"
 case "$1" in
 --* | -* | zebrad)
   shift
-  exec_as_user zebrad --config "${CONF_PATH}" "$@"
+  exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
   ;;
 test)
   shift
   if [[ "$1" == "zebrad" ]]; then
     shift
-    exec_as_user zebrad --config "${CONF_PATH}" "$@"
+    exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
   else
     run_tests "$@"
   fi
