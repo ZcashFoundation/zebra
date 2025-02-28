@@ -43,7 +43,8 @@ use zebra_consensus::ParameterCheckpoint;
 use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{
-    HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+    HashHeightOrNegativeHeight, HashOrHeight, OutputIndex, OutputLocation, ReadRequest,
+    ReadResponse, TransactionLocation,
 };
 
 use crate::{
@@ -839,11 +840,24 @@ where
             None
         };
 
-        let hash_or_height: HashOrHeight = hash_or_height
-            .parse()
+        let hash_height_or_negative_height = hash_or_height
+            .parse::<HashHeightOrNegativeHeight>()
             // Reference for the legacy error code:
             // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
             .map_error(server::error::LegacyCode::InvalidParameter)?;
+
+        let best_tip_height = hash_height_or_negative_height
+            .is_negative_height()
+            .then(|| {
+                self.latest_chain_tip
+                    .best_tip_height()
+                    .ok_or_misc_error("No blocks in state")
+            })
+            .transpose()?;
+
+        let hash_or_height = hash_height_or_negative_height
+            .into_hash_or_height(best_tip_height)
+            .ok_or_misc_error("Block height out of range")?;
 
         if verbosity == 0 {
             let request = zebra_state::ReadRequest::Block(hash_or_height);
