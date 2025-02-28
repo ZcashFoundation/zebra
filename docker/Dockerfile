@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# check=skip=UndefinedVar
+# check=skip=UndefinedVar,UserExist # We use gosu in the entrypoint instead of USER directive
 
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
@@ -13,8 +13,18 @@
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
 
-ARG RUST_VERSION=1.85.0
+# Build zebrad with these features
+#
+# Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES
+# https://github.com/ZcashFoundation/zebra/settings/variables/actions
+ARG FEATURES="default-release-binaries"
 
+ARG USER="zebra"
+ARG UID=10001
+ARG GID=10001
+ARG HOME="/home/${USER}"
+
+ARG RUST_VERSION=1.85.0
 # In this stage we download all system requirements to build the project
 #
 # It also captures all the build arguments to be used as environment variables.
@@ -47,6 +57,14 @@ ARG SHORT_SHA
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
 ENV SHORT_SHA=${SHORT_SHA:-}
 
+# Set the working directory for the build.
+ARG HOME
+WORKDIR ${HOME}
+ENV HOME=${HOME}
+ENV CARGO_HOME="${HOME}/.cargo/"
+
+ENV USER=${USER}
+
 # This stage builds tests without running them.
 #
 # We also download needed dependencies for tests to work, from other images.
@@ -60,19 +78,17 @@ ENV FEATURES=${FEATURES}
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 
-# Set up the test environment the same way the production environment is. This
-# is not very DRY as the same code repeats for the `runtime` target below, but I
-# didn't find a suitable way to share the setup between the two targets.
+# This environment setup is almost identical to the `runtime` target so that the
+# `tests` target differs minimally. In fact, a subset of this setup is used for
+# the `runtime` target.
 
-ENV UID=101
-ENV GID=${UID}
-ENV USER="zebra"
-ENV HOME="/home/${USER}"
-ENV CARGO_HOME="${HOME}/.cargo/"
+ARG UID
+ARG GID
+ARG HOME
+ARG USER
 
-RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
-
-WORKDIR ${HOME}
+RUN addgroup --gid ${GID} ${USER} && \
+    adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
 # Build Zebra test binaries, but don't run them
 
@@ -110,25 +126,27 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
 
+# Copy the gosu binary to be able to run the entrypoint as non-root user
+# and allow to change permissions for mounted cache directories
+COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+
 # Use the same default config as in the production environment.
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
-ARG LWD_CACHE_DIR
 ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
-RUN mkdir -p ${LWD_CACHE_DIR}
-RUN chown -R ${UID}:${GID} ${LWD_CACHE_DIR}
+RUN mkdir -p ${LWD_CACHE_DIR} && \
+    chown -R ${UID}:${GID} ${LWD_CACHE_DIR}
 
 # Use the same cache dir as in the production environment.
-ARG ZEBRA_CACHE_DIR
 ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
-RUN mkdir -p ${ZEBRA_CACHE_DIR}
-RUN chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+RUN mkdir -p ${ZEBRA_CACHE_DIR} && \
+    chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+
+COPY ./ ${HOME}
+RUN chown -R ${UID}:${GID} ${HOME}
 
 COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY ./ ${HOME}
-
-RUN chown -R ${UID}:${GID} ${HOME}
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
@@ -140,6 +158,7 @@ ENTRYPOINT [ "entrypoint.sh", "test" ]
 FROM deps AS release
 
 ARG FEATURES
+ARG HOME
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
@@ -157,47 +176,46 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${APP_HOME}/target/ \
+    --mount=type=cache,target=${HOME}/target/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
-    cp ${APP_HOME}/target/release/zebrad /usr/local/bin
+    cp ${HOME}/target/release/zebrad /usr/local/bin
 
 # This step starts from scratch using Debian and only adds the resulting binary
 # from the `release` stage.
 FROM debian:bookworm-slim AS runtime
 
-COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
 # Create a non-privileged system user for running `zebrad`.
-ARG USER="zebra"
+ARG USER
 ENV USER=${USER}
 
 # System users have no home dirs, but we set one for users' convenience.
-ARG HOME="/home/zebra"
+ARG HOME
 WORKDIR ${HOME}
 
-# System UIDs should be set according to
-# https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/uidrange.html.
+# We use a high UID/GID (10001) to avoid overlap with host system users.
+# This reduces the risk of container user namespace conflicts with host accounts,
+# which could potentially lead to privilege escalation if a container escape occurs.
 #
-# In Debian, the default dynamic range for system UIDs is defined by
-# [FIRST_SYSTEM_UID, LAST_SYSTEM_UID], which is set to [100, 999] in
-# `etc/adduser.conf`:
-# https://manpages.debian.org/bullseye/adduser/adduser.8.en.html
+# We do not use the `--system` flag for user creation since:
+# 1. System user ranges (100-999) can collide with host system users
+#   (see: https://github.com/nginxinc/docker-nginx/issues/490)
+# 2. There's no value added and warning messages can be raised at build time
+#   (see: https://github.com/dotnet/dotnet-docker/issues/4624)
 #
-# Debian assigns GID 100 to group `users`, so we set UID = GID = 101 as the
-# default value.
-ARG UID=101
+# The high UID/GID values provide an additional security boundary in containers
+# where user namespaces are shared with the host.
+ARG UID
 ENV UID=${UID}
-ARG GID=${UID}
+ARG GID
 ENV GID=${GID}
 
-RUN addgroup --system --gid ${GID} ${USER}
-RUN adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+RUN addgroup --gid ${GID} ${USER} && \
+    adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
 # We set the default locations of the conf and cache dirs according to the XDG
 # spec: https://specifications.freedesktop.org/basedir-spec/latest/
@@ -211,7 +229,18 @@ ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
 RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
 RUN chown -R ${UID}:${GID} ${HOME}
-USER $USER
+
+# We're explicitly NOT using the USER directive here.
+# Instead, we run as root initially and use gosu in the entrypoint.sh
+# to step down to the non-privileged user. This allows us to change permissions
+# on mounted volumes before running the application as a non-root user.
+# User with UID=${UID} is created above and used via gosu in entrypoint.sh.
+
+# Copy the gosu binary to be able to run the entrypoint as non-root user
+COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+
+COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
+COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
