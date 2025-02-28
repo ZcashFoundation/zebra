@@ -1300,81 +1300,8 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            async_checks.push(
-                primitives::halo2::VERIFIER
-                    .clone()
-                    .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
-            );
-
-            for authorized_action in orchard_shielded_data.actions.iter().cloned() {
-                let (action, spend_auth_sig) = authorized_action.into_parts();
-
-                // # Consensus
-                //
-                // > - Let SigHash be the SIGHASH transaction hash of this transaction, not
-                // >   associated with an input, as defined in § 4.10 using SIGHASH_ALL.
-                // > - The spend authorization signature MUST be a valid SpendAuthSig^{Orchard}
-                // >   signature over SigHash using rk as the validating key — i.e.
-                // >   SpendAuthSig^{Orchard}.Validate_{rk}(SigHash, spendAuthSig) = 1.
-                // >   As specified in § 5.4.7, validation of the 𝑅 component of the
-                // >   signature prohibits non-canonical encodings.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#actiondesc
-                //
-                // This is validated by the verifier, inside the [`reddsa`] crate.
-                // It calls [`pallas::Affine::from_bytes`] to parse R and
-                // that enforces the canonical encoding.
-                //
-                // Queue the validation of the RedPallas spend
-                // authorization signature for each Action
-                // description while adding the resulting future to
-                // our collection of async checks that (at a
-                // minimum) must pass for the transaction to verify.
-                async_checks.push(primitives::redpallas::VERIFIER.clone().oneshot(
-                    primitives::redpallas::Item::from_spendauth(
-                        action.rk,
-                        spend_auth_sig,
-                        &shielded_sighash,
-                    ),
-                ));
-            }
-
-            let bvk = orchard_shielded_data.binding_verification_key();
-
-            // # Consensus
-            //
-            // > The Action transfers of a transaction MUST be consistent with
-            // > its v balanceOrchard value as specified in § 4.14.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#actions
-            //
-            // > [NU5 onward] If effectiveVersion ≥ 5 and nActionsOrchard > 0, then:
-            // > – let bvk^{Orchard} and SigHash be as defined in § 4.14;
-            // > – bindingSigOrchard MUST represent a valid signature under the
-            // >   transaction binding validating key bvk^{Orchard} of SigHash —
-            // >   i.e. BindingSig^{Orchard}.Validate_{bvk^{Orchard}}(SigHash, bindingSigOrchard) = 1.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            //
-            // This is validated by the verifier. The `if` part is indirectly
-            // enforced, since the `orchard_shielded_data` is only parsed if those
-            // conditions apply in [`Transaction::zcash_deserialize`].
-            //
-            // >   As specified in § 5.4.7, validation of the 𝑅 component of the signature
-            // >   prohibits non-canonical encodings.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            //
-            // This is validated by the verifier, inside the `reddsa` crate.
-            // It calls [`pallas::Affine::from_bytes`] to parse R and
-            // that enforces the canonical encoding.
-
-            async_checks.push(primitives::redpallas::VERIFIER.clone().oneshot(
-                primitives::redpallas::Item::from_binding(
-                    bvk,
-                    orchard_shielded_data.binding_sig,
-                    &shielded_sighash,
-                ),
+            async_checks.push(primitives::halo2::VERIFIER.clone().oneshot(
+                primitives::halo2::Item::from((orchard_shielded_data, *shielded_sighash)),
             ));
         }
 
