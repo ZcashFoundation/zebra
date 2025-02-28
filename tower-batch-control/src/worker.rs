@@ -19,6 +19,8 @@ use tokio_util::sync::PollSemaphore;
 use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
+use crate::ItemSize;
+
 use super::{
     error::{Closed, ServiceError},
     message::{self, Message},
@@ -34,7 +36,7 @@ use super::{
 /// implement (only call).
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]
-pub struct Worker<T, Request>
+pub struct Worker<T, Request: ItemSize>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -91,7 +93,7 @@ pub(crate) struct ErrorHandle {
     inner: Arc<Mutex<Option<ServiceError>>>,
 }
 
-impl<T, Request> Worker<T, Request>
+impl<T, Request: ItemSize> Worker<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -351,7 +353,7 @@ impl Clone for ErrorHandle {
 }
 
 #[pin_project::pinned_drop]
-impl<T, Request> PinnedDrop for Worker<T, Request>
+impl<T, Request: ItemSize> PinnedDrop for Worker<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
