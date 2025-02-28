@@ -10,7 +10,7 @@
 
 set -eo pipefail
 
-# Check if `ZEBRA_CONF_PATH` points to a file, and FAIL if not.
+# Exit early if `ZEBRA_CONF_PATH` does not point to a file.
 if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   echo "ERROR: No Zebra config file found at ZEBRA_CONF_PATH (${ZEBRA_CONF_PATH})."
   echo "Please ensure the file exists or mount your custom config file and set ZEBRA_CONF_PATH accordingly."

@@ -20,8 +20,8 @@
 ARG FEATURES="default-release-binaries"
 
 ARG USER="zebra"
-ARG UID=1001
-ARG GID=1001
+ARG UID=10001
+ARG GID=10001
 ARG HOME="/home/${USER}"
 
 ARG RUST_VERSION=1.85.0
@@ -87,8 +87,8 @@ ARG GID
 ARG HOME
 ARG USER
 
-RUN addgroup --system --gid ${GID} ${USER} && \
-    adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+RUN addgroup --gid ${GID} ${USER} && \
+    adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
 # Build Zebra test binaries, but don't run them
 
@@ -197,23 +197,25 @@ ENV USER=${USER}
 ARG HOME
 WORKDIR ${HOME}
 
-# System UIDs should be set according to
-# https://refspecs.linuxfoundation.org/LSB_5.0.0/LSB-Core-generic/LSB-Core-generic/uidrange.html.
+# We use a high UID/GID (10001) to avoid overlap with host system users.
+# This reduces the risk of container user namespace conflicts with host accounts,
+# which could potentially lead to privilege escalation if a container escape occurs.
 #
-# In Debian, the default dynamic range for system UIDs is defined by
-# [FIRST_SYSTEM_UID, LAST_SYSTEM_UID], which is set to [100, 999] in
-# `etc/adduser.conf`:
-# https://manpages.debian.org/bullseye/adduser/adduser.8.en.html
+# We do not use the `--system` flag for user creation since:
+# 1. System user ranges (100-999) can collide with host system users
+#   (see: https://github.com/nginxinc/docker-nginx/issues/490)
+# 2. There's no value added and warning messages can be raised at build time
+#   (see: https://github.com/dotnet/dotnet-docker/issues/4624)
 #
-# Debian assigns GID 100 to group `users`, so we set UID = GID = 101 as the
-# default value.
+# The high UID/GID values provide an additional security boundary in containers
+# where user namespaces are shared with the host.
 ARG UID
 ENV UID=${UID}
 ARG GID
 ENV GID=${GID}
 
-RUN addgroup --system --gid ${GID} ${USER} && \
-    adduser --system --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+RUN addgroup --gid ${GID} ${USER} && \
+    adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
 # We set the default locations of the conf and cache dirs according to the XDG
 # spec: https://specifications.freedesktop.org/basedir-spec/latest/
@@ -228,18 +230,17 @@ RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
 RUN chown -R ${UID}:${GID} ${HOME}
 
-#! We're explicitly NOT using the USER directive here.
-#! Instead, we run as root initially and use gosu in the entrypoint.sh
-#! to step down to the non-privileged user. This allows us to change permissions
-#! on mounted volumes before running the application as a non-root user.
-#! User with UID=${UID} is created above and used via gosu in entrypoint.sh.
+# We're explicitly NOT using the USER directive here.
+# Instead, we run as root initially and use gosu in the entrypoint.sh
+# to step down to the non-privileged user. This allows us to change permissions
+# on mounted volumes before running the application as a non-root user.
+# User with UID=${UID} is created above and used via gosu in entrypoint.sh.
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
