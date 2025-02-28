@@ -144,10 +144,9 @@ where
 
         match self.service.ready().await {
             Ok(svc) => {
+                self.pending_items += req.item_size();
                 let rsp = svc.call(req.into());
                 let _ = tx.send(Ok(rsp));
-
-                self.pending_items += 1;
             }
             Err(e) => {
                 self.failed(e.into());
