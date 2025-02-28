@@ -13,7 +13,7 @@ use rand::thread_rng;
 
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, ItemSize};
 use tower_fallback::Fallback;
 
 use zebra_chain::primitives::redjubjub::*;
@@ -35,8 +35,23 @@ type VerifyResult = Result<(), Error>;
 type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
-/// This is a `RedJubjubItem`.
-pub type Item = batch::Item;
+/// This is a newtype around a `RedJubjubItem`.
+#[derive(Clone, Debug)]
+pub struct Item(batch::Item);
+
+impl ItemSize for Item {}
+
+impl<T: Into<batch::Item>> From<T> for Item {
+    fn from(value: T) -> Self {
+        Self(value.into())
+    }
+}
+
+impl Item {
+    fn verify_single(self) -> VerifyResult {
+        self.0.verify_single()
+    }
+}
 
 /// Global batch verification context for RedJubjub signatures.
 ///
@@ -152,7 +167,7 @@ impl Service<BatchControl<Item>> for Verifier {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
-                self.batch.queue(item);
+                self.batch.queue(item.0);
                 let mut rx = self.tx.subscribe();
 
                 Box::pin(async move {

@@ -13,10 +13,10 @@ use rand::thread_rng;
 
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, ItemSize};
 use tower_fallback::Fallback;
 
-use zebra_chain::primitives::reddsa::{batch, orchard, Error};
+use zebra_chain::primitives::reddsa::{batch, orchard, Error, Signature, VerificationKeyBytes};
 
 use crate::BoxError;
 
@@ -35,8 +35,41 @@ type VerifyResult = Result<(), Error>;
 type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
-/// This is a `RedPallasItem`.
-pub type Item = batch::Item<orchard::SpendAuth, orchard::Binding>;
+/// This is a newtype around a `RedPallasItem`.
+#[derive(Clone, Debug)]
+pub struct Item(batch::Item<orchard::SpendAuth, orchard::Binding>);
+
+impl ItemSize for Item {}
+
+impl From<Item> for batch::Item<orchard::SpendAuth, orchard::Binding> {
+    fn from(Item(item): Item) -> Self {
+        item
+    }
+}
+
+impl Item {
+    fn verify_single(self) -> VerifyResult {
+        self.0.verify_single()
+    }
+
+    /// Create a batch item from a `SpendAuth` signature.
+    pub fn from_spendauth(
+        vk_bytes: VerificationKeyBytes<orchard::SpendAuth>,
+        sig: Signature<orchard::SpendAuth>,
+        msg: &impl AsRef<[u8]>,
+    ) -> Self {
+        Self(batch::Item::from_spendauth(vk_bytes, sig, msg))
+    }
+
+    /// Create a batch item from a `Binding` signature.
+    pub fn from_binding(
+        vk_bytes: VerificationKeyBytes<orchard::Binding>,
+        sig: Signature<orchard::Binding>,
+        msg: &impl AsRef<[u8]>,
+    ) -> Self {
+        Self(batch::Item::from_binding(vk_bytes, sig, msg))
+    }
+}
 
 /// Global batch verification context for RedPallas signatures.
 ///

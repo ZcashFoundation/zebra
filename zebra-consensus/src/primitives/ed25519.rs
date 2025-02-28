@@ -13,7 +13,7 @@ use rand::thread_rng;
 
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, ItemSize};
 use tower_fallback::Fallback;
 use zebra_chain::primitives::ed25519::*;
 
@@ -34,8 +34,29 @@ type VerifyResult = Result<(), Error>;
 type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
-/// This is an `Ed25519Item`.
-pub type Item = batch::Item;
+/// This is a newtype around an `Ed25519Item`.
+#[derive(Clone, Debug)]
+pub struct Item(batch::Item);
+
+impl ItemSize for Item {}
+
+impl<'msg, M: AsRef<[u8]> + ?Sized> From<(VerificationKeyBytes, Signature, &'msg M)> for Item {
+    fn from(tup: (VerificationKeyBytes, Signature, &'msg M)) -> Self {
+        Self(batch::Item::from(tup))
+    }
+}
+
+impl From<Item> for batch::Item {
+    fn from(Item(item): Item) -> Self {
+        item
+    }
+}
+
+impl Item {
+    fn verify_single(self) -> VerifyResult {
+        self.0.verify_single()
+    }
+}
 
 /// Global batch verification context for Ed25519 signatures.
 ///
