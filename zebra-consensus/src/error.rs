@@ -9,7 +9,9 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 
 use zebra_chain::{
-    amount, block, orchard, sapling, sprout,
+    amount, block,
+    error::{CoinbaseTransactionError, SubsidyError},
+    orchard, sapling, sprout,
     transparent::{self, MIN_TRANSPARENT_COINBASE_MATURITY},
 };
 use zebra_state::ValidateContextError;
@@ -22,64 +24,11 @@ use proptest_derive::Arbitrary;
 /// Workaround for format string identifier rules.
 const MAX_EXPIRY_HEIGHT: block::Height = block::Height::MAX_EXPIRY_HEIGHT;
 
-/// Block subsidy errors.
-#[derive(Error, Clone, Debug, PartialEq, Eq)]
-#[allow(missing_docs)]
-pub enum SubsidyError {
-    #[error("no coinbase transaction in block")]
-    NoCoinbase,
-
-    #[error("funding stream expected output not found")]
-    FundingStreamNotFound,
-
-    #[error("miner fees are invalid")]
-    InvalidMinerFees,
-
-    #[error("a sum of amounts overflowed")]
-    SumOverflow,
-
-    #[error("unsupported height")]
-    UnsupportedHeight,
-
-    #[error("invalid amount")]
-    InvalidAmount(amount::Error),
-}
-
-impl From<amount::Error> for SubsidyError {
-    fn from(amount: amount::Error) -> Self {
-        Self::InvalidAmount(amount)
-    }
-}
-
 /// Errors for semantic transaction validation.
 #[derive(Error, Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[allow(missing_docs)]
 pub enum TransactionError {
-    #[error("first transaction must be coinbase")]
-    CoinbasePosition,
-
-    #[error("coinbase input found in non-coinbase transaction")]
-    CoinbaseAfterFirst,
-
-    #[error("coinbase transaction MUST NOT have any JoinSplit descriptions")]
-    CoinbaseHasJoinSplit,
-
-    #[error("coinbase transaction MUST NOT have any Spend descriptions")]
-    CoinbaseHasSpend,
-
-    #[error("coinbase transaction MUST NOT have any Output descriptions pre-Heartwood")]
-    CoinbaseHasOutputPreHeartwood,
-
-    #[error("coinbase transaction MUST NOT have the EnableSpendsOrchard flag set")]
-    CoinbaseHasEnableSpendsOrchard,
-
-    #[error("coinbase transaction Sapling or Orchard outputs MUST be decryptable with an all-zero outgoing viewing key")]
-    CoinbaseOutputsNotDecryptable,
-
-    #[error("coinbase inputs MUST NOT exist in mempool")]
-    CoinbaseInMempool,
-
     #[error("non-coinbase transactions MUST NOT have coinbase inputs")]
     NonCoinbaseHasCoinbaseInput,
 
@@ -93,15 +42,9 @@ pub enum TransactionError {
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     LockedUntilAfterBlockTime(DateTime<Utc>),
 
-    #[error(
-        "coinbase expiry {expiry_height:?} must be the same as the block {block_height:?} \
-         after NU5 activation, failing transaction: {transaction_hash:?}"
-    )]
-    CoinbaseExpiryBlockHeight {
-        expiry_height: Option<zebra_chain::block::Height>,
-        block_height: zebra_chain::block::Height,
-        transaction_hash: zebra_chain::transaction::Hash,
-    },
+    #[error("coinbase transaction error")]
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    Coinbase(#[from] CoinbaseTransactionError),
 
     #[error(
         "expiry {expiry_height:?} must be less than the maximum {MAX_EXPIRY_HEIGHT:?} \
@@ -294,16 +237,7 @@ impl TransactionError {
         match self {
             ImmatureTransparentCoinbaseSpend { .. }
             | UnshieldedTransparentCoinbaseSpend { .. }
-            | CoinbasePosition
-            | CoinbaseAfterFirst
-            | CoinbaseHasJoinSplit
-            | CoinbaseHasSpend
-            | CoinbaseHasOutputPreHeartwood
-            | CoinbaseHasEnableSpendsOrchard
-            | CoinbaseOutputsNotDecryptable
-            | CoinbaseInMempool
             | NonCoinbaseHasCoinbaseInput
-            | CoinbaseExpiryBlockHeight { .. }
             | IncorrectFee
             | Subsidy(_)
             | WrongVersion
