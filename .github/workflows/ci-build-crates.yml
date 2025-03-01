@@ -170,7 +170,11 @@ jobs:
     needs: [ matrix, build ]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
-    if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
+    #
+    # NB: This creates issues, so will fail on repos that have issues disabled (e.g., forks).
+    #     Unfortunately, there doesn’t seem to be a GitHub property that says whether issues are
+    #     enabled, so we check that the repo is in the ZcashFoundation org as a proxy.
+    if: (failure() || cancelled()) && github.repository_owner == 'ZcashFoundation' && github.event.pull_request == null
     runs-on: ubuntu-latest
     steps:
       - uses: jayqi/failed-build-issue-action@v1
