@@ -37,6 +37,14 @@ resource "aws_iam_policy" "ecr_ecs_policy" {
           "ecs:StartTask"
         ]
         Resource = "*"
+      },
+      {
+        Sid    = "AllowLambdaActions"
+        Effect = "Allow"
+        Action = [
+          "lambda:*"
+        ]
+        Resource = "arn:aws:lambda:eu-central-1:496038263219:function:watch-zebra-logs"
       }
     ]
   })
