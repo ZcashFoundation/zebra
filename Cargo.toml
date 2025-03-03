@@ -25,14 +25,15 @@ resolver = "2"
 incrementalmerkletree = { version = "0.7.1", features = ["legacy-api"] }
 orchard = "0.10.0"
 sapling-crypto = "0.3.0"
-zcash_address = "0.6.0"
-zcash_client_backend = "0.14.0"
-zcash_encoding = "0.2.2"
-zcash_history = "0.4.0"
-zcash_keys = "0.4.0"
-zcash_primitives = "0.19.0"
-zcash_proofs = "0.19.0"
-zcash_protocol = "0.4.0"
+# TODO: Revert to a release once librustzcash is released (#8749).
+zcash_address = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_client_backend = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_encoding = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_history = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_keys = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_primitives = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_proofs = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
+zcash_protocol = { git = "https://github.com/ShieldedLabs/librustzcash/", branch = "nsm" }
 abscissa_core = "0.7.0"
 atty = "0.2.14"
 base64 = "0.22.1"
