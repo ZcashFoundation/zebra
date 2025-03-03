@@ -36,10 +36,6 @@ provider "aws" {
 EOF
 }
 
-  # assume_role {
-  #   role_arn = "arn:aws:iam::496038263219:role/arseni-role"
-  # }
-
 # Configure Terragrunt to automatically store tfstate files in an S3 bucket
 remote_state {
   backend = "s3"
