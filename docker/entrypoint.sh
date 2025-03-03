@@ -28,7 +28,7 @@ exec_as_user() {
 
 # Modifies the existing Zebra config file at ZEBRA_CONF_PATH using environment variables.
 #
-# Environment variables are typically set in "docker/.env".
+# The config options this function supports are also listed in the "docker/.env" file.
 #
 # This function modifies the existing file in-place and prints its location.
 prepare_conf_file() {
