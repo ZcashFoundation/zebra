@@ -1,54 +1,46 @@
+<!--
+- Use this template to quickly write the PR description.
+- Skip or delete items that don't fit.
+-->
+
 ## Motivation
 
 <!--
 - Describe the goals of the PR.
-- If it closes any issues, list them here.
--->
-
-### Specifications & References
-
-<!--
-- Provide references related to the PR.
+- If it closes any issues, enumerate them here.
 -->
 
 ## Solution
 
-<!--
-- Summarize or list the changes in the PR.
--->
+<!-- Describe the changes in the PR. -->
 
 ### Tests
 
 <!--
-- Describe how the solution in this PR is tested:
+- Describe how you tested the solution:
   - Describe any manual or automated tests.
-  - If the solution can't be tested, explain why.
+  - If you could not test the solution, explain why.
 -->
+
+### Specifications & References
+
+<!-- Provide any relevant references. -->
 
 ### Follow-up Work
 
 <!--
-- Describe or list what's missing from the solution.
-- List any follow-up issues.
-- If this PR blocks or is blocked by any other work, provide a description, or
-  list the related issues.
+- If there's anything missing from the solution, describe it here.
+- List any follow-up issues or PRs.
+- If this PR blocks or depends on other issues or PRs, enumerate them here.
 -->
 
-### PR Author's Checklist
+### PR Checklist
 
-<!-- If you are the author of the PR, check the boxes below before making the PR
-ready for review. -->
+<!-- Check as many boxes as possible. -->
 
-- [ ] The PR name will make sense to users.
-- [ ] The PR provides a CHANGELOG summary.
+- [ ] The PR name is suitable for the release notes.
 - [ ] The solution is tested.
 - [ ] The documentation is up to date.
 - [ ] The PR has a priority label.
-
-### PR Reviewer's Checklist
-
-<!-- If you are a reviewer of the PR, check the boxes below before approving it. -->
-
-- [ ] The PR Author's checklist is complete.
-- [ ] The PR resolves the issue.
-
+- [ ] If the PR shouldn't be in the release notes, it has the
+      `C-exclude-from-changelog` label.

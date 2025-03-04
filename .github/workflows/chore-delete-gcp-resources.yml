@@ -106,7 +106,7 @@ jobs:
   # The same artifacts are used for both mainnet and testnet.
   clean-registries:
     name: Delete unused artifacts in registry
-    if: github.repository_owner == 'ZcashFoundation''
+    if: github.repository_owner == 'ZcashFoundation'
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
