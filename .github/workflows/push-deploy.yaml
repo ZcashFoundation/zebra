@@ -1,7 +1,5 @@
-# This GitHub Actions workflow automates the process of deploying a Dockerized application
-# to Amazon ECS. It triggers on any new tag, builds a Docker image, pushes it to Amazon
-# Elastic Container Registry (ECR), and updates the specified ECS service to use the
-# latest image.
+# This GitHub Actions workflow automates the deployment of the Zebra Server to Amazon ECS.
+# It triggers on any new tag, builds a Docker image, pushes it to Amazon Elastic Container Registry (ECR), and updates the specified ECS service to use the latest image.
 name: Deploy to Amazon ECS
 
 on:
