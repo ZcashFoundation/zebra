@@ -1,3 +1,5 @@
+# This file is a Makefile for the demo-deploy project.
+# It is used to plan, apply, and destroy changes to the infrastructure using Terragrunt.
 # Define variables
 ACCOUNT_DIR := dev
 REGION := eu-central-1
