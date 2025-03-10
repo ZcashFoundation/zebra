@@ -191,7 +191,7 @@ FROM debian:bookworm-slim AS runtime
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
-# Create a non-privileged system user for running `zebrad`.
+# Create a non-privileged user for running `zebrad`.
 #
 # We use a high UID/GID (10001) to avoid overlap with host system users.
 # This reduces the risk of container user namespace conflicts with host accounts,
@@ -217,7 +217,6 @@ ENV USER=${USER}
 RUN addgroup --gid ${GID} ${USER} && \
     adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
 
-# System users have no home dirs, but we set one for users' convenience.
 WORKDIR ${HOME}
 
 # We set the default locations of the conf and cache dirs according to the XDG
