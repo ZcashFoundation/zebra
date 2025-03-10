@@ -71,6 +71,8 @@ zebra-state = { path = "../zebra-state", version = "1.0.0-beta.45" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.45" }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.45" }
 
+nonempty.workspace = true
+
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
 

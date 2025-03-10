@@ -44,6 +44,11 @@ impl From<EncryptedNote> for [u8; 580] {
         enc_ciphertext.0
     }
 }
+impl From<&EncryptedNote> for [u8; 580] {
+    fn from(&EncryptedNote(enc_ciphertext): &EncryptedNote) -> Self {
+        enc_ciphertext
+    }
+}
 
 impl PartialEq for EncryptedNote {
     fn eq(&self, other: &Self) -> bool {
@@ -98,6 +103,12 @@ impl From<[u8; 80]> for WrappedNoteKey {
 
 impl From<WrappedNoteKey> for [u8; 80] {
     fn from(out_ciphertext: WrappedNoteKey) -> Self {
+        out_ciphertext.0
+    }
+}
+
+impl From<&WrappedNoteKey> for [u8; 80] {
+    fn from(out_ciphertext: &WrappedNoteKey) -> Self {
         out_ciphertext.0
     }
 }
