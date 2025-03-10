@@ -45,6 +45,7 @@ async fn rpc_server_spawn() {
 
     info!("spawning RPC server...");
 
+    let (_tx, rx) = watch::channel(None);
     let _rpc_server_task_handle = RpcServer::spawn(
         config,
         Default::default(),
@@ -59,7 +60,7 @@ async fn rpc_server_spawn() {
         NoChainTip,
         Mainnet,
         None,
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     info!("spawned RPC server, checking services...");
@@ -109,6 +110,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
 
     info!("spawning RPC server...");
 
+    let (_tx, rx) = watch::channel(None);
     let rpc_server_task_handle = RpcServer::spawn(
         config,
         Default::default(),
@@ -123,7 +125,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         NoChainTip,
         Mainnet,
         None,
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     )
     .await
     .expect("");
@@ -169,6 +171,7 @@ async fn rpc_server_spawn_port_conflict() {
 
     info!("spawning RPC server 1...");
 
+    let (_tx, rx) = watch::channel(None);
     let _rpc_server_1_task_handle = RpcServer::spawn(
         config.clone(),
         Default::default(),
@@ -183,7 +186,7 @@ async fn rpc_server_spawn_port_conflict() {
         NoChainTip,
         Mainnet,
         None,
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx.clone(),
     )
     .await;
 
@@ -205,7 +208,7 @@ async fn rpc_server_spawn_port_conflict() {
         NoChainTip,
         Mainnet,
         None,
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     )
     .await;
 

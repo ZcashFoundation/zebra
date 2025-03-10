@@ -30,6 +30,7 @@ async fn rpc_getinfo() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "/Zebra:RPC test/",
@@ -41,7 +42,7 @@ async fn rpc_getinfo() {
         Buffer::new(read_state.clone(), 1),
         NoChainTip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     let getinfo_future = tokio::spawn(async move { rpc.get_info().await });
@@ -145,6 +146,7 @@ async fn rpc_getblock() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -156,7 +158,7 @@ async fn rpc_getblock() {
         read_state.clone(),
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Make height calls with verbosity=0 and check response
@@ -490,6 +492,7 @@ async fn rpc_getblock_parse_error() {
     let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -501,7 +504,7 @@ async fn rpc_getblock_parse_error() {
         Buffer::new(read_state.clone(), 1),
         NoChainTip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Make sure we get an error if Zebra can't parse the block height.
@@ -538,6 +541,7 @@ async fn rpc_getblock_missing_error() {
     let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -549,7 +553,7 @@ async fn rpc_getblock_missing_error() {
         Buffer::new(read_state.clone(), 1),
         NoChainTip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
@@ -604,6 +608,7 @@ async fn rpc_getblockheader() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -615,7 +620,7 @@ async fn rpc_getblockheader() {
         read_state.clone(),
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Make height calls with verbose=false and check response
@@ -718,6 +723,7 @@ async fn rpc_getbestblockhash() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -729,7 +735,7 @@ async fn rpc_getbestblockhash() {
         read_state,
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Get the tip hash using RPC method `get_best_block_hash`
@@ -767,6 +773,7 @@ async fn rpc_getrawtransaction() {
     latest_chain_tip_sender.send_best_tip_height(Height(10));
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -778,7 +785,7 @@ async fn rpc_getrawtransaction() {
         read_state.clone(),
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // Test case where transaction is in mempool.
@@ -946,6 +953,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -957,7 +965,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // call the method with an invalid address string
@@ -1099,6 +1107,7 @@ async fn rpc_getaddresstxids_response_with(
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -1110,7 +1119,7 @@ async fn rpc_getaddresstxids_response_with(
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip.clone(),
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // call the method with valid arguments
@@ -1155,6 +1164,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let rpc = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -1166,7 +1176,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         Buffer::new(read_state.clone(), 1),
         NoChainTip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // call the method with an invalid address string
@@ -1204,6 +1214,7 @@ async fn rpc_getaddressutxos_response() {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let rpc = RpcImpl::new(
         "0.0.1",
         "RPC test",
@@ -1215,7 +1226,7 @@ async fn rpc_getaddressutxos_response() {
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
         MockAddressBookPeers::new(vec![]),
-        crate::methods::LoggedLastEvent::new(None.into()),
+        rx,
     );
 
     // call the method with a valid address
