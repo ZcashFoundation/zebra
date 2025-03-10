@@ -22,7 +22,7 @@ Our previous approach used UID/GID 101 with the `--system` flag for user creatio
 ## Considered Options
 
 * Option 1: Keep using low UID/GID (101) with `--system` flag
-* Option 2: Use unprivileged UID/GID (1000+) without `--system` flag
+* Option 2: Use UID/GID (1000+) without `--system` flag
 * Option 3: Use high UID/GID (10000+) without `--system` flag
 
 ## Decision Outcome

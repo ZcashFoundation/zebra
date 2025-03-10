@@ -4,13 +4,13 @@ We capture important decisions with [architectural decision records](https://adr
 
 These records provide context, trade-offs, and reasoning taken at our community & technical cross-roads. Our goal is to preserve the understanding of the project growth, and capture enough insight to effectively revisit previous decisions.
 
-Get started created a new decision record with the template:
+To get started, create a new decision record using the template:
 
 ```sh
 cp template.md NNNN-title-with-dashes.md
 ```
 
-For more rational behind this approach, see [Michael Nygard's article](http://thinkrelevance.com/blog/2011/11/15/documenting-architecture-decisions).
+For more rationale for this approach, see [Michael Nygard's article](http://thinkrelevance.com/blog/2011/11/15/documenting-architecture-decisions).
 
 We've inherited MADR [ADR template](https://adr.github.io/madr/), which is a bit more verbose than Nygard's original template. We may simplify it in the future.
 
