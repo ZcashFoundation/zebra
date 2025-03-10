@@ -2,6 +2,7 @@
 
 use color_eyre::eyre::{eyre, Report};
 use once_cell::sync::Lazy;
+use subsidy::general::block_subsidy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
@@ -20,7 +21,7 @@ use zebra_chain::{
 use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{block_subsidy, transaction};
+use crate::transaction;
 
 use super::*;
 
