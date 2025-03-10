@@ -13,7 +13,11 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
-    block::{self, Block, Height, TryIntoHeight},
+    block::{
+        self,
+        subsidy::{funding_streams, general},
+        Block, Height, TryIntoHeight,
+    },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
@@ -26,12 +30,13 @@ use zebra_chain::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
-};
+
+use zebra_consensus::RouterError;
+
+use zebra_state::{ReadRequest, ReadResponse};
+
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::{
     methods::{
@@ -293,6 +298,7 @@ pub trait GetBlockTemplateRpc {
     ///
     /// - `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.
     ///
+    /// - `zip233_amount`: (numeric, optional) The zip233 amount of a transaction [ZIP-233]
     /// # Notes
     ///
     /// Only works if the network of the running zebrad process is `Regtest`.
@@ -300,7 +306,11 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
     /// tags: generating
-    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>>;
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>>;
 }
 
 /// RPC method implementations.
@@ -618,7 +628,12 @@ where
         let mempool = self.mempool.clone();
         let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.sync_status.clone();
+
+        #[cfg(not(zcash_unstable = "zip234"))]
         let state = self.state.clone();
+
+        #[cfg(zcash_unstable = "zip234")]
+        let mut state = self.state.clone();
 
         if let Some(HexData(block_proposal_bytes)) = parameters
             .as_ref()
@@ -894,6 +909,37 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        let zip233_amount = if let Some(params) = parameters {
+            params.zip233_amount
+        } else {
+            None
+        };
+
+        #[cfg(zcash_unstable = "zip234")]
+        let expected_block_subsidy = {
+            let money_reserve = {
+                let response = state
+                    .ready()
+                    .and_then(|service| service.call(ReadRequest::TipPoolValues))
+                    .await
+                    .map_error(server::error::LegacyCode::default())?;
+                match response {
+                    ReadResponse::TipPoolValues {
+                        tip_hash: _,
+                        tip_height: _,
+                        value_balance,
+                    } => value_balance.money_reserve(),
+                    _ => unreachable!("wrong response to ReadRequest::TipPoolValues"),
+                }
+            };
+            general::block_subsidy(next_block_height, &network, money_reserve)
+                .map_error(server::error::LegacyCode::default())?
+        };
+
+        #[cfg(not(zcash_unstable = "zip234"))]
+        let expected_block_subsidy = general::block_subsidy_pre_nsm(next_block_height, &network)
+            .map_error(server::error::LegacyCode::default())?;
+
         // Randomly select some mempool transactions.
         let mempool_txs = zip317::select_mempool_transactions(
             &network,
@@ -903,6 +949,8 @@ where
             mempool_tx_deps,
             debug_like_zcashd,
             extra_coinbase_data.clone(),
+            expected_block_subsidy,
+            zip233_amount,
         );
 
         tracing::debug!(
@@ -924,6 +972,8 @@ where
             submit_old,
             debug_like_zcashd,
             extra_coinbase_data,
+            expected_block_subsidy,
+            zip233_amount,
         );
 
         Ok(response.into())
@@ -1186,6 +1236,8 @@ where
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<BlockSubsidy> {
         let latest_chain_tip = self.latest_chain_tip.clone();
         let network = self.network.clone();
+        #[cfg(zcash_unstable = "zip234")]
+        let mut state_service = self.state.clone();
 
         let height = if let Some(height) = height {
             Height(height)
@@ -1205,13 +1257,36 @@ where
         // Always zero for post-halving blocks
         let founders = Amount::zero();
 
-        let total_block_subsidy =
-            block_subsidy(height, &network).map_error(server::error::LegacyCode::default())?;
-        let miner_subsidy = miner_subsidy(height, &network, total_block_subsidy)
+        #[cfg(zcash_unstable = "zip234")]
+        let total_block_subsidy = {
+            let money_reserve = {
+                let response = state_service
+                    .ready()
+                    .and_then(|service| service.call(ReadRequest::TipPoolValues))
+                    .await
+                    .map_error(server::error::LegacyCode::default())?;
+                match response {
+                    ReadResponse::TipPoolValues {
+                        tip_hash: _,
+                        tip_height: _,
+                        value_balance,
+                    } => value_balance.money_reserve(),
+                    _ => unreachable!("wrong response to ReadRequest::TipPoolValues"),
+                }
+            };
+            general::block_subsidy(height, &network, money_reserve)
+                .map_error(server::error::LegacyCode::default())?
+        };
+
+        #[cfg(not(zcash_unstable = "zip234"))]
+        let total_block_subsidy = general::block_subsidy_pre_nsm(height, &network)
+            .map_error(server::error::LegacyCode::default())?;
+
+        let miner_subsidy = general::miner_subsidy(height, &network, total_block_subsidy)
             .map_error(server::error::LegacyCode::default())?;
 
         let (lockbox_streams, mut funding_streams): (Vec<_>, Vec<_>) =
-            funding_stream_values(height, &network, total_block_subsidy)
+            funding_streams::funding_stream_values(height, &network, total_block_subsidy)
                 .map_error(server::error::LegacyCode::default())?
                 .into_iter()
                 // Separate the funding streams into deferred and non-deferred streams
@@ -1238,7 +1313,8 @@ where
                 streams
                     .into_iter()
                     .map(|(receiver, value)| {
-                        let address = funding_stream_address(height, &network, receiver);
+                        let address =
+                            funding_streams::funding_stream_address(height, &network, receiver);
                         FundingStream::new(is_nu6, receiver, value, address)
                     })
                     .collect()
@@ -1308,7 +1384,11 @@ where
         ))
     }
 
-    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>> {
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>> {
         let rpc: GetBlockTemplateRpcImpl<
             Mempool,
             State,
@@ -1328,9 +1408,13 @@ where
         }
 
         let mut block_hashes = Vec::new();
+        let params = Some(get_block_template::JsonParameters {
+            zip233_amount,
+            ..Default::default()
+        });
         for _ in 0..num_blocks {
             let block_template = rpc
-                .get_block_template(None)
+                .get_block_template(params.clone())
                 .await
                 .map_error(server::error::LegacyCode::default())?;
 

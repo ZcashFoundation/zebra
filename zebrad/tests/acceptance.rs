@@ -2987,7 +2987,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         primitives::byte_array::increment_big_endian,
     };
     use zebra_rpc::methods::GetBlockHash;
-    use zebra_state::{ReadResponse, Response};
+    use zebra_state::{ReadResponse, Response, SemanticallyVerifiedBlock};
 
     let _init_guard = zebra_test::init();
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
@@ -3116,10 +3116,12 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             .bytes_in_serialized_order()
             .into();
 
+        let mut semantically_verified: SemanticallyVerifiedBlock = Arc::new(block.clone()).into();
+        semantically_verified.block_miner_fees = Some(0.try_into().unwrap());
         let Response::Committed(block_hash) = state2
             .clone()
             .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
-                Arc::new(block.clone()).into(),
+                semantically_verified,
             ))
             .await
             .map_err(|err| eyre!(err))?
@@ -3253,6 +3255,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 #[cfg(feature = "getblocktemplate-rpcs")]
 async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
+        block::subsidy::general,
         chain_sync_status::MockSyncStatus,
         parameters::{
             subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
@@ -3282,6 +3285,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
     };
     use zebra_test::mock_service::MockService;
+
+    #[cfg(zcash_unstable = "zip234")]
+    use zebra_chain::amount::MAX_MONEY;
+
     let _init_guard = zebra_test::init();
 
     tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
@@ -3294,6 +3301,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
             nu6: Some(1),
+            nu7: Some(2),
             ..Default::default()
         });
 
@@ -3469,14 +3477,26 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         })
         .to_network();
 
+    let block_height = Height(block_template.height);
+    #[cfg(zcash_unstable = "zip234")]
+    let expected_block_subsidy = general::block_subsidy(
+        block_height,
+        &network,
+        MAX_MONEY.try_into().expect("MAX_MONEY is a valid amount"),
+    )?;
+    #[cfg(not(zcash_unstable = "zip234"))]
+    let expected_block_subsidy = general::block_subsidy_pre_nsm(block_height, &network)?;
+
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
-        Height(block_template.height),
+        block_height,
         &miner_address,
         &[],
         history_tree.clone(),
         true,
         vec![],
+        expected_block_subsidy,
+        None,
     );
 
     let block_template = GetBlockTemplate {
@@ -3520,6 +3540,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         history_tree.clone(),
         true,
         vec![],
+        expected_block_subsidy,
+        None,
     );
 
     let block_template = GetBlockTemplate {
@@ -3549,6 +3571,166 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     // Check that the original block template can be submitted successfully
     let proposal_block =
         proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
+    let submit_block_response = get_block_template_rpc_impl
+        .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
+        .await?;
+
+    assert_eq!(
+        submit_block_response,
+        submit_block::Response::Accepted,
+        "valid block should be accepted"
+    );
+
+    Ok(())
+}
+
+/// Test successful block template submission as a block proposal or submission on a custom Testnet.
+///
+/// This test can be run locally with:
+/// `cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu7_nsm_transactions --exact --show-output`
+#[tokio::test(flavor = "multi_thread")]
+#[cfg(feature = "getblocktemplate-rpcs")]
+async fn nu7_nsm_transactions() -> Result<()> {
+    use zebra_chain::{
+        chain_sync_status::MockSyncStatus,
+        parameters::{
+            testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+            NetworkUpgrade,
+        },
+        serialization::ZcashSerialize,
+        work::difficulty::U256,
+    };
+    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_node_services::mempool;
+    use zebra_rpc::methods::{
+        get_block_template_rpcs::{
+            get_block_template::{proposal_block_from_template, GetBlockTemplateRequestMode},
+            types::get_block_template,
+            types::submit_block::{self, SubmitBlockChannel},
+        },
+        hex_data::HexData,
+        GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
+    };
+    use zebra_test::mock_service::MockService;
+    let _init_guard = zebra_test::init();
+
+    tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
+
+    let base_network_params = testnet::Parameters::build()
+        // Regtest genesis hash
+        .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
+        .with_disable_pow(true)
+        .with_slow_start_interval(Height::MIN)
+        .with_activation_heights(ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        });
+
+    let network = base_network_params
+        .clone()
+        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+            // Start checking funding streams from block height 1
+            height_range: Some(Height(1)..Height(100)),
+            // Use default post-NU6 recipients
+            recipients: None,
+        })
+        .to_network();
+
+    tracing::info!("built configured Testnet, starting state service and block verifier");
+
+    let default_test_config = default_test_config(&network)?;
+    let mut mining_config = default_test_config.mining;
+    mining_config.debug_like_zcashd = false;
+
+    let (state, read_state, latest_chain_tip, _chain_tip_change) =
+        zebra_state::init_test_services(&network);
+
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
+
+    tracing::info!("started state service and block verifier, committing Regtest genesis block");
+
+    let genesis_hash = block_verifier_router
+        .clone()
+        .oneshot(zebra_consensus::Request::Commit(regtest_genesis_block()))
+        .await
+        .expect("should validate Regtest genesis block");
+
+    let mut mempool = MockService::build()
+        .with_max_request_delay(Duration::from_secs(5))
+        .for_unit_tests();
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    let submitblock_channel = SubmitBlockChannel::new();
+    let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
+        &network,
+        mining_config,
+        mempool.clone(),
+        read_state.clone(),
+        latest_chain_tip,
+        block_verifier_router,
+        mock_sync_status,
+        MockAddressBookPeers::default(),
+        Some(submitblock_channel.sender()),
+    );
+
+    let make_mock_mempool_request_handler = || async move {
+        mempool
+            .expect_request(mempool::Request::FullTransactions)
+            .await
+            .respond(mempool::Response::FullTransactions {
+                transactions: vec![],
+                transaction_dependencies: Default::default(),
+                // tip hash needs to match chain info for long poll requests
+                last_seen_tip_hash: genesis_hash,
+            });
+    };
+
+    let block_template_fut = get_block_template_rpc_impl.get_block_template(None);
+    let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
+    let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
+    let get_block_template::Response::TemplateMode(block_template) =
+        block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+    };
+
+    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu7)?;
+
+    let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
+
+    // Check that the block template is a valid block proposal
+    let get_block_template::Response::ProposalMode(block_proposal_result) =
+        get_block_template_rpc_impl
+            .get_block_template(Some(get_block_template::JsonParameters {
+                mode: GetBlockTemplateRequestMode::Proposal,
+                data: Some(hex_proposal_block),
+                ..Default::default()
+            }))
+            .await?
+    else {
+        panic!(
+            "this getblocktemplate call should return the `ProposalMode` variant of the response"
+        )
+    };
+
+    assert!(
+        block_proposal_result.is_valid(),
+        "block proposal should succeed"
+    );
+
+    // Submit the same block
     let submit_block_response = get_block_template_rpc_impl
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;
@@ -3735,6 +3917,7 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
             canopy: Some(1),
             nu5: Some(2),
             nu6: Some(3),
+            nu7: Some(4),
             ..Default::default()
         })
         .with_slow_start_interval(Height::MIN)
