@@ -1,7 +1,6 @@
 //! Fixed test vectors for the network consensus parameters.
 
-use zcash_primitives::consensus::{self as zp_consensus, Parameters};
-use zcash_protocol::consensus::NetworkConstants as _;
+use zcash_protocol::consensus::{self as zp_consensus, NetworkConstants as _, Parameters};
 
 use crate::{
     block::Height,
