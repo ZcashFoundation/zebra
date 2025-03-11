@@ -47,9 +47,15 @@ pub use arbitrary::LedgerState;
 /// A Zcash block, containing a header and a list of transactions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
+    any(
+        test,
+        feature = "proptest-impl",
+        feature = "elasticsearch",
+        feature = "remote_read_state_service"
+    ),
     derive(Serialize)
 )]
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 pub struct Block {
     /// The block header, containing block metadata.
     pub header: Arc<Header>,

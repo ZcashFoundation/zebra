@@ -47,6 +47,9 @@ internal-miner = []
 # Experimental elasticsearch support
 elasticsearch = []
 
+# Serde Serialisation and Deserialisation for ReadRequest and ReadResponse, required for remote use of the [`ReadStateService`].
+remote_read_state_service = []
+
 # Test-only features
 
 proptest-impl = [

@@ -48,6 +48,9 @@ elasticsearch = [
     "zebra-chain/elasticsearch",
 ]
 
+# Serde Serialisation and Deserialisation for ReadRequest and ReadResponse, required for remote use of the [`ReadStateService`].
+remote_read_state_service = []
+
 [dependencies]
 bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }

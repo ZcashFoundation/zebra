@@ -67,9 +67,15 @@ pub const EXTRA_ZEBRA_COINBASE_DATA: &str = "z\u{1F993}";
 // TODO: rename to ExtraCoinbaseData, because height is also part of the coinbase data?
 #[derive(Clone, Eq, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
+    any(
+        test,
+        feature = "proptest-impl",
+        feature = "elasticsearch",
+        feature = "remote_read_state_service"
+    ),
     derive(Serialize)
 )]
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 pub struct CoinbaseData(
     /// Invariant: this vec, together with the coinbase height, must be less than
     /// 100 bytes. We enforce this by only constructing CoinbaseData fields by
@@ -115,9 +121,15 @@ impl std::fmt::Debug for CoinbaseData {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
+    any(
+        test,
+        feature = "proptest-impl",
+        feature = "elasticsearch",
+        feature = "remote_read_state_service"
+    ),
     derive(Serialize)
 )]
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 pub struct OutPoint {
     /// References the transaction that contains the UTXO being spent.
     ///
@@ -153,9 +165,15 @@ impl OutPoint {
 /// A transparent input to a transaction.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
+    any(
+        test,
+        feature = "proptest-impl",
+        feature = "elasticsearch",
+        feature = "remote_read_state_service"
+    ),
     derive(Serialize)
 )]
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 pub enum Input {
     /// A reference to an output of a previous transaction.
     PrevOut {
