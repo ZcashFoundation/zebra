@@ -17,22 +17,12 @@ if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   exit 1
 fi
 
-# Define function to execute commands as the specified user
-exec_as_user() {
-  if [[ "$(id -u)" = '0' ]]; then
-    exec gosu "${USER}" "$@"
-  else
-    exec "$@"
-  fi
-}
-
 # Modifies the existing Zebra config file at ZEBRA_CONF_PATH using environment variables.
 #
 # The config options this function supports are also listed in the "docker/.env" file.
 #
 # This function modifies the existing file in-place and prints its location.
 prepare_conf_file() {
-
   # Set a custom network.
   if [[ -n "${NETWORK}" ]]; then
     sed -i '/network = ".*"/s/".*"/"'"${NETWORK//\"/}"'"/' "${ZEBRA_CONF_PATH}"
@@ -132,11 +122,11 @@ check_directory_files() {
 #     https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options,
 #   - or be empty.
 # - The remaining params will be appended to a command starting with
-#   `exec_as_user cargo test ... -- ...`
+#   `cargo test ... -- ...`
 run_cargo_test() {
   # Start constructing the command, ensuring that $1 is enclosed in single
   # quotes as it's a feature list
-  local cmd="exec_as_user cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
+  local cmd="cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
 
   # Shift the first argument, as it's already included in the cmd
   shift
@@ -169,23 +159,23 @@ run_tests() {
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
-    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
+    cargo test --locked --release --workspace --features "${FEATURES}" \
       -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
   elif [[ "${RUN_CHECK_NO_GIT_REFS}" -eq "1" ]]; then
     # Run the check_no_git_refs_in_cargo_lock test.
-    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
+    cargo test --locked --release --workspace --features "${FEATURES}" \
       -- --nocapture --include-ignored check_no_git_refs_in_cargo_lock
 
   elif [[ "${TEST_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
     # Run state tests with fake activation heights.
-    exec_as_user cargo test --locked --release --lib --features "zebra-test" \
+    cargo test --locked --release --lib --features "zebra-test" \
       --package zebra-state \
       -- --nocapture --include-ignored with_fake_activation_heights
 
   elif [[ "${TEST_SCANNER}" -eq "1" ]]; then
     # Test the scanner.
-    exec_as_user cargo test --locked --release --package zebra-scan \
+    cargo test --locked --release --package zebra-scan \
       -- --nocapture --include-ignored scan_task_commands scan_start_where_left
 
   elif [[ "${TEST_ZEBRA_EMPTY_SYNC}" -eq "1" ]]; then
@@ -273,41 +263,45 @@ run_tests() {
     run_cargo_test "${FEATURES}" "submit_block"
 
   else
-    exec_as_user "$@"
+    exec "$@"
   fi
 }
 
 # Main Script Logic
-
-prepare_conf_file "${ZEBRA_CONF_PATH}"
-echo "Prepared the following Zebra config:"
-cat "${ZEBRA_CONF_PATH}"
-
+#
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
 # - If "$1" is "tests":
 #   - and "$2" is "zebrad", run `zebrad` with the remaining params,
 #   - else run tests with the remaining params.
 # - TODO: If "$1" is "monitoring", start a monitoring node.
 # - If "$1" doesn't match any of the above, run "$@" directly.
-case "$1" in
---* | -* | zebrad)
-  shift
-  exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
-  ;;
-test)
-  shift
-  if [[ "$1" == "zebrad" ]]; then
+entrypoint() {
+  case "$1" in
+  --* | -* | zebrad)
     shift
-    exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
-  else
-    run_tests "$@"
-  fi
-  ;;
-monitoring)
-  #  TODO: Impl logic for starting a monitoring node.
-  :
-  ;;
-*)
-  exec_as_user "$@"
-  ;;
-esac
+    zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+    ;;
+  test)
+    shift
+    if [[ "$1" == "zebrad" ]]; then
+      shift
+      zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+    else
+      run_tests "$@"
+    fi
+    ;;
+  monitoring)
+    #  TODO: Impl logic for starting a monitoring node.
+    :
+    ;;
+  *)
+    exec "$@"
+    ;;
+  esac
+}
+
+prepare_conf_file "${ZEBRA_CONF_PATH}"
+echo "Prepared the following Zebra config:"
+cat "${ZEBRA_CONF_PATH}"
+
+gosu "${USER}" bash -c "$(declare -f entrypoint); entrypoint $@"
