@@ -49,8 +49,6 @@ ENV RUST_BACKTRACE=${RUST_BACKTRACE:-1}
 ARG RUST_LIB_BACKTRACE
 ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-1}
 
-ARG COLORBT_SHOW_HIDDEN
-ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-1}
 
 ARG SHORT_SHA
 # If this is not set, it must be an empty string, so Zebra can try an alternative git commit source:

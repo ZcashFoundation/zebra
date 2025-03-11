@@ -58,7 +58,6 @@ env:
   RUST_LOG: ${{ vars.RUST_LOG }}
   RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
   RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
-  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
   FIREBASE_CHANNEL: ${{ github.event_name == 'pull_request' && 'preview' || 'live' }}
   # cargo doc doesn't support '--  -D warnings', so we have to add it here
   # https://github.com/rust-lang/cargo/issues/8424#issuecomment-774662296

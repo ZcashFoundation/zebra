@@ -51,7 +51,6 @@ env:
   RUST_LOG: ${{ vars.RUST_LOG }}
   RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
   RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
-  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
   matrix:
