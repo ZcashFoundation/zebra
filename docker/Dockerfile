@@ -19,43 +19,15 @@ ARG RUST_VERSION=1.85.0
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
 
-ARG RUST_LOG="info"
-ARG RUST_BACKTRACE=1
-ARG RUST_LIB_BACKTRACE=1
-
 ARG UID=10001
-ARG GID=${UID}
+ARG GID=$UID
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
-ARG CARGO_HOME="${HOME}/.cargo/"
-
-ARG SHORT_SHA
 ARG ZEBRA_SKIP_IPV6_TESTS=1
 
-# This stage prepares Zebra's build deps, and captures the build arguments to be
-# used as environment variables in the image.
+# This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
-
-ARG FEATURES
-ARG RUST_LOG
-ARG RUST_BACKTRACE
-ARG RUST_LIB_BACKTRACE
-ARG UID
-ARG GID
-ARG USER
-ARG HOME
-ARG CARGO_HOME
-
-ENV FEATURES=${FEATURES}
-ENV RUST_LOG=${RUST_LOG}
-ENV RUST_BACKTRACE=${RUST_BACKTRACE}
-ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE}
-ENV UID=${UID}
-ENV GID=${GID}
-ENV USER=${USER}
-ENV HOME=${HOME}
-ENV CARGO_HOME=${CARGO_HOME}
 
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
@@ -63,11 +35,17 @@ RUN apt-get -qq update && \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
-# This stage builds tests without running them.
-FROM deps AS tests
-
-ARG SHORT_SHA
+ARG UID
+ARG GID
+ARG USER
+ARG HOME
 ARG ZEBRA_SKIP_IPV6_TESTS
+ARG SHORT_SHA
+
+ENV UID=${UID}
+ENV GID=${GID}
+ENV USER=${USER}
+ENV HOME=${HOME}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS}
@@ -76,6 +54,12 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS}
 # alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
 ENV SHORT_SHA=${SHORT_SHA:-}
+
+# This stage builds tests without running them.
+FROM deps AS tests
+
+ARG FEATURES
+ARG HOME
 
 # Build Zebra test binaries, but don't run them
 #
@@ -110,9 +94,8 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     cp ${HOME}/target/release/zebrad /usr/local/bin && \
     cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
 
-ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
-ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
+ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
+ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
 
 COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
@@ -122,12 +105,14 @@ COPY ./ ${HOME}
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
-# This stage builds the zebrad binary for a release.
+# This stage builds the zebrad release binary.
 #
-# This stage also adds `cache mounts` as this stage is completely independent
-# from the `test` stage. This stage is a dependency for the `runtime` stage,
-# which uses the built zebrad binary from this stage.
+# It also adds `cache mounts` as this stage is completely independent from the
+# `test` stage.
 FROM deps AS release
+
+ARG FEATURES
+ARG HOME
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
@@ -155,17 +140,11 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
 # from the `release` stage along with other binaries and files.
 FROM debian:bookworm-slim AS runtime
 
-ARG RUST_LOG
-ARG RUST_BACKTRACE
-ARG RUST_LIB_BACKTRACE
 ARG UID
 ARG GID
 ARG USER
 ARG HOME
 
-ENV RUST_LOG=${RUST_LOG}
-ENV RUST_BACKTRACE=${RUST_BACKTRACE}
-ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE}
 ENV UID=${UID}
 ENV GID=${GID}
 ENV USER=${USER}
@@ -174,13 +153,10 @@ ENV HOME=${HOME}
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
 
-ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
-ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
-
-COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
 COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]

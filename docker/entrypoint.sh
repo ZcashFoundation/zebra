@@ -228,6 +228,23 @@ run_tests() {
   fi
 }
 
+# Prepares the container for running Zebra.
+container_init() {
+  echo "INFO: Container has the following environment variables:"
+  printenv
+
+  prepare_conf_file "${ZEBRA_CONF_PATH}"
+  echo "INFO: Using the following Zebra config:"
+  cat "${ZEBRA_CONF_PATH}"
+
+  mkdir -p "${HOME}"
+  chown -R "${UID}":"${GID}" "${HOME}"
+  addgroup --quiet --gid "${GID}" "${USER}"
+  adduser --quiet --disabled-password --gecos "" \
+    --gid "${GID}" --uid "${UID}" "${USER}"
+cd "${HOME}"
+}
+
 # Main Script Logic
 #
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
@@ -261,8 +278,6 @@ entrypoint() {
   esac
 }
 
-prepare_conf_file "${ZEBRA_CONF_PATH}"
-echo "Prepared the following Zebra config:"
-cat "${ZEBRA_CONF_PATH}"
+container_init
 
-gosu "${USER}" bash -c "$(declare -f entrypoint); entrypoint $@"
+gosu "${USER}" bash -c "$(declare -f entrypoint); entrypoint $*"
