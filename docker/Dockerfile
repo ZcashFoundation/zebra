@@ -52,18 +52,13 @@ ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-1}
 ARG COLORBT_SHOW_HIDDEN
 ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-1}
 
+ARG CARGO_INCREMENTAL
+ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
+
 ARG SHORT_SHA
 # If this is not set, it must be an empty string, so Zebra can try an alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
 ENV SHORT_SHA=${SHORT_SHA:-}
-
-# Set the working directory for the build.
-ARG HOME
-WORKDIR ${HOME}
-ENV HOME=${HOME}
-ENV CARGO_HOME="${HOME}/.cargo/"
-
-ENV USER=${USER}
 
 # This stage builds tests without running them.
 #
@@ -81,14 +76,21 @@ ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
 # This environment setup is almost identical to the `runtime` target so that the
 # `tests` target differs minimally. In fact, a subset of this setup is used for
 # the `runtime` target.
-
 ARG UID
+ENV UID=${UID}
 ARG GID
+ENV GID=${GID}
 ARG HOME
+ENV HOME=${HOME}
 ARG USER
+ENV USER=${USER}
 
 RUN addgroup --gid ${GID} ${USER} && \
     adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+
+# Set the working directory for the build.
+WORKDIR ${HOME}
+ENV CARGO_HOME="${HOME}/.cargo/"
 
 # Build Zebra test binaries, but don't run them
 
@@ -189,14 +191,8 @@ FROM debian:bookworm-slim AS runtime
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
-# Create a non-privileged system user for running `zebrad`.
-ARG USER
-ENV USER=${USER}
-
-# System users have no home dirs, but we set one for users' convenience.
-ARG HOME
-WORKDIR ${HOME}
-
+# Create a non-privileged user for running `zebrad`.
+#
 # We use a high UID/GID (10001) to avoid overlap with host system users.
 # This reduces the risk of container user namespace conflicts with host accounts,
 # which could potentially lead to privilege escalation if a container escape occurs.
@@ -213,9 +209,15 @@ ARG UID
 ENV UID=${UID}
 ARG GID
 ENV GID=${GID}
+ARG HOME
+ENV HOME=${HOME}
+ARG USER
+ENV USER=${USER}
 
 RUN addgroup --gid ${GID} ${USER} && \
     adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+
+WORKDIR ${HOME}
 
 # We set the default locations of the conf and cache dirs according to the XDG
 # spec: https://specifications.freedesktop.org/basedir-spec/latest/
