@@ -242,7 +242,7 @@ container_init() {
   addgroup --quiet --gid "${GID}" "${USER}"
   adduser --quiet --disabled-password --gecos "" \
     --gid "${GID}" --uid "${UID}" "${USER}"
-cd "${HOME}"
+  cd "${HOME}"
 }
 
 # Main Script Logic
