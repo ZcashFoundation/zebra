@@ -264,7 +264,7 @@ entrypoint() {
     shift
     if [[ "$1" == "zebrad" ]]; then
       shift
-      zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+      cargo run --config "${ZEBRA_CONF_PATH}" "$@"
     else
       run_tests "$@"
     fi
