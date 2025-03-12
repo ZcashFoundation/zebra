@@ -23,6 +23,7 @@ ARG UID=10001
 ARG GID=$UID
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
+ARG CARGO_HOME="${HOME}/.cargo/"
 ARG CARGO_INCREMENTAL=0
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
@@ -44,6 +45,7 @@ ENV UID=${UID}
 ENV GID=${GID}
 ENV USER=${USER}
 ENV HOME=${HOME}
+ENV CARGO_HOME=${CARGO_HOME}
 ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
