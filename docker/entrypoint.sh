@@ -279,6 +279,8 @@ entrypoint() {
   esac
 }
 
+DECLARE_FUNS=$(declare -f entrypoint run_tests run_test)
+
 container_init
 
-gosu "${USER}" bash -c "$(declare -f entrypoint); entrypoint $*"
+gosu "${USER}" bash -c "${DECLARE_FUNS}; entrypoint $*"
