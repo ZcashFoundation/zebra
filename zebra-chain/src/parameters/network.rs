@@ -40,6 +40,7 @@ impl From<Network> for NetworkKind {
 }
 
 /// An enum describing the possible network choices.
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 #[derive(Clone, Default, Eq, PartialEq, Serialize)]
 #[serde(into = "NetworkKind")]
 pub enum Network {

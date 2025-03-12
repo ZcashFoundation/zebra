@@ -145,6 +145,10 @@ impl Header {
 /// This structure is used in the Bitcoin network protocol.
 ///
 /// The transaction count field is always zero, so we don't store it in the struct.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct CountedHeader {

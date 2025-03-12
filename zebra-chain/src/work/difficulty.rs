@@ -100,6 +100,10 @@ pub const INVALID_COMPACT_DIFFICULTY: CompactDifficulty = CompactDifficulty(u32:
 /// [section 7.7.2]: https://zips.z.cash/protocol/protocol.pdf#difficulty
 //
 // TODO: Use NonZeroU256, when available
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct ExpandedDifficulty(U256);
 

@@ -9,5 +9,9 @@
 use uint::construct_uint;
 
 construct_uint! {
+    #[cfg_attr(
+        feature = "remote_read_state_service",
+        derive(serde::Serialize, serde::Deserialize)
+    )]
     pub struct U256(4);
 }

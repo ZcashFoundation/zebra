@@ -19,6 +19,14 @@ mod tests;
 use ValueBalanceError::*;
 
 /// A balance in each chain value pool or transaction value pool.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    serde(bound = "C: amount::Constraint + Clone")
+)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub struct ValueBalance<C> {
     transparent: Amount<C>,

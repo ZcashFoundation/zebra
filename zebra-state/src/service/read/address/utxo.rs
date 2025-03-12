@@ -33,6 +33,10 @@ pub const ADDRESS_HEIGHTS_FULL_RANGE: RangeInclusive<Height> = Height(1)..=Heigh
 
 /// A convenience wrapper that efficiently stores unspent transparent outputs,
 /// and the corresponding transaction IDs.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AddressUtxos {
     /// A set of unspent transparent outputs.

@@ -45,6 +45,10 @@ impl PartialEq for HistoryTreeError {
 impl Eq for HistoryTreeError {}
 
 /// The inner [Tree] in one of its supported versions.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Debug)]
 enum InnerHistoryTree {
     /// A pre-Orchard tree.
@@ -55,6 +59,10 @@ enum InnerHistoryTree {
 
 /// History tree (Merkle mountain range) structure that contains information about
 /// the block history, as specified in [ZIP-221](https://zips.z.cash/zip-0221).
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Debug)]
 pub struct NonEmptyHistoryTree {
     network: Network,
@@ -414,6 +422,10 @@ impl Clone for NonEmptyHistoryTree {
 
 /// A History Tree that keeps track of its own creation in the Heartwood
 /// activation block, being empty beforehand.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Debug, Default, Clone)]
 pub struct HistoryTree(Option<NonEmptyHistoryTree>);
 

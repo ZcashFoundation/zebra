@@ -617,6 +617,10 @@ impl ParametersBuilder {
 }
 
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parameters {
     /// The name of this network to be used by the `Display` trait impl.
