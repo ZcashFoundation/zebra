@@ -230,7 +230,7 @@ run_tests() {
 
 # Prepares the container for running Zebra.
 container_init() {
-  echo "INFO: Container has the following environment variables:"
+  echo "INFO: Using the following environment variables:"
   printenv
 
   prepare_conf_file "${ZEBRA_CONF_PATH}"
