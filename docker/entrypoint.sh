@@ -31,17 +31,13 @@ prepare_conf_file() {
 
   # Set a custom state, network and cookie cache dirs.
   #
-  # We're pointing all three cache dirs at the same location, so users will find
-  # all cached data in that single location. We can introduce more env vars and
-  # use them to set the cache dirs separately if needed.
+  # We're pointing all three dirs at the same location, so users will find all
+  # cached data in that single location. We can introduce more env vars and use
+  # them to set the cache dirs separately if needed.
   if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
     mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
+    chown -R "${UID}:${GID}" "${ZEBRA_CACHE_DIR//\"/}"
     sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-    # Fix permissions right after creating/configuring the directory
-    if [[ "$(id -u)" = '0' ]]; then
-      # "Setting permissions for the cache directory
-      chown -R "${USER}:${USER}" "${ZEBRA_CACHE_DIR//\"/}"
-    fi
   fi
 
   # Enable the Prometheus metrics endpoint.
