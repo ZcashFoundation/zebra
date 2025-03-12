@@ -48,12 +48,8 @@ prepare_conf_file() {
   # Enable logging to a file by setting a custom log file path.
   if [[ -n "${LOG_FILE}" ]]; then
     mkdir -p "$(dirname "${LOG_FILE//\"/}")"
+    chown -R "${UID}:${GID}" "$(dirname "${LOG_FILE//\"/}")"
     sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-    # Fix permissions right after creating/configuring the log directory
-    if [[ "$(id -u)" = '0' ]]; then
-      # "Setting permissions for the log directory
-      chown -R "${USER}:${USER}" "$(dirname "${LOG_FILE//\"/}")"
-    fi
   fi
 
   # Enable or disable colored logs.
