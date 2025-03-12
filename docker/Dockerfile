@@ -61,6 +61,10 @@ FROM deps AS tests
 ARG FEATURES
 ARG HOME
 
+# Set the working directory for the build.
+WORKDIR ${HOME}
+ENV CARGO_HOME="${HOME}/.cargo/"
+
 # Build Zebra test binaries, but don't run them
 #
 # Leverage a cache mount to /usr/local/cargo/registry/

@@ -166,6 +166,7 @@ jobs:
           build-args: |
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
             RUST_LOG=${{ env.RUST_LOG }}
+            CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
           push: true
           # It's recommended to build images with max-level provenance attestations
