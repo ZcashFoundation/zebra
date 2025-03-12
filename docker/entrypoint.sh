@@ -93,26 +93,6 @@ prepare_conf_file() {
   echo "${ZEBRA_CONF_PATH}"
 }
 
-# Checks if a directory contains subdirectories
-#
-# Exits with 0 if it does, and 1 otherwise.
-check_directory_files() {
-  local dir="$1"
-  # Check if the directory exists
-  if [[ -d "${dir}" ]]; then
-    # Check if there are any subdirectories
-    if find "${dir}" -mindepth 1 -type d | read -r; then
-      :
-    else
-      echo "No subdirectories found in ${dir}."
-      exit 1
-    fi
-  else
-    echo "Directory ${dir} does not exist."
-    exit 1
-  fi
-}
-
 # Runs cargo test with an arbitrary number of arguments.
 #
 # ## Positional Parameters
