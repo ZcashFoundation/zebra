@@ -239,6 +239,7 @@ container_init() {
 
   mkdir -p "${HOME}"
   chown -R "${UID}":"${GID}" "${HOME}"
+  chown -R "${UID}":"${GID}" "${ZEBRA_CONF_PATH}"
   addgroup --quiet --gid "${GID}" "${USER}"
   adduser --quiet --disabled-password --gecos "" \
     --gid "${GID}" --uid "${UID}" "${USER}"
