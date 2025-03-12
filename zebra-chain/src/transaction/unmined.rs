@@ -125,7 +125,7 @@ impl fmt::Display for UnminedTxId {
                 .debug_tuple("transaction::Hash")
                 .field(&"private")
                 .finish(),
-            Witnessed(_id) => f.debug_tuple("WtxId").field(&"private").finish(),
+            Witnessed(id) => f.debug_tuple("WtxId").field(id).finish(),
         }
     }
 }
@@ -141,7 +141,7 @@ impl From<&Transaction> for UnminedTxId {
     fn from(transaction: &Transaction) -> Self {
         match transaction {
             V1 { .. } | V2 { .. } | V3 { .. } | V4 { .. } => Legacy(transaction.into()),
-            V5 { .. } => Witnessed(transaction.into()),
+            V5 { .. } | V6 { .. } => Witnessed(transaction.into()),
         }
     }
 }

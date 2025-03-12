@@ -53,7 +53,7 @@ fn check_sprout_anchors() {
         .expect("block should deserialize");
 
     // Add initial transactions to [`block_1`].
-    let block_1 = prepare_sprout_block(block_1, block_395);
+    let mut block_1 = prepare_sprout_block(block_1, block_395);
 
     // Create a block at height == 2 that references the Sprout note commitment tree state
     // from [`block_1`].
@@ -68,7 +68,7 @@ fn check_sprout_anchors() {
         .expect("block should deserialize");
 
     // Add the transactions with the first anchors to [`block_2`].
-    let block_2 = prepare_sprout_block(block_2, block_396);
+    let mut block_2 = prepare_sprout_block(block_2, block_396);
 
     let unmined_txs: Vec<_> = block_2
         .block
@@ -98,7 +98,7 @@ fn check_sprout_anchors() {
     assert!(validate_and_commit_non_finalized(
         &finalized_state.db,
         &mut non_finalized_state,
-        block_1
+        &mut block_1
     )
     .is_ok());
 
@@ -114,7 +114,11 @@ fn check_sprout_anchors() {
 
     // Validate and commit [`block_2`]. This will also check the anchors.
     assert_eq!(
-        validate_and_commit_non_finalized(&finalized_state.db, &mut non_finalized_state, block_2),
+        validate_and_commit_non_finalized(
+            &finalized_state.db,
+            &mut non_finalized_state,
+            &mut block_2
+        ),
         Ok(())
     );
 }
@@ -249,7 +253,7 @@ fn check_sapling_anchors() {
             }))
         });
 
-    let block1 = Arc::new(block1).prepare();
+    let mut block1 = Arc::new(block1).prepare();
 
     // Create a block at height == 2 that references the Sapling note commitment tree state
     // from earlier block
@@ -295,7 +299,7 @@ fn check_sapling_anchors() {
             }))
         });
 
-    let block2 = Arc::new(block2).prepare();
+    let mut block2 = Arc::new(block2).prepare();
 
     let unmined_txs: Vec<_> = block2
         .block
@@ -320,7 +324,7 @@ fn check_sapling_anchors() {
     assert!(validate_and_commit_non_finalized(
         &finalized_state.db,
         &mut non_finalized_state,
-        block1
+        &mut block1
     )
     .is_ok());
 
@@ -335,7 +339,11 @@ fn check_sapling_anchors() {
     assert!(check_unmined_tx_anchors_result.is_ok());
 
     assert_eq!(
-        validate_and_commit_non_finalized(&finalized_state.db, &mut non_finalized_state, block2),
+        validate_and_commit_non_finalized(
+            &finalized_state.db,
+            &mut non_finalized_state,
+            &mut block2
+        ),
         Ok(())
     );
 }

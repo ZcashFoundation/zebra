@@ -1566,6 +1566,20 @@ impl Chain {
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
+                V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )
             };
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
@@ -1733,6 +1747,20 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
+                ),
+                V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
                 ),
             };
 
@@ -2166,9 +2194,9 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
         {
             Ok(chain_value_pools) => self.chain_value_pools = chain_value_pools,
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
-                value_balance_error,
-                chain_value_pools: self.chain_value_pools,
-                block_value_pool_change: *block_value_pool_change,
+                value_balance_error: Arc::new(value_balance_error),
+                chain_value_pools: Arc::new(self.chain_value_pools),
+                block_value_pool_change: Arc::new(*block_value_pool_change),
                 // assume that the current block is added to `blocks` after `update_chain_tip_with`
                 height: self.max_block_height().and_then(|height| height + 1),
             })?,

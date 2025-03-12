@@ -104,7 +104,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block1.clone()
+                &mut block1.clone()
             );
 
             // the block was committed
@@ -154,11 +154,11 @@ proptest! {
 
         let previous_mem = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         // if the random proptest data produces other errors,
@@ -215,11 +215,11 @@ proptest! {
 
         let previous_mem = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         prop_assert_eq!(
@@ -276,11 +276,11 @@ proptest! {
 
         let previous_mem = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         prop_assert_eq!(
@@ -368,7 +368,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block1.clone()
+                &mut block1.clone()
             );
 
             prop_assert_eq!(commit_result, Ok(()));
@@ -383,11 +383,11 @@ proptest! {
             previous_mem = non_finalized_state.clone();
         }
 
-        let block2 = Arc::new(block2).prepare();
+        let mut block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block2
+            &mut block2
         );
 
         prop_assert_eq!(
@@ -463,7 +463,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block1.clone()
+                &mut block1.clone()
             );
 
             prop_assert_eq!(commit_result, Ok(()));
@@ -508,11 +508,11 @@ proptest! {
 
         let previous_mem = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         prop_assert_eq!(
@@ -564,11 +564,11 @@ proptest! {
 
         let previous_mem = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         prop_assert_eq!(
@@ -647,7 +647,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block1.clone()
+                &mut block1.clone()
             );
 
             prop_assert_eq!(commit_result, Ok(()));
@@ -661,11 +661,11 @@ proptest! {
             previous_mem = non_finalized_state.clone();
         }
 
-        let block2 = Arc::new(block2).prepare();
+        let mut block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block2
+            &mut block2
         );
 
         prop_assert_eq!(
@@ -743,7 +743,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block1.clone()
+                &mut block1.clone()
             );
 
             prop_assert_eq!(commit_result, Ok(()));
@@ -789,11 +789,11 @@ proptest! {
 
         let previous_mem = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         prop_assert_eq!(
@@ -849,11 +849,11 @@ proptest! {
 
         let previous_mem = non_finalized_state.clone();
 
-        let block1 = Arc::new(block1).prepare();
+        let mut block1 = Arc::new(block1).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block1
+            &mut block1
         );
 
         prop_assert_eq!(
@@ -936,7 +936,7 @@ proptest! {
             let commit_result = validate_and_commit_non_finalized(
                 &finalized_state.db,
                 &mut non_finalized_state,
-                block1.clone()
+                &mut block1.clone()
             );
 
             prop_assert_eq!(commit_result, Ok(()));
@@ -949,11 +949,11 @@ proptest! {
             previous_mem = non_finalized_state.clone();
         }
 
-        let block2 = Arc::new(block2).prepare();
+        let mut block2 = Arc::new(block2).prepare();
         let commit_result = validate_and_commit_non_finalized(
             &finalized_state.db,
             &mut non_finalized_state,
-            block2
+            &mut block2
         );
 
         prop_assert_eq!(
