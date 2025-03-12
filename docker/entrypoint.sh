@@ -3,19 +3,8 @@
 # Entrypoint for running Zebra in Docker.
 #
 # The main script logic is at the bottom.
-#
-# ## Notes
-#
-# - `$ZEBRA_CONF_PATH` must point to a Zebra conf file.
 
 set -eo pipefail
-
-# Exit early if `ZEBRA_CONF_PATH` does not point to a file.
-if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
-  echo "ERROR: No Zebra config file found at ZEBRA_CONF_PATH (${ZEBRA_CONF_PATH})."
-  echo "Please ensure the file exists or mount your custom config file and set ZEBRA_CONF_PATH accordingly."
-  exit 1
-fi
 
 # Modifies the existing Zebra config file at ZEBRA_CONF_PATH using environment variables.
 #
