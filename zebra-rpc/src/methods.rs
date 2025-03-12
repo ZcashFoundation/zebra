@@ -839,11 +839,11 @@ where
             None
         };
 
-        let hash_or_height: HashOrHeight = hash_or_height
-            .parse()
-            // Reference for the legacy error code:
-            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-            .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
             let request = zebra_state::ReadRequest::Block(hash_or_height);
