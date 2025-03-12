@@ -23,7 +23,7 @@ ARG UID=10001
 ARG GID=$UID
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
-ARG ZEBRA_SKIP_IPV6_TESTS=1
+ARG CARGO_INCREMENTAL=0
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
@@ -39,20 +39,21 @@ ARG UID
 ARG GID
 ARG USER
 ARG HOME
-ARG ZEBRA_SKIP_IPV6_TESTS
-ARG SHORT_SHA
 
 ENV UID=${UID}
 ENV GID=${GID}
 ENV USER=${USER}
 ENV HOME=${HOME}
+ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
+ARG ZEBRA_SKIP_IPV6_TESTS=1
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS}
 
 # If this is not set, it must be an empty string, so Zebra can try an
 # alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
+ARG SHORT_SHA
 ENV SHORT_SHA=${SHORT_SHA:-}
 
 # This stage builds tests without running them.
