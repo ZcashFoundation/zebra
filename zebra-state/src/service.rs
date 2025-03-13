@@ -2164,3 +2164,514 @@ pub fn init_test_services(
         chain_tip_change,
     )
 }
+
+#[cfg(feature = "remote_read_state_service")]
+pub mod remote {
+    use super::*;
+
+    /// A remote wrapper for the [`ReadStateService`].
+    /// Sends ReadRequests to the hyper???? server in zebrad.
+    ///
+    /// NOTE: The hyper???? server must be enabled in zebrad's config for this service to function.
+    ///
+    /// This service provides read-only access to:
+    /// - the non-finalized state: the ~100 most recent blocks.
+    /// - the finalized state: older blocks that have many confirmations.
+    ///
+    /// Requests to this service are processed in parallel,
+    /// ignoring any blocks queued by the read-write [`StateService`].
+    ///
+    /// This quick response behavior is better for most state users.
+    /// It allows other async tasks to make progress while concurrently reading data from disk.
+    #[derive(Clone, Debug)]
+    pub struct RemoteReadStateService {
+        // Configuration
+        //
+        /// The configured Zcash network.
+        network: Network,
+    }
+
+    impl Drop for RemoteReadStateService {
+        fn drop(&mut self) {
+            todo!()
+        }
+    }
+
+    impl RemoteReadStateService {
+        /// Creates a new read-only state service, using the provided finalized state and
+        /// block write task handle.
+        ///
+        /// Returns the newly created service,
+        /// and a watch channel for updating the shared recent non-finalized chain.
+        pub(crate) fn new() -> Self {
+            todo!()
+        }
+
+        /// Logs rocksdb metrics using the read only state service.
+        pub fn log_db_metrics(&self) {
+            todo!()
+        }
+    }
+
+    impl Service<ReadRequest> for RemoteReadStateService {
+        type Response = ReadResponse;
+        type Error = BoxError;
+        type Future =
+            Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            todo!()
+        }
+
+        #[instrument(name = "read_state", skip(self, req))]
+        fn call(&mut self, req: ReadRequest) -> Self::Future {
+            req.count_metric();
+            let timer = CodeTimer::start();
+            let span = Span::current();
+
+            match req {
+                // Used by the `getblockchaininfo` RPC.
+                ReadRequest::UsageInfo => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let db_size = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::UsageInfo");
+
+                        Ok(ReadResponse::UsageInfo(db_size))
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by the StateService.
+                ReadRequest::Tip => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let tip = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::Tip");
+
+                        Ok(ReadResponse::Tip(tip))
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by `getblockchaininfo` RPC method.
+                ReadRequest::TipPoolValues => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let (tip_height, tip_hash, value_balance) = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::TipPoolValues");
+
+                        Ok(ReadResponse::TipPoolValues {
+                            tip_height,
+                            tip_hash,
+                            value_balance,
+                        })
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by the StateService.
+                ReadRequest::Depth(hash) => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let depth = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::Depth");
+
+                        Ok(ReadResponse::Depth(depth))
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by the StateService.
+                ReadRequest::BestChainNextMedianTimePast => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let median_time_past = todo!();
+
+                            timer.finish(
+                                module_path!(),
+                                line!(),
+                                "ReadRequest::BestChainNextMedianTimePast",
+                            );
+
+                            Ok(ReadResponse::BestChainNextMedianTimePast(median_time_past))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // Used by the get_block (raw) RPC and the StateService.
+                ReadRequest::Block(hash_or_height) => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block = todo!();
+                        timer.finish(module_path!(), line!(), "ReadRequest::Block");
+
+                        Ok(ReadResponse::Block(block))
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by the get_block (verbose) RPC and the StateService.
+                ReadRequest::BlockHeader(hash_or_height) => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let (header, hash, height, next_block_hash) = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::Block");
+
+                            Ok(ReadResponse::BlockHeader {
+                                header,
+                                hash,
+                                height,
+                                next_block_hash,
+                            })
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // For the get_raw_transaction RPC and the StateService.
+                ReadRequest::Transaction(hash) => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let response = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::Transaction");
+
+                        Ok(ReadResponse::Transaction(response))
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by the getblock (verbose) RPC.
+                ReadRequest::TransactionIdsForBlock(hash_or_height) => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let transaction_ids = todo!();
+
+                            timer.finish(
+                                module_path!(),
+                                line!(),
+                                "ReadRequest::TransactionIdsForBlock",
+                            );
+
+                            Ok(ReadResponse::TransactionIdsForBlock(transaction_ids))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                #[cfg(feature = "indexer")]
+                ReadRequest::SpendingTransactionId(spend) => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let spending_transaction_id = todo!();
+
+                            timer.finish(
+                                module_path!(),
+                                line!(),
+                                "ReadRequest::TransactionIdForSpentOutPoint",
+                            );
+
+                            Ok(ReadResponse::TransactionId(spending_transaction_id))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                ReadRequest::UnspentBestChainUtxo(outpoint) => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let utxo = todo!();
+
+                            timer.finish(
+                                module_path!(),
+                                line!(),
+                                "ReadRequest::UnspentBestChainUtxo",
+                            );
+
+                            Ok(ReadResponse::UnspentBestChainUtxo(utxo))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // Manually used by the StateService to implement part of AwaitUtxo.
+                ReadRequest::AnyChainUtxo(outpoint) => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let utxo = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::AnyChainUtxo");
+
+                        Ok(ReadResponse::AnyChainUtxo(utxo))
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by the StateService.
+                ReadRequest::BlockLocator => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block_locator = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::BlockLocator");
+
+                        Ok(ReadResponse::BlockLocator(block_locator))
+                    })
+                })
+                .wait_for_panics(),
+
+                // Used by the StateService.
+                ReadRequest::FindBlockHashes { known_blocks, stop } => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let block_hashes = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHashes");
+
+                            Ok(ReadResponse::BlockHashes(block_hashes))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // Used by the StateService.
+                ReadRequest::FindBlockHeaders { known_blocks, stop } => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let block_headers = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::FindBlockHeaders");
+
+                            Ok(ReadResponse::BlockHeaders(block_headers))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                ReadRequest::SaplingTree(hash_or_height) => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let sapling_tree = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::SaplingTree");
+
+                            Ok(ReadResponse::SaplingTree(sapling_tree))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                ReadRequest::OrchardTree(hash_or_height) => {
+                    tokio::task::spawn_blocking(move || {
+                        let orchard_tree = todo!();
+
+                        span.in_scope(move || {
+                            timer.finish(module_path!(), line!(), "ReadRequest::OrchardTree");
+
+                            Ok(ReadResponse::OrchardTree(orchard_tree))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                ReadRequest::SaplingSubtrees { start_index, limit } => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let sapling_subtrees = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::SaplingSubtrees");
+
+                            Ok(ReadResponse::SaplingSubtrees(sapling_subtrees))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                ReadRequest::OrchardSubtrees { start_index, limit } => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let orchard_subtrees = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::OrchardSubtrees");
+
+                            Ok(ReadResponse::OrchardSubtrees(orchard_subtrees))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // For the get_address_balance RPC.
+                ReadRequest::AddressBalance(addresses) => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let balance = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
+
+                        Ok(ReadResponse::AddressBalance(balance))
+                    })
+                })
+                .wait_for_panics(),
+
+                // For the get_address_tx_ids RPC.
+                ReadRequest::TransactionIdsByAddresses {
+                    addresses,
+                    height_range,
+                } => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let tx_ids = todo!();
+
+                        timer.finish(
+                            module_path!(),
+                            line!(),
+                            "ReadRequest::TransactionIdsByAddresses",
+                        );
+
+                        tx_ids
+                    })
+                })
+                .wait_for_panics(),
+
+                // For the get_address_utxos RPC.
+                ReadRequest::UtxosByAddresses(addresses) => {
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let utxos = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::UtxosByAddresses");
+
+                            utxos
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                ReadRequest::CheckBestChainTipNullifiersAndAnchors(unmined_tx) => {
+                    let state = self.clone();
+
+                    tokio::task::spawn_blocking(move || {
+                        todo!();
+
+                        span.in_scope(move || {
+                            timer.finish(
+                                module_path!(),
+                                line!(),
+                                "ReadRequest::CheckBestChainTipNullifiersAndAnchors",
+                            );
+
+                            Ok(ReadResponse::ValidBestChainTipNullifiersAndAnchors)
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // Used by the get_block and get_block_hash RPCs.
+                ReadRequest::BestChainBlockHash(height) => {
+                    // # Performance
+                    //
+                    // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            let hash = todo!();
+
+                            timer.finish(
+                                module_path!(),
+                                line!(),
+                                "ReadRequest::BestChainBlockHash",
+                            );
+
+                            Ok(ReadResponse::BlockHash(hash))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // Used by get_block_template and getblockchaininfo RPCs.
+                ReadRequest::ChainInfo => {
+                    // # Performance
+                    //
+                    // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            // # Correctness
+                            //
+                            // It is ok to do these lookups using multiple database calls. Finalized state updates
+                            // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                            //
+                            // If there is a large overlap between the non-finalized and finalized states,
+                            // where the finalized tip is above the non-finalized tip,
+                            // Zebra is receiving a lot of blocks, or this request has been delayed for a long time.
+                            //
+                            // In that case, the `getblocktemplate` RPC will return an error because Zebra
+                            // is not synced to the tip. That check happens before the RPC makes this request.
+
+                            let get_block_template_info = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::ChainInfo");
+
+                            get_block_template_info
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                ReadRequest::SolutionRate { num_blocks, height } => {
+                    // # Performance
+                    //
+                    // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            // # Correctness
+                            //
+                            // It is ok to do these lookups using multiple database calls. Finalized state updates
+                            // can only add overlapping blocks, and block hashes are unique across all chain forks.
+                            //
+                            // The worst that can happen here is that the default `start_hash` will be below
+                            // the chain tip.
+
+                            let solution_rate = todo!();
+
+                            timer.finish(module_path!(), line!(), "ReadRequest::SolutionRate");
+
+                            Ok(ReadResponse::SolutionRate(solution_rate))
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
+                    // # Performance
+                    //
+                    // Allow other async tasks to make progress while concurrently reading blocks from disk.
+                    tokio::task::spawn_blocking(move || {
+                        span.in_scope(move || {
+                            todo!();
+
+                            timer.finish(
+                                module_path!(),
+                                line!(),
+                                "ReadRequest::CheckBlockProposalValidity",
+                            );
+
+                            Ok(ReadResponse::ValidBlockProposal)
+                        })
+                    })
+                    .wait_for_panics()
+                }
+
+                #[cfg(feature = "getblocktemplate-rpcs")]
+                ReadRequest::TipBlockSize => tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block = todo!();
+
+                        timer.finish(module_path!(), line!(), "ReadRequest::TipBlockSize");
+
+                        block
+                    })
+                })
+                .wait_for_panics(),
+            }
+        }
+    }
+}
