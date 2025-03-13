@@ -48,8 +48,8 @@ elasticsearch = [
     "zebra-chain/elasticsearch",
 ]
 
-# Serde Serialisation and Deserialisation for ReadRequest and ReadResponse, required for remote use of the [`ReadStateService`].
-remote_read_state_service = []
+# Remote support for the [`ReadStateService`].
+remote_read_state_service = ["dep:hyper", "dep:hyper-rustls", "dep:url"]
 
 [dependencies]
 bincode = { workspace = true }
@@ -78,6 +78,11 @@ rayon = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
+
+# remote_read_state_service specific dependencies.
+hyper = { workspace = true, optional = true, features = ["client", "server", "http1"]}
+hyper-rustls = { workspace = true, optional = true }
+url = { workspace = true, optional = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl

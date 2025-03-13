@@ -2169,6 +2169,25 @@ pub fn init_test_services(
 pub mod remote {
     use super::*;
 
+    use hyper;
+    use url::Url;
+
+    /// Remote query about chain metrics or server health, via the [`RemoteReadStateService`].
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub enum RemoteRequest {
+        Metrics,
+        PollReady,
+        Call(ReadRequest),
+    }
+
+    /// A response to a [`RemoteReadStateService`]'s [`RemoteRequest`].
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    pub enum RemoteResponse {
+        Metrics(String),
+        PollReady,
+        Call(ReadResponse),
+    }
+
     /// A remote wrapper for the [`ReadStateService`].
     /// Sends ReadRequests to the hyper???? server in zebrad.
     ///
@@ -2185,10 +2204,11 @@ pub mod remote {
     /// It allows other async tasks to make progress while concurrently reading data from disk.
     #[derive(Clone, Debug)]
     pub struct RemoteReadStateService {
-        // Configuration
-        //
         /// The configured Zcash network.
         network: Network,
+
+        /// The url at which the zebrad [`ReadStateService`] server is configured to listen.
+        service_url: Url,
     }
 
     impl Drop for RemoteReadStateService {
@@ -2203,12 +2223,22 @@ pub mod remote {
         ///
         /// Returns the newly created service,
         /// and a watch channel for updating the shared recent non-finalized chain.
-        pub(crate) fn new() -> Self {
-            todo!()
+        pub fn new(network: Network, service_url: Url) -> Result<Self, BoxError> {
+            let remote_read_state_service = Self {
+                network,
+                service_url,
+            };
+
+            Ok(remote_read_state_service)
         }
 
         /// Logs rocksdb metrics using the read only state service.
         pub fn log_db_metrics(&self) {
+            todo!()
+        }
+
+        /// Sends a request to the server an waits on a response.
+        fn send_request(&self, req: RemoteRequest) -> Result<RemoteResponse, BoxError> {
             todo!()
         }
     }
