@@ -17,10 +17,10 @@ if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   exit 1
 fi
 
-# Define function to execute commands as the specified user
+# If running as root, use gosu to drop privileges
 exec_as_user() {
   if [[ "$(id -u)" = '0' ]]; then
-    exec gosu "${USER}" "$@"
+    exec gosu "${UID}:${GID}" "$@"
   else
     exec "$@"
   fi
@@ -59,10 +59,14 @@ prepare_conf_file() {
     mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
     sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${ZEBRA_CONF_PATH}"
     # Fix permissions right after creating/configuring the directory
-    if [[ "$(id -u)" = '0' ]]; then
-      # "Setting permissions for the cache directory
-      chown -R "${USER}:${USER}" "${ZEBRA_CACHE_DIR//\"/}"
-    fi
+    chown -R "${UID}:${GID}" "${ZEBRA_CACHE_DIR//\"/}"
+  fi
+
+  # Set a custom lightwalletd cache dir.
+  if [[ -n "${LWD_CACHE_DIR}" ]]; then
+    mkdir -p "${LWD_CACHE_DIR//\"/}"
+    # Fix permissions right after creating/configuring the directory
+    chown -R "${UID}:${GID}" "${LWD_CACHE_DIR//\"/}"
   fi
 
   # Enable the Prometheus metrics endpoint.
@@ -75,10 +79,7 @@ prepare_conf_file() {
     mkdir -p "$(dirname "${LOG_FILE//\"/}")"
     sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${ZEBRA_CONF_PATH}"
     # Fix permissions right after creating/configuring the log directory
-    if [[ "$(id -u)" = '0' ]]; then
-      # "Setting permissions for the log directory
-      chown -R "${USER}:${USER}" "$(dirname "${LOG_FILE//\"/}")"
-    fi
+    chown -R "${UID}:${GID}" "$(dirname "${LOG_FILE//\"/}")"
   fi
 
   # Enable or disable colored logs.
