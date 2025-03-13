@@ -181,7 +181,7 @@ jobs:
     with:
       test_id: "custom-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
+      test_variables: '-e ZEBRA_CONF_PATH="/home/zebra/zebrad/tests/common/configs/custom-conf.toml"'
       grep_patterns: '-e "extra_coinbase_data:\sSome\(\"do you even shield\?\"\)"'
 
   failure-issue:
