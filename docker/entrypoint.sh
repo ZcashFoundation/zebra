@@ -135,29 +135,30 @@ check_directory_files() {
 # - The remaining params will be appended to a command starting with
 #   `exec_as_user cargo test ... -- ...`
 run_cargo_test() {
-  # Start constructing the command, ensuring that $1 is enclosed in single
-  # quotes as it's a feature list
-  local cmd="exec_as_user cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
-
   # Shift the first argument, as it's already included in the cmd
+  local features="$1"
   shift
+
+  # Start constructing the command array
+  local cmd_args=(
+    cargo test --locked --release
+    --features "${features}"
+    --package zebrad
+    --test acceptance
+    -- --nocapture --include-ignored
+  )
 
   # Loop through the remaining arguments
   for arg in "$@"; do
     if [[ -n ${arg} ]]; then
       # If the argument is non-empty, add it to the command
-      cmd+=" ${arg}"
+      cmd_args+=("${arg}")
     fi
   done
 
-  # Run the command using eval. This will replace the current process with the
-  # cargo command.
-  echo "Running:"
-  echo "${cmd}"
-  eval "${cmd}" || {
-    echo "Cargo test failed"
-    exit 1
-  }
+  echo "Running: ${cmd_args[*]}"
+  # Execute directly to become PID 1
+  exec_as_user "${cmd_args[@]}"
 }
 
 # Runs tests depending on the env vars.
