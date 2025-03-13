@@ -853,60 +853,111 @@ impl DiskDb {
         // from the current implementation.
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
-        let column_families_in_code = column_families_in_code.into_iter();
-
-        let column_families = column_families_on_disk
-            .into_iter()
-            .chain(column_families_in_code)
-            .unique()
-            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
-
-        let db_result = if read_only {
-            // Use a tempfile for the secondary instance cache directory
-            let secondary_config = Config {
-                ephemeral: true,
-                ..config.clone()
+        let prepare_column_families =
+            |path: &Path, column_families_in_code: &[String]| -> Vec<ColumnFamilyDescriptor> {
+                let column_families_on_disk = DB::list_cf(&db_options, path).unwrap_or_default();
+                column_families_on_disk
+                    .into_iter()
+                    .chain(column_families_in_code.iter().cloned())
+                    .unique()
+                    .map(|name| ColumnFamilyDescriptor::new(name, db_options.clone()))
+                    .collect()
             };
-            let secondary_path =
-                secondary_config.db_path("secondary_state", format_version_in_code.major, network);
-            let create_dir_result = std::fs::create_dir_all(&secondary_path);
 
-            info!(?create_dir_result, "creating secondary db directory");
+        // Collect column_families_in_code for reuse in retries
+        let column_families_in_code: Vec<String> = column_families_in_code.into_iter().collect();
 
-            DB::open_cf_descriptors_as_secondary(
-                &db_options,
-                &path,
-                &secondary_path,
-                column_families,
-            )
-        } else {
-            DB::open_cf_descriptors(&db_options, &path, column_families)
-        };
+        // Retry loop for handling temporary lock issues
+        let mut retry_count = 0;
+        let max_retries = 5;
 
-        match db_result {
-            Ok(db) => {
-                info!("Opened Zebra state cache at {}", path.display());
+        loop {
+            // Prepare column families for this attempt
+            let column_families = prepare_column_families(&path, &column_families_in_code);
 
-                let db = DiskDb {
-                    db_kind: db_kind.to_string(),
-                    format_version_in_code: format_version_in_code.clone(),
-                    network: network.clone(),
-                    ephemeral: config.ephemeral,
-                    db: Arc::new(db),
+            let db_result = if read_only {
+                // Create a secondary instance with temporary dir
+                let secondary_config = Config {
+                    ephemeral: true,
+                    ..config.clone()
                 };
+                let secondary_path = secondary_config.db_path(
+                    "secondary_state",
+                    format_version_in_code.major,
+                    network,
+                );
+                let create_dir_result = std::fs::create_dir_all(&secondary_path);
 
-                db.assert_default_cf_is_empty();
+                info!(?create_dir_result, "creating secondary db directory");
 
-                db
+                DB::open_cf_descriptors_as_secondary(
+                    &db_options,
+                    &path,
+                    &secondary_path,
+                    column_families,
+                )
+            } else {
+                // Clean up any stale locks
+                if config.ephemeral || cfg!(test) {
+                    let lock_path = path.join("LOCK");
+                    if lock_path.exists() {
+                        let _ = std::fs::remove_file(&lock_path);
+                    }
+                }
+
+                DB::open_cf_descriptors(&db_options, &path, column_families)
+            };
+
+            match db_result {
+                Ok(db) => {
+                    info!("Opened Zebra state cache at {}", path.display());
+
+                    let db = DiskDb {
+                        db_kind: db_kind.to_string(),
+                        format_version_in_code: format_version_in_code.clone(),
+                        network: network.clone(),
+                        ephemeral: config.ephemeral,
+                        db: Arc::new(db),
+                    };
+                    db.assert_default_cf_is_empty();
+                    return db;
+                }
+                Err(e) => {
+                    // Check if this is a lock error
+                    let error_str = format!("{:?}", e);
+                    let is_lock_error = error_str.contains("LOCK")
+                        && error_str.contains("Resource temporarily unavailable");
+
+                    if is_lock_error && retry_count < max_retries {
+                        // Exponential backoff
+                        let wait_time =
+                            std::time::Duration::from_millis(100 * (2_u64.pow(retry_count)));
+                        warn!(
+                            ?path,
+                            ?retry_count,
+                            ?wait_time,
+                            "Database lock error, retrying after backoff"
+                        );
+
+                        // Try removing the lock file
+                        let lock_path = path.join("LOCK");
+                        if lock_path.exists() {
+                            let _ = std::fs::remove_file(&lock_path);
+                        }
+
+                        std::thread::sleep(wait_time);
+                        retry_count += 1;
+                        continue;
+                    }
+
+                    // If we've exhausted retries or it's not a lock error
+                    panic!(
+                        "Opening database {path:?} failed: {e:?}. \
+                         Hint: Check if another zebrad process is running. \
+                         Try changing the state cache_dir in the Zebra config.",
+                    );
+                }
             }
-
-            // TODO: provide a different hint if the disk is full, see #1623
-            Err(e) => panic!(
-                "Opening database {path:?} failed: {e:?}. \
-                 Hint: Check if another zebrad process is running. \
-                 Try changing the state cache_dir in the Zebra config.",
-            ),
         }
     }
 
