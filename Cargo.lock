@@ -5829,12 +5829,12 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
+ "hex",
  "primitive-types",
+ "serde",
 ]
 
 [[package]]

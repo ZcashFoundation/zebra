@@ -33,6 +33,10 @@ pub trait Version: zcash_history::Version {
 ///
 /// Currently it should not be used as a long-term data structure because it
 /// may grow without limits.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct Tree<V: zcash_history::Version> {
     network: Network,
     network_upgrade: NetworkUpgrade,

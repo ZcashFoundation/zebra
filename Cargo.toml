@@ -152,6 +152,9 @@ x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.2.0"
 
+[patch.crates-io]
+zcash_history = { path = "../librustzcash/zcash_history" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
