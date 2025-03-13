@@ -411,9 +411,18 @@ impl Input {
 /// that spends my UTXO and sends 1 ZEC to you and 1 ZEC back to me
 /// (just like receiving change).
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Deserialize))]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
+    any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
+    derive(Deserialize)
+)]
+#[cfg_attr(
+    any(
+        test,
+        feature = "proptest-impl",
+        feature = "elasticsearch",
+        feature = "remote_read_state_service",
+    ),
     derive(Serialize)
 )]
 pub struct Output {

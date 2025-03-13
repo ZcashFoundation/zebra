@@ -63,9 +63,10 @@ pub const TRANSACTION_LOCATION_DISK_BYTES: usize = HEIGHT_DISK_BYTES + TX_INDEX_
 ///
 /// (The maximum transaction count is tested by the large generated block serialization tests.)
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 #[cfg_attr(
-    any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Default, Serialize, Deserialize)
+    any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
+    derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct TransactionIndex(pub(super) u16);
 
@@ -124,9 +125,10 @@ impl TransactionIndex {
 ///
 /// This provides a chain-order list of transactions.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 #[cfg_attr(
-    any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Default, Serialize, Deserialize)
+    any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
+    derive(serde::Serialize, serde::Deserialize)
 )]
 pub struct TransactionLocation {
     /// The block height of the transaction.

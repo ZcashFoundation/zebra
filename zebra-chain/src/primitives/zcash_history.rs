@@ -37,6 +37,18 @@ pub trait Version: zcash_history::Version {
     feature = "remote_read_state_service",
     derive(serde::Serialize, serde::Deserialize)
 )]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    serde(bound(
+        serialize = "V: serde::Serialize, 
+                     V::NodeData: serde::Serialize, 
+                     zcash_history::Tree<V>: serde::Serialize",
+        deserialize = "V: serde::de::DeserializeOwned, 
+                       V::NodeData: serde::de::DeserializeOwned, 
+                       zcash_history::Tree<V>: 
+                       serde::de::DeserializeOwned"
+    ))
+)]
 pub struct Tree<V: zcash_history::Version> {
     network: Network,
     network_upgrade: NetworkUpgrade,

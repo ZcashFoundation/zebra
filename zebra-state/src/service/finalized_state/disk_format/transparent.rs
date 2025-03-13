@@ -116,9 +116,10 @@ impl OutputIndex {
 /// [`OutputLocation`]s are sorted in increasing chain order, by height, transaction index,
 /// and output index.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 #[cfg_attr(
-    any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
+    derive(Serialize, Deserialize)
 )]
 pub struct OutputLocation {
     /// The location of the transparent input's transaction.

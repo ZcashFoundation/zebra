@@ -11,8 +11,12 @@ use crate::{
 /// An unspent `transparent::Output`, with accompanying metadata.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(proptest_derive::Arbitrary)
+)]
+#[cfg_attr(
     any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
-    derive(proptest_derive::Arbitrary, serde::Serialize)
+    derive(serde::Serialize)
 )]
 #[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 pub struct Utxo {
