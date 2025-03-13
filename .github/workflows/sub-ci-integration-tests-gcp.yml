@@ -351,7 +351,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-update-sync
       test_description: Test lightwalletd update sync with both states
-      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_UPDATE_SYNC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra -e LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: true
@@ -401,7 +401,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-send-transactions
       test_description: Test sending transactions via lightwalletd
-      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_TRANSACTIONS=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra -e LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -424,7 +424,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
-      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_LWD_GRPC=1 -e ZEBRA_TEST_LIGHTWALLETD=1 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra -e LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
