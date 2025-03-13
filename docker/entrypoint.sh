@@ -17,13 +17,9 @@ if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   exit 1
 fi
 
-# If running as root, use gosu to drop privileges
+# Use gosu to drop privileges
 exec_as_user() {
-  if [[ "$(id -u)" = '0' ]]; then
-    exec gosu "${UID}:${GID}" "$@"
-  else
-    exec "$@"
-  fi
+  exec gosu "${UID}:${GID}" "$@"
 }
 
 # Modifies the existing Zebra config file at ZEBRA_CONF_PATH using environment variables.
@@ -56,15 +52,13 @@ prepare_conf_file() {
   # them to set the cache dirs separately if needed.
   if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
     mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
-    sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-    # Fix permissions right after creating/configuring the directory
     chown -R "${UID}:${GID}" "${ZEBRA_CACHE_DIR//\"/}"
+    sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${ZEBRA_CONF_PATH}"
   fi
 
   # Set a custom lightwalletd cache dir.
   if [[ -n "${LWD_CACHE_DIR}" ]]; then
     mkdir -p "${LWD_CACHE_DIR//\"/}"
-    # Fix permissions right after creating/configuring the directory
     chown -R "${UID}:${GID}" "${LWD_CACHE_DIR//\"/}"
   fi
 
@@ -76,9 +70,8 @@ prepare_conf_file() {
   # Enable logging to a file by setting a custom log file path.
   if [[ -n "${LOG_FILE}" ]]; then
     mkdir -p "$(dirname "${LOG_FILE//\"/}")"
-    sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-    # Fix permissions right after creating/configuring the log directory
     chown -R "${UID}:${GID}" "$(dirname "${LOG_FILE//\"/}")"
+    sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${ZEBRA_CONF_PATH}"
   fi
 
   # Enable or disable colored logs.
@@ -281,6 +274,9 @@ run_tests() {
 # Main Script Logic
 
 prepare_conf_file "${ZEBRA_CONF_PATH}"
+echo "INFO: Using the following environment variables:"
+printenv
+
 echo "Prepared the following Zebra config:"
 cat "${ZEBRA_CONF_PATH}"
 
