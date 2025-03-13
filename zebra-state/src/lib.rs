@@ -51,7 +51,9 @@ pub use request::Spend;
 pub use response::{GetBlockTemplateChainInfo, KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
-    check, init, init_read_only,
+    check,
+    finalized_state::FinalizedState,
+    init, init_read_only,
     non_finalized_state::NonFinalizedState,
     spawn_init, spawn_init_read_only,
     watch_receiver::WatchReceiver,
