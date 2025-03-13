@@ -49,7 +49,7 @@ elasticsearch = [
 ]
 
 # Remote support for the [`ReadStateService`].
-remote_read_state_service = ["dep:hyper", "dep:hyper-rustls", "dep:url"]
+remote_read_state_service = ["dep:reqwest", "dep:url"]
 
 [dependencies]
 bincode = { workspace = true }
@@ -80,8 +80,7 @@ tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
 
 # remote_read_state_service specific dependencies.
-hyper = { workspace = true, optional = true, features = ["client", "server", "http1"]}
-hyper-rustls = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
 
 # elasticsearch specific dependencies.

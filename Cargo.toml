@@ -68,7 +68,6 @@ hex = "0.4.3"
 hex-literal = "0.4.1"
 howudoin = "0.1.2"
 http-body-util = "0.1.2"
-hyper-rustls = "0.27.5"
 human_bytes = { version = "0.4.3", default-features = false }
 humantime = "2.1.0"
 humantime-serde = "1.1.1"
