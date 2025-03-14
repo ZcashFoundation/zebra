@@ -49,7 +49,12 @@ elasticsearch = [
 ]
 
 # Remote support for the [`ReadStateService`].
-remote_read_state_service = ["dep:reqwest", "dep:url"]
+remote_read_state_service = [
+    "dep:url", 
+    "dep:jsonrpsee", 
+    "jsonrpsee/http-client",
+    "jsonrpsee/client-core",
+]
 
 [dependencies]
 bincode = { workspace = true }
@@ -80,8 +85,8 @@ tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
 
 # remote_read_state_service specific dependencies.
-reqwest = { workspace = true, optional = true }
 url = { workspace = true, optional = true }
+jsonrpsee = { workspace = true, optional = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl

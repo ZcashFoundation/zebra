@@ -2165,38 +2165,20 @@ pub fn init_test_services(
     )
 }
 
+/// Holds functionality for remote use of the [`ReadStateService`] ([`RemoteStateService`]).
 #[cfg(feature = "remote_read_state_service")]
 pub mod remote {
     use super::*;
 
-    use futures::executor::block_on;
-    use reqwest::{Client, ClientBuilder};
-    use tokio::time::sleep;
+    use jsonrpsee::{
+        core::client::ClientT,
+        http_client::{HttpClient, HttpClientBuilder},
+    };
     use url::Url;
 
-    /// Remote query about chain metrics or server health, via the [`RemoteStateService`].
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    pub enum RemoteRequest {
-        PollReady,
-        Call(ReadRequest),
-    }
-
-    /// Serializable response type for [`poll_ready`].
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    pub enum PollResponse {
-        Ready,
-        Pending,
-        Error(String),
-    }
-
-    /// A response to a [`RemoteStateService`]'s [`RemoteRequest`].
-    #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-    pub enum RemoteResponse {
-        PollReady(PollResponse),
-        Call(ReadResponse),
-    }
-
     /// A remote, read-only service for accessing Zebra's cached blockchain state.
+    ///
+    /// Uses a JsonRpSee client to send [`ReadRequests`] to zebrad
     ///
     /// Note: The zebrad process this service is configured to communicate with must be built
     /// with the "remote_read_state_service" feature enabled for this service to run.
@@ -2212,69 +2194,29 @@ pub mod remote {
     /// It allows other async tasks to make progress while concurrently reading data from disk.
     #[derive(Clone, Debug)]
     pub struct RemoteStateService {
-        /// The url at which the zebrad [`RemoteStateServer`] is configured to listen.
-        url: Url,
-
-        /// Reqwest client used for sending requests to the `[RemoteStateServer]`.
-        client: Client,
+        /// JsonRpSee client used for sending requests to the `[RemoteStateServer]`.
+        client: HttpClient,
     }
 
     impl RemoteStateService {
         /// Creates a new remote, read-only state service client.
         #[allow(dead_code)]
         pub fn new(url: Url) -> Result<Self, BoxError> {
-            let client = ClientBuilder::new()
-                .connect_timeout(Duration::from_secs(3))
-                .timeout(Duration::from_secs(5))
-                .redirect(reqwest::redirect::Policy::none())
-                .build()?;
+            let client = HttpClientBuilder::default()
+                .request_timeout(Duration::from_secs(5))
+                .build(url.as_str())?;
 
-            let remote_read_state_service = Self { url, client };
+            let remote_read_state_service = Self { client };
 
             Ok(remote_read_state_service)
         }
 
         /// Sends a request to the server an waits on a response.
-        async fn send_request(&self, req: RemoteRequest) -> Result<RemoteResponse, BoxError> {
-            let max_attempts = 3;
-            let mut attempts = 0;
-            loop {
-                attempts += 1;
+        async fn send_request(&self, req: ReadRequest) -> Result<ReadResponse, BoxError> {
+            let response: ReadResponse =
+                self.client.request("remote_state_request", (req,)).await?;
 
-                let req_body = bincode::serialize(&req)?;
-
-                let response_result = self
-                    .client
-                    .post(self.url.as_str())
-                    .header("Content-Type", "application/octet-stream")
-                    .body(req_body)
-                    .send()
-                    .await;
-
-                match response_result {
-                    Ok(server_response) => {
-                        if !server_response.status().is_success() {
-                            return Err(format!(
-                                "Server returned error status: {}",
-                                server_response.status()
-                            )
-                            .into());
-                        }
-
-                        let response_body = server_response.bytes().await?;
-                        let response: RemoteResponse = bincode::deserialize(&response_body)?;
-
-                        return Ok(response);
-                    }
-                    Err(e) => {
-                        if attempts >= max_attempts {
-                            return Err(e.into());
-                        }
-
-                        sleep(Duration::from_millis(500)).await;
-                    }
-                }
-            }
+            Ok(response)
         }
     }
 
@@ -2286,31 +2228,9 @@ pub mod remote {
 
         /// Note: Requires block_on due to the async nature of reqwest.
         fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-            let remote_state_service = self.clone();
-
-            let join_handle = tokio::task::spawn_blocking(move || {
-                let poll_ready_response =
-                    block_on(remote_state_service.send_request(RemoteRequest::PollReady));
-
-                match poll_ready_response {
-                    Ok(RemoteResponse::PollReady(poll_response)) => match poll_response {
-                        PollResponse::Ready => Poll::Ready(Ok(())),
-                        PollResponse::Pending => Poll::Pending,
-                        PollResponse::Error(e) => {
-                            Poll::Ready(Err(format!("Error in server: {:?}", e).into()))
-                        }
-                    },
-                    Ok(other) => {
-                        Poll::Ready(Err(format!("Unexpected response: {:?}", other).into()))
-                    }
-                    Err(e) => Poll::Ready(Err(e)),
-                }
-            });
-
-            match block_on(join_handle) {
-                Ok(poll) => poll,
-                Err(e) => Poll::Ready(Err(e.into())),
-            }
+            // This client doesn't hold any state that could block readiness,
+            // so we are always ready.
+            Poll::Ready(Ok(()))
         }
 
         #[instrument(name = "remote_state", skip(self, req))]
@@ -2324,17 +2244,14 @@ pub mod remote {
             Box::pin(async move {
                 let _guard = span.enter();
 
-                let call_response = remote_state_service
-                    .send_request(RemoteRequest::Call(req))
-                    .await;
+                let call_response = remote_state_service.send_request(req).await;
 
                 match call_response {
-                    Ok(RemoteResponse::Call(read_response)) => {
-                        timer.finish(module_path!(), line!(), "RemoteRequest::Call");
+                    Ok(read_response) => {
+                        timer.finish(module_path!(), line!(), "ReadRequest::{RemoteStateRequest}");
 
                         Ok(read_response)
                     }
-                    Ok(other) => Err(format!("Unexpected response: {:?}", other).into()),
                     Err(e) => Err(e),
                 }
             })

@@ -53,6 +53,9 @@ proptest-impl = [
     "zebra-chain/proptest-impl",
 ]
 
+# Remote support for the [`ReadStateService`].
+remote_read_state_service = ["zebra-state/remote_read_state_service", "zebra-chain/remote_read_state_service"]
+
 [dependencies]
 chrono = { workspace = true, features = ["clock", "std"] }
 futures = { workspace = true }

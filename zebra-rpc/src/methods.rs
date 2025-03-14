@@ -358,6 +358,19 @@ pub trait Rpc {
     /// tags: control
     #[method(name = "stop")]
     fn stop(&self) -> Result<String>;
+
+    /// RPC wrapper for reomte use of the [`ReadStateService`] ([`RemoteStateService`]).
+    ///
+    /// zcashd reference: NA (Not a zcash RPC, )
+    /// method: post
+    /// tags: internal
+    ///
+    /// # Notes
+    ///
+    ///
+    #[cfg(feature = "remote_read_state_service")]
+    #[method(name = "remote_state_request")]
+    async fn remote_state_request(&self, request: ReadRequest) -> Result<ReadResponse>;
 }
 
 /// RPC method implementations.
@@ -1585,6 +1598,19 @@ where
             "stop is not available in windows targets",
             None,
         ))
+    }
+
+    #[cfg(feature = "remote_read_state_service")]
+    async fn remote_state_request(&self, request: ReadRequest) -> Result<ReadResponse> {
+        let mut state = self.state.clone();
+
+        let response = state
+            .ready()
+            .and_then(|service| service.call(request))
+            .await
+            .map_misc_error()?;
+
+        Ok(response)
     }
 }
 
