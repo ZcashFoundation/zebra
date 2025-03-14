@@ -875,8 +875,14 @@ pub enum ReadRequest {
     Tip,
 
     /// Returns [`ReadResponse::TipPoolValues(Option<(Height, block::Hash, ValueBalance)>)`](ReadResponse::TipPoolValues)
-    /// with the current best chain tip.
+    /// with the pool values of the current best chain tip.
     TipPoolValues,
+
+    /// Looks up the pool values after a block by hash or height in the current best chain.
+    ///
+    /// * [`ReadResponse::PoolValues(Some(pool_values))`](ReadResponse::PoolValues) if the block is in the best chain;
+    /// * [`ReadResponse::PoolValues(None)`](ReadResponse::PoolValues) otherwise.
+    PoolValues(HashOrHeight),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
@@ -1141,6 +1147,7 @@ impl ReadRequest {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
+            ReadRequest::PoolValues(_) => "pool_values",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
             ReadRequest::BlockHeader(_) => "block_header",

@@ -1242,6 +1242,32 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            // Used by getblock
+            ReadRequest::PoolValues(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let value_balance = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::value_balance(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        // TODO: Do this in the Drop impl with the variant name?
+                        timer.finish(module_path!(), line!(), "ReadRequest::PoolValues");
+
+                        Ok(ReadResponse::PoolValues(value_balance))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the StateService.
             ReadRequest::Depth(hash) => {
                 let state = self.clone();

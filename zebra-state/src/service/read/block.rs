@@ -15,9 +15,11 @@
 use std::sync::Arc;
 
 use zebra_chain::{
+    amount::NonNegative,
     block::{self, Block, Height},
     transaction::{self, Transaction},
     transparent::{self, Utxo},
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -227,4 +229,25 @@ pub fn any_utxo(
     non_finalized_state
         .any_utxo(&outpoint)
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
+}
+
+/// Returns the [`ValueBalance`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn value_balance<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<ValueBalance<NonNegative>>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().value_balance(hash_or_height))
+        .or_else(|| db.value_balance(hash_or_height))
 }
