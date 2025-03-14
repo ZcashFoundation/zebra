@@ -81,7 +81,7 @@ ENV CARGO_TARGET_DIR=${HOME}/target
 COPY ./ ${HOME}
 RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    cargo test --locked --release --no-run \ --features "${FEATURES}" && \
+    cargo test --locked --release --no-run --features "${FEATURES}" && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp -a ${CARGO_TARGET_DIR} ${HOME}/tmp_target  && \
     cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home
