@@ -266,7 +266,7 @@ jobs:
           # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
             MOUNT_FLAGS="${MOUNT_FLAGS} --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=/home/zebra/.cache/lwd"
-            MOUNT_LOCATIONS="${MOUNT_LOCATIONS} -e ZEBRA_LWD_DIR=/home/zebra/.cache/lwd"
+            MOUNT_LOCATIONS="${MOUNT_LOCATIONS} -e LWD_CACHE_DIR=/home/zebra/.cache/lwd"
           fi
 
           sudo docker run \
