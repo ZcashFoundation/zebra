@@ -102,7 +102,7 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=cache,target=${HOME}/target/ \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
-    cargo test --locked --release --workspace --no-run \
+    cargo test --locked --release --no-run \
     --features "${FEATURES} zebra-checkpoints" && \
     cp ${HOME}/target/release/zebrad /usr/local/bin && \
     cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin

@@ -87,7 +87,7 @@ prepare_conf_file() {
 run_test() {
   # Start constructing the command, ensuring that $1 is enclosed in single
   # quotes as it's a feature list
-  local cmd="cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
+  local cmd="cargo test --locked --release --features '$1' --test acceptance -- --nocapture --include-ignored"
 
   # Shift the first argument, as it's already included in the cmd
   shift
@@ -120,23 +120,22 @@ run_tests() {
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
-    cargo test --locked --release --workspace --features "${FEATURES}" \
+    cargo test --locked --release --features "${FEATURES}" \
       -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
   elif [[ "${RUN_CHECK_NO_GIT_REFS}" -eq "1" ]]; then
     # Run the check_no_git_refs_in_cargo_lock test.
-    cargo test --locked --release --workspace --features "${FEATURES}" \
+    cargo test --locked --release --features "${FEATURES}" \
       -- --nocapture --include-ignored check_no_git_refs_in_cargo_lock
 
   elif [[ "${TEST_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
     # Run state tests with fake activation heights.
-    cargo test --locked --release --lib --features "zebra-test" \
-      --package zebra-state \
+    cargo test --locked --release --features "${FEATURES}" \
       -- --nocapture --include-ignored with_fake_activation_heights
 
   elif [[ "${TEST_SCANNER}" -eq "1" ]]; then
     # Test the scanner.
-    cargo test --locked --release --package zebra-scan \
+    cargo test --locked --release --features "${FEATURES}" \
       -- --nocapture --include-ignored scan_task_commands scan_start_where_left
 
   elif [[ "${TEST_ZEBRA_EMPTY_SYNC}" -eq "1" ]]; then
