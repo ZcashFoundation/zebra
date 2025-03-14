@@ -17,8 +17,8 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, history_tree::HistoryTree, transparent,
-    value_balance::ValueBalance,
+    amount::NonNegative, block::Height, block_data::BlockData, history_tree::HistoryTree,
+    transparent, value_balance::ValueBalance,
 };
 
 use crate::{
@@ -29,7 +29,7 @@ use crate::{
         zebra_db::ZebraDb,
         TypedColumnFamily,
     },
-    BoxError,
+    BoxError, HashOrHeight,
 };
 
 /// The name of the History Tree column family.
@@ -51,7 +51,7 @@ pub type LegacyHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, Height, HistoryT
 /// This type should not be used in new code.
 pub type RawHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, RawBytes, HistoryTreeParts>;
 
-/// The name of the chain value pools column family.
+/// The name of the tip-only chain value pools column family.
 ///
 /// This constant should be used so the compiler can detect typos.
 pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
@@ -61,6 +61,17 @@ pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
 pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNegative>>;
+
+/// The name of the block data column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const BLOCK_DATA: &str = "block_data";
+
+/// The type for reading value pools from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type BlockDataCf<'cf> = TypedColumnFamily<'cf, Height, BlockData>;
 
 impl ZebraDb {
     // Column family convenience methods
@@ -88,6 +99,12 @@ impl ZebraDb {
     /// Returns a typed handle to the chain value pools column family.
     pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf {
         ChainValuePoolsCf::new(&self.db, CHAIN_VALUE_POOLS)
+            .expect("column family was created when database was created")
+    }
+
+    /// Returns a typed handle to the block data column family.
+    pub(crate) fn block_data_cf(&self) -> BlockDataCf {
+        BlockDataCf::new(&self.db, BLOCK_DATA)
             .expect("column family was created when database was created")
     }
 
@@ -162,6 +179,15 @@ impl ZebraDb {
             .zs_get(&())
             .unwrap_or_else(ValueBalance::zero)
     }
+
+    /// Returns the stored `BlockData` for the given block.
+    pub fn block_data(&self, hash_or_height: HashOrHeight) -> Option<BlockData> {
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+
+        let block_data_cf = self.block_data_cf();
+
+        block_data_cf.zs_get(&height)
+    }
 }
 
 impl DiskWriteBatch {
@@ -227,18 +253,20 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
+        let new_value_pool = value_pool.add_chain_value_pool_change(
+            finalized
+                .block
+                .chain_value_pool_change(&utxos_spent_by_block, finalized.deferred_balance)?,
+        )?;
         let _ = db
             .chain_value_pools_cf()
             .with_batch_for_writing(self)
-            .zs_insert(
-                &(),
-                &value_pool.add_chain_value_pool_change(
-                    finalized.block.chain_value_pool_change(
-                        &utxos_spent_by_block,
-                        finalized.deferred_balance,
-                    )?,
-                )?,
-            );
+            .zs_insert(&(), &new_value_pool);
+
+        let _ = db
+            .block_data_cf()
+            .with_batch_for_writing(self)
+            .zs_insert(&finalized.height, &BlockData::new(new_value_pool));
 
         Ok(())
     }

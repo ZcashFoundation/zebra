@@ -29,6 +29,7 @@ use tracing::Instrument;
 
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
+    amount::NegativeAllowed,
     block::{self, Commitment, Height, SerializedBlock},
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
@@ -36,6 +37,7 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
+    value_balance::ValueBalance,
     work::{
         difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
         equihash::Solution,
@@ -721,7 +723,7 @@ where
             best_block_hash: tip_hash,
             estimated_height,
             chain_supply: types::Balance::chain_supply(value_balance),
-            value_pools: types::Balance::value_pools(value_balance),
+            value_pools: types::Balance::value_pools(value_balance, None),
             upgrades,
             consensus,
             headers: tip_height,
@@ -902,6 +904,9 @@ where
                 transactions_request,
                 // Orchard trees
                 zebra_state::ReadRequest::OrchardTree(hash_or_height),
+                // Block data
+                zebra_state::ReadRequest::BlockData(previous_block_hash.0.into()),
+                zebra_state::ReadRequest::BlockData(hash_or_height),
             ];
 
             let mut futs = FuturesOrdered::new();
@@ -973,6 +978,28 @@ where
 
             let trees = GetBlockTrees { sapling, orchard };
 
+            let block_data_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::BlockData(prev_block_data) =
+                block_data_response.map_misc_error()?
+            else {
+                unreachable!("unmatched response to a BlockData request");
+            };
+            let block_data_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::BlockData(block_data) =
+                block_data_response.map_misc_error()?
+            else {
+                unreachable!("unmatched response to a BlockData request");
+            };
+
+            let delta = block_data.as_ref().and_then(|d| {
+                let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
+                let prev_value_pools = prev_block_data
+                    .map(|d| d.value_pools().constrain::<NegativeAllowed>())
+                    .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
+                    .ok()?;
+                (value_pools - prev_value_pools).ok()
+            });
+
             Ok(GetBlock::Object {
                 hash,
                 confirmations,
@@ -986,6 +1013,11 @@ where
                 difficulty: Some(difficulty),
                 tx,
                 trees,
+                chain_supply: block_data
+                    .as_ref()
+                    .map(|d| types::Balance::chain_supply(*d.value_pools())),
+                value_pools: block_data
+                    .map(|d| types::Balance::value_pools(*d.value_pools(), delta)),
                 size: size.map(|size| size as i64),
                 block_commitments: Some(block_commitments),
                 final_sapling_root: Some(final_sapling_root),
@@ -2192,9 +2224,17 @@ pub enum GetBlock {
 
         // `chainwork` would be here, but we don't plan on supporting it
         // `anchor` would be here. Not planned to be supported.
-        // `chainSupply` would be here, TODO: implement
-        // `valuePools` would be here, TODO: implement
         //
+        /// Chain supply balance
+        #[serde(rename = "chainSupply")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        chain_supply: Option<types::Balance>,
+
+        /// Value pool balances
+        #[serde(rename = "valuePools")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        value_pools: Option<[types::Balance; 5]>,
+
         /// Information about the note commitment trees.
         trees: GetBlockTrees,
 
@@ -2226,6 +2266,8 @@ impl Default for GetBlock {
             nonce: None,
             bits: None,
             difficulty: None,
+            chain_supply: None,
+            value_pools: None,
             previous_block_hash: None,
             next_block_hash: None,
             solution: None,

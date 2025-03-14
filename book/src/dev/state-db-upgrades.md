@@ -12,7 +12,8 @@ family doesn't exist.
 Instead:
 - define the name and type of each column family at the top of the implementation module,
 - add a method on the database that returns that type, and
-- add the column family name to the list of column families in the database:
+- add the column family name to the list of column families in the database
+  (in the `STATE_COLUMN_FAMILIES_IN_CODE` array):
 
 For example:
 ```rust
@@ -328,16 +329,16 @@ We use the following rocksdb column families:
 
 With the following additional modifications when compiled with the `indexer` feature:
 
-| Column Family                      | Keys                   | Values                        | Changes |
-| ---------------------------------- | ---------------------- | ----------------------------- | ------- |
-| *Transparent*                      |                        |                               |         |
-| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
-| *Sprout*                           |                        |                               |         |
-| `sprout_nullifiers`                | `sprout::Nullifier`    | `TransactionLocation`         | Create  |
-| *Sapling*                          |                        |                               |         |
-| `sapling_nullifiers`               | `sapling::Nullifier`   | `TransactionLocation`         | Create  |
-| *Orchard*                          |                        |                               |         |
-| `orchard_nullifiers`               | `orchard::Nullifier`   | `TransactionLocation`         | Create  |
+| Column Family             | Keys                 | Values                | Changes |
+| ------------------------- | -------------------- | --------------------- | ------- |
+| *Transparent*             |                      |                       |         |
+| `tx_loc_by_spent_out_loc` | `OutputLocation`     | `TransactionLocation` | Create  |
+| *Sprout*                  |                      |                       |         |
+| `sprout_nullifiers`       | `sprout::Nullifier`  | `TransactionLocation` | Create  |
+| *Sapling*                 |                      |                       |         |
+| `sapling_nullifiers`      | `sapling::Nullifier` | `TransactionLocation` | Create  |
+| *Orchard*                 |                      |                       |         |
+| `orchard_nullifiers`      | `orchard::Nullifier` | `TransactionLocation` | Create  |
 
 ### Data Formats
 [rocksdb-data-format]: #rocksdb-data-format

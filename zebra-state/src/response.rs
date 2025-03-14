@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block},
+    block_data::BlockData,
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -152,6 +153,10 @@ pub enum ReadResponse {
         /// The value pool balance at the current best chain tip.
         value_balance: ValueBalance<NonNegative>,
     },
+
+    /// Response to [`ReadRequest::BlockData`] with
+    /// the block data after the specified block.
+    BlockData(Option<BlockData>),
 
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
@@ -343,6 +348,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
+            | ReadResponse::BlockData(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)

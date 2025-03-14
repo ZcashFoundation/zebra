@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use lazy_static::lazy_static;
 
 use crate::{
-    amount::COIN,
+    amount::{self, Amount, NonNegative, COIN},
     block::{Height, HeightDiff},
     parameters::{Network, NetworkUpgrade},
     transparent,
@@ -599,4 +599,138 @@ pub fn height_for_halving(halving: u32, network: &Network) -> Option<Height> {
 
     let height = u32::try_from(height).ok()?;
     height.try_into().ok()
+}
+
+/// Returns the `fs.Value(height)` for each stream receiver
+/// as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn funding_stream_values(
+    height: Height,
+    network: &Network,
+    expected_block_subsidy: Amount<NonNegative>,
+) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, crate::amount::Error> {
+    let canopy_height = NetworkUpgrade::Canopy.activation_height(network).unwrap();
+    let mut results = HashMap::new();
+
+    if height >= canopy_height {
+        let funding_streams = network.funding_streams(height);
+        if funding_streams.height_range().contains(&height) {
+            for (&receiver, recipient) in funding_streams.recipients() {
+                // - Spec equation: `fs.value = floor(block_subsidy(height)*(fs.numerator/fs.denominator))`:
+                //   https://zips.z.cash/protocol/protocol.pdf#subsidies
+                // - In Rust, "integer division rounds towards zero":
+                //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
+                //   This is the same as `floor()`, because these numbers are all positive.
+                let amount_value = ((expected_block_subsidy * recipient.numerator())?
+                    / FUNDING_STREAM_RECEIVER_DENOMINATOR)?;
+
+                results.insert(receiver, amount_value);
+            }
+        }
+    }
+
+    Ok(results)
+}
+
+/// Block subsidy errors.
+#[derive(thiserror::Error, Clone, Debug, PartialEq, Eq)]
+#[allow(missing_docs)]
+pub enum SubsidyError {
+    #[error("no coinbase transaction in block")]
+    NoCoinbase,
+
+    #[error("funding stream expected output not found")]
+    FundingStreamNotFound,
+
+    #[error("miner fees are invalid")]
+    InvalidMinerFees,
+
+    #[error("a sum of amounts overflowed")]
+    SumOverflow,
+
+    #[error("unsupported height")]
+    UnsupportedHeight,
+
+    #[error("invalid amount")]
+    InvalidAmount(#[from] amount::Error),
+}
+
+/// The divisor used for halvings.
+///
+/// `1 << Halving(height)`, as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+///
+/// Returns `None` if the divisor would overflow a `u64`.
+pub fn halving_divisor(height: Height, network: &Network) -> Option<u64> {
+    // Some far-future shifts can be more than 63 bits
+    1u64.checked_shl(num_halvings(height, network))
+}
+
+/// The halving index for a block height and network.
+///
+/// `Halving(height)`, as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn num_halvings(height: Height, network: &Network) -> u32 {
+    let slow_start_shift = network.slow_start_shift();
+    let blossom_height = NetworkUpgrade::Blossom
+        .activation_height(network)
+        .expect("blossom activation height should be available");
+
+    let halving_index = if height < slow_start_shift {
+        0
+    } else if height < blossom_height {
+        let pre_blossom_height = height - slow_start_shift;
+        pre_blossom_height / network.pre_blossom_halving_interval()
+    } else {
+        let pre_blossom_height = blossom_height - slow_start_shift;
+        let scaled_pre_blossom_height =
+            pre_blossom_height * HeightDiff::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
+
+        let post_blossom_height = height - blossom_height;
+
+        (scaled_pre_blossom_height + post_blossom_height) / network.post_blossom_halving_interval()
+    };
+
+    halving_index
+        .try_into()
+        .expect("already checked for negatives")
+}
+
+/// `BlockSubsidy(height)` as described in [protocol specification §7.8][7.8]
+///
+/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
+pub fn block_subsidy(
+    height: Height,
+    network: &Network,
+) -> Result<Amount<NonNegative>, SubsidyError> {
+    let blossom_height = NetworkUpgrade::Blossom
+        .activation_height(network)
+        .expect("blossom activation height should be available");
+
+    // If the halving divisor is larger than u64::MAX, the block subsidy is zero,
+    // because amounts fit in an i64.
+    //
+    // Note: bitcoind incorrectly wraps here, which restarts large block rewards.
+    let Some(halving_div) = halving_divisor(height, network) else {
+        return Ok(Amount::zero());
+    };
+
+    // Zebra doesn't need to calculate block subsidies for blocks with heights in the slow start
+    // interval because it handles those blocks through checkpointing.
+    if height < network.slow_start_interval() {
+        Err(SubsidyError::UnsupportedHeight)
+    } else if height < blossom_height {
+        // this calculation is exact, because the halving divisor is 1 here
+        Ok(Amount::try_from(MAX_BLOCK_SUBSIDY / halving_div)?)
+    } else {
+        let scaled_max_block_subsidy =
+            MAX_BLOCK_SUBSIDY / u64::from(BLOSSOM_POW_TARGET_SPACING_RATIO);
+        // in future halvings, this calculation might not be exact
+        // Amount division is implemented using integer division,
+        // which truncates (rounds down) the result, as specified
+        Ok(Amount::try_from(scaled_max_block_subsidy / halving_div)?)
+    }
 }

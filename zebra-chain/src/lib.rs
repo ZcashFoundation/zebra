@@ -20,6 +20,7 @@ extern crate tracing;
 
 pub mod amount;
 pub mod block;
+pub mod block_data;
 pub mod chain_sync_status;
 pub mod chain_tip;
 pub mod common;
