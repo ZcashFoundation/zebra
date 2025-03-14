@@ -7,82 +7,81 @@ on:
       test_id:
         required: true
         type: string
-        description: 'Unique identifier for the test'
+        description: "Unique identifier for the test"
       test_description:
         required: true
         type: string
-        description: 'Explains what the test does'
+        description: "Explains what the test does"
       height_grep_text:
         required: false
         type: string
-        description: 'Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata'
+        description: "Regular expression to find the tip height in test logs, and add it to newly created cached state image metadata"
 
       # Test selection and parameters
       test_variables:
         required: true
         type: string
-        description: 'Environmental variables used to select and configure the test'
+        description: "Environmental variables used to select and configure the test"
       network:
         required: false
         type: string
         default: Mainnet
-        description: 'Zcash network to test against'
+        description: "Zcash network to test against"
       is_long_test:
         required: false
         type: boolean
         default: false
-        description: 'Does this test need multiple run jobs? (Does it run longer than 6 hours?)'
+        description: "Does this test need multiple run jobs? (Does it run longer than 6 hours?)"
 
       # Cached state
-      #
       zebra_state_dir:
         required: false
         type: string
-        default: '/home/zebra/.cache/zebra'
-        description: 'Zebra cached state directory and input image prefix to search in GCP'
+        default: "/home/zebra/.cache/zebra"
+        description: "Zebra cached state directory and input image prefix to search in GCP"
       lwd_state_dir:
         required: false
         type: string
-        default: '/home/zebra/.cache/lwd'
-        description: 'Lightwalletd cached state directory and input image prefix to search in GCP'
+        default: "/home/zebra/.cache/lwd"
+        description: "Lightwalletd cached state directory and input image prefix to search in GCP"
       disk_prefix:
         required: false
         type: string
-        default: 'zebrad-cache'
-        description: 'Image name prefix, and `zebra_state_dir` name for newly created cached states'
+        default: "zebrad-cache"
+        description: "Image name prefix, and `zebra_state_dir` name for newly created cached states"
       disk_suffix:
         required: false
         type: string
-        default: 'tip'
-        description: 'Image name suffix'
+        default: "tip"
+        description: "Image name suffix"
       needs_zebra_state:
         required: true
         type: boolean
-        description: 'Does the test use Zebra cached state?'
+        description: "Does the test use Zebra cached state?"
       needs_lwd_state:
         required: false
         type: boolean
-        description: 'Does the test use Lightwalletd and Zebra cached state?'
+        description: "Does the test use Lightwalletd and Zebra cached state?"
       # main branch states can be outdated and slower, but they can also be more reliable
       prefer_main_cached_state:
         required: false
         type: boolean
         default: false
-        description: 'Does the test prefer to use a main branch cached state?'
+        description: "Does the test prefer to use a main branch cached state?"
       saves_to_disk:
         required: true
         type: boolean
-        description: 'Can this test create new or updated cached state disks?'
+        description: "Can this test create new or updated cached state disks?"
       force_save_to_disk:
         required: false
         type: boolean
         default: false
-        description: 'Force this test to create a new or updated cached state disk'
+        description: "Force this test to create a new or updated cached state disk"
       app_name:
         required: false
         type: string
-        default: 'zebra'
-        description: 'Application name, used to work out when a job is an update job'
+        default: "zebra"
+        description: "Application name, used to work out when a job is an update job"
 
 env:
   RUST_LOG: ${{ vars.RUST_LOG }}
@@ -132,7 +131,7 @@ jobs:
   test-result:
     name: Run ${{ inputs.test_id }} test
     runs-on: zfnd-runners
-    needs: [ get-disk-name ]
+    needs: [get-disk-name]
     if: ${{ !cancelled() && !failure() }}
     timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
@@ -141,13 +140,13 @@ jobs:
     env:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
     steps:
       - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
-          fetch-depth: '2'
+          fetch-depth: "2"
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
@@ -178,8 +177,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.8
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.4
@@ -382,7 +381,7 @@ jobs:
   create-state-image:
     name: Create ${{ inputs.test_id }} cached state image
     runs-on: ubuntu-latest
-    needs: [ test-result ]
+    needs: [test-result]
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
@@ -391,13 +390,13 @@ jobs:
       STATE_VERSION: ${{ needs.test-result.outputs.state_version }}
       CACHED_DISK_NAME: ${{ needs.test-result.outputs.cached_disk_name }}
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
     steps:
       - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
-          fetch-depth: '2'
+          fetch-depth: "2"
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
@@ -440,8 +439,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.8
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.4
@@ -681,19 +680,19 @@ jobs:
   delete-instance:
     name: Delete ${{ inputs.test_id }} instance
     runs-on: ubuntu-latest
-    needs: [ create-state-image ]
+    needs: [create-state-image]
     # If a disk generation step timeouts (+6 hours) the previous job (creating the image) will be skipped.
     # Even if the instance continues running, no image will be created, so it's better to delete it.
     if: always()
     continue-on-error: true
     permissions:
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
     steps:
       - uses: actions/checkout@v4.2.2
         with:
           persist-credentials: false
-          fetch-depth: '2'
+          fetch-depth: "2"
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
@@ -706,8 +705,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.8
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.4
