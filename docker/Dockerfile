@@ -23,7 +23,7 @@ ARG UID=10001
 ARG GID=${UID}
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
-ARG CARGO_HOME="${HOME}/.cargo/"
+ARG CARGO_HOME="${HOME}/.cargo"
 ARG CARGO_INCREMENTAL=0
 ARG COLORBT_SHOW_HIDDEN=0
 
@@ -70,48 +70,32 @@ FROM deps AS tests
 
 ARG FEATURES
 ARG HOME
+ARG CARGO_HOME
 
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
 
-# Build Zebra test binaries, but don't run them
-#
-# Leverage a cache mount to /usr/local/cargo/registry/
-# for downloaded dependencies, a cache mount to /usr/local/cargo/git/db
-# for git repository dependencies, and a cache mount to ${HOME}/target/ for
-# compiled dependencies which will speed up subsequent builds.
-# Leverage a bind mount to each crate directory to avoid having to copy the
-# source code into the container. Once built, copy the executable to an
-# output directory before the cache mounted ${HOME}/target/ is unmounted.
-RUN --mount=type=bind,source=zebrad,target=zebrad \
-    --mount=type=bind,source=zebra-chain,target=zebra-chain \
-    --mount=type=bind,source=zebra-network,target=zebra-network \
-    --mount=type=bind,source=zebra-state,target=zebra-state \
-    --mount=type=bind,source=zebra-script,target=zebra-script \
-    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
-    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
-    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
-    --mount=type=bind,source=zebra-test,target=zebra-test \
-    --mount=type=bind,source=zebra-utils,target=zebra-utils \
-    --mount=type=bind,source=zebra-scan,target=zebra-scan \
-    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
-    --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
-    --mount=type=bind,source=tower-fallback,target=tower-fallback \
-    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
-    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${HOME}/target/ \
-    --mount=type=cache,target=/usr/local/cargo/git/db \
-    --mount=type=cache,target=/usr/local/cargo/registry/ \
+WORKDIR ${HOME}
+ENV CARGO_TARGET_DIR=${HOME}/target
+
+COPY ./ ${HOME}
+RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
+    --mount=type=cache,target=${CARGO_HOME} \
     cargo test --locked --release --no-run \
     --features "${FEATURES} zebra-checkpoints" && \
-    cp ${HOME}/target/release/zebrad /usr/local/bin && \
-    cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
+    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    cp -r ${CARGO_TARGET_DIR} ${HOME}/tmp_target  && \
+    cp -r ${CARGO_HOME} ${HOME}/tmp_cargo_home
+
+RUN rm -rf ${CARGO_TARGET_DIR} && rm -rf ${CARGO_HOME} && \
+    mv ${HOME}/tmp_target ${CARGO_TARGET_DIR}  && \
+    mv ${HOME}/tmp_cargo_home ${CARGO_HOME}
 
 COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 COPY ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY ./ ${HOME}
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
