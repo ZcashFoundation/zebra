@@ -138,10 +138,10 @@ run_tests() {
     cargo test --locked --release --features "${FEATURES}" \
       -- --nocapture --include-ignored scan_task_commands scan_start_where_left
 
-  # elif [[ "${TEST_ZEBRA_EMPTY_SYNC}" -eq "1" ]]; then
-  #   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
-  #   # state.
-  #   run_test "${FEATURES}" "sync_large_checkpoints_"
+  elif [[ "${TEST_ZEBRA_EMPTY_SYNC}" -eq "1" ]]; then
+    # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
+    # state.
+    run_test "${FEATURES}" "sync_large_checkpoints_"
 
   elif [[ -n "${FULL_SYNC_MAINNET_TIMEOUT_MINUTES}" ]]; then
     # Run a Zebra full sync test on mainnet.
@@ -168,18 +168,18 @@ run_tests() {
     run_test "${FEATURES} test_sync_past_mandatory_checkpoint_${NETWORK,,}" \
       "sync_past_mandatory_checkpoint_${NETWORK,,}"
 
-  # elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
-  #   # Generate checkpoints after syncing Zebra from a cached state on mainnet.
-  #   #
-  #   # TODO: disable or filter out logs like:
-  #   # test generate_checkpoints_mainnet has been running for over 60 seconds
-  #   run_test "${FEATURES}" "generate_checkpoints_mainnet"
+  elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
+    # Generate checkpoints after syncing Zebra from a cached state on mainnet.
+    #
+    # TODO: disable or filter out logs like:
+    # test generate_checkpoints_mainnet has been running for over 60 seconds
+    run_test "${FEATURES}" "generate_checkpoints_mainnet"
 
-  # elif [[ "${GENERATE_CHECKPOINTS_TESTNET}" -eq "1" ]]; then
-  #   # Generate checkpoints after syncing Zebra on testnet.
-  #   #
-  #   # This test might fail if testnet is unstable.
-  #   run_test "${FEATURES}" "generate_checkpoints_testnet"
+  elif [[ "${GENERATE_CHECKPOINTS_TESTNET}" -eq "1" ]]; then
+    # Generate checkpoints after syncing Zebra on testnet.
+    #
+    # This test might fail if testnet is unstable.
+    run_test "${FEATURES}" "generate_checkpoints_testnet"
 
   elif [[ "${TEST_LWD_RPC_CALL}" -eq "1" ]]; then
     # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
