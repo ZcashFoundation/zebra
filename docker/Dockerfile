@@ -85,8 +85,8 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --features "${FEATURES} zebra-checkpoints" && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
-    cp -r ${CARGO_TARGET_DIR} ${HOME}/tmp_target  && \
-    cp -r ${CARGO_HOME} ${HOME}/tmp_cargo_home
+    cp -a ${CARGO_TARGET_DIR} ${HOME}/tmp_target  && \
+    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home
 
 RUN rm -rf ${CARGO_TARGET_DIR} && rm -rf ${CARGO_HOME} && \
     mv ${HOME}/tmp_target ${CARGO_TARGET_DIR}  && \
