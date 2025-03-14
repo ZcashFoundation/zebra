@@ -34,21 +34,11 @@ on:
         description: "Does this test need multiple run jobs? (Does it run longer than 6 hours?)"
 
       # Cached state
-      zebra_state_dir:
-        required: false
-        type: string
-        default: "/home/zebra/.cache/zebra"
-        description: "Zebra cached state directory and input image prefix to search in GCP"
-      lwd_state_dir:
-        required: false
-        type: string
-        default: "/home/zebra/.cache/lwd"
-        description: "Lightwalletd cached state directory and input image prefix to search in GCP"
       disk_prefix:
         required: false
         type: string
         default: "zebrad-cache"
-        description: "Image name prefix, and `zebra_state_dir` name for newly created cached states"
+        description: "Image name prefix for newly created cached states"
       disk_suffix:
         required: false
         type: string
@@ -239,10 +229,6 @@ jobs:
       # VM and to the container might require more steps in this workflow, and additional
       # considerations.
       #
-      # The disk mounted in the VM is located at /dev/$DISK_NAME, we mount the root `/` of this disk to the docker
-      # container, and might have two different paths (if lightwalletd state is needed):
-      # - ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
-      #
       # Currently we do this by mounting the same disk at both paths.
       #
       # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
@@ -253,9 +239,7 @@ jobs:
       # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root to both directories, Zebra and Lightwalletd, tests
-      # will only respect the values from $ZEBRA_CACHE_DIR and $LWD_CACHE_DIR,
-      # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
-      # are only used to match those variables paths.
+      # will only respect the values from $ZEBRA_CACHE_DIR and $LWD_CACHE_DIR.
       - name: Launch ${{ inputs.test_id }} test
         id: launch-test
         run: |
@@ -266,15 +250,23 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
 
+          MOUNT_FLAGS=""
+          MOUNT_LOCATIONS=""
+
           # Extract the correct disk name based on the device-name
           DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-)
 
-          MOUNT_FLAGS="--mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.zebra_state_dir }}"
+          if [[ "${{ inputs.needs_zebra_state }}" == "true"; then
+            MOUNT_FLAGS="${MOUNT_FLAGS} --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=/home/zebra/.cache/zebra"
+            MOUNT_LOCATIONS="${MOUNT_LOCATIONS} -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+          fi
+
 
           # Check if we need to mount for Lightwalletd state
           # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
           if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
-            MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.lwd_state_dir }}"
+            MOUNT_FLAGS="${MOUNT_FLAGS} --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=/home/zebra/.cache/lwd"
+            MOUNT_LOCATIONS="${MOUNT_LOCATIONS} -e ZEBRA_LWD_DIR=/home/zebra/.cache/lwd"
           fi
 
           sudo docker run \
@@ -288,6 +280,7 @@ jobs:
           -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
           -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
           ${MOUNT_FLAGS} \
+          ${MOUNT_LOCATIONS} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           '
 
