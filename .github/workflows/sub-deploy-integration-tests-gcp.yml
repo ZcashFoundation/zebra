@@ -256,7 +256,7 @@ jobs:
           # Extract the correct disk name based on the device-name
           DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-)
 
-          if [[ "${{ inputs.needs_zebra_state }}" == "true"; then
+          if [[ "${{ inputs.needs_zebra_state }}" == "true"]]; then
             MOUNT_FLAGS="${MOUNT_FLAGS} --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=/home/zebra/.cache/zebra"
             MOUNT_LOCATIONS="${MOUNT_LOCATIONS} -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
           fi
