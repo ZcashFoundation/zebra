@@ -14,6 +14,7 @@ use tracing::instrument;
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
+    block_data::BlockData,
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -21,8 +22,10 @@ use zebra_chain::{
     primitives::Groth16Proof,
     sapling, sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
-    transaction::Transaction::*,
-    transaction::{self, Transaction},
+    transaction::{
+        self,
+        Transaction::{self, *},
+    },
     transparent,
     value_balance::ValueBalance,
     work::difficulty::PartialCumulativeWork,
@@ -222,6 +225,8 @@ pub struct ChainInner {
     /// When a new chain is created from the finalized tip, it is initialized with the finalized tip
     /// chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
+    /// The block data after the given block height.
+    pub(crate) block_data_by_height: BTreeMap<block::Height, BlockData>,
 }
 
 impl Chain {
@@ -260,6 +265,7 @@ impl Chain {
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
+            block_data_by_height: Default::default(),
         };
 
         let mut chain = Self {
@@ -527,6 +533,15 @@ impl Chain {
             self.non_finalized_tip_hash(),
             self.chain_value_pools,
         )
+    }
+
+    /// Returns the total pool balance after the block specified by
+    /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
+    pub fn block_data(&self, hash_or_height: HashOrHeight) -> Option<BlockData> {
+        let height =
+            hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
+
+        self.block_data_by_height.get(&height).cloned()
     }
 
     /// Returns the Sprout note commitment tree of the tip of this [`Chain`],
