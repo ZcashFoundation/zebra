@@ -316,7 +316,7 @@ async fn rpc_getblock() {
                     }))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialize_to_vec().unwrap().len() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -364,7 +364,7 @@ async fn rpc_getblock() {
                     }))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialize_to_vec().unwrap().len() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
