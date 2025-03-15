@@ -53,9 +53,8 @@ pub trait DiskFormatUpgrade {
 
     /// Check that state has been upgraded to this format correctly.
     ///
-    /// # Panics
-    ///
-    /// If the state has not been upgraded to this format correctly.
+    /// The outer `Result` indicates whether the validation was cancelled (due to e.g. node shutdown).
+    /// The inner `Result` indicates whether the validation itself failed or not.
     fn validate(
         &self,
         _db: &ZebraDb,
