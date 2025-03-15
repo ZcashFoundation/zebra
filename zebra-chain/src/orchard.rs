@@ -6,7 +6,7 @@ mod action;
 mod address;
 mod commitment;
 mod note;
-mod orchard_flavor_ext;
+mod shielded_data_flavor;
 mod sinsemilla;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -23,10 +23,10 @@ pub use address::Address;
 pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
-pub use orchard_flavor_ext::{OrchardVanilla, ShieldedDataFlavor};
 pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};
+pub use shielded_data_flavor::{OrchardVanilla, ShieldedDataFlavor};
 
 pub(crate) use shielded_data::ActionCommon;
 
 #[cfg(feature = "tx-v6")]
-pub use orchard_flavor_ext::OrchardZSA;
+pub use shielded_data_flavor::OrchardZSA;
