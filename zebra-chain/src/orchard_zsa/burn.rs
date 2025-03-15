@@ -4,19 +4,15 @@ use std::io;
 
 use halo2::pasta::pallas;
 
-use crate::{
-    amount::Amount,
-    block::MAX_BLOCK_BYTES,
-    orchard::ValueCommitment,
-    serialization::{
-        ReadZcashExt, SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashSerialize,
-    },
-};
-
 use orchard::{note::AssetBase, value::NoteValue};
 
-// The size of the serialized AssetBase in bytes (used for TrustedPreallocate impls)
-pub(super) const ASSET_BASE_SIZE: u64 = 32;
+use zcash_primitives::transaction::components::orchard::{read_burn, write_burn};
+
+use crate::{
+    amount::Amount,
+    orchard::ValueCommitment,
+    serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
+};
 
 impl ZcashSerialize for AssetBase {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
@@ -31,11 +27,7 @@ impl ZcashDeserialize for AssetBase {
     }
 }
 
-// The size of the Amount type, in bytes
-const AMOUNT_SIZE: u64 = 8;
-
-const BURN_ITEM_SIZE: u64 = ASSET_BASE_SIZE + AMOUNT_SIZE;
-
+// FIXME: use Amount insstead of Amount, remove both TryFrom<...> after that
 /// Represents an OrchardZSA burn item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, Amount);
@@ -49,29 +41,18 @@ impl TryFrom<(AssetBase, NoteValue)> for BurnItem {
     }
 }
 
-impl ZcashSerialize for BurnItem {
-    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        let BurnItem(asset_base, amount) = self;
+impl TryFrom<BurnItem> for (AssetBase, NoteValue) {
+    type Error = std::io::Error;
 
-        asset_base.zcash_serialize(&mut writer)?;
-        amount.zcash_serialize(&mut writer)?;
-
-        Ok(())
-    }
-}
-
-impl ZcashDeserialize for BurnItem {
-    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        Ok(Self(
-            AssetBase::zcash_deserialize(&mut reader)?,
-            Amount::zcash_deserialize(&mut reader)?,
+    fn try_from(item: BurnItem) -> Result<Self, Self::Error> {
+        Ok((
+            item.0,
+            NoteValue::from_raw(
+                i64::from(item.1)
+                    .try_into()
+                    .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidData))?,
+            ),
         ))
-    }
-}
-
-impl TrustedPreallocate for BurnItem {
-    fn max_allocation() -> u64 {
-        (MAX_BLOCK_BYTES - 1) / BURN_ITEM_SIZE
     }
 }
 
@@ -111,6 +92,12 @@ impl From<NoBurn> for ValueCommitment {
     }
 }
 
+impl AsRef<[BurnItem]> for NoBurn {
+    fn as_ref(&self) -> &[BurnItem] {
+        &[]
+    }
+}
+
 impl ZcashSerialize for NoBurn {
     fn zcash_serialize<W: io::Write>(&self, mut _writer: W) -> Result<(), io::Error> {
         Ok(())
@@ -145,14 +132,32 @@ impl From<Burn> for ValueCommitment {
     }
 }
 
+impl AsRef<[BurnItem]> for Burn {
+    fn as_ref(&self) -> &[BurnItem] {
+        &self.0
+    }
+}
+
 impl ZcashSerialize for Burn {
-    fn zcash_serialize<W: io::Write>(&self, writer: W) -> Result<(), io::Error> {
-        self.0.zcash_serialize(writer)
+    fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        write_burn(
+            &mut writer,
+            &self
+                .0
+                .iter()
+                .map(|item| item.clone().try_into())
+                .collect::<Result<Vec<_>, _>>()?,
+        )
     }
 }
 
 impl ZcashDeserialize for Burn {
-    fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
-        Ok(Burn(Vec::<BurnItem>::zcash_deserialize(reader)?))
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        Ok(Burn(
+            read_burn(&mut reader)?
+                .into_iter()
+                .map(|item| item.try_into())
+                .collect::<Result<Vec<_>, _>>()?,
+        ))
     }
 }
