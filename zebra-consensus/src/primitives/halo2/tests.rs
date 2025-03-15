@@ -18,7 +18,7 @@ use orchard::{
 use rand::rngs::OsRng;
 
 use zebra_chain::{
-    orchard::{OrchardFlavorExt, OrchardVanilla, ShieldedData},
+    orchard::{OrchardVanilla, ShieldedData},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
@@ -27,7 +27,7 @@ use crate::primitives::halo2::*;
 // TODO: Add support for OrchardZSA (see OrchardVanilla and AssetBase::native() usage below)
 #[allow(dead_code, clippy::print_stdout)]
 fn generate_test_vectors() {
-    let proving_key = ProvingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();
+    let proving_key = ProvingKey::build::<OrchardVanilla>();
 
     let rng = OsRng;
 
@@ -62,8 +62,7 @@ fn generate_test_vectors() {
                     .unwrap();
             }
 
-            let bundle: Bundle<_, i64, <OrchardVanilla as OrchardFlavorExt>::Flavor> =
-                builder.build(rng).unwrap().0;
+            let bundle: Bundle<_, i64, OrchardVanilla> = builder.build(rng).unwrap().0;
 
             let bundle = bundle
                 .create_proof(&proving_key, rng)

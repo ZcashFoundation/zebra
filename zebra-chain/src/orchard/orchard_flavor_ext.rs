@@ -4,10 +4,12 @@ use std::fmt::Debug;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-#[cfg(any(test, feature = "proptest-impl"))]
-use proptest_derive::Arbitrary;
+use orchard::{domain::OrchardDomainCommon, orchard_flavor::OrchardFlavor};
 
-use orchard::{domain::OrchardDomainCommon, orchard_flavor};
+pub use orchard::orchard_flavor::OrchardVanilla;
+
+#[cfg(feature = "tx-v6")]
+pub use orchard::orchard_flavor::OrchardZSA;
 
 use crate::{
     orchard::ValueCommitment,
@@ -15,25 +17,29 @@ use crate::{
 };
 
 #[cfg(feature = "tx-v6")]
-use crate::orchard_zsa::{Burn, NoBurn};
+use crate::orchard_zsa::{Burn, BurnItem, NoBurn};
 
 use super::note;
 
-#[cfg(not(any(test, feature = "proptest-impl")))]
-pub trait TestArbitrary {}
-
-#[cfg(not(any(test, feature = "proptest-impl")))]
-impl<T> TestArbitrary for T {}
-
+// When testing or with the proptest-impl feature, enforce Arbitrary.
 #[cfg(any(test, feature = "proptest-impl"))]
-pub trait TestArbitrary: proptest::prelude::Arbitrary {}
+mod test_arbitrary {
+    use proptest::prelude::Arbitrary;
 
-#[cfg(any(test, feature = "proptest-impl"))]
-impl<T: proptest::prelude::Arbitrary> TestArbitrary for T {}
+    pub trait TestArbitrary: Arbitrary {}
+    impl<T: Arbitrary> TestArbitrary for T {}
+}
 
-/// A trait representing compile-time settings of Orchard Shielded Protocol used in
-/// the transactions `V5` and `V6`.
-pub trait OrchardFlavorExt: Clone + Debug {
+// Otherwise, no extra requirement.
+#[cfg(not(any(test, feature = "proptest-impl")))]
+mod test_arbitrary {
+    pub trait TestArbitrary {}
+    impl<T> TestArbitrary for T {}
+}
+
+/// A trait representing compile-time settings of ShieldedData of Orchard Shielded Protocol
+/// used in the transactions `V5` and `V6`.
+pub trait ShieldedDataFlavor: OrchardFlavor {
     /// A type representing an encrypted note for this protocol version.
     type EncryptedNote: Clone
         + Debug
@@ -43,47 +49,29 @@ pub trait OrchardFlavorExt: Clone + Debug {
         + Serialize
         + ZcashDeserialize
         + ZcashSerialize
-        + TestArbitrary;
-
-    /// Specifies the Orchard protocol flavor from `orchard` crate used by this implementation.
-    type Flavor: orchard_flavor::OrchardFlavor;
-
-    /// The size of the encrypted note for this protocol version.
-    const ENCRYPTED_NOTE_SIZE: usize = Self::Flavor::ENC_CIPHERTEXT_SIZE;
+        + test_arbitrary::TestArbitrary;
 
     /// A type representing a burn field for this protocol version.
     #[cfg(feature = "tx-v6")]
+    // FIXME: try to get rid
     type BurnType: Clone
         + Debug
         + Default
         + ZcashDeserialize
         + ZcashSerialize
         + Into<ValueCommitment>
-        + TestArbitrary;
+        + AsRef<[BurnItem]>
+        + test_arbitrary::TestArbitrary;
 }
 
-/// A structure representing a tag for Orchard protocol variant used for the transaction version 5.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct OrchardVanilla;
-
-/// A structure representing a tag for Orchard protocol variant used for the transaction version 6
-/// (which support for ZSAs).
-#[cfg(feature = "tx-v6")]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-#[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
-pub struct OrchardZSA;
-
-impl OrchardFlavorExt for OrchardVanilla {
-    type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
-    type Flavor = orchard_flavor::OrchardVanilla;
+impl ShieldedDataFlavor for OrchardVanilla {
+    type EncryptedNote = note::EncryptedNote<{ Self::ENC_CIPHERTEXT_SIZE }>;
     #[cfg(feature = "tx-v6")]
     type BurnType = NoBurn;
 }
 
 #[cfg(feature = "tx-v6")]
-impl OrchardFlavorExt for OrchardZSA {
-    type EncryptedNote = note::EncryptedNote<{ Self::ENCRYPTED_NOTE_SIZE }>;
-    type Flavor = orchard_flavor::OrchardZSA;
+impl ShieldedDataFlavor for OrchardZSA {
+    type EncryptedNote = note::EncryptedNote<{ Self::ENC_CIPHERTEXT_SIZE }>;
     type BurnType = Burn;
 }

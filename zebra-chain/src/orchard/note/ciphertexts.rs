@@ -99,7 +99,7 @@ impl ZcashDeserialize for WrappedNoteKey {
 }
 
 #[cfg(test)]
-use crate::orchard::OrchardFlavorExt;
+use crate::orchard::{OrchardVanilla, ShieldedDataFlavor};
 
 #[cfg(test)]
 use proptest::prelude::*;
@@ -107,7 +107,7 @@ use proptest::prelude::*;
 proptest! {
 
     #[test]
-    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote::<{ crate::orchard::OrchardVanilla::ENCRYPTED_NOTE_SIZE }>>()) {
+    fn encrypted_ciphertext_roundtrip(ec in any::<<OrchardVanilla as ShieldedDataFlavor>::EncryptedNote>()) {
         let _init_guard = zebra_test::init();
 
         let mut data = Vec::new();

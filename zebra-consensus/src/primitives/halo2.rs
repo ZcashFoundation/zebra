@@ -19,7 +19,7 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
-use zebra_chain::orchard::{OrchardFlavorExt, OrchardVanilla, OrchardZSA};
+use zebra_chain::orchard::{OrchardVanilla, OrchardZSA, ShieldedData, ShieldedDataFlavor};
 
 use crate::BoxError;
 
@@ -78,10 +78,10 @@ pub type ItemVerifyingKey = VerifyingKey;
 // FIXME: Check if the Orchard code (called from the zebra-consensus) checks burn as a part of bidning signature
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key for Orchard Vanilla
-    pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();
+    pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
 
     /// The halo2 proof verifying key for Orchard ZSA
-    pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey = ItemVerifyingKey::build::<<OrchardZSA as OrchardFlavorExt>::Flavor>();
+    pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardZSA>();
 }
 
 // === TEMPORARY BATCH HALO2 SUBSTITUTE ===
@@ -136,8 +136,8 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl<V: OrchardVerifier> From<&zebra_chain::orchard::ShieldedData<V>> for Item {
-    fn from(shielded_data: &zebra_chain::orchard::ShieldedData<V>) -> Item {
+impl<V: OrchardVerifier> From<&ShieldedData<V>> for Item {
+    fn from(shielded_data: &ShieldedData<V>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
@@ -199,7 +199,7 @@ type VerificationContext = Fallback<
     ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
 >;
 
-pub(crate) trait OrchardVerifier: OrchardFlavorExt {
+pub(crate) trait OrchardVerifier: ShieldedDataFlavor {
     const ZSA_ENABLED: bool;
 
     fn get_verifying_key() -> &'static ItemVerifyingKey;
