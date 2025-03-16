@@ -7,8 +7,9 @@ use hex::ToHex;
 use zebra_chain::{
     block,
     parameters::Network,
-    serialization::ZcashSerialize,
+    sapling::NotSmallOrderValueCommitment,
     transaction::{SerializedTransaction, Transaction},
+    transparent::{CoinbaseData, Script},
 };
 use zebra_consensus::groth16::Description;
 use zebra_state::IntoDisk;
@@ -68,7 +69,8 @@ pub enum Input {
     /// A coinbase input.
     Coinbase {
         /// The coinbase scriptSig as hex.
-        coinbase: String,
+        #[serde(with = "hex")]
+        coinbase: CoinbaseData,
         /// The script sequence number.
         sequence: u32,
     },
@@ -115,7 +117,8 @@ pub struct ScriptPubKey {
     /// the asm.
     asm: String,
     /// the hex.
-    hex: String,
+    #[serde(with = "hex")]
+    hex: Script,
     /// The required sigs.
     #[serde(rename = "reqSigs")]
     req_sigs: u32,
@@ -131,46 +134,54 @@ pub struct ScriptSig {
     /// The asm.
     asm: String,
     /// The hex.
-    hex: String,
+    #[serde(with = "hex")]
+    hex: Script,
 }
 
 /// A Sapling spend of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
-    cv: String,
+    #[serde(with = "hex")]
+    cv: NotSmallOrderValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
-    anchor: String,
+    #[serde(with = "hex")]
+    anchor: [u8; 32],
     /// The nullifier of the input note.
-    nullifier: String,
+    #[serde(with = "hex")]
+    nullifier: [u8; 32],
     /// The randomized public key for spendAuthSig.
-    rk: String,
+    #[serde(with = "hex")]
+    rk: [u8; 32],
     /// A zero-knowledge proof using the Sapling Spend circuit.
-    proof: String,
+    #[serde(with = "hex")]
+    proof: [u8; 192],
     /// A signature authorizing this Spend.
-    #[serde(rename = "spendAuthSig")]
-    spend_auth_sig: String,
+    #[serde(rename = "spendAuthSig", with = "hex")]
+    spend_auth_sig: [u8; 64],
 }
 
 /// A Sapling output of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
-    cv: String,
+    #[serde(with = "hex")]
+    cv: NotSmallOrderValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(rename = "cmu")]
-    cm_u: String,
+    #[serde(rename = "cmu", with = "hex")]
+    cm_u: [u8; 32],
     /// A Jubjub public key.
-    #[serde(rename = "ephemeralKey")]
-    ephemeral_key: String,
+    #[serde(rename = "ephemeralKey", with = "hex")]
+    ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext")]
-    enc_ciphertext: String,
+    #[serde(rename = "encCiphertext", with = "hex")]
+    enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
-    #[serde(rename = "outCiphertext")]
-    out_ciphertext: String,
+    #[serde(rename = "outCiphertext", with = "hex")]
+    out_ciphertext: [u8; 80],
     /// A zero-knowledge proof using the Sapling Output circuit.
-    proof: String,
+    #[serde(with = "hex")]
+    proof: [u8; 192],
 }
 
 /// Object with Orchard-specific information.
@@ -189,27 +200,30 @@ pub struct Orchard {
 /// The Orchard action of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct OrchardAction {
-    /// A value commitment to the net value of the input note minus the output note
-    cv: String,
+    /// A value commitment to the net value of the input note minus the output note.
+    #[serde(with = "hex")]
+    cv: [u8; 32],
     /// The nullifier of the input note.
-    nullifier: String,
+    #[serde(with = "hex")]
+    nullifier: [u8; 32],
     /// The randomized validating key for spendAuthSig.
-    rk: String,
+    #[serde(with = "hex")]
+    rk: [u8; 32],
     /// The x-coordinate of the note commitment for the output note.
-    #[serde(rename = "cmx")]
-    cm_x: String,
+    #[serde(rename = "cmx", with = "hex")]
+    cm_x: [u8; 32],
     /// An encoding of an ephemeral Pallas public key.
-    #[serde(rename = "ephemeralKey")]
-    ephemeral_key: String,
+    #[serde(rename = "ephemeralKey", with = "hex")]
+    ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext")]
-    enc_ciphertext: String,
+    #[serde(rename = "encCiphertext", with = "hex")]
+    enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
-    #[serde(rename = "spendAuthSig")]
-    spend_auth_sig: String,
+    #[serde(rename = "spendAuthSig", with = "hex")]
+    spend_auth_sig: [u8; 64],
     /// A signature authorizing the spend in this Action.
-    #[serde(rename = "outCiphertext")]
-    out_ciphertext: String,
+    #[serde(rename = "outCiphertext", with = "hex")]
+    out_ciphertext: [u8; 80],
 }
 
 impl Default for TransactionObject {
@@ -250,7 +264,7 @@ impl TransactionObject {
                     .map(|input| match input {
                         zebra_chain::transparent::Input::Coinbase { sequence, data, .. } => {
                             Input::Coinbase {
-                                coinbase: data.encode_hex(),
+                                coinbase: data.clone(),
                                 sequence: *sequence,
                             }
                         }
@@ -263,7 +277,7 @@ impl TransactionObject {
                             vout: outpoint.index,
                             script_sig: ScriptSig {
                                 asm: "".to_string(),
-                                hex: unlock_script.encode_hex(),
+                                hex: unlock_script.clone(),
                             },
                             sequence: *sequence,
                             value: None,
@@ -289,7 +303,7 @@ impl TransactionObject {
                             n: output.0 as u32,
                             script_pub_key: ScriptPubKey {
                                 asm: "".to_string(),
-                                hex: output.1.lock_script.encode_hex(),
+                                hex: output.1.lock_script.clone(),
                                 req_sigs: addresses.len() as u32,
                                 r#type: "".to_string(),
                                 addresses,
@@ -310,18 +324,15 @@ impl TransactionObject {
                         let mut rk: [u8; 32] = spend.clone().rk.into();
                         rk.reverse();
 
-                        let spend_auth_sig = spend
-                            .spend_auth_sig
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
+                        let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
 
                         ShieldedSpend {
-                            cv: spend.cv.encode_hex(),
-                            anchor: anchor.encode_hex(),
-                            nullifier: nullifier.encode_hex(),
-                            rk: rk.encode_hex(),
-                            proof: spend.proof().0.encode_hex(),
-                            spend_auth_sig: spend_auth_sig.encode_hex(),
+                            cv: spend.cv.clone(),
+                            anchor,
+                            nullifier,
+                            rk,
+                            proof: spend.proof().0,
+                            spend_auth_sig,
                         }
                     })
                     .collect(),
@@ -329,30 +340,18 @@ impl TransactionObject {
             shielded_outputs: Some(
                 tx.sapling_outputs()
                     .map(|output| {
-                        let ephemeral_key = output
-                            .ephemeral_key
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
-                        let enc_ciphertext = output
-                            .enc_ciphertext
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
-                        let out_ciphertext = output
-                            .out_ciphertext
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
-                        let proof = output
-                            .zkproof
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
+                        let mut ephemeral_key: [u8; 32] = output.ephemeral_key.into();
+                        ephemeral_key.reverse();
+                        let enc_ciphertext: [u8; 580] = output.enc_ciphertext.into();
+                        let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
 
                         ShieldedOutput {
-                            cv: output.cv.encode_hex(),
-                            cm_u: output.display_cmu(),
-                            ephemeral_key: ephemeral_key.encode_hex(),
-                            enc_ciphertext: enc_ciphertext.encode_hex(),
-                            out_ciphertext: out_ciphertext.encode_hex(),
-                            proof: proof.encode_hex(),
+                            cv: output.cv.clone(),
+                            cm_u: output.cm_u.to_bytes(),
+                            ephemeral_key: ephemeral_key,
+                            enc_ciphertext,
+                            out_ciphertext,
+                            proof: output.proof().0,
                         }
                     })
                     .collect(),
@@ -368,50 +367,36 @@ impl TransactionObject {
                     .collect::<Vec<_>>()
                     .iter()
                     .map(|action| {
-                        let spend_auth_sig = if let Some(shielded_data) = tx.orchard_shielded_data()
-                        {
-                            shielded_data
-                                .actions
-                                .iter()
-                                .filter(|authorized_action| authorized_action.action == **action)
-                                .map(|authorized_action| authorized_action.spend_auth_sig)
-                                .collect::<Vec<_>>()
-                                .first()
-                                .map(|sig| {
-                                    sig.zcash_serialize_to_vec().unwrap_or_else(|_| Vec::new())
-                                })
-                                .unwrap_or_else(Vec::new)
-                        } else {
-                            vec![]
-                        };
+                        let spend_auth_sig: [u8; 64] = tx
+                            .orchard_shielded_data()
+                            .and_then(|shielded_data| {
+                                shielded_data
+                                    .actions
+                                    .iter()
+                                    .find(|authorized_action| authorized_action.action == **action)
+                                    .map(|authorized_action| {
+                                        authorized_action.spend_auth_sig.into()
+                                    })
+                            })
+                            .unwrap_or([0; 64]);
+
+                        let cv: [u8; 32] = action.cv.into();
+                        let nullifier: [u8; 32] = action.nullifier.into();
                         let rk: [u8; 32] = action.rk.into();
                         let cm_x: [u8; 32] = action.cm_x.into();
-                        let cv = action
-                            .cv
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
-                        let ephemeral_key = action
-                            .ephemeral_key
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
-                        let enc_ciphertext = action
-                            .enc_ciphertext
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
-                        let out_ciphertext = action
-                            .out_ciphertext
-                            .zcash_serialize_to_vec()
-                            .unwrap_or_else(|_| vec![]);
+                        let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
+                        let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
+                        let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
 
                         OrchardAction {
-                            cv: cv.encode_hex(),
-                            nullifier: action.nullifier.as_bytes().encode_hex(),
-                            rk: rk.encode_hex(),
-                            cm_x: cm_x.encode_hex(),
-                            ephemeral_key: ephemeral_key.encode_hex(),
-                            enc_ciphertext: enc_ciphertext.encode_hex(),
-                            spend_auth_sig: spend_auth_sig.encode_hex(),
-                            out_ciphertext: out_ciphertext.encode_hex(),
+                            cv,
+                            nullifier,
+                            rk,
+                            cm_x,
+                            ephemeral_key,
+                            enc_ciphertext,
+                            spend_auth_sig,
+                            out_ciphertext,
                         }
                     })
                     .collect(),

@@ -7,5 +7,5 @@ mod zec;
 
 pub use get_blockchain_info::Balance;
 pub use get_raw_mempool::{GetRawMempool, MempoolObject};
-pub use transaction::TransactionObject;
+pub use transaction::{Input, TransactionObject};
 pub use zec::Zec;

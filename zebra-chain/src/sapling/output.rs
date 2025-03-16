@@ -4,8 +4,6 @@
 
 use std::io;
 
-use hex::ToHex;
-
 use crate::{
     block::MAX_BLOCK_BYTES,
     primitives::Groth16Proof,
@@ -106,13 +104,6 @@ impl Output {
         };
 
         (prefix, self.zkproof)
-    }
-
-    /// Display the `cm_u` field of this output as a hex string in big endian byte order.
-    pub fn display_cmu(&self) -> String {
-        let mut reversed_bytes = self.cm_u.to_bytes();
-        reversed_bytes.reverse();
-        reversed_bytes.encode_hex()
     }
 }
 
