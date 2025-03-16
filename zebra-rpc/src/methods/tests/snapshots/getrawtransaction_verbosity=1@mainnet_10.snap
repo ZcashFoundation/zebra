@@ -1,6 +1,5 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
-assertion_line: 453
 expression: rsp
 ---
 {
@@ -44,11 +43,6 @@ expression: rsp
     ],
     "vShieldedSpend": [],
     "vShieldedOutput": [],
-    "orchard": {
-      "actions": [],
-      "valueBalance": 0.0,
-      "valueBalanceZat": 0
-    },
     "valueBalance": 0.0,
     "valueBalanceZat": 0
   }

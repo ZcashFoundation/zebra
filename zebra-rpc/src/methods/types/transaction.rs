@@ -327,7 +327,7 @@ impl TransactionObject {
                         let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
 
                         ShieldedSpend {
-                            cv: spend.cv.clone(),
+                            cv: spend.cv,
                             anchor,
                             nullifier,
                             rk,
@@ -346,9 +346,9 @@ impl TransactionObject {
                         let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
 
                         ShieldedOutput {
-                            cv: output.cv.clone(),
+                            cv: output.cv,
                             cm_u: output.cm_u.to_bytes(),
-                            ephemeral_key: ephemeral_key,
+                            ephemeral_key,
                             enc_ciphertext,
                             out_ciphertext,
                             proof: output.proof().0,
@@ -361,49 +361,55 @@ impl TransactionObject {
             ),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
 
-            orchard: Some(Orchard {
-                actions: tx
-                    .orchard_actions()
-                    .collect::<Vec<_>>()
-                    .iter()
-                    .map(|action| {
-                        let spend_auth_sig: [u8; 64] = tx
-                            .orchard_shielded_data()
-                            .and_then(|shielded_data| {
-                                shielded_data
-                                    .actions
-                                    .iter()
-                                    .find(|authorized_action| authorized_action.action == **action)
-                                    .map(|authorized_action| {
-                                        authorized_action.spend_auth_sig.into()
-                                    })
-                            })
-                            .unwrap_or([0; 64]);
+            orchard: if !tx.has_orchard_shielded_data() {
+                None
+            } else {
+                Some(Orchard {
+                    actions: tx
+                        .orchard_actions()
+                        .collect::<Vec<_>>()
+                        .iter()
+                        .map(|action| {
+                            let spend_auth_sig: [u8; 64] = tx
+                                .orchard_shielded_data()
+                                .and_then(|shielded_data| {
+                                    shielded_data
+                                        .actions
+                                        .iter()
+                                        .find(|authorized_action| {
+                                            authorized_action.action == **action
+                                        })
+                                        .map(|authorized_action| {
+                                            authorized_action.spend_auth_sig.into()
+                                        })
+                                })
+                                .unwrap_or([0; 64]);
 
-                        let cv: [u8; 32] = action.cv.into();
-                        let nullifier: [u8; 32] = action.nullifier.into();
-                        let rk: [u8; 32] = action.rk.into();
-                        let cm_x: [u8; 32] = action.cm_x.into();
-                        let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
-                        let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
-                        let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
+                            let cv: [u8; 32] = action.cv.into();
+                            let nullifier: [u8; 32] = action.nullifier.into();
+                            let rk: [u8; 32] = action.rk.into();
+                            let cm_x: [u8; 32] = action.cm_x.into();
+                            let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
+                            let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
+                            let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
 
-                        OrchardAction {
-                            cv,
-                            nullifier,
-                            rk,
-                            cm_x,
-                            ephemeral_key,
-                            enc_ciphertext,
-                            spend_auth_sig,
-                            out_ciphertext,
-                        }
-                    })
-                    .collect(),
-                value_balance: types::Zec::from(tx.orchard_value_balance().orchard_amount())
-                    .lossy_zec(),
-                value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
-            }),
+                            OrchardAction {
+                                cv,
+                                nullifier,
+                                rk,
+                                cm_x,
+                                ephemeral_key,
+                                enc_ciphertext,
+                                spend_auth_sig,
+                                out_ciphertext,
+                            }
+                        })
+                        .collect(),
+                    value_balance: types::Zec::from(tx.orchard_value_balance().orchard_amount())
+                        .lossy_zec(),
+                    value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
+                })
+            },
         }
     }
 }

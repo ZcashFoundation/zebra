@@ -61,7 +61,7 @@ impl ZcashDeserialize for EncryptedNote {
 
 impl From<EncryptedNote> for [u8; 580] {
     fn from(note: EncryptedNote) -> Self {
-        note.0.into()
+        note.0
     }
 }
 
@@ -120,7 +120,7 @@ impl ZcashDeserialize for WrappedNoteKey {
 
 impl From<WrappedNoteKey> for [u8; 80] {
     fn from(note: WrappedNoteKey) -> Self {
-        note.0.into()
+        note.0
     }
 }
 
