@@ -377,16 +377,6 @@ impl ZcashDeserialize for NotSmallOrderValueCommitment {
     }
 }
 
-impl ToHex for NotSmallOrderValueCommitment {
-    fn encode_hex<T: FromIterator<char>>(&self) -> T {
-        self.bytes_in_display_order().encode_hex()
-    }
-
-    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
-        self.bytes_in_display_order().encode_hex_upper()
-    }
-}
-
 impl ToHex for &NotSmallOrderValueCommitment {
     fn encode_hex<T: FromIterator<char>>(&self) -> T {
         self.bytes_in_display_order().encode_hex()

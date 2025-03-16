@@ -115,6 +115,7 @@ pub struct Output {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ScriptPubKey {
     /// the asm.
+    // #9330: The `asm` field is not currently populated.
     asm: String,
     /// the hex.
     #[serde(with = "hex")]
@@ -123,6 +124,7 @@ pub struct ScriptPubKey {
     #[serde(rename = "reqSigs")]
     req_sigs: u32,
     /// The type, eg 'pubkeyhash'.
+    // #9330: The `type` field is not currently populated.
     r#type: String,
     /// The addresses.
     addresses: Vec<String>,
@@ -132,6 +134,7 @@ pub struct ScriptPubKey {
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct ScriptSig {
     /// The asm.
+    // #9330: The `asm` field is not currently populated.
     asm: String,
     /// The hex.
     #[serde(with = "hex")]
