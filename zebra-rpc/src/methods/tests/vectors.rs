@@ -312,7 +312,14 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Object(TransactionObject {
                         hex: (*tx).clone().into(),
                         height: Some(i.try_into().expect("valid u32")),
-                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64"))
+                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
+                        inputs: None,
+                        outputs: None,
+                        shielded_spends: None,
+                        shielded_outputs: None,
+                        value_balance: None,
+                        value_balance_zat: None,
+                        orchard: None,
                     }))
                     .collect(),
                 trees,
@@ -360,7 +367,14 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Object(TransactionObject {
                         hex: (*tx).clone().into(),
                         height: Some(i.try_into().expect("valid u32")),
-                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64"))
+                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64")),
+                        inputs: None,
+                        outputs: None,
+                        shielded_spends: None,
+                        shielded_outputs: None,
+                        value_balance: None,
+                        value_balance_zat: None,
+                        orchard: None,
                     }))
                     .collect(),
                 trees,
@@ -850,6 +864,7 @@ async fn rpc_getrawtransaction() {
                 hex,
                 height,
                 confirmations,
+                ..
             }) = response.expect("We should have a GetRawTransaction struct")
             else {
                 unreachable!("Should return a Raw enum")
