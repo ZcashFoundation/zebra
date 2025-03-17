@@ -73,6 +73,9 @@ pub use service::finalized_state::{
 
 pub use service::{finalized_state::ZebraDb, ReadStateService};
 
+#[cfg(feature = "remote_read_state_service")]
+pub use service::remote::RemoteStateService;
+
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
