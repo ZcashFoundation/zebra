@@ -133,7 +133,7 @@ RUN mkdir -p ${ZEBRA_CACHE_DIR} && \
     chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
 COPY --chown=${UID}:${GID} ./ ${HOME}
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
@@ -222,8 +222,8 @@ RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
-COPY ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
