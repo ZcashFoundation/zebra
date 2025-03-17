@@ -40,8 +40,7 @@ RUN apt-get -qq update && \
 ARG CARGO_INCREMENTAL
 ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
 
-ARG HOME
-ENV HOME=${HOME}
+ARG CARGO_HOME
 ENV CARGO_HOME=${CARGO_HOME}
 
 ARG FEATURES
@@ -71,9 +70,11 @@ ARG GID
 ENV GID=${GID}
 ARG USER
 ENV USER=${USER}
+ARG HOME
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
-    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos "" && \
+    chown -R ${UID}:${GID} ${HOME}
 
 # Set the working directory for the build.
 WORKDIR ${HOME}
@@ -197,7 +198,8 @@ ENV USER=${USER}
 ARG HOME
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
-    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos "" && \
+    chown -R ${UID}:${GID} ${HOME}
 
 WORKDIR ${HOME}
 
