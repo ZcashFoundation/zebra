@@ -76,6 +76,11 @@ RUN addgroup --quiet --gid ${GID} ${USER} && \
     adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos "" && \
     chown -R ${UID}:${GID} ${HOME}
 
+# As tests are run as the non-root user, we need to create the cargo home dir
+# and set the correct permissions.
+RUN mkdir -p "${CARGO_HOME}" && \
+    chown -R ${UID}:${GID} "${CARGO_HOME}"
+
 # Set the working directory for the build.
 WORKDIR ${HOME}
 
