@@ -122,15 +122,6 @@ COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
-ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
-RUN mkdir -p ${LWD_CACHE_DIR} && \
-    chown -R ${UID}:${GID} ${LWD_CACHE_DIR}
-
-# Use the same cache dir as in the production environment.
-ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && \
-    chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
-
 # As tests are run as the non-root user, we need to set the correct permissions
 # for the cargo home dir.
 RUN chown -R ${UID}:${GID} "${HOME}" && \
@@ -213,10 +204,6 @@ RUN chown -R ${UID}:${GID} ${HOME}
 
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
-
-ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
-ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
 
 # We're explicitly NOT using the USER directive here.
 # Instead, we run as root initially and use gosu in the entrypoint.sh

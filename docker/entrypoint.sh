@@ -10,6 +10,15 @@
 
 set -eo pipefail
 
+
+# These are the default cached state directories for Zebra and lightwalletd.
+#
+# They are set to `${HOME}/.cache/zebra` and `${HOME}/.cache/lwd`
+# respectively, but can be overridden by setting the
+# `ZEBRA_CACHE_DIR` and `LWD_CACHE_DIR` environment variables.
+: "${ZEBRA_CACHE_DIR:=${HOME}/.cache/zebra}"
+: "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
+
 # Exit early if `ZEBRA_CONF_PATH` does not point to a file.
 if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   echo "ERROR: No Zebra config file found at ZEBRA_CONF_PATH (${ZEBRA_CONF_PATH})."
