@@ -24,7 +24,7 @@ impl Arbitrary for BurnItem {
         // FIXME: should we filter/protect from including native assets into burn here?
         BundleArb::<orchard::orchard_flavor::OrchardVanilla>::arb_asset_to_burn()
             .prop_filter_map("Conversion to Amount failed", |(asset_base, value)| {
-                BurnItem::try_from((asset_base, value)).ok()
+                BurnItem::from((asset_base, value)).ok()
             })
             .boxed()
     }
