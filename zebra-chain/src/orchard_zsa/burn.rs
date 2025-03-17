@@ -27,32 +27,39 @@ impl ZcashDeserialize for AssetBase {
     }
 }
 
-// FIXME: use NoteValue instead of Amount, remove both TryFrom<...> after that
-/// Represents an OrchardZSA burn item.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BurnItem(AssetBase, Amount);
+// FIXME: Define BurnItem (or, even Burn/NoBurn) in Orchard and reuse it here?
+/// Orchard ZSA burn item.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub struct BurnItem(AssetBase, NoteValue);
 
-// Convert from burn item type used in `orchard` crate
-impl TryFrom<(AssetBase, NoteValue)> for BurnItem {
-    type Error = crate::amount::Error;
+impl BurnItem {
+    /// Returns [`AssetBase`] being burned.
+    pub fn asset(&self) -> AssetBase {
+        self.0
+    }
 
-    fn try_from(item: (AssetBase, NoteValue)) -> Result<Self, Self::Error> {
-        Ok(Self(item.0, item.1.inner().try_into()?))
+    /// Returns the amount being burned.
+    pub fn amount(&self) -> NoteValue {
+        self.1
+    }
+
+    /// Returns the raw [`u64`] amount being burned.
+    pub fn raw_amount(&self) -> u64 {
+        self.1.inner()
     }
 }
 
-impl TryFrom<BurnItem> for (AssetBase, NoteValue) {
-    type Error = std::io::Error;
+// Convert from burn item type used in `orchard` crate
+impl From<(AssetBase, NoteValue)> for BurnItem {
+    fn from(item: (AssetBase, NoteValue)) -> Self {
+        Self(item.0, item.1)
+    }
+}
 
-    fn try_from(item: BurnItem) -> Result<Self, Self::Error> {
-        Ok((
-            item.0,
-            NoteValue::from_raw(
-                i64::from(item.1)
-                    .try_into()
-                    .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidData))?,
-            ),
-        ))
+// Convert to burn item type used in `orchard` crate
+impl From<BurnItem> for (AssetBase, NoteValue) {
+    fn from(item: BurnItem) -> Self {
+        (item.0, item.1)
     }
 }
 
@@ -61,7 +68,7 @@ impl serde::Serialize for BurnItem {
     where
         S: serde::Serializer,
     {
-        (self.0.to_bytes(), &self.1).serialize(serializer)
+        (self.0.to_bytes(), &self.1.inner()).serialize(serializer)
     }
 }
 
@@ -70,11 +77,12 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
     where
         D: serde::Deserializer<'de>,
     {
-        let (asset_base_bytes, amount) = <([u8; 32], Amount)>::deserialize(deserializer)?;
+        let (asset_base_bytes, amount) = <([u8; 32], u64)>::deserialize(deserializer)?;
         Ok(BurnItem(
+            // FIXME: duplicates the body of AssetBase::zcash_deserialize?
             Option::from(AssetBase::from_bytes(&asset_base_bytes))
                 .ok_or_else(|| serde::de::Error::custom("Invalid orchard_zsa AssetBase"))?,
-            amount,
+            NoteValue::from_raw(amount),
         ))
     }
 }
@@ -142,11 +150,7 @@ impl ZcashSerialize for Burn {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         write_burn(
             &mut writer,
-            &self
-                .0
-                .iter()
-                .map(|item| item.clone().try_into())
-                .collect::<Result<Vec<_>, _>>()?,
+            &self.0.iter().map(|item| (*item).into()).collect::<Vec<_>>(),
         )
     }
 }
@@ -156,8 +160,8 @@ impl ZcashDeserialize for Burn {
         Ok(Burn(
             read_burn(&mut reader)?
                 .into_iter()
-                .map(|item| item.try_into())
-                .collect::<Result<Vec<_>, _>>()?,
+                .map(|item| item.into())
+                .collect(),
         ))
     }
 }
