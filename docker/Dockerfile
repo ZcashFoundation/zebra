@@ -46,9 +46,10 @@ ENV CARGO_HOME=${CARGO_HOME}
 ARG FEATURES
 ENV FEATURES=${FEATURES}
 
-ARG SHORT_SHA
-# If this is not set, it must be an empty string, so Zebra can try an alternative git commit source:
+# If this is not set, it must be an empty string, so Zebra can try an
+# alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
+ARG SHORT_SHA
 ENV SHORT_SHA=${SHORT_SHA:-}
 
 # This stage builds tests without running them.
@@ -79,7 +80,7 @@ RUN addgroup --quiet --gid ${GID} ${USER} && \
 WORKDIR ${HOME}
 
 # Build Zebra test binaries, but don't run them
-
+#
 # Leverage a cache mount to /usr/local/cargo/registry/
 # for downloaded dependencies, a cache mount to /usr/local/cargo/git/db
 # for git repository dependencies, and a cache mount to ${HOME}/target/ for
@@ -132,11 +133,10 @@ COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
-# In this stage we build a release (generate the zebrad binary)
+# This stage builds the zebrad release binary.
 #
-# This step also adds `cache mounts` as this stage is completely independent from the
-# `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
-# zebrad binary from this step.
+# It also adds `cache mounts` as this stage is completely independent from the
+# `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
 
 ARG HOME
@@ -163,8 +163,8 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${HOME}/target/release/zebrad /usr/local/bin
 
-# This step starts from scratch using Debian and only adds the resulting binary
-# from the `release` stage.
+# This stage starts from scratch using Debian and copies the built zebrad binary
+# from the `release` stage along with other binaries and files.
 FROM debian:bookworm-slim AS runtime
 
 ARG FEATURES

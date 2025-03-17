@@ -26,7 +26,7 @@ if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   exit 1
 fi
 
-# Use gosu to drop privileges
+# Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
   exec gosu "${UID}:${GID}" "$@"
 }
@@ -105,26 +105,6 @@ prepare_conf_file() {
   echo "${ZEBRA_CONF_PATH}"
 }
 
-# Checks if a directory contains subdirectories
-#
-# Exits with 0 if it does, and 1 otherwise.
-check_directory_files() {
-  local dir="$1"
-  # Check if the directory exists
-  if [[ -d "${dir}" ]]; then
-    # Check if there are any subdirectories
-    if find "${dir}" -mindepth 1 -type d | read -r; then
-      :
-    else
-      echo "No subdirectories found in ${dir}."
-      exit 1
-    fi
-  else
-    echo "Directory ${dir} does not exist."
-    exit 1
-  fi
-}
-
 # Runs cargo test with an arbitrary number of arguments.
 #
 # ## Positional Parameters
@@ -164,7 +144,7 @@ run_cargo_test() {
 
 # Runs tests depending on the env vars.
 #
-# Positional Parameters
+# ## Positional Parameters
 #
 # - $@: Arbitrary command that will be executed if no test env var is set.
 run_tests() {
@@ -290,7 +270,7 @@ echo "Prepared the following Zebra config:"
 cat "${ZEBRA_CONF_PATH}"
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
-# - If "$1" is "tests":
+# - If "$1" is "test":
 #   - and "$2" is "zebrad", run `zebrad` with the remaining params,
 #   - else run tests with the remaining params.
 # - TODO: If "$1" is "monitoring", start a monitoring node.
