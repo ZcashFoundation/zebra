@@ -27,7 +27,7 @@ impl ZcashDeserialize for AssetBase {
     }
 }
 
-// FIXME: use Amount insstead of Amount, remove both TryFrom<...> after that
+// FIXME: use NoteValue instead of Amount, remove both TryFrom<...> after that
 /// Represents an OrchardZSA burn item.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, Amount);

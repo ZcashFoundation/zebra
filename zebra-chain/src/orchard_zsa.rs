@@ -1,11 +1,11 @@
 //! OrchardZSA related functionality.
 
-// FIXME: remove pub(crate) later if possible
+// TODO: FIXME: remove pub(crate) later if possible
 #[cfg(any(test, feature = "proptest-impl"))]
 pub(crate) mod arbitrary;
 
-/// FIXME: feature = "proptest-impl" and pub are needed to access test vectors from other crates,
-/// remove it then
+/// TODO: FIXME: feature = "proptest-impl" and pub are needed to access test vectors from
+/// other crates, remove it later if possible
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod tests;
 

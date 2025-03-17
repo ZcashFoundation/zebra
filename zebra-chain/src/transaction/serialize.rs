@@ -860,10 +860,8 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data,
                 orchard_zsa_issue_data,
             } => {
-                // FIXME: fix spec or use another link as the current version of the PDF
-                // doesn't contain V6 description.
                 // Transaction V6 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // https://zips.z.cash/zip-0230#transaction-format
 
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
@@ -898,7 +896,7 @@ impl ZcashSerialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
 
-                // TODO: FIXME: add ref to spec
+                // TODO: FIXME: add a comment and ref to spec
                 orchard_zsa_issue_data.zcash_serialize(&mut writer)?;
             }
         }
@@ -1160,10 +1158,8 @@ impl ZcashDeserialize for Transaction {
             // FIXME: implement a proper deserialization for V6
             #[cfg(feature = "tx-v6")]
             (6, true) => {
-                // FIXME: fix spec or use another link as the current version of the PDF
-                // doesn't contain V6 description.
                 // Transaction V6 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // https://zips.z.cash/zip-0230#transaction-format
 
                 // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;
