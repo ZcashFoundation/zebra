@@ -73,13 +73,7 @@ ENV USER=${USER}
 ARG HOME
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
-    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos "" && \
-    chown -R ${UID}:${GID} ${HOME}
-
-# As tests are run as the non-root user, we need to create the cargo home dir
-# and set the correct permissions.
-RUN mkdir -p "${CARGO_HOME}" && \
-    chown -R ${UID}:${GID} "${CARGO_HOME}"
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
 # Set the working directory for the build.
 WORKDIR ${HOME}
@@ -136,6 +130,11 @@ RUN mkdir -p ${LWD_CACHE_DIR} && \
 ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
 RUN mkdir -p ${ZEBRA_CACHE_DIR} && \
     chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
+
+# As tests are run as the non-root user, we need to set the correct permissions
+# for the cargo home dir.
+RUN chown -R ${UID}:${GID} "${HOME}" && \
+    chown -R ${UID}:${GID} "${CARGO_HOME}"
 
 COPY --chown=${UID}:${GID} ./ ${HOME}
 COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -203,13 +202,14 @@ ENV USER=${USER}
 ARG HOME
 
 RUN addgroup --quiet --gid ${GID} ${USER} && \
-    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos "" && \
-    chown -R ${UID}:${GID} ${HOME}
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
 WORKDIR ${HOME}
 
 # We set the default locations of the conf and cache dirs according to the XDG
 # spec: https://specifications.freedesktop.org/basedir-spec/latest/
+
+RUN chown -R ${UID}:${GID} ${HOME}
 
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
