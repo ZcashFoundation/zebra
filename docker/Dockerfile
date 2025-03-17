@@ -24,40 +24,27 @@ ARG GID=${UID}
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
 ARG CARGO_HOME="${HOME}/.cargo/"
-ARG CARGO_INCREMENTAL=0
-ARG COLORBT_SHOW_HIDDEN=0
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
+# Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
     libclang-dev \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
-ARG UID
-ARG GID
-ARG USER
-ARG HOME
-ARG CARGO_HOME
+# Build arguments and variables
 ARG CARGO_INCREMENTAL
-ARG FEATURES
-ARG COLORBT_SHOW_HIDDEN
+ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
 
-ENV UID=${UID}
-ENV GID=${GID}
-ENV USER=${USER}
-ENV HOME=${HOME}
+ARG CARGO_HOME
 ENV CARGO_HOME=${CARGO_HOME}
-ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL}
-ENV FEATURES=${FEATURES}
-ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN}
 
-# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
-ARG ZEBRA_SKIP_IPV6_TESTS=1
-ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS}
+ARG FEATURES
+ENV FEATURES=${FEATURES}
 
 # If this is not set, it must be an empty string, so Zebra can try an
 # alternative git commit source:
@@ -66,13 +53,31 @@ ARG SHORT_SHA
 ENV SHORT_SHA=${SHORT_SHA:-}
 
 # This stage builds tests without running them.
+#
+# We also download needed dependencies for tests to work, from other images.
+# An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
-ARG FEATURES
+# Skip IPv6 tests by default, as some CI environment don't have IPv6 available
+ARG ZEBRA_SKIP_IPV6_TESTS
+ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
+
+# This environment setup is almost identical to the `runtime` target so that the
+# `tests` target differs minimally. In fact, a subset of this setup is used for
+# the `runtime` target.
+ARG UID
+ENV UID=${UID}
+ARG GID
+ENV GID=${GID}
+ARG USER
+ENV USER=${USER}
 ARG HOME
 
-ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
+RUN addgroup --quiet --gid ${GID} ${USER} && \
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
+
+# Set the working directory for the build.
+WORKDIR ${HOME}
 
 # Build Zebra test binaries, but don't run them
 #
@@ -107,21 +112,33 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     cp ${HOME}/target/release/zebrad /usr/local/bin && \
     cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
 
+# Copy the lightwalletd binary and source files to be able to run tests
 COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
+
+# Copy the gosu binary to be able to run the entrypoint as non-root user
+# and allow to change permissions for mounted cache directories
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
-COPY ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY ./ ${HOME}
+
+# Use the same default config as in the production environment.
+ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
+COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+
+# As tests are run as the non-root user, we need to set the correct permissions
+# for the cargo home dir.
+RUN chown -R ${UID}:${GID} "${HOME}" && \
+    chown -R ${UID}:${GID} "${CARGO_HOME}"
+
+COPY --chown=${UID}:${GID} ./ ${HOME}
+COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
 # This stage builds the zebrad release binary.
 #
 # It also adds `cache mounts` as this stage is completely independent from the
-# `test` stage.
+# `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
 
-ARG FEATURES
 ARG HOME
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
@@ -150,23 +167,55 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
 # from the `release` stage along with other binaries and files.
 FROM debian:bookworm-slim AS runtime
 
+ARG FEATURES
+ENV FEATURES=${FEATURES}
+
+# Create a non-privileged user for running `zebrad`.
+#
+# We use a high UID/GID (10001) to avoid overlap with host system users.
+# This reduces the risk of container user namespace conflicts with host accounts,
+# which could potentially lead to privilege escalation if a container escape occurs.
+#
+# We do not use the `--system` flag for user creation since:
+# 1. System user ranges (100-999) can collide with host system users
+#   (see: https://github.com/nginxinc/docker-nginx/issues/490)
+# 2. There's no value added and warning messages can be raised at build time
+#   (see: https://github.com/dotnet/dotnet-docker/issues/4624)
+#
+# The high UID/GID values provide an additional security boundary in containers
+# where user namespaces are shared with the host.
 ARG UID
+ENV UID=${UID}
 ARG GID
+ENV GID=${GID}
 ARG USER
+ENV USER=${USER}
 ARG HOME
 
-ENV UID=${UID}
-ENV GID=${GID}
-ENV USER=${USER}
-ENV HOME=${HOME}
+RUN addgroup --quiet --gid ${GID} ${USER} && \
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
+
+WORKDIR ${HOME}
+
+# We set the default locations of the conf and cache dirs according to the XDG
+# spec: https://specifications.freedesktop.org/basedir-spec/latest/
+
+RUN chown -R ${UID}:${GID} ${HOME}
 
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
 
-COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-COPY ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+# We're explicitly NOT using the USER directive here.
+# Instead, we run as root initially and use gosu in the entrypoint.sh
+# to step down to the non-privileged user. This allows us to change permissions
+# on mounted volumes before running the application as a non-root user.
+# User with UID=${UID} is created above and used via gosu in entrypoint.sh.
+
+# Copy the gosu binary to be able to run the entrypoint as non-root user
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
+COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
