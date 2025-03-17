@@ -163,7 +163,7 @@ run_tests() {
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
-    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
+    cargo test --locked --release --workspace --features "${FEATURES}" \
       -- --nocapture --include-ignored --skip check_no_git_refs_in_cargo_lock
 
   elif [[ "${RUN_CHECK_NO_GIT_REFS}" -eq "1" ]]; then
