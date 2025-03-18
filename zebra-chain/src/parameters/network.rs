@@ -39,8 +39,22 @@ impl From<Network> for NetworkKind {
     }
 }
 
+/// NOTE: Uses default values for [`Testnet`] and [`Regtest`] as custom values are not retrievable from [`NetworkKind`].
+///       If we want to make custom Networks Deserializable we will have to serialize the full [`Network`].
+#[cfg(feature = "remote_read_state_service")]
+impl From<NetworkKind> for Network {
+    fn from(value: NetworkKind) -> Self {
+        match value {
+            NetworkKind::Mainnet => Network::Mainnet,
+            NetworkKind::Testnet => Network::new_default_testnet(),
+            NetworkKind::Regtest => Network::new_regtest(Some(1), Some(1)),
+        }
+    }
+}
+
 /// An enum describing the possible network choices.
 #[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
+#[cfg_attr(feature = "remote_read_state_service", serde(from = "NetworkKind"))]
 #[derive(Clone, Default, Eq, PartialEq, Serialize)]
 #[serde(into = "NetworkKind")]
 pub enum Network {
