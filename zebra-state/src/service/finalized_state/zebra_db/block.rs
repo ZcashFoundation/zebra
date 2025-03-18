@@ -191,8 +191,11 @@ impl ZebraDb {
         // transactions. This requires summing them all and also adding the
         // size of the CompactSize-encoded transaction count.
         // See https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks
-        let tx_count = CompactSizeMessage::try_from(txs.len()).unwrap();
-        let tx_raw = tx_count.zcash_serialize_to_vec().unwrap();
+        let tx_count = CompactSizeMessage::try_from(txs.len())
+            .expect("must work for a previously serialized block");
+        let tx_raw = tx_count
+            .zcash_serialize_to_vec()
+            .expect("must work for a previously serialized block");
         let size = raw_header.raw_bytes().len()
             + raw_txs
                 .iter()
