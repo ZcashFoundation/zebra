@@ -23,7 +23,7 @@ ARG UID=10001
 ARG GID=${UID}
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
-ARG CARGO_HOME="${HOME}/.cargo/"
+ARG CARGO_HOME="${HOME}/.cargo"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
@@ -123,8 +123,8 @@ COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
-# As tests are run as the non-root user, we need to set the correct permissions
-# for the cargo home dir.
+# As the build has already run as root user, we need to set the correct permissions
+# for the home and cargo home dirs owned by root.
 RUN chown -R ${UID}:${GID} "${HOME}" && \
     chown -R ${UID}:${GID} "${CARGO_HOME}"
 

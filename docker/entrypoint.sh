@@ -56,9 +56,9 @@ prepare_conf_file() {
 
   # Set a custom state, network and cookie cache dirs.
   #
-  # We're pointing all three dirs at the same location, so users will find all
-  # cached data in that single location. We can introduce more env vars and use
-  # them to set the cache dirs separately if needed.
+  # We're pointing all three cache dirs at the same location, so users will find
+  # all cached data in that single location. We can introduce more env vars and
+  # use them to set the cache dirs separately if needed.
   if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
     mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
     chown -R "${UID}:${GID}" "${ZEBRA_CACHE_DIR//\"/}"
@@ -107,7 +107,7 @@ prepare_conf_file() {
 
 # Runs cargo test with an arbitrary number of arguments.
 #
-# ## Positional Parameters
+# Positional Parameters
 #
 # - '$1' must contain
 #   - either cargo FEATURES as described here:
@@ -121,25 +121,19 @@ run_cargo_test() {
   shift
 
   # Start constructing the command array
-  local cmd_args=(
-    cargo test --locked --release
-    --features "${features}"
-    --package zebrad
-    --test acceptance
-    -- --nocapture --include-ignored
-  )
+  local cmd="cargo test --locked --release --features ${features} --package zebrad --test acceptance -- --nocapture --include-ignored"
 
   # Loop through the remaining arguments
   for arg in "$@"; do
     if [[ -n ${arg} ]]; then
       # If the argument is non-empty, add it to the command
-      cmd_args+=("${arg}")
+      cmd+=("${arg}")
     fi
   done
 
-  echo "Running: ${cmd_args[*]}"
+  echo "Running: ${cmd[*]}"
   # Execute directly to become PID 1
-  exec_as_user "${cmd_args[@]}"
+  exec_as_user "${cmd[@]}"
 }
 
 # Runs tests depending on the env vars.
