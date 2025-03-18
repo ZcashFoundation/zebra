@@ -21,11 +21,10 @@ async fn verify_groth16_spends_and_outputs<V>(
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<bellman::groth16::batch::Item<bls12_381::Bls12>>>::Error:
-        std::fmt::Debug
-            + std::convert::From<
-                std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-            >,
+    <V as tower::Service<Item>>::Error: std::fmt::Debug
+        + std::convert::From<
+            std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
+        >,
 {
     let _init_guard = zebra_test::init();
 
@@ -133,10 +132,9 @@ async fn verify_invalid_groth16_output_description<V>(
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<bellman::groth16::batch::Item<bls12_381::Bls12>>>::Error:
-        std::convert::From<
-            std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-        >,
+    <V as tower::Service<Item>>::Error: std::convert::From<
+        std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
+    >,
 {
     let _init_guard = zebra_test::init();
 
@@ -213,11 +211,10 @@ async fn verify_groth16_joinsplits<V>(
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<bellman::groth16::batch::Item<bls12_381::Bls12>>>::Error:
-        std::fmt::Debug
-            + std::convert::From<
-                std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-            >,
+    <V as tower::Service<Item>>::Error: std::fmt::Debug
+        + std::convert::From<
+            std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
+        >,
 {
     let _init_guard = zebra_test::init();
 
@@ -285,11 +282,10 @@ async fn verify_groth16_joinsplit_vector<V>(
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<bellman::groth16::batch::Item<bls12_381::Bls12>>>::Error:
-        std::fmt::Debug
-            + std::convert::From<
-                std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-            >,
+    <V as tower::Service<Item>>::Error: std::fmt::Debug
+        + std::convert::From<
+            std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
+        >,
 {
     let _init_guard = zebra_test::init();
 
@@ -402,10 +398,9 @@ async fn verify_invalid_groth16_joinsplit_description<V>(
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<bellman::groth16::batch::Item<bls12_381::Bls12>>>::Error:
-        std::convert::From<
-            std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-        >,
+    <V as tower::Service<Item>>::Error: std::convert::From<
+        std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
+    >,
 {
     let _init_guard = zebra_test::init();
 

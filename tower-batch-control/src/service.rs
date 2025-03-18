@@ -19,6 +19,8 @@ use tokio_util::sync::PollSemaphore;
 use tower::Service;
 use tracing::{info_span, Instrument};
 
+use crate::ItemSize;
+
 use super::{
     future::ResponseFuture,
     message::Message,
@@ -34,7 +36,7 @@ pub const QUEUE_BATCH_LIMIT: usize = 64;
 /// Allows batch processing of requests.
 ///
 /// See the crate documentation for more details.
-pub struct Batch<T, Request>
+pub struct Batch<T, Request: ItemSize>
 where
     T: Service<BatchControl<Request>>,
 {
@@ -72,7 +74,7 @@ where
     worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 }
 
-impl<T, Request> fmt::Debug for Batch<T, Request>
+impl<T, Request: ItemSize> fmt::Debug for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
 {
@@ -88,7 +90,7 @@ where
     }
 }
 
-impl<T, Request> Batch<T, Request>
+impl<T, Request: ItemSize> Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -218,7 +220,7 @@ where
     }
 }
 
-impl<T, Request> Service<Request> for Batch<T, Request>
+impl<T, Request: ItemSize> Service<Request> for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
     T::Future: Send + 'static,
@@ -322,7 +324,7 @@ where
     }
 }
 
-impl<T, Request> Clone for Batch<T, Request>
+impl<T, Request: ItemSize> Clone for Batch<T, Request>
 where
     T: Service<BatchControl<Request>>,
 {
