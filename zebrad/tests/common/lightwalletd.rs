@@ -50,7 +50,7 @@ pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
 ///
 /// Can also be used to speed up the [`sending_transactions_using_lightwalletd`] test,
 /// by skipping the lightwalletd initial sync.
-pub const LIGHTWALLETD_DATA_DIR: &str = "LIGHTWALLETD_DATA_DIR";
+pub const LWD_CACHE_DIR: &str = "LWD_CACHE_DIR";
 
 /// Should we skip Zebra lightwalletd integration tests?
 #[allow(clippy::print_stderr)]
@@ -76,7 +76,7 @@ pub fn zebra_skip_lightwalletd_tests() -> bool {
 /// Spawns a lightwalletd instance on `network`, connected to `zebrad_rpc_address`,
 /// with its gRPC server functionality enabled.
 ///
-/// Expects cached state based on the `test_type`. Use the `LIGHTWALLETD_DATA_DIR`
+/// Expects cached state based on the `test_type`. Use the `LWD_CACHE_DIR`
 /// environmental variable to provide an initial state to the lightwalletd instance.
 ///
 /// Returns:

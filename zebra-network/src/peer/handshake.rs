@@ -262,10 +262,10 @@ impl ConnectedAddr {
     /// TODO: remove the `get_` from these methods (Rust style avoids `get` prefixes)
     pub fn get_address_book_addr(&self) -> Option<PeerSocketAddr> {
         match self {
-            OutboundDirect { addr } => Some(*addr),
+            OutboundDirect { addr } | InboundDirect { addr } => Some(*addr),
             // TODO: consider using the canonical address of the peer to track
             //       outbound proxy connections
-            InboundDirect { .. } | OutboundProxy { .. } | InboundProxy { .. } | Isolated => None,
+            OutboundProxy { .. } | InboundProxy { .. } | Isolated => None,
         }
     }
 
@@ -369,6 +369,11 @@ impl ConnectedAddr {
         };
 
         addrs.into_iter()
+    }
+
+    /// Returns true if the [`ConnectedAddr`] was created for an inbound connection.
+    pub fn is_inbound(&self) -> bool {
+        matches!(self, InboundDirect { .. } | InboundProxy { .. })
     }
 }
 
@@ -933,7 +938,11 @@ where
                 // the collector doesn't depend on network activity,
                 // so this await should not hang
                 let _ = address_book_updater
-                    .send(MetaAddr::new_connected(book_addr, &remote_services))
+                    .send(MetaAddr::new_connected(
+                        book_addr,
+                        &remote_services,
+                        connected_addr.is_inbound(),
+                    ))
                     .await;
             }
 

@@ -24,7 +24,7 @@ use zebra_node_services::mempool;
 
 use crate::{
     config::Config,
-    methods::{RpcImpl, RpcServer as _},
+    methods::{LoggedLastEvent, RpcImpl, RpcServer as _},
     server::{
         http_request_compatibility::HttpRequestMiddlewareLayer,
         rpc_call_compatibility::FixRpcResponseMiddleware,
@@ -122,6 +122,7 @@ impl RpcServer {
         network: Network,
         #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
+        last_event: LoggedLastEvent,
     ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -171,7 +172,7 @@ impl RpcServer {
             latest_chain_tip.clone(),
             block_verifier_router,
             sync_status,
-            address_book,
+            address_book.clone(),
             mined_block_sender,
         );
 
@@ -188,6 +189,8 @@ impl RpcServer {
             mempool,
             state,
             latest_chain_tip,
+            address_book,
+            last_event,
         );
 
         let http_middleware_layer = if config.enable_cookie_auth {

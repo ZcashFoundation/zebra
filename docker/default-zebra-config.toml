@@ -1,0 +1,65 @@
+# Default configuration file for running Zebra in Docker.
+#
+# This file is tailored for Zebra running in Docker. Do not use it with Zebra
+# running directly on your localhost as some fields are adjusted specifically
+# for Docker.
+#
+# You can use this file as a starting point for custom configuration. If you
+# don't specify a field, Zebra will use its default value.
+#
+# The config format, including a complete list of sections and fields, is
+# documented here:
+# https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
+
+[network]
+network = "Mainnet"
+listen_addr = "0.0.0.0"
+cache_dir = "/home/zebra/.cache/zebra"
+
+[rpc]
+# The RPC server is disabled by default. To enable it, uncomment one of the
+# lines below and alternatively set your own port.
+
+# listen_addr = "0.0.0.0:8232" # Mainnet
+# listen_addr = "0.0.0.0:18232" # Testnet
+
+cookie_dir = "/home/zebra/.cache/zebra"
+
+# To disable cookie authentication, uncomment the line below and set the value
+# to false.
+
+# enable_cookie_auth = true
+
+[state]
+cache_dir = "/home/zebra/.cache/zebra"
+
+[tracing]
+# Zebra recognizes whether its logs are being written to a terminal or a file,
+# and uses colored logs for terminals and uncolored logs for files. To force
+# colors even for files, uncomment the line below. To disable colors, set
+# `use_color` to false.
+
+# force_use_color = true
+use_color = true
+
+# Logging to a file is disabled by default. To enable it, uncomment the line
+# below and alternatively set your own path.
+
+# log_file = "/home/zebra/.local/state/zebrad.log"
+
+# Sending tracing events to systemd-journald is disabled by default. To enable
+# it, uncomment the line below.
+
+# use_journald = true
+
+[metrics]
+# Metrics via Prometheus are disabled by default. To enable them, uncomment the
+# line below and alternatively set your own port.
+
+# endpoint_addr = "0.0.0.0:9999" # Prometheus
+
+[mining]
+# If you are going to use Zebra as a backend for a mining pool, set your mining
+# address.
+
+# miner_address = "your_mining_address"

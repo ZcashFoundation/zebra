@@ -14,9 +14,10 @@ use zebra_chain::{
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::UnminedTxId,
 };
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 
-use zebra_state::{LatestChainTip, ReadStateService};
+use zebra_state::{GetBlockTemplateChainInfo, LatestChainTip, ReadStateService};
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -28,8 +29,9 @@ async fn rpc_getinfo() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "/Zebra:RPC test/",
         Mainnet,
         false,
@@ -37,13 +39,36 @@ async fn rpc_getinfo() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
-    let get_info = rpc.get_info().expect("We should have a GetInfo struct");
+    let getinfo_future = tokio::spawn(async move { rpc.get_info().await });
+
+    // Make the mock service respond with
+    let response_handler = state
+        .expect_request(zebra_state::ReadRequest::ChainInfo)
+        .await;
+    response_handler.respond(zebra_state::ReadResponse::ChainInfo(
+        GetBlockTemplateChainInfo {
+            tip_hash: Mainnet.genesis_hash(),
+            tip_height: Height::MIN,
+            history_tree: Default::default(),
+            expected_difficulty: Default::default(),
+            cur_time: zebra_chain::serialization::DateTime32::now(),
+            min_time: zebra_chain::serialization::DateTime32::now(),
+            max_time: zebra_chain::serialization::DateTime32::now(),
+        },
+    ));
+
+    let get_info = getinfo_future
+        .await
+        .expect("getinfo future should not panic")
+        .expect("getinfo future should not return an error");
 
     // make sure there is a `build` field in the response,
     // and that is equal to the provided string, with an added 'v' version prefix.
-    assert_eq!(get_info.build, "vRPC test");
+    assert_eq!(get_info.build, "v0.0.1");
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
@@ -57,13 +82,13 @@ async fn rpc_getinfo() {
     assert!(rpc_tx_queue_task_result.is_none());
 }
 
-// Helper function that returns the nonce and final sapling root of a given
-// Block.
+// Helper function that returns the nonce, final sapling root and
+// block commitments of a given Block.
 async fn get_block_data(
     read_state: &ReadStateService,
     block: Arc<Block>,
     height: usize,
-) -> ([u8; 32], [u8; 32]) {
+) -> ([u8; 32], [u8; 32], [u8; 32]) {
     let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
         .clone()
         .oneshot(zebra_state::ReadRequest::SaplingTree(HashOrHeight::Height(
@@ -85,7 +110,22 @@ async fn get_block_data(
     } else {
         [0; 32]
     };
-    (expected_nonce, expected_final_sapling_root)
+
+    let expected_block_commitments = match block
+        .commitment(&Mainnet)
+        .expect("Unexpected failure while parsing the blockcommitments field in get_block_data")
+    {
+        Commitment::PreSaplingReserved(bytes) => bytes,
+        Commitment::FinalSaplingRoot(_) => expected_final_sapling_root,
+        Commitment::ChainHistoryActivationReserved => [0; 32],
+        Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+        Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
+    };
+    (
+        expected_nonce,
+        expected_final_sapling_root,
+        expected_block_commitments,
+    )
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -104,8 +144,9 @@ async fn rpc_getblock() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -113,6 +154,8 @@ async fn rpc_getblock() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // Make height calls with verbosity=0 and check response
@@ -165,7 +208,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -184,6 +227,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -208,7 +252,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -227,6 +271,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -251,7 +296,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -274,6 +319,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -298,7 +344,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -321,6 +367,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -345,7 +392,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -364,6 +411,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -388,7 +436,7 @@ async fn rpc_getblock() {
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root) =
+        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
         assert_eq!(
@@ -407,6 +455,7 @@ async fn rpc_getblock() {
                 size: None,
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
+                block_commitments: Some(expected_block_commitments),
                 final_sapling_root: Some(expected_final_sapling_root),
                 final_orchard_root: None,
                 nonce: Some(expected_nonce),
@@ -439,8 +488,9 @@ async fn rpc_getblock_parse_error() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -448,6 +498,8 @@ async fn rpc_getblock_parse_error() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // Make sure we get an error if Zebra can't parse the block height.
@@ -482,8 +534,9 @@ async fn rpc_getblock_missing_error() {
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -491,6 +544,8 @@ async fn rpc_getblock_missing_error() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // Make sure Zebra returns the correct error code `-8` for missing blocks
@@ -544,8 +599,9 @@ async fn rpc_getblockheader() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -553,6 +609,8 @@ async fn rpc_getblockheader() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // Make height calls with verbose=false and check response
@@ -602,6 +660,7 @@ async fn rpc_getblockheader() {
             height,
             version: 4,
             merkle_root: block.header.merkle_root,
+            block_commitments: block.header.commitment_bytes.0,
             final_sapling_root: expected_final_sapling_root,
             sapling_tree_size: sapling_tree.count(),
             time: block.header.time.timestamp(),
@@ -654,8 +713,9 @@ async fn rpc_getbestblockhash() {
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -663,6 +723,8 @@ async fn rpc_getbestblockhash() {
         Buffer::new(mempool.clone(), 1),
         read_state,
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // Get the tip hash using RPC method `get_best_block_hash`
@@ -700,8 +762,9 @@ async fn rpc_getrawtransaction() {
     latest_chain_tip_sender.send_best_tip_height(Height(10));
 
     // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -709,6 +772,8 @@ async fn rpc_getrawtransaction() {
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // Test case where transaction is in mempool.
@@ -876,8 +941,9 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -885,6 +951,8 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // call the method with an invalid address string
@@ -1025,8 +1093,9 @@ async fn rpc_getaddresstxids_response_with(
 ) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         network.clone(),
         false,
@@ -1034,6 +1103,8 @@ async fn rpc_getaddresstxids_response_with(
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip.clone(),
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // call the method with valid arguments
@@ -1077,8 +1148,9 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let rpc = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -1086,6 +1158,8 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         NoChainTip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // call the method with an invalid address string
@@ -1122,8 +1196,9 @@ async fn rpc_getaddressutxos_response() {
     let (_state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let rpc = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         Mainnet,
         false,
@@ -1131,6 +1206,8 @@ async fn rpc_getaddressutxos_response() {
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         latest_chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     // call the method with a valid address
@@ -1804,6 +1881,8 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
+        time: None,
+        height: None,
     };
 
     let next_fake_tip_hash =

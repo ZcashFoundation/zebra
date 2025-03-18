@@ -25,7 +25,6 @@ use zebra_chain::{
     transparent::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
-    work::difficulty::{ParameterDifficulty as _, U256},
 };
 use zebra_consensus::{
     block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
@@ -36,7 +35,7 @@ use zebra_state::{ReadRequest, ReadResponse};
 
 use crate::{
     methods::{
-        best_chain_tip_height,
+        best_chain_tip_height, chain_tip_difficulty,
         get_block_template_rpcs::{
             constants::{
                 DEFAULT_SOLUTION_RATE_WINDOW_SIZE, GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL,
@@ -1261,67 +1260,7 @@ where
     }
 
     async fn get_difficulty(&self) -> Result<f64> {
-        let network = self.network.clone();
-        let mut state = self.state.clone();
-
-        let request = ReadRequest::ChainInfo;
-
-        // # TODO
-        // - add a separate request like BestChainNextMedianTimePast, but skipping the
-        //   consistency check, because any block's difficulty is ok for display
-        // - return 1.0 for a "not enough blocks in the state" error, like `zcashd`:
-        // <https://github.com/zcash/zcash/blob/7b28054e8b46eb46a9589d0bdc8e29f9fa1dc82d/src/rpc/blockchain.cpp#L40-L41>
-        let response = state
-            .ready()
-            .and_then(|service| service.call(request))
-            .await
-            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
-
-        let chain_info = match response {
-            ReadResponse::ChainInfo(info) => info,
-            _ => unreachable!("unmatched response to a chain info request"),
-        };
-
-        // This RPC is typically used for display purposes, so it is not consensus-critical.
-        // But it uses the difficulty consensus rules for its calculations.
-        //
-        // Consensus:
-        // https://zips.z.cash/protocol/protocol.pdf#nbits
-        //
-        // The zcashd implementation performs to_expanded() on f64,
-        // and then does an inverse division:
-        // https://github.com/zcash/zcash/blob/d6e2fada844373a8554ee085418e68de4b593a6c/src/rpc/blockchain.cpp#L46-L73
-        //
-        // But in Zebra we divide the high 128 bits of each expanded difficulty. This gives
-        // a similar result, because the lower 128 bits are insignificant after conversion
-        // to `f64` with a 53-bit mantissa.
-        //
-        // `pow_limit >> 128 / difficulty >> 128` is the same as the work calculation
-        // `(2^256 / pow_limit) / (2^256 / difficulty)`, but it's a bit more accurate.
-        //
-        // To simplify the calculation, we don't scale for leading zeroes. (Bitcoin's
-        // difficulty currently uses 68 bits, so even it would still have full precision
-        // using this calculation.)
-
-        // Get expanded difficulties (256 bits), these are the inverse of the work
-        let pow_limit: U256 = network.target_difficulty_limit().into();
-        let difficulty: U256 = chain_info
-            .expected_difficulty
-            .to_expanded()
-            .expect("valid blocks have valid difficulties")
-            .into();
-
-        // Shift out the lower 128 bits (256 bits, but the top 128 are all zeroes)
-        let pow_limit = pow_limit >> 128;
-        let difficulty = difficulty >> 128;
-
-        // Convert to u128 then f64.
-        // We could also convert U256 to String, then parse as f64, but that's slower.
-        let pow_limit = pow_limit.as_u128() as f64;
-        let difficulty = difficulty.as_u128() as f64;
-
-        // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
-        Ok(pow_limit / difficulty)
+        chain_tip_difficulty(self.network.clone(), self.state.clone()).await
     }
 
     async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response> {
@@ -1380,10 +1319,10 @@ where
         > = self.clone();
         let network = self.network.clone();
 
-        if !network.is_regtest() {
+        if !network.disable_pow() {
             return Err(ErrorObject::borrowed(
                 0,
-                "generate is only supported on regtest",
+                "generate is only supported on networks where PoW is disabled",
                 None,
             ));
         }

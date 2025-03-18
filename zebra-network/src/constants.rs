@@ -383,6 +383,13 @@ pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.5;
 /// The minimum interval between logging peer set status updates.
 pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The maximum number of peer misbehavior incidents before a peer is
+/// disconnected and banned.
+pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
+
+/// The maximum number of banned IP addresses to be stored in-memory at any time.
+pub const MAX_BANNED_IPS: usize = 20_000;
+
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,
     /// represented as a network upgrade.

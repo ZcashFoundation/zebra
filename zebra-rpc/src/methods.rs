@@ -6,6 +6,8 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
+#[cfg(feature = "getblocktemplate-rpcs")]
+use std::collections::HashMap;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
 use chrono::Utc;
@@ -16,27 +18,33 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use tokio::{sync::broadcast, task::JoinHandle};
+use tokio::{
+    sync::{broadcast, watch},
+    task::JoinHandle,
+};
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
 use zcash_primitives::consensus::Parameters;
 use zebra_chain::{
-    block::{self, Height, SerializedBlock},
+    block::{self, Commitment, Height, SerializedBlock},
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
-    value_balance::ValueBalance,
     work::{
-        difficulty::{CompactDifficulty, ExpandedDifficulty},
+        difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
         equihash::Solution,
     },
 };
+use zebra_consensus::ParameterCheckpoint;
+use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, OutputIndex, OutputLocation, TransactionLocation};
+use zebra_state::{
+    HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+};
 
 use crate::{
     methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
@@ -53,6 +61,10 @@ pub mod hex_data;
 pub mod trees;
 
 pub mod types;
+
+use types::GetRawMempool;
+#[cfg(feature = "getblocktemplate-rpcs")]
+use types::MempoolObject;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
@@ -81,7 +93,7 @@ pub trait Rpc {
     /// Some fields from the zcashd reference are missing from Zebra's [`GetInfo`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95)
     #[method(name = "getinfo")]
-    fn get_info(&self) -> Result<GetInfo>;
+    async fn get_info(&self) -> Result<GetInfo>;
 
     /// Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
     ///
@@ -131,6 +143,7 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `raw_transaction_hex`: (string, required, example="signedhex") The hex-encoded raw transaction bytes.
+    /// - `allow_high_fees`: (bool, optional) A legacy parameter accepted by zcashd but ignored by Zebra.
     ///
     /// # Notes
     ///
@@ -140,6 +153,7 @@ pub trait Rpc {
     async fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
+        _allow_high_fees: Option<bool>,
     ) -> Result<SentTransactionHash>;
 
     /// Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
@@ -211,11 +225,15 @@ pub trait Rpc {
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
+    /// # Parameters
+    ///
+    /// - `verbose`: (boolean, optional, default=false) true for a json object, false for array of transaction ids.
+    ///
     /// zcashd reference: [`getrawmempool`](https://zcash.github.io/rpc/getrawmempool.html)
     /// method: post
     /// tags: blockchain
     #[method(name = "getrawmempool")]
-    async fn get_raw_mempool(&self) -> Result<Vec<String>>;
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool>;
 
     /// Returns information about the given block's Sapling & Orchard tree state.
     ///
@@ -344,7 +362,7 @@ pub trait Rpc {
 
 /// RPC method implementations.
 #[derive(Clone)]
-pub struct RpcImpl<Mempool, State, Tip>
+pub struct RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -365,6 +383,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Configuration
     //
@@ -400,9 +419,18 @@ where
     //
     /// A sender component of a channel used to send transactions to the mempool queue.
     queue_sender: broadcast::Sender<UnminedTx>,
+
+    /// Peer address book.
+    address_book: AddressBook,
+
+    /// The last warning or error event logged by the server.
+    last_warn_error_log_rx: LoggedLastEvent,
 }
 
-impl<Mempool, State, Tip> Debug for RpcImpl<Mempool, State, Tip>
+/// A type alias for the last event logged by the server.
+pub type LoggedLastEvent = watch::Receiver<Option<(String, tracing::Level, chrono::DateTime<Utc>)>>;
+
+impl<Mempool, State, Tip, AddressBook> Debug for RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -423,6 +451,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Skip fields without Debug impls, and skip channels
@@ -436,7 +465,7 @@ where
     }
 }
 
-impl<Mempool, State, Tip> RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, AddressBook> RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -457,6 +486,7 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     /// Create a new instance of the RPC handler.
     //
@@ -472,6 +502,8 @@ where
         mempool: Mempool,
         state: State,
         latest_chain_tip: Tip,
+        address_book: AddressBook,
+        last_warn_error_log_rx: LoggedLastEvent,
     ) -> (Self, JoinHandle<()>)
     where
         VersionString: ToString + Clone + Send + 'static,
@@ -497,6 +529,8 @@ where
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             queue_sender,
+            address_book,
+            last_warn_error_log_rx,
         };
 
         // run the process queue
@@ -511,7 +545,7 @@ where
 }
 
 #[async_trait]
-impl<Mempool, State, Tip> RpcServer for RpcImpl<Mempool, State, Tip>
+impl<Mempool, State, Tip, AddressBook> RpcServer for RpcImpl<Mempool, State, Tip, AddressBook>
 where
     Mempool: Service<
             mempool::Request,
@@ -532,11 +566,51 @@ where
         + 'static,
     State::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    fn get_info(&self) -> Result<GetInfo> {
+    async fn get_info(&self) -> Result<GetInfo> {
+        let version = GetInfo::version(&self.build_version).expect("invalid version string");
+
+        let connections = self.address_book.recently_live_peers(Utc::now()).len();
+
+        let last_error_recorded = self.last_warn_error_log_rx.borrow().clone();
+        let (last_error_log, _level, last_error_log_time) = last_error_recorded.unwrap_or((
+            GetInfo::default().errors,
+            tracing::Level::INFO,
+            Utc::now(),
+        ));
+
+        let tip_height = self
+            .latest_chain_tip
+            .best_tip_height()
+            .unwrap_or(Height::MIN);
+        let testnet = self.network.is_a_test_network();
+
+        // This field is behind the `ENABLE_WALLET` feature flag in zcashd:
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/rpc/misc.cpp#L113
+        // However it is not documented as optional:
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/rpc/misc.cpp#L70
+        // For compatibility, we keep the field in the response, but always return 0.
+        let pay_tx_fee = 0.0;
+
+        let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
+            / (zebra_chain::amount::COIN as f64);
+        let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone()).await?;
+
         let response = GetInfo {
+            version,
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
+            protocol_version: zebra_network::constants::CURRENT_NETWORK_PROTOCOL_VERSION.0,
+            blocks: tip_height.0,
+            connections,
+            proxy: None,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors: last_error_log,
+            errors_timestamp: last_error_log_time.to_string(),
         };
 
         Ok(response)
@@ -544,75 +618,65 @@ where
 
     #[allow(clippy::unwrap_in_result)]
     async fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
-        let network = self.network.clone();
         let debug_force_finished_sync = self.debug_force_finished_sync;
-        let mut state = self.state.clone();
+        let network = &self.network;
 
-        // `chain` field
-        let chain = network.bip70_network_name();
+        let (usage_info_rsp, tip_pool_values_rsp, chain_tip_difficulty) = {
+            use zebra_state::ReadRequest::*;
+            let state_call = |request| self.state.clone().oneshot(request);
+            tokio::join!(
+                state_call(UsageInfo),
+                state_call(TipPoolValues),
+                chain_tip_difficulty(network.clone(), self.state.clone())
+            )
+        };
 
-        let (tip_height, tip_hash, tip_block_time, value_balance) = match state
-            .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::TipPoolValues))
-            .await
-        {
-            Ok(zebra_state::ReadResponse::TipPoolValues {
-                tip_height,
-                tip_hash,
-                value_balance,
-            }) => {
-                let request = zebra_state::ReadRequest::BlockHeader(tip_hash.into());
-                let response: zebra_state::ReadResponse = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_misc_error()?;
+        let (size_on_disk, (tip_height, tip_hash), value_balance, difficulty) = {
+            use zebra_state::ReadResponse::*;
 
-                if let zebra_state::ReadResponse::BlockHeader { header, .. } = response {
-                    (tip_height, tip_hash, header.time, value_balance)
-                } else {
-                    unreachable!("unmatched response to a TipPoolValues request")
-                }
-            }
-            _ => {
-                let request =
-                    zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(Height::MIN));
-                let response: zebra_state::ReadResponse = state
-                    .ready()
-                    .and_then(|service| service.call(request))
-                    .await
-                    .map_misc_error()?;
+            let UsageInfo(size_on_disk) = usage_info_rsp.map_misc_error()? else {
+                unreachable!("unmatched response to a TipPoolValues request")
+            };
 
-                if let zebra_state::ReadResponse::BlockHeader {
-                    header,
-                    hash,
-                    height,
-                    ..
-                } = response
-                {
-                    (height, hash, header.time, ValueBalance::zero())
-                } else {
-                    unreachable!("unmatched response to a BlockHeader request")
-                }
-            }
+            let (tip, value_balance) = match tip_pool_values_rsp {
+                Ok(TipPoolValues {
+                    tip_height,
+                    tip_hash,
+                    value_balance,
+                }) => ((tip_height, tip_hash), value_balance),
+                Ok(_) => unreachable!("unmatched response to a TipPoolValues request"),
+                Err(_) => ((Height::MIN, network.genesis_hash()), Default::default()),
+            };
+
+            let difficulty = chain_tip_difficulty.unwrap_or_else(|_| {
+                (U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64
+            });
+            (size_on_disk, tip, value_balance, difficulty)
         };
 
         let now = Utc::now();
-        let zebra_estimated_height =
-            NetworkChainTipHeightEstimator::new(tip_block_time, tip_height, &network)
-                .estimate_height_at(now);
+        let (estimated_height, verification_progress) = self
+            .latest_chain_tip
+            .best_tip_height_and_block_time()
+            .map(|(tip_height, tip_block_time)| {
+                let height =
+                    NetworkChainTipHeightEstimator::new(tip_block_time, tip_height, network)
+                        .estimate_height_at(now);
 
-        // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
-        // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
-        // later than the current time on the local clock.
-        let estimated_height = if tip_block_time > now
-            || zebra_estimated_height < tip_height
-            || debug_force_finished_sync
-        {
-            tip_height
-        } else {
-            zebra_estimated_height
-        };
+                // If we're testing the mempool, force the estimated height to be the actual tip height, otherwise,
+                // check if the estimated height is below Zebra's latest tip height, or if the latest tip's block time is
+                // later than the current time on the local clock.
+                let height =
+                    if tip_block_time > now || height < tip_height || debug_force_finished_sync {
+                        tip_height
+                    } else {
+                        height
+                    };
+
+                (height, f64::from(tip_height.0) / f64::from(height.0))
+            })
+            // TODO: Add a `genesis_block_time()` method on `Network` to use here.
+            .unwrap_or((Height::MIN, 0.0));
 
         // `upgrades` object
         //
@@ -645,29 +709,40 @@ where
             (tip_height + 1).expect("valid chain tips are a lot less than Height::MAX");
         let consensus = TipConsensusBranch {
             chain_tip: ConsensusBranchIdHex(
-                NetworkUpgrade::current(&network, tip_height)
+                NetworkUpgrade::current(network, tip_height)
                     .branch_id()
                     .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),
             next_block: ConsensusBranchIdHex(
-                NetworkUpgrade::current(&network, next_block_height)
+                NetworkUpgrade::current(network, next_block_height)
                     .branch_id()
                     .unwrap_or(ConsensusBranchId::RPC_MISSING_ID),
             ),
         };
 
         let response = GetBlockChainInfo {
-            chain,
+            chain: network.bip70_network_name(),
             blocks: tip_height,
             best_block_hash: tip_hash,
             estimated_height,
-            value_pools: types::ValuePoolBalance::from_value_balance(value_balance),
+            chain_supply: types::Balance::chain_supply(value_balance),
+            value_pools: types::Balance::value_pools(value_balance),
             upgrades,
             consensus,
+            headers: tip_height,
+            difficulty,
+            verification_progress,
+            // TODO: store work in the finalized state for each height (#7109)
+            chain_work: 0,
+            pruned: false,
+            size_on_disk,
+            // TODO: Investigate whether this needs to be implemented (it's sprout-only in zcashd)
+            commitments: 0,
         };
 
         Ok(response)
     }
+
     async fn get_address_balance(&self, address_strings: AddressStrings) -> Result<AddressBalance> {
         let state = self.state.clone();
 
@@ -688,6 +763,7 @@ where
     async fn send_raw_transaction(
         &self,
         raw_transaction_hex: String,
+        _allow_high_fees: Option<bool>,
     ) -> Result<SentTransactionHash> {
         let mempool = self.mempool.clone();
         let queue_sender = self.queue_sender.clone();
@@ -797,6 +873,7 @@ where
                 height,
                 version,
                 merkle_root,
+                block_commitments,
                 final_sapling_root,
                 sapling_tree_size,
                 time,
@@ -908,6 +985,7 @@ where
                 tx,
                 trees,
                 size: None,
+                block_commitments: Some(block_commitments),
                 final_sapling_root: Some(final_sapling_root),
                 final_orchard_root,
                 previous_block_hash: Some(previous_block_hash),
@@ -1005,12 +1083,25 @@ where
 
             let difficulty = header.difficulty_threshold.relative_to_network(&network);
 
+            let block_commitments = match header.commitment(&network, height).expect(
+                "Unexpected failure while parsing the blockcommitments field in get_block_header",
+            ) {
+                Commitment::PreSaplingReserved(bytes) => bytes,
+                Commitment::FinalSaplingRoot(_) => final_sapling_root,
+                Commitment::ChainHistoryActivationReserved => [0; 32],
+                Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
+                Commitment::ChainHistoryBlockTxAuthCommitment(hash) => {
+                    hash.bytes_in_display_order()
+                }
+            };
+
             let block_header = GetBlockHeaderObject {
                 hash: GetBlockHash(hash),
                 confirmations,
                 height,
                 version: header.version,
                 merkle_root: header.merkle_root,
+                block_commitments,
                 final_sapling_root,
                 sapling_tree_size,
                 time: header.time.timestamp(),
@@ -1042,7 +1133,10 @@ where
             .ok_or_misc_error("No blocks in state")
     }
 
-    async fn get_raw_mempool(&self) -> Result<Vec<String>> {
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool> {
+        #[allow(unused)]
+        let verbose = verbose.unwrap_or(false);
+
         #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
@@ -1053,7 +1147,7 @@ where
         let mut mempool = self.mempool.clone();
 
         #[cfg(feature = "getblocktemplate-rpcs")]
-        let request = if should_use_zcashd_order {
+        let request = if should_use_zcashd_order || verbose {
             mempool::Request::FullTransactions
         } else {
             mempool::Request::TransactionIds
@@ -1073,27 +1167,46 @@ where
             #[cfg(feature = "getblocktemplate-rpcs")]
             mempool::Response::FullTransactions {
                 mut transactions,
-                transaction_dependencies: _,
+                transaction_dependencies,
                 last_seen_tip_hash: _,
             } => {
-                // Sort transactions in descending order by fee/size, using hash in serialized byte order as a tie-breaker
-                transactions.sort_by_cached_key(|tx| {
-                    // zcashd uses modified fee here but Zebra doesn't currently
-                    // support prioritizing transactions
-                    std::cmp::Reverse((
-                        i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
-                            / tx.transaction.size as u128,
-                        // transaction hashes are compared in their serialized byte-order.
-                        tx.transaction.id.mined_id(),
-                    ))
-                });
+                if verbose {
+                    let map = transactions
+                        .iter()
+                        .map(|unmined_tx| {
+                            (
+                                unmined_tx.transaction.id.mined_id().encode_hex(),
+                                MempoolObject::from_verified_unmined_tx(
+                                    unmined_tx,
+                                    &transactions,
+                                    &transaction_dependencies,
+                                ),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+                    Ok(GetRawMempool::Verbose(map))
+                } else {
+                    // Sort transactions in descending order by fee/size, using
+                    // hash in serialized byte order as a tie-breaker. Note that
+                    // this is only done in not verbose because in verbose mode
+                    // a dictionary is returned, where order does not matter.
+                    transactions.sort_by_cached_key(|tx| {
+                        // zcashd uses modified fee here but Zebra doesn't currently
+                        // support prioritizing transactions
+                        std::cmp::Reverse((
+                            i64::from(tx.miner_fee) as u128 * MAX_BLOCK_BYTES as u128
+                                / tx.transaction.size as u128,
+                            // transaction hashes are compared in their serialized byte-order.
+                            tx.transaction.id.mined_id(),
+                        ))
+                    });
+                    let tx_ids: Vec<String> = transactions
+                        .iter()
+                        .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
+                        .collect();
 
-                let tx_ids: Vec<String> = transactions
-                    .iter()
-                    .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
-                    .collect();
-
-                Ok(tx_ids)
+                    Ok(GetRawMempool::TxIds(tx_ids))
+                }
             }
 
             mempool::Response::TransactionIds(unmined_transaction_ids) => {
@@ -1105,7 +1218,7 @@ where
                 // Sort returned transaction IDs in numeric/string order.
                 tx_ids.sort();
 
-                Ok(tx_ids)
+                Ok(GetRawMempool::TxIds(tx_ids))
             }
 
             _ => unreachable!("unmatched response to a transactionids request"),
@@ -1489,46 +1602,198 @@ where
 /// Response to a `getinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_info` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetInfo {
+    /// The node version
+    version: u64,
+
     /// The node version build number
     build: String,
 
     /// The server sub-version identifier, used as the network protocol user-agent
     subversion: String,
+
+    /// The protocol version
+    #[serde(rename = "protocolversion")]
+    protocol_version: u32,
+
+    /// The current number of blocks processed in the server
+    blocks: u32,
+
+    /// The total (inbound and outbound) number of connections the node has
+    connections: usize,
+
+    /// The proxy (if any) used by the server. Currently always `None` in Zebra.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proxy: Option<String>,
+
+    /// The current network difficulty
+    difficulty: f64,
+
+    /// True if the server is running in testnet mode, false otherwise
+    testnet: bool,
+
+    /// The minimum transaction fee in ZEC/kB
+    #[serde(rename = "paytxfee")]
+    pay_tx_fee: f64,
+
+    /// The minimum relay fee for non-free transactions in ZEC/kB
+    #[serde(rename = "relayfee")]
+    relay_fee: f64,
+
+    /// The last error or warning message, or "no errors" if there are no errors
+    errors: String,
+
+    /// The time of the last error or warning message, or "no errors timestamp" if there are no errors
+    #[serde(rename = "errorstimestamp")]
+    errors_timestamp: String,
 }
 
 impl Default for GetInfo {
     fn default() -> Self {
         GetInfo {
+            version: 0,
             build: "some build version".to_string(),
             subversion: "some subversion".to_string(),
+            protocol_version: 0,
+            blocks: 0,
+            connections: 0,
+            proxy: None,
+            difficulty: 0.0,
+            testnet: false,
+            pay_tx_fee: 0.0,
+            relay_fee: 0.0,
+            errors: "no errors".to_string(),
+            errors_timestamp: "no errors timestamp".to_string(),
         }
     }
 }
 
 impl GetInfo {
     /// Constructs [`GetInfo`] from its constituent parts.
-    pub fn from_parts(build: String, subversion: String) -> Self {
-        Self { build, subversion }
+    #[allow(clippy::too_many_arguments)]
+    pub fn from_parts(
+        version: u64,
+        build: String,
+        subversion: String,
+        protocol_version: u32,
+        blocks: u32,
+        connections: usize,
+        proxy: Option<String>,
+        difficulty: f64,
+        testnet: bool,
+        pay_tx_fee: f64,
+        relay_fee: f64,
+        errors: String,
+        errors_timestamp: String,
+    ) -> Self {
+        Self {
+            version,
+            build,
+            subversion,
+            protocol_version,
+            blocks,
+            connections,
+            proxy,
+            difficulty,
+            testnet,
+            pay_tx_fee,
+            relay_fee,
+            errors,
+            errors_timestamp,
+        }
     }
 
     /// Returns the contents of ['GetInfo'].
-    pub fn into_parts(self) -> (String, String) {
-        (self.build, self.subversion)
+    pub fn into_parts(
+        self,
+    ) -> (
+        u64,
+        String,
+        String,
+        u32,
+        u32,
+        usize,
+        Option<String>,
+        f64,
+        bool,
+        f64,
+        f64,
+        String,
+        String,
+    ) {
+        (
+            self.version,
+            self.build,
+            self.subversion,
+            self.protocol_version,
+            self.blocks,
+            self.connections,
+            self.proxy,
+            self.difficulty,
+            self.testnet,
+            self.pay_tx_fee,
+            self.relay_fee,
+            self.errors,
+            self.errors_timestamp,
+        )
+    }
+
+    /// Create the node version number.
+    pub fn version(build_string: &str) -> Option<u64> {
+        let semver_version = semver::Version::parse(build_string.strip_prefix('v')?).ok()?;
+        let build_number = semver_version
+            .build
+            .as_str()
+            .split('.')
+            .next()
+            .and_then(|num_str| num_str.parse::<u64>().ok())
+            .unwrap_or_default();
+
+        // https://github.com/zcash/zcash/blob/v6.1.0/src/clientversion.h#L55-L59
+        let version_number = 1_000_000 * semver_version.major
+            + 10_000 * semver_version.minor
+            + 100 * semver_version.patch
+            + build_number;
+
+        Some(version_number)
     }
 }
 
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GetBlockChainInfo {
     /// Current network name as defined in BIP70 (main, test, regtest)
     chain: String,
 
     /// The current number of blocks processed in the server, numeric
     blocks: Height,
+
+    /// The current number of headers we have validated in the best chain, that is,
+    /// the height of the best chain.
+    headers: Height,
+
+    /// The estimated network solution rate in Sol/s.
+    difficulty: f64,
+
+    /// The verification progress relative to the estimated network chain tip.
+    #[serde(rename = "verificationprogress")]
+    verification_progress: f64,
+
+    /// The total amount of work in the best chain, hex-encoded.
+    #[serde(rename = "chainwork")]
+    chain_work: u64,
+
+    /// Whether this node is pruned, currently always false in Zebra.
+    pruned: bool,
+
+    /// The estimated size of the block and undo files on disk
+    size_on_disk: u64,
+
+    /// The current number of note commitments in the commitment tree
+    commitments: u64,
 
     /// The hash of the currently best block, in big-endian order, hex-encoded
     #[serde(rename = "bestblockhash", with = "hex")]
@@ -1540,9 +1805,13 @@ pub struct GetBlockChainInfo {
     #[serde(rename = "estimatedheight")]
     estimated_height: Height,
 
+    /// Chain supply balance
+    #[serde(rename = "chainSupply")]
+    chain_supply: types::Balance,
+
     /// Value pool balances
     #[serde(rename = "valuePools")]
-    value_pools: [types::ValuePoolBalance; 5],
+    value_pools: [types::Balance; 5],
 
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
@@ -1558,35 +1827,60 @@ impl Default for GetBlockChainInfo {
             blocks: Height(1),
             best_block_hash: block::Hash([0; 32]),
             estimated_height: Height(1),
-            value_pools: types::ValuePoolBalance::zero_pools(),
+            chain_supply: types::Balance::chain_supply(Default::default()),
+            value_pools: types::Balance::zero_pools(),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
                 next_block: ConsensusBranchIdHex(ConsensusBranchId::default()),
             },
+            headers: Height(1),
+            difficulty: 0.0,
+            verification_progress: 0.0,
+            chain_work: 0,
+            pruned: false,
+            size_on_disk: 0,
+            commitments: 0,
         }
     }
 }
 
 impl GetBlockChainInfo {
     /// Creates a new [`GetBlockChainInfo`] instance.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: String,
         blocks: Height,
         best_block_hash: block::Hash,
         estimated_height: Height,
-        value_pools: [types::ValuePoolBalance; 5],
+        chain_supply: types::Balance,
+        value_pools: [types::Balance; 5],
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
+        headers: Height,
+        difficulty: f64,
+        verification_progress: f64,
+        chain_work: u64,
+        pruned: bool,
+        size_on_disk: u64,
+        commitments: u64,
     ) -> Self {
         Self {
             chain,
             blocks,
             best_block_hash,
             estimated_height,
+            chain_supply,
             value_pools,
             upgrades,
             consensus,
+            headers,
+            difficulty,
+            verification_progress,
+            chain_work,
+            pruned,
+            size_on_disk,
+            commitments,
         }
     }
 
@@ -1615,7 +1909,7 @@ impl GetBlockChainInfo {
     }
 
     /// Returns the value pool balances.
-    pub fn value_pools(&self) -> &[types::ValuePoolBalance; 5] {
+    pub fn value_pools(&self) -> &[types::Balance; 5] {
         &self.value_pools
     }
 
@@ -1850,7 +2144,12 @@ pub enum GetBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         merkle_root: Option<block::merkle::Root>,
 
-        // `blockcommitments` would be here. Undocumented. TODO: decide if we want to support it
+        /// The blockcommitments field of the requested block. Its interpretation changes
+        /// depending on the network and height.
+        #[serde(with = "opthex", rename = "blockcommitments")]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        block_commitments: Option<[u8; 32]>,
+
         // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
         //
         /// The root of the Sapling commitment tree after applying this block.
@@ -1924,6 +2223,7 @@ impl Default for GetBlock {
             size: None,
             version: None,
             merkle_root: None,
+            block_commitments: None,
             final_sapling_root: None,
             final_orchard_root: None,
             nonce: None,
@@ -1982,6 +2282,11 @@ pub struct GetBlockHeaderObject {
     #[serde(with = "hex", rename = "merkleroot")]
     pub merkle_root: block::merkle::Root,
 
+    /// The blockcommitments field of the requested block. Its interpretation changes
+    /// depending on the network and height.
+    #[serde(with = "hex", rename = "blockcommitments")]
+    pub block_commitments: [u8; 32],
+
     /// The root of the Sapling commitment tree after applying this block.
     #[serde(with = "hex", rename = "finalsaplingroot")]
     pub final_sapling_root: [u8; 32],
@@ -2035,6 +2340,7 @@ impl Default for GetBlockHeaderObject {
             height: Height::MIN,
             version: 4,
             merkle_root: block::merkle::Root([0; 32]),
+            block_commitments: Default::default(),
             final_sapling_root: Default::default(),
             sapling_tree_size: Default::default(),
             time: 0,
@@ -2425,4 +2731,74 @@ mod opthex {
             None => serializer.serialize_none(),
         }
     }
+}
+/// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
+pub async fn chain_tip_difficulty<State>(network: Network, mut state: State) -> Result<f64>
+where
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+{
+    let request = ReadRequest::ChainInfo;
+
+    // # TODO
+    // - add a separate request like BestChainNextMedianTimePast, but skipping the
+    //   consistency check, because any block's difficulty is ok for display
+    // - return 1.0 for a "not enough blocks in the state" error, like `zcashd`:
+    // <https://github.com/zcash/zcash/blob/7b28054e8b46eb46a9589d0bdc8e29f9fa1dc82d/src/rpc/blockchain.cpp#L40-L41>
+    let response = state
+        .ready()
+        .and_then(|service| service.call(request))
+        .await
+        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+
+    let chain_info = match response {
+        ReadResponse::ChainInfo(info) => info,
+        _ => unreachable!("unmatched response to a chain info request"),
+    };
+
+    // This RPC is typically used for display purposes, so it is not consensus-critical.
+    // But it uses the difficulty consensus rules for its calculations.
+    //
+    // Consensus:
+    // https://zips.z.cash/protocol/protocol.pdf#nbits
+    //
+    // The zcashd implementation performs to_expanded() on f64,
+    // and then does an inverse division:
+    // https://github.com/zcash/zcash/blob/d6e2fada844373a8554ee085418e68de4b593a6c/src/rpc/blockchain.cpp#L46-L73
+    //
+    // But in Zebra we divide the high 128 bits of each expanded difficulty. This gives
+    // a similar result, because the lower 128 bits are insignificant after conversion
+    // to `f64` with a 53-bit mantissa.
+    //
+    // `pow_limit >> 128 / difficulty >> 128` is the same as the work calculation
+    // `(2^256 / pow_limit) / (2^256 / difficulty)`, but it's a bit more accurate.
+    //
+    // To simplify the calculation, we don't scale for leading zeroes. (Bitcoin's
+    // difficulty currently uses 68 bits, so even it would still have full precision
+    // using this calculation.)
+
+    // Get expanded difficulties (256 bits), these are the inverse of the work
+    let pow_limit: U256 = network.target_difficulty_limit().into();
+    let Some(difficulty) = chain_info.expected_difficulty.to_expanded() else {
+        return Ok(0.0);
+    };
+
+    // Shift out the lower 128 bits (256 bits, but the top 128 are all zeroes)
+    let pow_limit = pow_limit >> 128;
+    let difficulty = U256::from(difficulty) >> 128;
+
+    // Convert to u128 then f64.
+    // We could also convert U256 to String, then parse as f64, but that's slower.
+    let pow_limit = pow_limit.as_u128() as f64;
+    let difficulty = difficulty.as_u128() as f64;
+
+    // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
+    Ok(pow_limit / difficulty)
 }

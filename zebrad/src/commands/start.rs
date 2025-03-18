@@ -90,7 +90,7 @@ use zebra_rpc::server::RpcServer;
 use zebra_rpc::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
 
 use crate::{
-    application::{build_version, user_agent},
+    application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
@@ -173,7 +173,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book) = zebra_network::init(
+        let (peer_set, address_book, misbehavior_sender) = zebra_network::init(
             config.network.clone(),
             inbound,
             latest_chain_tip.clone(),
@@ -200,6 +200,7 @@ impl StartCmd {
             block_verifier_router.clone(),
             state.clone(),
             latest_chain_tip.clone(),
+            misbehavior_sender.clone(),
         );
 
         info!("initializing mempool");
@@ -211,6 +212,7 @@ impl StartCmd {
             sync_status.clone(),
             latest_chain_tip.clone(),
             chain_tip_change.clone(),
+            misbehavior_sender.clone(),
         );
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new()
@@ -230,6 +232,7 @@ impl StartCmd {
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
+            misbehavior_sender,
         };
         setup_tx
             .send(setup_data)
@@ -270,6 +273,7 @@ impl StartCmd {
                     Some(submit_block_channel.sender()),
                     #[cfg(not(feature = "getblocktemplate-rpcs"))]
                     None,
+                    LAST_WARN_ERROR_LOG_SENDER.subscribe(),
                 );
                 rpc_task_handle.await.unwrap()
             } else {
