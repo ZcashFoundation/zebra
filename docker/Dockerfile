@@ -123,8 +123,8 @@ COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
-# As the build has already run as root user, we need to set the correct permissions
-# for the home and cargo home dirs owned by root.
+# As the build has already run with the root user,
+# we need to set the correct permissions for the home and cargo home dirs owned by it.
 RUN chown -R ${UID}:${GID} "${HOME}" && \
     chown -R ${UID}:${GID} "${CARGO_HOME}"
 

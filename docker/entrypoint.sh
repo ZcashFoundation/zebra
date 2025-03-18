@@ -121,7 +121,7 @@ run_cargo_test() {
   shift
 
   # Start constructing the command array
-  local cmd="cargo test --locked --release --features ${features} --package zebrad --test acceptance -- --nocapture --include-ignored"
+  local cmd=(cargo test --locked --release --features "${features}" --package zebrad --test acceptance -- --nocapture --include-ignored)
 
   # Loop through the remaining arguments
   for arg in "$@"; do
