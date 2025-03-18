@@ -20,7 +20,7 @@ Before using this script, ensure the following:
 4. **Repository Structure**:
    - The script expects the `infra/terragrunt-aws-environments` directory to exist at the following location:
      ```
-     /Users/arsenikalma/GIT/qed-it/zebra/demo-deploy/infra/terragrunt-aws-environments
+     ./zebra/demo-deploy/infra/terragrunt-aws-environments
      ```
    - Update the `Makefile` if the directory structure changes.
 
@@ -48,4 +48,4 @@ Before using this script, ensure the following:
 
 1. Navigate to the directory containing the `Makefile`:
    ```bash
-   cd /Users/arsenikalma/GIT/qed-it/zebra/demo-deploy
+   ./zebra/demo-deploy

@@ -5,7 +5,7 @@ ACCOUNT_DIR := dev
 REGION := eu-central-1
 ENVIRONMENT := zsa
 AWS_PROFILE := qed-it
-BASE_DIR := /Users/arsenikalma/GIT/qed-it/zebra/demo-deploy/infra/terragrunt-aws-environments
+BASE_DIR := ./zebra/demo-deploy/infra/terragrunt-aws-environments
 
 # Check prerequisites
 .PHONY: check-prerequisites plan-all apply-all destroy-all

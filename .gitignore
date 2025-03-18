@@ -170,7 +170,3 @@ zebra-rpc/qa/cache/
 **/.terraform/*
 **/.terragrunt/*
 **/.terragrunt-cache/*
-
-# .tfstate files
-*.tfstate
-*.tfstate.*
