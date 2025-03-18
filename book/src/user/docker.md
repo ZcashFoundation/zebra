@@ -17,32 +17,6 @@ If you want to preserve Zebra's state, you can create a Docker volume:
 docker volume create zebrad-cache
 ```
 
-### Alternatives
-
-See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) for more information.
-
-## Advanced usage
-
-You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like metrics with Prometheus.
-
-### Building with Custom Features
-
-Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
-
-```shell
-# Build with specific features
-docker build -f ./docker/Dockerfile --target runtime \
-    --build-arg FEATURES="default-release-binaries prometheus" \
-    --tag zebra:custom .
-```
-
-### Building with Metrics Support
-
-For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
-
-> [!IMPORTANT]
-> To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
-
 ```shell
 docker run \
   --mount source=zebrad-cache,target=/home/zebra/.cache/zebra \
@@ -78,10 +52,34 @@ docker build \
   .
 ```
 
+### Alternatives
+
+See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) for more information.
+
+## Advanced usage
+
+You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like metrics with Prometheus.
+
+### Building with Custom Features
+
+Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
+
+For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
+
+> [!IMPORTANT]
+> To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
+
+```shell
+# Build with specific features
+docker build -f ./docker/Dockerfile --target runtime \
+    --build-arg FEATURES="default-release-binaries prometheus" \
+    --tag zebra:metrics .
+```
+
 All available Cargo features are listed at
 <https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags>.
 
-## Configuring Zebra
+## Configuring Zebra with Docker Compose
 
 To configure Zebra, edit the `docker/default-zebra-config.toml` config file and
 uncomment the `configs` mapping in `docker/docker-compose.yml` so your config
