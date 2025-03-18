@@ -28,6 +28,9 @@ use proptest_derive::Arbitrary;
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
+#[cfg(feature = "remote_read_state_service")]
+use std::str::FromStr;
+
 /// Transparent balances are stored as an 8 byte integer on disk.
 pub const BALANCE_DISK_BYTES: usize = 8;
 
@@ -121,12 +124,63 @@ impl OutputIndex {
     any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
     derive(Serialize, Deserialize)
 )]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    serde(try_from = "String", into = "String")
+)]
 pub struct OutputLocation {
     /// The location of the transparent input's transaction.
     transaction_location: TransactionLocation,
 
     /// The index of the transparent output in its transaction.
     output_index: OutputIndex,
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl std::fmt::Display for OutputLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}-output:{}",
+            self.transaction_location, self.output_index.0
+        )
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl std::str::FromStr for OutputLocation {
+    type Err = &'static str;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Expected format: `height:<h>-index:<i>-output:<n>`
+        let parts: Vec<&str> = s.split("-output:").collect();
+        if parts.len() != 2 {
+            return Err("invalid format, expected '<tx-location>-output:<number>'");
+        }
+        let transaction_location = TransactionLocation::from_str(parts[0])?;
+        let output_index = parts[1]
+            .parse::<u32>()
+            .map_err(|_| "invalid output index")?;
+        Ok(OutputLocation {
+            transaction_location,
+            output_index: OutputIndex(output_index),
+        })
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl From<OutputLocation> for String {
+    fn from(loc: OutputLocation) -> Self {
+        loc.to_string()
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl TryFrom<String> for OutputLocation {
+    type Error = &'static str;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        OutputLocation::from_str(&s)
+    }
 }
 
 impl OutputLocation {

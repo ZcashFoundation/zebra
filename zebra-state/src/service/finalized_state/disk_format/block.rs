@@ -17,8 +17,11 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-#[cfg(any(test, feature = "proptest-impl"))]
+#[cfg(any(test, feature = "proptest-impl", feature = "remote_read_state_service"))]
 use serde::{Deserialize, Serialize};
+
+#[cfg(feature = "remote_read_state_service")]
+use std::str::FromStr;
 
 /// The maximum value of an on-disk serialized [`Height`].
 ///
@@ -128,7 +131,11 @@ impl TransactionIndex {
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 #[cfg_attr(
     any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
-    derive(serde::Serialize, serde::Deserialize)
+    derive(Serialize, Deserialize)
+)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    serde(try_from = "String", into = "String")
 )]
 pub struct TransactionLocation {
     /// The block height of the transaction.
@@ -136,6 +143,58 @@ pub struct TransactionLocation {
 
     /// The index of the transaction in its block.
     pub index: TransactionIndex,
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl std::fmt::Display for TransactionLocation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "height:{}-index:{}", self.height.0, self.index.0)
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl std::str::FromStr for TransactionLocation {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        let prefix = "height:";
+        if !s.starts_with(prefix) {
+            return Err("missing 'height:' prefix");
+        }
+        let s = &s[prefix.len()..];
+
+        let parts: Vec<&str> = s.split("-index:").collect();
+        if parts.len() != 2 {
+            return Err("invalid format, expected 'height:<number>-index:<number>'");
+        }
+
+        let height = parts[0]
+            .parse::<u32>()
+            .map_err(|_| "invalid height value")?;
+        let index = parts[1].parse::<u16>().map_err(|_| "invalid index value")?;
+
+        Ok(TransactionLocation {
+            height: Height(height),
+            index: TransactionIndex(index),
+        })
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl From<TransactionLocation> for String {
+    fn from(loc: TransactionLocation) -> Self {
+        loc.to_string()
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+impl TryFrom<String> for TransactionLocation {
+    type Error = &'static str;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        TransactionLocation::from_str(&s)
+    }
 }
 
 impl TransactionLocation {
