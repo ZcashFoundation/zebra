@@ -5,17 +5,17 @@ This diagram illustrates the architecture of the Zebra mempool, showing its main
 ```mermaid
 graph TD
     %% External Components
-    Net[Network Service] 
-    State[State Service]
-    TxVerifier[Transaction Verifier]
-    RPC[RPC Service]
+    Net[("Network Service")]
+    State[("State Service")]
+    TxVerifier[("Transaction Verifier")]
+    RPC[("RPC Service")]
     
     %% Mempool Main Components
-    Mempool[Mempool Service]
-    Storage[Storage]
-    Downloads[Transaction Downloads]
-    Crawler[Crawler]
-    QueueChecker[Queue Checker]
+    Mempool{{"Mempool Service"}}
+    Storage{{"Storage"}}
+    Downloads{{"Transaction Downloads"}}
+    Crawler{{"Crawler"}}
+    QueueChecker{{"Queue Checker"}}
     
     %% Transaction Flow
     Net -->|1. Inv messages| Mempool
@@ -48,41 +48,34 @@ graph TD
     %% Mempool responds to service requests
     RPC -->|Query mempool| Mempool
     Mempool -->|Mempool data| RPC
-    
-    %% Styling
-    classDef external fill:#f96,stroke:#333,stroke-width:2px;
-    classDef component fill:#9cf,stroke:#333,stroke-width:2px;
-    
-    class Net,State,TxVerifier,RPC external;
-    class Mempool,Storage,Downloads,Crawler,QueueChecker component;
 ```
 
 ## Component Descriptions
 
-1. **Mempool Service**: The central coordinator that handles requests and manages the mempool state.
+1. **Mempool Service**: Central coordinator handling requests and managing mempool state.
 
-2. **Storage**: In-memory storage for verified transactions and rejection lists.
+2. **Storage**: In-memory storage for verified and rejected transactions.
 
-3. **Transaction Downloads**: Handles downloading and verifying transactions from peers.
+3. **Transaction Downloads**: Handles downloading and verifying transactions.
 
-4. **Crawler**: Periodically polls peers for new transactions.
+4. **Crawler**: Polls peers for new transactions.
 
-5. **Queue Checker**: Regularly polls for newly verified transactions.
+5. **Queue Checker**: Polls for newly verified transactions.
 
 ## Transaction Flow
 
 1. Transactions arrive via network gossiping, direct RPC submission, or crawler polling.
 
-2. The mempool checks if transactions are already known or rejected. If not, it queues them for download.
+2. Mempool checks if transactions are known or rejected, queues new ones for download.
 
-3. The download service retrieves transaction data from peers.
+3. Download service retrieves transaction data from peers.
 
-4. Transactions are verified against consensus rules using the transaction verifier.
+4. Transactions are verified against consensus rules.
 
-5. Verified transactions are stored in memory and gossiped to peers.
+5. Verified transactions are stored and gossiped to peers.
 
-6. The queue checker regularly checks for newly verified transactions.
+6. Queue checker regularly checks for newly verified transactions.
 
-7. Transactions remain in the mempool until they are mined or evicted due to size limits.
+7. Transactions remain in mempool until mined or evicted.
 
-8. When the chain tip changes, the mempool updates its verification context and potentially evicts invalid transactions. 
+8. Chain tip changes trigger verification context updates. 
