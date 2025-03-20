@@ -51,6 +51,7 @@ elasticsearch = [
 # Remote support for the [`ReadStateService`].
 remote_read_state_service = [
     "dep:url", 
+    "dep:http",
     "dep:jsonrpsee", 
     "jsonrpsee/http-client",
     "jsonrpsee/client-core",
@@ -86,6 +87,7 @@ tracing = { workspace = true }
 
 # remote_read_state_service specific dependencies.
 url = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 jsonrpsee = { workspace = true, optional = true }
 
 # elasticsearch specific dependencies.

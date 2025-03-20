@@ -2168,11 +2168,14 @@ pub fn init_test_services(
 /// Holds functionality for remote use of the [`ReadStateService`] ([`RemoteStateService`]).
 #[cfg(feature = "remote_read_state_service")]
 pub mod remote {
+    use std::fs;
+
     use super::*;
 
+    use http::header::COOKIE;
     use jsonrpsee::{
         core::client::ClientT,
-        http_client::{HttpClient, HttpClientBuilder},
+        http_client::{HeaderMap, HttpClient, HttpClientBuilder},
     };
     use url::Url;
 
@@ -2199,16 +2202,28 @@ pub mod remote {
     }
 
     impl RemoteStateService {
-        /// Creates a new remote, read-only state service client.
+        /// Creates a new remote, read-only state service client with optional cookie authentication.
         #[allow(dead_code)]
-        pub fn new(url: Url) -> Result<Self, BoxError> {
-            let client = HttpClientBuilder::default()
-                .request_timeout(Duration::from_secs(5))
-                .build(url.as_str())?;
+        pub fn new(url: Url, cookie: Option<String>) -> Result<Self, BoxError> {
+            let mut builder = HttpClientBuilder::default().request_timeout(Duration::from_secs(5));
 
-            let remote_read_state_service = Self { client };
+            if let Some(cookie_path) = cookie {
+                let cookie_content =
+                    fs::read_to_string(&cookie_path).map_err(|e| Box::new(e) as BoxError)?;
+                let cookie_content = cookie_content.trim();
 
-            Ok(remote_read_state_service)
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    COOKIE,
+                    cookie_content
+                        .parse()
+                        .map_err(|e| Box::new(e) as BoxError)?,
+                );
+                builder = builder.set_headers(headers);
+            }
+
+            let client = builder.build(url.as_str())?;
+            Ok(Self { client })
         }
 
         /// Sends a request to the server an waits on a response.
