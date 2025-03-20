@@ -8,7 +8,7 @@ The mempool is a fundamental component of the Zebra node, responsible for managi
 
 Key responsibilities of the mempool include:
 - Accepting new transactions from the network
-- Verifying transactions against consensus rules
+- Verifying transactions against a subset of consensus rules
 - Storing verified transactions in memory
 - Managing memory usage and transaction eviction
 - Providing transaction queries to other components
