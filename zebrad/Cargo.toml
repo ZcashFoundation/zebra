@@ -158,6 +158,8 @@ test_sync_to_mandatory_checkpoint_testnet = []
 test_sync_past_mandatory_checkpoint_mainnet = []
 test_sync_past_mandatory_checkpoint_testnet = []
 
+tx_v6 = []
+
 [dependencies]
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.45" }
 zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.45" }
