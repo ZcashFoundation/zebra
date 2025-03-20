@@ -523,6 +523,19 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                #[cfg(feature="tx_v6")]
+                Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => Self::verify_v5_transaction(
+                    &req,
+                    &network,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )?,
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {

@@ -28,6 +28,8 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
             Transaction::V5 { .. } => self.txid_v5(),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { .. } => self.txid_v5(),
         }
     }
 
