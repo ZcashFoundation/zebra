@@ -34,6 +34,10 @@ use crate::{
 /// This enum implements `From` for [`transparent::OutPoint`], [`sprout::Nullifier`],
 /// [`sapling::Nullifier`], and [`orchard::Nullifier`].
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[cfg(feature = "indexer")]
 pub enum Spend {
     /// A spend identified by a [`transparent::OutPoint`].
@@ -78,6 +82,10 @@ impl From<orchard::Nullifier> for Spend {
 ///
 /// This enum implements `From` for [`block::Hash`] and [`block::Height`],
 /// so it can be created using `hash.into()` or `height.into()`.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum HashOrHeight {
     /// A block identified by hash.
@@ -191,6 +199,10 @@ impl std::str::FromStr for HashOrHeight {
 /// This structure contains data from contextual validation, which is computed in
 /// the *service caller*'s task, not inside the service call itself. This allows
 /// moving work out of the single-threaded state service.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SemanticallyVerifiedBlock {
     /// The block to commit to the state.
@@ -862,6 +874,10 @@ impl Request {
     }
 }
 
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).

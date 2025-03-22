@@ -106,6 +106,10 @@ pub enum KnownBlock {
 }
 
 /// Information about a transaction in the best chain
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MinedTx {
     /// The transaction.
@@ -130,6 +134,10 @@ impl MinedTx {
     }
 }
 
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
@@ -261,6 +269,10 @@ pub enum ReadResponse {
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
     // Data fetched directly from the state tip.

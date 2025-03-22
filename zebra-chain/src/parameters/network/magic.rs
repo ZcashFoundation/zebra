@@ -8,6 +8,10 @@ use crate::parameters::{constants::magics, Network};
 use proptest_derive::Arbitrary;
 
 /// A magic number identifying the network.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Copy, Clone, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct Magic(pub [u8; 4]);

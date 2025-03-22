@@ -360,6 +360,24 @@ pub trait Rpc {
     fn stop(&self) -> Result<String>;
 }
 
+#[cfg(feature = "remote_read_state_service")]
+#[rpc(server)]
+pub trait RemoteStateRpc {
+    /// RPC wrapper for remote use of the [`ReadStateService`] ([`RemoteStateService`]).
+    ///
+    /// zcashd reference: NA (Not a zcash RPC, )
+    /// method: post
+    /// tags: internal
+    ///
+    /// # Parameters
+    ///
+    /// - `request`: ([`ReadRequest`] enum) The request type and input.
+    ///
+    #[cfg(feature = "remote_read_state_service")]
+    #[method(name = "remote_state_request")]
+    async fn remote_state_request(&self, request: ReadRequest) -> Result<ReadResponse>;
+}
+
 /// RPC method implementations.
 #[derive(Clone)]
 pub struct RpcImpl<Mempool, State, Tip, AddressBook>
@@ -1585,6 +1603,45 @@ where
             "stop is not available in windows targets",
             None,
         ))
+    }
+}
+
+#[cfg(feature = "remote_read_state_service")]
+#[async_trait]
+impl<Mempool, State, Tip, AddressBook> RemoteStateRpcServer
+    for RpcImpl<Mempool, State, Tip, AddressBook>
+where
+    Mempool: Service<
+            mempool::Request,
+            Response = mempool::Response,
+            Error = zebra_node_services::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    Mempool::Future: Send,
+    State: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    Tip: ChainTip + Clone + Send + Sync + 'static,
+    AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
+{
+    async fn remote_state_request(&self, request: ReadRequest) -> Result<ReadResponse> {
+        let mut state = self.state.clone();
+
+        let response = state
+            .ready()
+            .and_then(|service| service.call(request))
+            .await
+            .map_misc_error()?;
+
+        Ok(response)
     }
 }
 

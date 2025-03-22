@@ -2164,3 +2164,112 @@ pub fn init_test_services(
         chain_tip_change,
     )
 }
+
+/// Holds functionality for remote use of the [`ReadStateService`] ([`RemoteStateService`]).
+#[cfg(feature = "remote_read_state_service")]
+pub mod remote {
+    use std::fs;
+
+    use super::*;
+
+    use http::header::COOKIE;
+    use jsonrpsee::{
+        core::client::ClientT,
+        http_client::{HeaderMap, HttpClient, HttpClientBuilder},
+    };
+    use url::Url;
+
+    /// A remote, read-only service for accessing Zebra's cached blockchain state.
+    ///
+    /// Uses a JsonRpSee client to send [`ReadRequests`] to zebrad
+    ///
+    /// Note: The zebrad process this service is configured to communicate with must be built
+    /// with the "remote_read_state_service" feature enabled for this service to run.
+    ///
+    /// This service provides read-only access to:
+    /// - the non-finalized state: the ~100 most recent blocks.
+    /// - the finalized state: older blocks that have many confirmations.
+    ///
+    /// Requests to this service are processed in parallel,
+    /// ignoring any blocks queued by the read-write [`StateService`].
+    ///
+    /// This quick response behavior is better for most state users.
+    /// It allows other async tasks to make progress while concurrently reading data from disk.
+    #[derive(Clone, Debug)]
+    pub struct RemoteStateService {
+        /// JsonRpSee client used for sending requests to the `[RemoteStateServer]`.
+        client: HttpClient,
+    }
+
+    impl RemoteStateService {
+        /// Creates a new remote, read-only state service client with optional cookie authentication.
+        #[allow(dead_code)]
+        pub fn new(url: Url, cookie: Option<String>) -> Result<Self, BoxError> {
+            let mut builder = HttpClientBuilder::default().request_timeout(Duration::from_secs(5));
+
+            if let Some(cookie_path) = cookie {
+                let cookie_content =
+                    fs::read_to_string(&cookie_path).map_err(|e| Box::new(e) as BoxError)?;
+                let cookie_content = cookie_content.trim();
+
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    COOKIE,
+                    cookie_content
+                        .parse()
+                        .map_err(|e| Box::new(e) as BoxError)?,
+                );
+                builder = builder.set_headers(headers);
+            }
+
+            let client = builder.build(url.as_str())?;
+            Ok(Self { client })
+        }
+
+        /// Sends a request to the server an waits on a response.
+        async fn send_request(&self, req: ReadRequest) -> Result<ReadResponse, BoxError> {
+            let response: ReadResponse =
+                self.client.request("remote_state_request", (req,)).await?;
+
+            Ok(response)
+        }
+    }
+
+    impl Service<ReadRequest> for RemoteStateService {
+        type Response = ReadResponse;
+        type Error = BoxError;
+        type Future =
+            Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+        /// Note: Requires block_on due to the async nature of reqwest.
+        fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            // This client doesn't hold any state that could block readiness,
+            // so we are always ready.
+            Poll::Ready(Ok(()))
+        }
+
+        #[instrument(name = "remote_state", skip(self, req))]
+        fn call(&mut self, req: ReadRequest) -> Self::Future {
+            req.count_metric();
+            let timer = CodeTimer::start();
+            let span = Span::current();
+
+            let remote_state_service = self.clone();
+
+            Box::pin(async move {
+                let _guard = span.enter();
+
+                let call_response = remote_state_service.send_request(req).await;
+
+                match call_response {
+                    Ok(read_response) => {
+                        timer.finish(module_path!(), line!(), "ReadRequest::{RemoteStateRequest}");
+
+                        Ok(read_response)
+                    }
+                    Err(e) => Err(e),
+                }
+            })
+        }
+    }
+}

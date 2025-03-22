@@ -67,9 +67,15 @@ use crate::{
 /// activation, we do not validate any pre-Sapling transaction types.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
+    any(
+        test,
+        feature = "proptest-impl",
+        feature = "elasticsearch",
+        feature = "remote_read_state_service"
+    ),
     derive(Serialize)
 )]
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 pub enum Transaction {
     /// A fully transparent transaction (`version = 1`).
     V1 {

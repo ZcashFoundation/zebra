@@ -24,7 +24,7 @@ use zebra_node_services::mempool;
 
 use crate::{
     config::Config,
-    methods::{LoggedLastEvent, RpcImpl, RpcServer as _},
+    methods::{LoggedLastEvent, RpcImpl},
     server::{
         http_request_compatibility::HttpRequestMiddlewareLayer,
         rpc_call_compatibility::FixRpcResponseMiddleware,
@@ -220,13 +220,25 @@ impl RpcServer {
             .expect("Unable to get local address");
         info!("{OPENED_RPC_ENDPOINT_MSG}{}", addr);
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        let mut rpc_module = rpc_impl.into_rpc();
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        let rpc_module = rpc_impl.into_rpc();
+        #[cfg(any(
+            feature = "remote_read_state_service",
+            feature = "getblocktemplate-rpcs"
+        ))]
+        let mut rpc_module = crate::methods::RpcServer::into_rpc(rpc_impl.clone());
+        #[cfg(not(any(
+            feature = "remote_read_state_service",
+            feature = "getblocktemplate-rpcs"
+        )))]
+        let rpc_module = crate::methods::RpcServer::into_rpc(rpc_impl);
+
         #[cfg(feature = "getblocktemplate-rpcs")]
         rpc_module
             .merge(get_block_template_rpc_impl.into_rpc())
+            .unwrap();
+
+        #[cfg(feature = "remote_read_state_service")]
+        rpc_module
+            .merge(<RpcImpl<Mempool, State, Tip, AddressBook> as crate::methods::RemoteStateRpcServer>::into_rpc(rpc_impl.clone()))
             .unwrap();
 
         let server_task: JoinHandle<Result<(), tower::BoxError>> = tokio::spawn(async move {
