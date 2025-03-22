@@ -51,13 +51,18 @@ impl<'a> RpcServiceT<'a> for FixRpcResponseMiddleware {
                     let json: serde_json::Value =
                         serde_json::from_str(response.into_parts().0.as_str())
                             .expect("response string should be valid json");
-                    let id = json["id"]
-                        .as_str()
-                        .expect("response json should have an id")
-                        .to_string();
+                    let id = match &json["id"] {
+                        serde_json::Value::Null => Some(jsonrpsee::types::Id::Null),
+                        serde_json::Value::Number(n) => {
+                            n.as_u64().map(jsonrpsee::types::Id::Number)
+                        }
+                        serde_json::Value::String(s) => Some(jsonrpsee::types::Id::Str(s.into())),
+                        _ => None,
+                    }
+                    .expect("response json should have an id");
 
                     return MethodResponse::error(
-                        jsonrpsee_types::Id::Str(id.into()),
+                        id,
                         ErrorObject::borrowed(new_error_code, "Invalid params", None),
                     );
                 }
