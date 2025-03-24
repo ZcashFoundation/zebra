@@ -23,7 +23,7 @@ cache_dir = "/home/zebra/.cache/zebra"
 # listen_addr = "0.0.0.0:8232" # Mainnet
 # listen_addr = "0.0.0.0:18232" # Testnet
 
-cookie_dir = "/home/zebra/.cache/zebra"
+cookie_dir = "/home/zebra/.config/cookie"
 
 # To disable cookie authentication, uncomment the line below and set the value
 # to false.
