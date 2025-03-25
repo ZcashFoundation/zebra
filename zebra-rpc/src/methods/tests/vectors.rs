@@ -1609,6 +1609,9 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     use zebra_network::address_book_peers::MockAddressBookPeers;
     use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
 
+    #[cfg(zcash_unstable = "zip234")]
+    use zebra_chain::value_balance::ValueBalance;
+
     use crate::methods::{
         get_block_template_rpcs::{
             constants::{
@@ -1702,6 +1705,16 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                     max_time: fake_max_time,
                     history_tree: fake_history_tree(&Mainnet),
                 }));
+
+            #[cfg(zcash_unstable = "zip234")]
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::TipPoolValues))
+                .await
+                .respond(ReadResponse::TipPoolValues {
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    value_balance: ValueBalance::zero(),
+                });
         }
     };
 

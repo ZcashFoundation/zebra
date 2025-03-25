@@ -1,5 +1,7 @@
 //! Parameter types for the `getblocktemplate` RPC.
 
+use zebra_chain::amount::{Amount, NonNegative};
+
 use crate::methods::{get_block_template_rpcs::types::long_poll::LongPollId, hex_data::HexData};
 
 /// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
@@ -89,6 +91,9 @@ pub struct JsonParameters {
     /// currently unused.
     #[serde(rename = "workid")]
     pub _work_id: Option<String>,
+
+    /// The zip233 amount of a transaction [ZIP-233]
+    pub zip233_amount: Option<Amount<NonNegative>>,
 }
 
 impl JsonParameters {
