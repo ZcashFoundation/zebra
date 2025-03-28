@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block::{self, Block, Height},
+    serialization::ZcashSerialize as _,
     transaction::{self, Transaction},
     transparent::{self, Utxo},
 };
@@ -49,6 +50,31 @@ where
         .and_then(|chain| chain.as_ref().block(hash_or_height))
         .map(|contextual| contextual.block.clone())
         .or_else(|| db.block(hash_or_height))
+}
+
+/// Returns the [`Block`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn block_and_size<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<(Arc<Block>, usize)>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().block(hash_or_height))
+        .map(|contextual| {
+            let size = contextual.block.zcash_serialize_to_vec().unwrap().len();
+            (contextual.block.clone(), size)
+        })
+        .or_else(|| db.block_and_size(hash_or_height))
 }
 
 /// Returns the [`block::Header`] with [`block::Hash`] or
