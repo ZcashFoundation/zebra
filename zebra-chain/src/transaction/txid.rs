@@ -28,6 +28,7 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
             Transaction::V5 { .. } => self.txid_v5(),
+            Transaction::V6 { .. } => self.txid_v6(),
         }
     }
 
@@ -46,6 +47,14 @@ impl<'a> TxIdBuilder<'a> {
         let nu = self.trans.network_upgrade()?;
 
         // We compute v5 txid (from ZIP-244) using librustzcash.
+        Some(Hash(*self.trans.to_librustzcash(nu).ok()?.txid().as_ref()))
+    }
+
+    /// Compute the Transaction ID for a V6 transaction in the given network upgrade.
+    fn txid_v6(self) -> Option<Hash> {
+        let nu = self.trans.network_upgrade()?;
+        // The v5 txid (from ZIP-244) is computed using librustzcash. Convert the zebra
+        // transaction to a librustzcash transaction.
         Some(Hash(*self.trans.to_librustzcash(nu).ok()?.txid().as_ref()))
     }
 }
