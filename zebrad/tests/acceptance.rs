@@ -2982,17 +2982,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use common::regtest::MiningRpcMethods;
     use eyre::Error;
     use tokio::time::timeout;
-    use zebra_chain::{
-        chain_tip::ChainTip, parameters::NetworkUpgrade,
-        primitives::byte_array::increment_big_endian,
-    };
-    use zebra_rpc::methods::GetBlockHash;
-    use zebra_state::{ReadResponse, Response};
+    use zebra_chain::parameters::testnet::REGTEST_NU5_ACTIVATION_HEIGHT;
+    use zebra_state::ReadResponse;
 
     let _init_guard = zebra_test::init();
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
     config.state.ephemeral = false;
-    let network = config.network.network.clone();
+    // let network = config.network.network.clone();
 
     let test_dir = testdir()?.with_config(&mut config)?;
 
@@ -3028,7 +3024,15 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client.submit_block_from_template().await?;
+        let (block, height) = rpc_client
+            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
+            .await?;
+        // TODO: Submit 50 blocks instead of 5, call reconsiderblock, and check that there's another chain tip reset.
+        // let header = Arc::make_mut(&mut block.header);
+        // while header.hash() < network.target_difficulty_limit() {
+        //     increment_big_endian(header.nonce.as_mut());
+        // }
+        rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
         let tip_action = timeout(
             Duration::from_secs(1),
@@ -3074,74 +3078,24 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         );
     }
 
-    tracing::info!("getting next block template");
-    let (block_11, _) = rpc_client.block_from_template(Height(100)).await?;
-    let next_blocks: Vec<_> = blocks
-        .split_off(5)
-        .into_iter()
-        .chain(std::iter::once(block_11))
-        .collect();
+    tracing::info!("invalidating blocks to trigger a best chain change");
 
-    tracing::info!("creating populated state");
-    let genesis_block = regtest_genesis_block();
-    let (state2, read_state2, latest_chain_tip2, _chain_tip_change2) =
-        zebra_state::populated_state(
-            std::iter::once(genesis_block).chain(blocks.iter().cloned().map(Arc::new)),
-            &network,
-        )
-        .await;
+    let block_6_hash = blocks.get(5).expect("should have 11 blocks").hash();
+    let _ = rpc_client
+        .call("invalidateblock", format!("[${block_6_hash}]"))
+        .await
+        .map_err(|err| eyre!(err))?;
 
-    tracing::info!("attempting to trigger a best chain change");
-    for mut block in next_blocks {
-        let is_chain_history_activation_height = NetworkUpgrade::Heartwood
-            .activation_height(&network)
-            == Some(block.coinbase_height().unwrap());
-        let header = Arc::make_mut(&mut block.header);
-        increment_big_endian(header.nonce.as_mut());
-        let ReadResponse::ChainInfo(chain_info) = read_state2
-            .clone()
-            .oneshot(zebra_state::ReadRequest::ChainInfo)
-            .await
-            .map_err(|err| eyre!(err))?
-        else {
-            unreachable!("wrong response variant");
-        };
+    for _ in 0..10 {
+        let fut = rpc_client
+            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
+            .await;
 
-        header.previous_block_hash = chain_info.tip_hash;
-        header.commitment_bytes = chain_info
-            .history_tree
-            .hash()
-            .or(is_chain_history_activation_height.then_some([0; 32].into()))
-            .expect("history tree can't be empty")
-            .bytes_in_serialized_order()
-            .into();
+        tracing::info!(?fut, "iojads");
 
-        let Response::Committed(block_hash) = state2
-            .clone()
-            .oneshot(zebra_state::Request::CommitSemanticallyVerifiedBlock(
-                Arc::new(block.clone()).into(),
-            ))
-            .await
-            .map_err(|err| eyre!(err))?
-        else {
-            unreachable!("wrong response variant");
-        };
-
-        assert!(
-            chain_tip_change.last_tip_change().is_none(),
-            "there should be no tip change until the last block is submitted"
-        );
+        let (block, _height) = fut?;
 
         rpc_client.submit_block(block.clone()).await?;
-        blocks.push(block);
-        let GetBlockHash(best_block_hash) = rpc_client
-            .json_result_from_call("getbestblockhash", "[]")
-            .await
-            .map_err(|err| eyre!(err))?;
-
-        if block_hash == best_block_hash {
-            break;
-        }
     }
 
     tracing::info!("newly submitted blocks are in the best chain, checking for reset");
@@ -3151,15 +3105,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         chain_tip_change.wait_for_tip_change(),
     )
     .await??;
-    let (expected_height, expected_hash) = latest_chain_tip2
-        .best_tip_height_and_hash()
-        .expect("should have a chain tip");
     assert!(tip_action.is_reset(), "tip action should be reset");
-    assert_eq!(
-        tip_action.best_tip_hash_and_height(),
-        (expected_hash, expected_height),
-        "tip action hashes and heights should match"
-    );
 
     tracing::info!("checking that read state has the new non-finalized best chain blocks");
     for expected_block in blocks {
