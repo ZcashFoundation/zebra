@@ -77,6 +77,10 @@ impl<T: fmt::Display> From<T> for DisplayToDebug<T> {
 ///
 /// For collections and exact size iterators, it only displays the
 /// collection/iterator type, the item type, and the length.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SummaryDebug<CollectionOrIter>(pub CollectionOrIter)
 where

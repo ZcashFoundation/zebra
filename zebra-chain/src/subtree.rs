@@ -87,6 +87,7 @@ impl<SubtreeRoot> NoteCommitmentSubtree<SubtreeRoot> {
 
 /// Subtree root of Sapling or Orchard note commitment tree, with block height, but without the subtree index.
 /// Used for database key-value serialization, where the subtree index is the key, and this struct is the value.
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct NoteCommitmentSubtreeData<SubtreeRoot> {
