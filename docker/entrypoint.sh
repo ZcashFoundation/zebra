@@ -280,6 +280,7 @@ test)
     shift
     exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
   else
+    chown -R "${USER}:${USER}" "/home/zebra/.cache/zebra"
     run_tests "$@"
   fi
   ;;
