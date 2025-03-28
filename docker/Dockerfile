@@ -3,32 +3,29 @@
 
 # If you want to include a file in the Docker image, add it to .dockerignore.
 #
-# We are using 4 (TODO: 5) stages:
+# We use 4 (TODO: 5) stages:
 # - deps: installs build dependencies and sets default values
-# - tests: builds tests binaries
+# - tests: prepares a test image
 # - release: builds release binaries
-# - runtime: runs the release binaries
+# - runtime: prepares the release image
 # - TODO: Add a `monitoring` stage
 #
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
 
-# Build zebrad with these features
-#
-# Keep these argument defaults in sync with GitHub vars.RUST_PROD_FEATURES
+ARG RUST_VERSION=1.85.0
+
+# Keep in sync with vars.RUST_PROD_FEATURES in GitHub
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
 ARG FEATURES="default-release-binaries"
 
-ARG USER="zebra"
 ARG UID=10001
-ARG GID=10001
+ARG GID=${UID}
+ARG USER="zebra"
 ARG HOME="/home/${USER}"
+ARG CARGO_HOME="${HOME}/.cargo"
 
-ARG RUST_VERSION=1.85.0
-# In this stage we download all system requirements to build the project
-#
-# It also captures all the build arguments to be used as environment variables.
-# We set defaults for the arguments, in case the build does not include this information.
+# This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
@@ -39,25 +36,20 @@ RUN apt-get -qq update && \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/* /tmp/*
 
-# Build arguments and variables set for tracelog levels and debug information
-ARG RUST_LOG
-ENV RUST_LOG=${RUST_LOG:-info}
-
-ARG RUST_BACKTRACE
-ENV RUST_BACKTRACE=${RUST_BACKTRACE:-1}
-
-ARG RUST_LIB_BACKTRACE
-ENV RUST_LIB_BACKTRACE=${RUST_LIB_BACKTRACE:-1}
-
-ARG COLORBT_SHOW_HIDDEN
-ENV COLORBT_SHOW_HIDDEN=${COLORBT_SHOW_HIDDEN:-1}
-
+# Build arguments and variables
 ARG CARGO_INCREMENTAL
 ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
 
-ARG SHORT_SHA
-# If this is not set, it must be an empty string, so Zebra can try an alternative git commit source:
+ARG CARGO_HOME
+ENV CARGO_HOME=${CARGO_HOME}
+
+ARG FEATURES
+ENV FEATURES=${FEATURES}
+
+# If this is not set, it must be an empty string, so Zebra can try an
+# alternative git commit source:
 # https://github.com/ZcashFoundation/zebra/blob/9ebd56092bcdfc1a09062e15a0574c94af37f389/zebrad/src/application.rs#L179-L182
+ARG SHORT_SHA
 ENV SHORT_SHA=${SHORT_SHA:-}
 
 # This stage builds tests without running them.
@@ -65,9 +57,6 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 # We also download needed dependencies for tests to work, from other images.
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
-
-ARG FEATURES
-ENV FEATURES=${FEATURES}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
@@ -80,20 +69,19 @@ ARG UID
 ENV UID=${UID}
 ARG GID
 ENV GID=${GID}
-ARG HOME
-ENV HOME=${HOME}
 ARG USER
 ENV USER=${USER}
+ARG HOME
+ENV HOME=${HOME}
 
-RUN addgroup --gid ${GID} ${USER} && \
-    adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+RUN addgroup --quiet --gid ${GID} ${USER} && \
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
 # Set the working directory for the build.
 WORKDIR ${HOME}
-ENV CARGO_HOME="${HOME}/.cargo/"
 
 # Build Zebra test binaries, but don't run them
-
+#
 # Leverage a cache mount to /usr/local/cargo/registry/
 # for downloaded dependencies, a cache mount to /usr/local/cargo/git/db
 # for git repository dependencies, and a cache mount to ${HOME}/target/ for
@@ -136,30 +124,22 @@ COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 
-ENV LWD_CACHE_DIR="${HOME}/.cache/lwd"
-RUN mkdir -p ${LWD_CACHE_DIR} && \
-    chown -R ${UID}:${GID} ${LWD_CACHE_DIR}
+# As the build has already run with the root user,
+# we need to set the correct permissions for the home and cargo home dirs owned by it.
+RUN chown -R ${UID}:${GID} "${HOME}" && \
+    chown -R ${UID}:${GID} "${CARGO_HOME}"
 
-# Use the same cache dir as in the production environment.
-ENV ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && \
-    chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
-
-COPY ./ ${HOME}
-RUN chown -R ${UID}:${GID} ${HOME}
-
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=${UID}:${GID} ./ ${HOME}
+COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 
-# In this stage we build a release (generate the zebrad binary)
+# This stage builds the zebrad release binary.
 #
-# This step also adds `cache mounts` as this stage is completely independent from the
-# `test` stage. This step is a dependency for the `runtime` stage, which uses the resulting
-# zebrad binary from this step.
+# It also adds `cache mounts` as this stage is completely independent from the
+# `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
 
-ARG FEATURES
 ARG HOME
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
@@ -184,8 +164,8 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${HOME}/target/release/zebrad /usr/local/bin
 
-# This step starts from scratch using Debian and only adds the resulting binary
-# from the `release` stage.
+# This stage starts from scratch using Debian and copies the built zebrad binary
+# from the `release` stage along with other binaries and files.
 FROM debian:bookworm-slim AS runtime
 
 ARG FEATURES
@@ -209,28 +189,23 @@ ARG UID
 ENV UID=${UID}
 ARG GID
 ENV GID=${GID}
-ARG HOME
-ENV HOME=${HOME}
 ARG USER
 ENV USER=${USER}
+ARG HOME
+ENV HOME=${HOME}
 
-RUN addgroup --gid ${GID} ${USER} && \
-    adduser --gid ${GID} --uid ${UID} --home ${HOME} ${USER}
+RUN addgroup --quiet --gid ${GID} ${USER} && \
+    adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
 WORKDIR ${HOME}
 
 # We set the default locations of the conf and cache dirs according to the XDG
 # spec: https://specifications.freedesktop.org/basedir-spec/latest/
 
+RUN chown -R ${UID}:${GID} ${HOME}
+
 ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
 ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
-COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
-
-ARG ZEBRA_CACHE_DIR="${HOME}/.cache/zebra"
-ENV ZEBRA_CACHE_DIR=${ZEBRA_CACHE_DIR}
-RUN mkdir -p ${ZEBRA_CACHE_DIR} && chown -R ${UID}:${GID} ${ZEBRA_CACHE_DIR}
-
-RUN chown -R ${UID}:${GID} ${HOME}
 
 # We're explicitly NOT using the USER directive here.
 # Instead, we run as root initially and use gosu in the entrypoint.sh
@@ -240,9 +215,9 @@ RUN chown -R ${UID}:${GID} ${HOME}
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
-
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
-COPY ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
+COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
