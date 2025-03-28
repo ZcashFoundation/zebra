@@ -5,6 +5,7 @@ expression: block
 {
   "hash": "0007bc227e1c57a4a70e237cad00e7b7ce565155ab49166bc57397a26d339283",
   "confirmations": 10,
+  "size": 1617,
   "height": 1,
   "version": 4,
   "merkleroot": "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609",
