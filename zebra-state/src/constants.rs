@@ -78,13 +78,6 @@ pub fn state_database_format_version_in_code() -> Version {
     }
 }
 
-/// Returns the highest database version that modifies the subtree index format.
-///
-/// This version is used by tests to wait for the subtree upgrade to finish.
-pub fn latest_version_for_adding_subtrees() -> Version {
-    Version::parse("25.2.2").expect("Hardcoded version string should be valid.")
-}
-
 /// The name of the file containing the minor and patch database versions.
 ///
 /// Use [`Config::version_file_path()`] to get the path to this file.

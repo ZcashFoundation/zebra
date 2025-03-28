@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crossbeam_channel::{Receiver, TryRecvError};
 use hex_literal::hex;
 use itertools::Itertools;
+use semver::Version;
 use tracing::instrument;
 
 use zebra_chain::{
@@ -17,90 +18,144 @@ use zebra_chain::{
 };
 
 use crate::service::finalized_state::{
-    disk_format::upgrade::CancelFormatChange, DiskWriteBatch, ZebraDb,
+    disk_format::upgrade::{CancelFormatChange, DiskFormatUpgrade},
+    DiskWriteBatch, ZebraDb,
 };
 
-/// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
-///
-/// Trees are added to the database in reverse height order, so that wallets can sync correctly
-/// while the upgrade is running.
-///
-/// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
-#[allow(clippy::unwrap_in_result)]
-#[instrument(skip(upgrade_db, cancel_receiver))]
-pub fn run(
-    initial_tip_height: Height,
-    upgrade_db: &ZebraDb,
-    cancel_receiver: &Receiver<CancelFormatChange>,
-) -> Result<(), CancelFormatChange> {
-    // # Consensus
-    //
-    // Zebra stores exactly one note commitment tree for every block with sapling notes.
-    // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
-    //
-    // The consensus rules limit blocks to less than 2^16 sapling and 2^16 orchard outputs. So a
-    // block can't complete multiple level 16 subtrees (or complete an entire subtree by itself).
-    // Currently, with 2MB blocks and v4/v5 sapling and orchard output sizes, the subtree index can
-    // increase by at most 1 every ~20 blocks.
-    //
-    // # Compatibility
-    //
-    // Because wallets search backwards from the chain tip, subtrees need to be added to the
-    // database in reverse height order. (Tip first, genesis last.)
-    //
-    // Otherwise, wallets that sync during the upgrade will be missing some notes.
+/// Implements [`DiskFormatUpgrade`] for populating Sapling and Orchard note commitment subtrees.
+pub struct AddSubtrees;
 
-    // Generate a list of sapling subtree inputs: previous and current trees, and their end heights.
-    let subtrees = upgrade_db
-        .sapling_tree_by_reversed_height_range(..=initial_tip_height)
-        // We need both the tree and its previous tree for each shielded block.
-        .tuple_windows()
-        // Because the iterator is reversed, the larger tree is first.
-        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
-            (prev_end_height, prev_tree, end_height, tree)
-        })
-        // Find new subtrees.
-        .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            tree.contains_new_subtree(prev_tree)
-        });
-
-    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
-        // Return early if the upgrade is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-            return Err(CancelFormatChange);
-        }
-
-        let subtree =
-            calculate_sapling_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
-        write_sapling_subtree(upgrade_db, subtree);
+impl DiskFormatUpgrade for AddSubtrees {
+    fn version(&self) -> Version {
+        Version::new(25, 2, 2)
     }
 
-    // Generate a list of orchard subtree inputs: previous and current trees, and their end heights.
-    let subtrees = upgrade_db
-        .orchard_tree_by_reversed_height_range(..=initial_tip_height)
-        // We need both the tree and its previous tree for each shielded block.
-        .tuple_windows()
-        // Because the iterator is reversed, the larger tree is first.
-        .map(|((end_height, tree), (prev_end_height, prev_tree))| {
-            (prev_end_height, prev_tree, end_height, tree)
-        })
-        // Find new subtrees.
-        .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
-            tree.contains_new_subtree(prev_tree)
-        });
-
-    for (prev_end_height, prev_tree, end_height, tree) in subtrees {
-        // Return early if the upgrade is cancelled.
-        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-            return Err(CancelFormatChange);
-        }
-
-        let subtree =
-            calculate_orchard_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
-        write_orchard_subtree(upgrade_db, subtree);
+    fn description(&self) -> &'static str {
+        "add subtrees upgrade"
     }
 
-    Ok(())
+    fn prepare(
+        &self,
+        initial_tip_height: Height,
+        upgrade_db: &ZebraDb,
+        cancel_receiver: &Receiver<CancelFormatChange>,
+        older_disk_version: &Version,
+    ) -> Result<(), CancelFormatChange> {
+        let first_version_for_adding_subtrees = Version::new(25, 2, 0);
+        if older_disk_version >= &first_version_for_adding_subtrees {
+            // Clear previous upgrade data, because it was incorrect.
+            reset(initial_tip_height, upgrade_db, cancel_receiver)?;
+        }
+
+        Ok(())
+    }
+
+    /// Runs disk format upgrade for adding Sapling and Orchard note commitment subtrees to database.
+    ///
+    /// Trees are added to the database in reverse height order, so that wallets can sync correctly
+    /// while the upgrade is running.
+    ///
+    /// Returns `Ok` if the upgrade completed, and `Err` if it was cancelled.
+    fn run(
+        &self,
+        initial_tip_height: Height,
+        upgrade_db: &ZebraDb,
+        cancel_receiver: &Receiver<CancelFormatChange>,
+    ) -> Result<(), CancelFormatChange> {
+        // # Consensus
+        //
+        // Zebra stores exactly one note commitment tree for every block with sapling notes.
+        // (It also stores the empty note commitment tree for the genesis block, but we skip that.)
+        //
+        // The consensus rules limit blocks to less than 2^16 sapling and 2^16 orchard outputs. So a
+        // block can't complete multiple level 16 subtrees (or complete an entire subtree by itself).
+        // Currently, with 2MB blocks and v4/v5 sapling and orchard output sizes, the subtree index can
+        // increase by at most 1 every ~20 blocks.
+        //
+        // # Compatibility
+        //
+        // Because wallets search backwards from the chain tip, subtrees need to be added to the
+        // database in reverse height order. (Tip first, genesis last.)
+        //
+        // Otherwise, wallets that sync during the upgrade will be missing some notes.
+
+        // Generate a list of sapling subtree inputs: previous and current trees, and their end heights.
+        let subtrees = upgrade_db
+            .sapling_tree_by_reversed_height_range(..=initial_tip_height)
+            // We need both the tree and its previous tree for each shielded block.
+            .tuple_windows()
+            // Because the iterator is reversed, the larger tree is first.
+            .map(|((end_height, tree), (prev_end_height, prev_tree))| {
+                (prev_end_height, prev_tree, end_height, tree)
+            })
+            // Find new subtrees.
+            .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
+                tree.contains_new_subtree(prev_tree)
+            });
+
+        for (prev_end_height, prev_tree, end_height, tree) in subtrees {
+            // Return early if the upgrade is cancelled.
+            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                return Err(CancelFormatChange);
+            }
+
+            let subtree =
+                calculate_sapling_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
+            write_sapling_subtree(upgrade_db, subtree);
+        }
+
+        // Generate a list of orchard subtree inputs: previous and current trees, and their end heights.
+        let subtrees = upgrade_db
+            .orchard_tree_by_reversed_height_range(..=initial_tip_height)
+            // We need both the tree and its previous tree for each shielded block.
+            .tuple_windows()
+            // Because the iterator is reversed, the larger tree is first.
+            .map(|((end_height, tree), (prev_end_height, prev_tree))| {
+                (prev_end_height, prev_tree, end_height, tree)
+            })
+            // Find new subtrees.
+            .filter(|(_prev_end_height, prev_tree, _end_height, tree)| {
+                tree.contains_new_subtree(prev_tree)
+            });
+
+        for (prev_end_height, prev_tree, end_height, tree) in subtrees {
+            // Return early if the upgrade is cancelled.
+            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                return Err(CancelFormatChange);
+            }
+
+            let subtree =
+                calculate_orchard_subtree(upgrade_db, prev_end_height, prev_tree, end_height, tree);
+            write_orchard_subtree(upgrade_db, subtree);
+        }
+
+        Ok(())
+    }
+
+    #[allow(clippy::unwrap_in_result)]
+    fn validate(
+        &self,
+        db: &ZebraDb,
+        cancel_receiver: &Receiver<CancelFormatChange>,
+    ) -> Result<Result<(), String>, CancelFormatChange> {
+        // This is redundant in some code paths, but not in others. But it's quick anyway.
+        let quick_result = subtree_format_calculation_pre_checks(db);
+
+        // Check the entire format before returning any errors.
+        let sapling_result = check_sapling_subtrees(db, cancel_receiver)?;
+        let orchard_result = check_orchard_subtrees(db, cancel_receiver)?;
+
+        if quick_result.is_err() || sapling_result.is_err() || orchard_result.is_err() {
+            let err = Err(format!(
+                "missing or invalid subtree(s): \
+             quick: {quick_result:?}, sapling: {sapling_result:?}, orchard: {orchard_result:?}"
+            ));
+            warn!(?err);
+            return Ok(err);
+        }
+
+        Ok(Ok(()))
+    }
 }
 
 /// Reset data from previous upgrades. This data can be complete or incomplete.
@@ -302,30 +357,6 @@ fn quick_check_orchard_subtrees(db: &ZebraDb) -> Result<(), &'static str> {
     }
 
     Ok(())
-}
-
-/// Check that note commitment subtrees were correctly added.
-pub fn subtree_format_validity_checks_detailed(
-    db: &ZebraDb,
-    cancel_receiver: &Receiver<CancelFormatChange>,
-) -> Result<Result<(), String>, CancelFormatChange> {
-    // This is redundant in some code paths, but not in others. But it's quick anyway.
-    let quick_result = subtree_format_calculation_pre_checks(db);
-
-    // Check the entire format before returning any errors.
-    let sapling_result = check_sapling_subtrees(db, cancel_receiver)?;
-    let orchard_result = check_orchard_subtrees(db, cancel_receiver)?;
-
-    if quick_result.is_err() || sapling_result.is_err() || orchard_result.is_err() {
-        let err = Err(format!(
-            "missing or invalid subtree(s): \
-             quick: {quick_result:?}, sapling: {sapling_result:?}, orchard: {orchard_result:?}"
-        ));
-        warn!(?err);
-        return Ok(err);
-    }
-
-    Ok(Ok(()))
 }
 
 /// Check that Sapling note commitment subtrees were correctly added.
