@@ -1,6 +1,6 @@
 //! Fixed Zebra RPC serialization test vectors.
 
-use crate::methods::{GetBlock, GetRawTransaction, TransactionObject};
+use crate::methods::{types::TransactionObject, GetBlock, GetRawTransaction};
 
 #[test]
 pub fn test_transaction_serialization() {
@@ -12,6 +12,13 @@ pub fn test_transaction_serialization() {
         hex: vec![0x42].into(),
         height: Some(1),
         confirmations: Some(0),
+        inputs: None,
+        outputs: None,
+        shielded_spends: None,
+        shielded_outputs: None,
+        value_balance: None,
+        value_balance_zat: None,
+        orchard: None,
     });
 
     assert_eq!(
@@ -23,6 +30,13 @@ pub fn test_transaction_serialization() {
         hex: vec![0x42].into(),
         height: None,
         confirmations: None,
+        inputs: None,
+        outputs: None,
+        shielded_spends: None,
+        shielded_outputs: None,
+        value_balance: None,
+        value_balance_zat: None,
+        orchard: None,
     });
 
     assert_eq!(serde_json::to_string(&tx).unwrap(), r#"{"hex":"42"}"#);
