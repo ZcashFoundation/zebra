@@ -14,6 +14,10 @@ V4(
   ],
   outputs: [
     Output(
+      value: 250000000,
+      lock_script: Script("a914adadadadadadadadadadadadadadadadadadadad87"),
+    ),
+    Output(
       value: 15625000,
       lock_script: Script("a9140c0bcca02f3cba01a5d7423ac3903d40586399eb87"),
     ),
@@ -24,10 +28,6 @@ V4(
     Output(
       value: 25000000,
       lock_script: Script("a91471e1df05024288a00802de81e08c437859586c8787"),
-    ),
-    Output(
-      value: 250000000,
-      lock_script: Script("a914adadadadadadadadadadadadadadadadadadadad87"),
     ),
   ],
   lock_time: Height(Height(0)),
