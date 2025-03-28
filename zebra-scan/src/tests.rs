@@ -208,7 +208,7 @@ pub fn fake_compact_block(
     let cout = CompactSaplingOutput {
         cmu,
         ephemeral_key,
-        ciphertext: enc_ciphertext.as_ref()[..52].to_vec(),
+        ciphertext: enc_ciphertext[..52].to_vec(),
     };
     let mut ctx = CompactTx::default();
     let mut txid = vec![0; 32];
@@ -250,7 +250,7 @@ pub fn random_compact_tx(mut rng: impl RngCore) -> CompactTx {
     };
     let fake_cmu = {
         let fake_cmu = bls12_381::Scalar::random(&mut rng);
-        fake_cmu.to_repr().as_ref().to_owned()
+        fake_cmu.to_repr().to_vec()
     };
     let fake_epk = {
         let mut buffer = [0; 64];
