@@ -113,6 +113,7 @@ where
     V: Version,
     V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
     V::EntryKind: From<EntryKind>,
+    EntryLink: From<V::EntryLink>,
 {
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
