@@ -133,6 +133,7 @@ COPY --chown=${UID}:${GID} ./ ${HOME}
 COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
+CMD [ "cargo", "test" ]
 
 # This stage builds the zebrad release binary.
 #
