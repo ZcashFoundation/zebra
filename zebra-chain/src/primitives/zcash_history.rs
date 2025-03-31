@@ -9,6 +9,7 @@ mod tests;
 use std::{collections::BTreeMap, io, sync::Arc};
 
 use serde_big_array::BigArray;
+use zcash_history::{EntryKind, EntryLink};
 pub use zcash_history::{V1, V2};
 
 use crate::{
@@ -107,7 +108,12 @@ impl Entry {
     }
 }
 
-impl<V: Version> Tree<V> {
+impl<V> Tree<V>
+where
+    V: Version,
+    V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
+    V::EntryKind: From<EntryKind>,
+{
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
     /// The `peaks` are the peaks of the MMR tree to build and their position in the

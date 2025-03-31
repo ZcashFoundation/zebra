@@ -48,7 +48,7 @@ internal-miner = []
 elasticsearch = []
 
 # Serde Serialisation and Deserialisation for ReadRequest and ReadResponse, required for remote use of the [`ReadStateService`].
-remote_read_state_service = ["zcash_history/remote_read_state_service"]
+remote_read_state_service = ["zcash_history/serde_serialization"]
 
 # Test-only features
 
