@@ -5981,7 +5981,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/idky137/librustzcash.git?branch=remote_read_state_service_1#e552e1d47b860e869c3185940fd1f9aec7b7141f"
+source = "git+https://github.com/idky137/librustzcash.git?branch=remote_read_state_service_1#cdb2e7358147a7ac44743ab4df8dc4c89c38c358"
 dependencies = [
  "blake2b_simd",
  "byteorder",

@@ -111,9 +111,9 @@ impl Entry {
 impl<V> Tree<V>
 where
     V: Version,
-    V::EntryLink: Into<EntryLink> + From<EntryLink> + Copy,
-    EntryLink: From<V::EntryLink>,
+    V::EntryLink: From<EntryLink> + Copy,
     V::EntryKind: From<EntryKind>,
+    EntryLink: From<V::EntryLink>,
 {
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
@@ -140,12 +140,12 @@ where
             .expect("unexpected pre-Overwinter MMR history tree");
         let mut peaks_vec = Vec::new();
         for (idx, entry) in peaks {
-            let inner_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.inner)?;
+            let inner_entry = zcash_history::Entry::from_bytes(branch_id.0, entry.inner)?;
             peaks_vec.push((*idx, inner_entry));
         }
         let mut extra_vec = Vec::new();
         for (idx, entry) in extra {
-            let inner_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.inner)?;
+            let inner_entry = zcash_history::Entry::from_bytes(branch_id.0, entry.inner)?;
             extra_vec.push((*idx, inner_entry));
         }
         let inner = zcash_history::Tree::new(length, peaks_vec, extra_vec);
