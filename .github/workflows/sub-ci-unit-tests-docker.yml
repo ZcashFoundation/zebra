@@ -36,7 +36,8 @@ jobs:
   test-all:
     name: Test all
     timeout-minutes: 180
-    runs-on: ubuntu-latest-xl
+    # TODO: This is using a default runner, to allow external contributors to run this workflow.
+    runs-on: ubuntu-latest
     steps:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
