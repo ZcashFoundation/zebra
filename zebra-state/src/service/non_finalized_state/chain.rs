@@ -359,7 +359,7 @@ impl Chain {
         (block, treestate)
     }
 
-    // Returns the block at the provided height and all of its descendant blocks.
+    /// Returns the block at the provided height and all of its descendant blocks.
     pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
         self.blocks
             .range(block_height..)
@@ -367,7 +367,7 @@ impl Chain {
             .collect()
     }
 
-    // Returns a new chain without the invalidated block or its descendants.
+    /// Returns a new chain without the invalidated block or its descendants.
     pub fn invalidate_block(
         &self,
         block_hash: block::Hash,

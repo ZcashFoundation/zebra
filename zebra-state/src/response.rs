@@ -52,6 +52,9 @@ pub enum Response {
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
+    /// Response to [`Request::BlockAndSize`] with the specified block and size.
+    BlockAndSize(Option<(Arc<Block>, usize)>),
+
     /// The response to a `BlockHeader` request.
     BlockHeader {
         /// The header of the requested block
@@ -158,6 +161,10 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::Block`] with the specified block.
     Block(Option<Arc<Block>>),
+
+    /// Response to [`ReadRequest::BlockAndSize`] with the specified block and
+    /// serialized size.
+    BlockAndSize(Option<(Arc<Block>, usize)>),
 
     /// The response to a `BlockHeader` request.
     BlockHeader {
@@ -313,6 +320,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
+            ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
             ReadResponse::BlockHeader {
                 header,
                 hash,
