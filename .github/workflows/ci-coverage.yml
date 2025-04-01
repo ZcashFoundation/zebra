@@ -65,8 +65,9 @@ jobs:
     name: Coverage on stable
     # The large timeout is to accommodate:
     # - stable builds (typically 50-90 minutes), and
-    timeout-minutes: 120
-    runs-on: ubuntu-latest-xl
+    timeout-minutes: 180
+    # TODO: This is using a default runner, to allow external contributors to run this workflow.
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4.2.2
