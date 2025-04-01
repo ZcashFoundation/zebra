@@ -112,8 +112,9 @@ impl<V> Tree<V>
 where
     V: Version,
     V::EntryLink: From<EntryLink> + Copy,
+    V: Version<EntryLink = EntryLink>,
     V::EntryKind: From<EntryKind>,
-    EntryLink: From<V::EntryLink>,
+    V: Version<EntryKind = EntryKind>,
 {
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
