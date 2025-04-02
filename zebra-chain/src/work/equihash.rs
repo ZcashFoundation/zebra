@@ -165,8 +165,6 @@ impl Solution {
 
             let mut valid_solutions = Vec::new();
 
-            // If we got any solutions, try submitting them, because the new template might just
-            // contain some extra transactions. Mining extra transactions is optional.
             for solution in &solutions {
                 header.solution = Self::from_bytes(solution)
                     .expect("unexpected invalid solution: incorrect length");
@@ -196,7 +194,9 @@ impl Solution {
 
     /// Returns `true` if the `nonce` and `solution` in `header` meet the difficulty threshold.
     ///
-    /// Assumes that the difficulty threshold in the header is valid.
+    /// # Panics
+    ///
+    /// - If `header` contains an invalid difficulty threshold.  
     #[cfg(feature = "internal-miner")]
     fn difficulty_is_valid(header: &Header) -> bool {
         // Simplified from zebra_consensus::block::check::difficulty_is_valid().
