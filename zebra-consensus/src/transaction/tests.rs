@@ -2128,7 +2128,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     // Setting the new expiry height as the block height will activate NU6, so we need to set NU6
     // for the tx as well.
     new_transaction
-        .update_network_upgrade(NetworkUpgrade::Nu6)
+        .update_network_upgrade(NetworkUpgrade::Nu7)
         .expect("updating the network upgrade for a V5 tx should succeed");
 
     let verification_result = verifier
@@ -2231,7 +2231,7 @@ async fn v5_transaction_with_exceeding_expiry_height() {
         expiry_height,
         sapling_shielded_data: None,
         orchard_shielded_data: None,
-        network_upgrade: NetworkUpgrade::Nu6,
+        network_upgrade: NetworkUpgrade::Nu7,
     };
 
     let transaction_hash = transaction.hash();
