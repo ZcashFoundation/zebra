@@ -48,7 +48,7 @@ elasticsearch = [
     "zebra-chain/elasticsearch",
 ]
 
-tx_v6 = []
+tx_v6 = ["zebra-chain/tx_v6"]
 
 [dependencies]
 bincode = { workspace = true }
