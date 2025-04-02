@@ -18,8 +18,8 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree::NonEmptyFrontier;
 use hex::ToHex;
+use incrementalmerkletree::frontier::NonEmptyFrontier;
 use incrementalmerkletree::{frontier::Frontier, Hashable};
 
 use lazy_static::lazy_static;
@@ -637,7 +637,7 @@ impl NoteCommitmentTree {
 
     /// Serializes [`Self`] to a format matching `zcashd`'s RPCs.
     pub fn to_rpc_bytes(&self) -> Vec<u8> {
-        // Convert the tree from [`Frontier`](bridgetree::Frontier) to
+        // Convert the tree from [`Frontier`](incrementalmerkletree::frontier::Frontier) to
         // [`CommitmentTree`](merkle_tree::CommitmentTree).
         let tree = incrementalmerkletree::frontier::CommitmentTree::from_frontier(&self.inner);
 
@@ -666,7 +666,7 @@ impl Clone for NoteCommitmentTree {
 impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
-            inner: bridgetree::Frontier::empty(),
+            inner: incrementalmerkletree::frontier::Frontier::empty(),
             cached_root: Default::default(),
         }
     }

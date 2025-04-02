@@ -91,6 +91,7 @@ serde = { workspace = true, features = ["serde_derive"] }
 nix = { workspace = true, features = ["signal"] }
 
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
+zcash_protocol.workspace = true
 
 # ECC deps used by getblocktemplate-rpcs feature
 zcash_address = { workspace = true, optional = true}

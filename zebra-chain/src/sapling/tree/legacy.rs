@@ -8,8 +8,10 @@
 //!
 //! Conversions methods to/from [`LegacyNoteCommitmentTree`] to/from [`NoteCommitmentTree`] are defined also in this file.
 //!
-//! [1]: https://github.com/zcash/incrementalmerkletree/blob/incrementalmerkletree-v0.3.1/src/bridgetree.rs
-//! [2]: https://github.com/zcash/incrementalmerkletree/blob/incrementalmerkletree-v0.3.1/src/lib.rs
+//! [1]:
+//! https://github.com/zcash/incrementalmerkletree/blob/incrementalmerkletree-v0.3.1/src/bridgetree.rs
+//! [2]:
+//! https://github.com/zcash/incrementalmerkletree/blob/incrementalmerkletree-v0.3.1/src/lib.rs
 
 use incrementalmerkletree::{frontier::Frontier, Position};
 

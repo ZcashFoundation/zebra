@@ -50,7 +50,7 @@ fn generate_test_vectors() {
 
             for _ in 0..num_recipients {
                 builder
-                    .add_output(None, recipient, NoteValue::from_raw(note_value), None)
+                    .add_output(None, recipient, NoteValue::from_raw(note_value), [0u8; 512])
                     .unwrap();
             }
 

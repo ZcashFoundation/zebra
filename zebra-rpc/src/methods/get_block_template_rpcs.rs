@@ -1266,9 +1266,11 @@ where
     async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response> {
         use zcash_address::unified::Container;
 
-        let (network, unified_address): (zcash_address::Network, zcash_address::unified::Address) =
-            zcash_address::unified::Encoding::decode(address.clone().as_str())
-                .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+        let (network, unified_address): (
+            zcash_protocol::consensus::NetworkType,
+            zcash_address::unified::Address,
+        ) = zcash_address::unified::Encoding::decode(address.clone().as_str())
+            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
         let mut p2pkh = String::new();
         let mut p2sh = String::new();

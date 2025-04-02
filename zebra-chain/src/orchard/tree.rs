@@ -18,9 +18,9 @@ use std::{
 };
 
 use bitvec::prelude::*;
-use bridgetree::NonEmptyFrontier;
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::ToHex;
+use incrementalmerkletree::frontier::NonEmptyFrontier;
 use incrementalmerkletree::Hashable;
 use lazy_static::lazy_static;
 use thiserror::Error;
@@ -248,7 +248,7 @@ impl ToHex for Node {
 /// [`z_gettreestate`][2] RPC requires [`CommitmentTree`][3]s. Implementing
 /// [`HashSer`] for [`Node`]s allows the conversion.
 ///
-/// [1]: bridgetree::Frontier
+/// [1]: incrementalmerkletree::frontier::Frontier
 /// [2]: https://zcash.github.io/rpc/z_gettreestate.html
 /// [3]: incrementalmerkletree::frontier::CommitmentTree
 impl HashSer for Node {
@@ -348,7 +348,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Orchard = MERKLE_DEPTH = 32.
-    inner: bridgetree::Frontier<Node, MERKLE_DEPTH>,
+    inner: incrementalmerkletree::frontier::Frontier<Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///
@@ -637,7 +637,7 @@ impl NoteCommitmentTree {
 
     /// Serializes [`Self`] to a format compatible with `zcashd`'s RPCs.
     pub fn to_rpc_bytes(&self) -> Vec<u8> {
-        // Convert the tree from [`Frontier`](bridgetree::Frontier) to
+        // Convert the tree from [`Frontier`](incrementalmerkletree::frontier::Frontier) to
         // [`CommitmentTree`](merkle_tree::CommitmentTree).
         let tree = incrementalmerkletree::frontier::CommitmentTree::from_frontier(&self.inner);
 
@@ -665,7 +665,7 @@ impl Clone for NoteCommitmentTree {
 impl Default for NoteCommitmentTree {
     fn default() -> Self {
         Self {
-            inner: bridgetree::Frontier::empty(),
+            inner: incrementalmerkletree::frontier::Frontier::empty(),
             cached_root: Default::default(),
         }
     }
