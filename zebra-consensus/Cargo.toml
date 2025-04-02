@@ -31,7 +31,7 @@ getblocktemplate-rpcs = [
      "zebra-chain/getblocktemplate-rpcs",
 ]
 
-tx_v6 = []
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6"]
 
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
