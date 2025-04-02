@@ -18,16 +18,16 @@ use orchard::{
 use rand::rngs::OsRng;
 
 use zebra_chain::{
-    orchard::{OrchardFlavorExt, OrchardVanilla, ShieldedData},
+    orchard::{OrchardVanilla, ShieldedData},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
 use crate::primitives::halo2::*;
 
-// FIXME: add support for OrchardZSA (see OrchardVanilla and AssetBase::native() usage below)
+// TODO: Add support for OrchardZSA (see OrchardVanilla and AssetBase::native() usage below)
 #[allow(dead_code, clippy::print_stdout)]
 fn generate_test_vectors() {
-    let proving_key = ProvingKey::build::<<OrchardVanilla as OrchardFlavorExt>::Flavor>();
+    let proving_key = ProvingKey::build::<OrchardVanilla>();
 
     let rng = OsRng;
 
@@ -40,7 +40,7 @@ fn generate_test_vectors() {
     let anchor_bytes = [0; 32];
     let note_value = 10;
 
-    let shielded_data: Vec<zebra_chain::orchard::ShieldedData<OrchardVanilla>> = (1..=4)
+    let shielded_data: Vec<ShieldedData<OrchardVanilla>> = (1..=4)
         .map(|num_recipients| {
             let mut builder = Builder::new(
                 BundleType::Transactional {
@@ -62,8 +62,7 @@ fn generate_test_vectors() {
                     .unwrap();
             }
 
-            let bundle: Bundle<_, i64, <OrchardVanilla as OrchardFlavorExt>::Flavor> =
-                builder.build(rng).unwrap().unwrap().0;
+            let bundle: Bundle<_, i64, OrchardVanilla> = builder.build(rng).unwrap().0;
 
             let bundle = bundle
                 .create_proof(&proving_key, rng)
@@ -71,7 +70,7 @@ fn generate_test_vectors() {
                 .apply_signatures(rng, [0; 32], &[])
                 .unwrap();
 
-            zebra_chain::orchard::ShieldedData::<OrchardVanilla> {
+            ShieldedData::<OrchardVanilla> {
                 flags,
                 value_balance: note_value.try_into().unwrap(),
                 shared_anchor: anchor_bytes.try_into().unwrap(),
@@ -88,14 +87,7 @@ fn generate_test_vectors() {
                             rk: <[u8; 32]>::from(a.rk()).into(),
                             cm_x: pallas::Base::from_repr(a.cmx().into()).unwrap(),
                             ephemeral_key: a.encrypted_note().epk_bytes.try_into().unwrap(),
-                            // FIXME: support OrchardZSA too, 580 works for OrchardVanilla only!
-                            // FIXME: consider more "type safe" way to do the following conversion
-                            // (now it goes through &[u8])
-                            enc_ciphertext: <[u8; OrchardVanilla::ENCRYPTED_NOTE_SIZE]>::try_from(
-                                a.encrypted_note().enc_ciphertext.as_ref(),
-                            )
-                            .unwrap()
-                            .into(),
+                            enc_ciphertext: a.encrypted_note().enc_ciphertext.0.into(),
                             out_ciphertext: a.encrypted_note().out_ciphertext.into(),
                         };
                         zebra_chain::orchard::shielded_data::AuthorizedAction {
@@ -158,10 +150,9 @@ async fn verify_generated_halo2_proofs() {
         .clone()
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<zebra_chain::orchard::ShieldedData<OrchardVanilla>> =
-                bytes
-                    .zcash_deserialize_into()
-                    .expect("a valid orchard::ShieldedData instance");
+            let maybe_shielded_data: Option<ShieldedData<OrchardVanilla>> = bytes
+                .zcash_deserialize_into()
+                .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()
         })
         .collect();
@@ -231,10 +222,9 @@ async fn correctly_err_on_invalid_halo2_proofs() {
         .clone()
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<zebra_chain::orchard::ShieldedData<OrchardVanilla>> =
-                bytes
-                    .zcash_deserialize_into()
-                    .expect("a valid orchard::ShieldedData instance");
+            let maybe_shielded_data: Option<ShieldedData<OrchardVanilla>> = bytes
+                .zcash_deserialize_into()
+                .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()
         })
         .collect();

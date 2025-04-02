@@ -20,17 +20,15 @@ use crate::{
     },
 };
 
-use super::OrchardFlavorExt;
-
-#[cfg(not(feature = "tx-v6"))]
-use super::OrchardVanilla;
-
-#[cfg(feature = "tx-v6")]
-use super::OrchardZSA;
+use super::{OrchardVanilla, ShieldedDataFlavor};
 
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct ShieldedData<V: OrchardFlavorExt> {
+#[serde(bound(
+    serialize = "FL::EncryptedNote: serde::Serialize, FL::BurnType: serde::Serialize",
+    deserialize = "FL::BurnType: serde::Deserialize<'de>"
+))]
+pub struct ShieldedData<FL: ShieldedDataFlavor> {
     /// The orchard flags for this transaction.
     /// Denoted as `flagsOrchard` in the spec.
     pub flags: Flags,
@@ -45,7 +43,7 @@ pub struct ShieldedData<V: OrchardFlavorExt> {
     pub proof: Halo2Proof,
     /// The Orchard Actions, in the order they appear in the transaction.
     /// Denoted as `vActionsOrchard` and `vSpendAuthSigsOrchard` in the spec.
-    pub actions: AtLeastOne<AuthorizedAction<V>>,
+    pub actions: AtLeastOne<AuthorizedAction<FL>>,
     /// A signature on the transaction `sighash`.
     /// Denoted as `bindingSigOrchard` in the spec.
     pub binding_sig: Signature<Binding>,
@@ -53,10 +51,10 @@ pub struct ShieldedData<V: OrchardFlavorExt> {
     #[cfg(feature = "tx-v6")]
     /// Assets intended for burning
     /// Denoted as `vAssetBurn` in the spec (ZIP 230).
-    pub burn: V::BurnType,
+    pub burn: FL::BurnType,
 }
 
-impl<V: OrchardFlavorExt> fmt::Display for ShieldedData<V> {
+impl<FL: ShieldedDataFlavor> fmt::Display for ShieldedData<FL> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("orchard::ShieldedData");
 
@@ -72,14 +70,15 @@ impl<V: OrchardFlavorExt> fmt::Display for ShieldedData<V> {
     }
 }
 
-impl<V: OrchardFlavorExt> ShieldedData<V> {
+impl<FL: ShieldedDataFlavor> ShieldedData<FL> {
     /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this
     /// transaction, in the order they appear in it.
-    pub fn actions(&self) -> impl Iterator<Item = &Action<V>> {
+    pub fn actions(&self) -> impl Iterator<Item = &Action<FL>> {
         self.actions.actions()
     }
 
-    /// FIXME: add a doc comment
+    /// Return an iterator for the [`ActionCommon`] copy of the Actions in this
+    /// transaction, in the order they appear in it.
     pub fn action_commons(&self) -> impl Iterator<Item = ActionCommon> + '_ {
         self.actions.actions().map(|action| action.into())
     }
@@ -143,9 +142,9 @@ impl<V: OrchardFlavorExt> ShieldedData<V> {
     }
 }
 
-impl<V: OrchardFlavorExt> AtLeastOne<AuthorizedAction<V>> {
+impl<FL: ShieldedDataFlavor> AtLeastOne<AuthorizedAction<FL>> {
     /// Iterate over the [`Action`]s of each [`AuthorizedAction`].
-    pub fn actions(&self) -> impl Iterator<Item = &Action<V>> {
+    pub fn actions(&self) -> impl Iterator<Item = &Action<FL>> {
         self.iter()
             .map(|authorized_action| &authorized_action.action)
     }
@@ -155,21 +154,23 @@ impl<V: OrchardFlavorExt> AtLeastOne<AuthorizedAction<V>> {
 ///
 /// Every authorized Orchard `Action` must have a corresponding `SpendAuth` signature.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct AuthorizedAction<V: OrchardFlavorExt> {
+#[serde(bound = "FL::EncryptedNote: serde::Serialize")]
+pub struct AuthorizedAction<FL: ShieldedDataFlavor> {
     /// The action description of this Action.
-    pub action: Action<V>,
+    pub action: Action<FL>,
     /// The spend signature.
     pub spend_auth_sig: Signature<SpendAuth>,
 }
 
-impl<V: OrchardFlavorExt> AuthorizedAction<V> {
+impl<FL: ShieldedDataFlavor> AuthorizedAction<FL> {
+    // FIXME: change the comments below to fit both OrchardVanilla and OrchardZSA (refs to specs, 820 bytes etc.)
     /// The size of a single Action
     ///
     /// Actions are 5 * 32 + ENCRYPTED_NOTE_SIZE + 80 bytes so the total size of each Action is 820 bytes.
     /// [7.5 Action Description Encoding and Consensus][ps]
     ///
-    /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsensus>
-    pub const ACTION_SIZE: u64 = 5 * 32 + (V::ENCRYPTED_NOTE_SIZE as u64) + 80;
+    /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsen`sus>
+    pub const ACTION_SIZE: u64 = 5 * 32 + (FL::ENC_CIPHERTEXT_SIZE as u64) + 80;
 
     /// The size of a single `Signature<SpendAuth>`.
     ///
@@ -190,29 +191,21 @@ impl<V: OrchardFlavorExt> AuthorizedAction<V> {
     // a valid max allocation can never exceed this size
     pub const ACTION_MAX_ALLOCATION: u64 = (MAX_BLOCK_BYTES - 1) / Self::AUTHORIZED_ACTION_SIZE;
 
-    // To be but we ensure ACTION_MAX_ALLOCATION is less than 2^16 on compile time
-    // (this is a workaround, as static_assertions::const_assert! doesn't work for generics,
-    // see TrustedPreallocate for Action<V>)
+    // Ensure ACTION_MAX_ALLOCATION is less than 2^16 on compile time
     const _ACTION_MAX_ALLOCATION_OK: u64 = (1 << 16) - Self::ACTION_MAX_ALLOCATION;
-    /* FIXME: remove this
-    const ACTION_MAX_ALLOCATION_OK: () = assert!(
-        Self::ACTION_MAX_ALLOCATION < 1, //(1 << 16),
-        "must be less than 2^16"
-    );
-    */
 
     /// Split out the action and the signature for V5 transaction
     /// serialization.
-    pub fn into_parts(self) -> (Action<V>, Signature<SpendAuth>) {
+    pub fn into_parts(self) -> (Action<FL>, Signature<SpendAuth>) {
         (self.action, self.spend_auth_sig)
     }
 
     // Combine the action and the spend auth sig from V5 transaction
     /// deserialization.
     pub fn from_parts(
-        action: Action<V>,
+        action: Action<FL>,
         spend_auth_sig: Signature<SpendAuth>,
-    ) -> AuthorizedAction<V> {
+    ) -> AuthorizedAction<FL> {
         AuthorizedAction {
             action,
             spend_auth_sig,
@@ -220,24 +213,20 @@ impl<V: OrchardFlavorExt> AuthorizedAction<V> {
     }
 }
 
-// TODO: FIXME: Consider moving it to transaction.rs as it's not used here. Or move its usage here from transaction.rs.
-/// A struct that contains values of several fields of an `Action` struct.
-/// Those fields are used in other parts of the code that call the `orchard_actions()` method of the `Transaction`.
-/// The goal of using `ActionCommon` is that it's not a generic, unlike `Action`, so it can be returned from Transaction methods
-/// (the fields of `ActionCommon` do not depend on the generic parameter `Version` of `Action`).
+/// Non-generic fields of an `Action` used in `Transaction` methods.
 pub struct ActionCommon {
-    /// A reference to the value commitment to the net value of the input note minus the output note.
-    pub cv: super::commitment::ValueCommitment,
-    /// A reference to the nullifier of the input note being spent.
+    /// A value commitment to net value of the input note minus the output note
+    pub cv: ValueCommitment,
+    /// The nullifier of the input note being spent.
     pub nullifier: super::note::Nullifier,
-    /// A reference to the randomized validating key for `spendAuthSig`.
+    /// The randomized validating key for spendAuthSig,
     pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
-    /// A reference to the x-coordinate of the note commitment for the output note.
+    /// The x-coordinate of the note commitment for the output note.
     pub cm_x: pallas::Base,
 }
 
-impl<V: OrchardFlavorExt> From<&Action<V>> for ActionCommon {
-    fn from(action: &Action<V>) -> Self {
+impl<FL: ShieldedDataFlavor> From<&Action<FL>> for ActionCommon {
+    fn from(action: &Action<FL>) -> Self {
         Self {
             cv: action.cv,
             nullifier: action.nullifier,
@@ -247,20 +236,12 @@ impl<V: OrchardFlavorExt> From<&Action<V>> for ActionCommon {
     }
 }
 
-/*
-struct AssertBlockSizeLimit<const N: u64>;
-
-impl<const N: u64> AssertBlockSizeLimit<N> {
-    const OK: () = assert!(N < (1 << 16), "must be less than 2^16");
-}
-*/
-
 /// The maximum number of orchard actions in a valid Zcash on-chain transaction V5.
 ///
 /// If a transaction contains more actions than can fit in maximally large block, it might be
 /// valid on the network and in the mempool, but it can never be mined into a block. So
 /// rejecting these large edge-case transactions can never break consensus.
-impl<V: OrchardFlavorExt> TrustedPreallocate for Action<V> {
+impl<FL: ShieldedDataFlavor> TrustedPreallocate for Action<FL> {
     fn max_allocation() -> u64 {
         // # Consensus
         //
@@ -276,23 +257,14 @@ impl<V: OrchardFlavorExt> TrustedPreallocate for Action<V> {
         // https://users.rust-lang.org/t/how-do-i-static-assert-a-property-of-a-generic-u32-parameter/76307)?
         // The following expression doesn't work for generics, so a workaround with _ACTION_MAX_ALLOCATION_OK in
         // AuthorizedAction impl is used instead:
-        // static_assertions::const_assert!(AuthorizedAction::<V>::ACTION_MAX_ALLOCATION < (1 << 16));
-        AuthorizedAction::<V>::ACTION_MAX_ALLOCATION
+        // static_assertions::const_assert!(AuthorizedAction::<FL>::ACTION_MAX_ALLOCATION < (1 << 16));
+        AuthorizedAction::<FL>::ACTION_MAX_ALLOCATION
     }
 }
 
 impl TrustedPreallocate for Signature<SpendAuth> {
     fn max_allocation() -> u64 {
-        // Each signature must have a corresponding action.
-        #[cfg(not(feature = "tx-v6"))]
-        let result = Action::<OrchardVanilla>::max_allocation();
-
-        // TODO: FIXME: Check this: V6 is used as it provides the max size of the action.
-        // So it's used even for V5 - is this correct?
-        #[cfg(feature = "tx-v6")]
-        let result = Action::<OrchardZSA>::max_allocation();
-
-        result
+        Action::<OrchardVanilla>::max_allocation()
     }
 }
 

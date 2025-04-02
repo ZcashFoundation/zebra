@@ -235,9 +235,8 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     },
-    // FIXME: implement V6 properly (now it's just a coipy of V5)
-    /// A `version = 6` transaction , which supports Orchard ZSA, Orchard Vanille, Sapling and
-    /// transparent, but not Sprout.
+    // FIXME: implement V6 properly (now it's just a copy of V5)
+    /// A `version = 6` transaction , OrchardZSA, Orchard, Sapling and transparent, but not Sprout.
     #[cfg(feature = "tx-v6")]
     V6 {
         /// The Network Upgrade for this transaction.
@@ -255,11 +254,9 @@ pub enum Transaction {
         outputs: Vec<transparent::Output>,
         /// The sapling shielded data for this transaction, if any.
         sapling_shielded_data: Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        /// The ZSA orchard shielded data for this transaction, if any.
-        #[cfg(feature = "tx-v6")]
+        /// The OrchardZSA shielded data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardZSA>>,
-        /// The ZSA issuance data for this transaction, if any.
-        #[cfg(feature = "tx-v6")]
+        /// The OrchardZSA issuance data for this transaction, if any.
         orchard_zsa_issue_data: Option<orchard_zsa::IssueData>,
     },
 }
@@ -1138,11 +1135,11 @@ impl Transaction {
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
     /// regardless of version.
     pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {
-        // FIXME: remove this line with_shielded_data!(self, |data: impl orchard::ShieldedDataCommon| data.flags)
         orchard_shielded_data_field!(self, flags)
     }
 
-    /// FIXME: add doc
+    /// Access the [`orchard::tree::Root`] in this transaction, if there is any,
+    /// regardless of version.
     pub fn orchard_shared_anchor(&self) -> Option<orchard::tree::Root> {
         orchard_shielded_data_field!(self, shared_anchor)
     }
