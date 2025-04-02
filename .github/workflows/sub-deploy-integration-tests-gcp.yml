@@ -85,6 +85,11 @@ on:
         description: 'Application name, used to work out when a job is an update job'
 
 env:
+  RUST_LOG: ${{ vars.RUST_LOG }}
+  RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
+  RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
+  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
   # How many previous log lines we show at the start of each new log job.
   # Increase this number if some log lines are skipped between jobs
   #
@@ -95,7 +100,6 @@ env:
   # How many blocks to wait before creating an updated cached state image.
   # 1 day is approximately 1152 blocks.
   CACHED_STATE_UPDATE_LIMIT: 576
-
 jobs:
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
@@ -279,6 +283,11 @@ jobs:
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
           ${MOUNT_FLAGS} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           '
