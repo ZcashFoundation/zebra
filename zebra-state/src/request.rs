@@ -163,7 +163,9 @@ impl HashOrHeight {
                             .unwrap_or(Err("height was not negative"))
                     })
             })
-            .map_err(|e| format!("could not convert the input string to a hash or height: {e}"))
+            .map_err(|_| {
+                "parse error: could not convert the input string to a hash or height".to_string()
+            })
     }
 }
 
