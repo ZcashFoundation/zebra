@@ -150,6 +150,14 @@ impl TrustedChainSync {
                     }
                 };
 
+                // # Correctness
+                //
+                // Ensure that the secondary rocksdb instance has caught up to the primary instance
+                // before attempting to commit the new block to the non-finalized state. It is sufficient
+                // to call this once here, as a new chain tip block has already been retrieved and so
+                // we know that the primary rocksdb instance has already been updated.
+                self.try_catch_up_with_primary().await;
+
                 let block_hash = block.hash;
                 let commit_result = if self.non_finalized_state.chain_count() == 0 {
                     self.non_finalized_state

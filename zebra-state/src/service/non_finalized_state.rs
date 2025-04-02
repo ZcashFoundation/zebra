@@ -8,14 +8,17 @@ use std::{
     sync::Arc,
 };
 
+use indexmap::IndexMap;
 use zebra_chain::{
-    block::{self, Block, Hash},
+    block::{self, Block, Hash, Height},
     parameters::Network,
-    sprout, transparent,
+    sprout::{self},
+    transparent,
 };
 
 use crate::{
-    constants::MAX_NON_FINALIZED_CHAIN_FORKS,
+    constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
+    error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
     SemanticallyVerifiedBlock, ValidateContextError,
@@ -47,7 +50,7 @@ pub struct NonFinalizedState {
 
     /// Blocks that have been invalidated in, and removed from, the non finalized
     /// state.
-    invalidated_blocks: HashMap<Hash, Arc<Vec<ContextuallyVerifiedBlock>>>,
+    invalidated_blocks: IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>>,
 
     // Configuration
     //
@@ -233,6 +236,10 @@ impl NonFinalizedState {
             self.insert(side_chain);
         }
 
+        // Remove all invalidated_blocks at or below the finalized height
+        self.invalidated_blocks
+            .retain(|height, _blocks| *height >= best_chain_root.height);
+
         self.update_metrics_for_chains();
 
         // Add the treestate to the finalized block.
@@ -294,11 +301,98 @@ impl NonFinalizedState {
             invalidated_blocks
         };
 
-        self.invalidated_blocks
-            .insert(block_hash, Arc::new(invalidated_blocks));
+        self.invalidated_blocks.insert(
+            invalidated_blocks.first().unwrap().clone().height,
+            Arc::new(invalidated_blocks),
+        );
+
+        while self.invalidated_blocks.len() > MAX_INVALIDATED_BLOCKS {
+            self.invalidated_blocks.shift_remove_index(0);
+        }
 
         self.update_metrics_for_chains();
         self.update_metrics_bars();
+    }
+
+    /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
+    /// based on a block_hash. Reconsidered blocks are inserted into the previous chain and re-inserted
+    /// into the chain_set.
+    pub fn reconsider_block(
+        &mut self,
+        block_hash: block::Hash,
+        finalized_state: &ZebraDb,
+    ) -> Result<(), ReconsiderError> {
+        // Get the invalidated blocks that were invalidated by the given block_hash
+        let height = self
+            .invalidated_blocks
+            .iter()
+            .find_map(|(height, blocks)| {
+                if blocks.first()?.hash == block_hash {
+                    Some(height)
+                } else {
+                    None
+                }
+            })
+            .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
+
+        let mut invalidated_blocks = self
+            .invalidated_blocks
+            .clone()
+            .shift_remove(height)
+            .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
+        let mut_blocks = Arc::make_mut(&mut invalidated_blocks);
+
+        // Find and fork the parent chain of the invalidated_root. Update the parent chain
+        // with the invalidated_descendants
+        let invalidated_root = mut_blocks
+            .first()
+            .ok_or(ReconsiderError::InvalidatedBlocksEmpty)?;
+
+        let root_parent_hash = invalidated_root.block.header.previous_block_hash;
+
+        // If the parent is the tip of the finalized_state we create a new chain and insert it
+        // into the non finalized state
+        let chain_result = if root_parent_hash == finalized_state.finalized_tip_hash() {
+            let chain = Chain::new(
+                &self.network,
+                finalized_state
+                    .finalized_tip_height()
+                    .ok_or(ReconsiderError::ParentChainNotFound(block_hash))?,
+                finalized_state.sprout_tree_for_tip(),
+                finalized_state.sapling_tree_for_tip(),
+                finalized_state.orchard_tree_for_tip(),
+                finalized_state.history_tree(),
+                finalized_state.finalized_value_pool(),
+            );
+            Arc::new(chain)
+        } else {
+            // The parent is not the finalized_tip and still exist in the NonFinalizedState
+            // or else we return an error due to the parent not existing in the NonFinalizedState
+            self.parent_chain(root_parent_hash)
+                .map_err(|_| ReconsiderError::ParentChainNotFound(block_hash))?
+        };
+
+        let mut modified_chain = Arc::unwrap_or_clone(chain_result);
+        for block in Arc::unwrap_or_clone(invalidated_blocks) {
+            modified_chain = modified_chain.push(block)?;
+        }
+
+        let (height, hash) = modified_chain.non_finalized_tip();
+
+        // Only track invalidated_blocks that are not yet finalized. Once blocks are finalized (below the best_chain_root_height)
+        // we can discard the block.
+        if let Some(best_chain_root_height) = finalized_state.finalized_tip_height() {
+            self.invalidated_blocks
+                .retain(|height, _blocks| *height >= best_chain_root_height);
+        }
+
+        self.insert_with(Arc::new(modified_chain), |chain_set| {
+            chain_set.retain(|chain| chain.non_finalized_tip_hash() != root_parent_hash)
+        });
+
+        self.update_metrics_for_committed_block(height, hash);
+
+        Ok(())
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
@@ -352,6 +446,12 @@ impl NonFinalizedState {
         prepared: SemanticallyVerifiedBlock,
         finalized_state: &ZebraDb,
     ) -> Result<Arc<Chain>, ValidateContextError> {
+        if self.invalidated_blocks.contains_key(&prepared.height) {
+            return Err(ValidateContextError::BlockPreviouslyInvalidated {
+                block_hash: prepared.hash,
+            });
+        }
+
         // Reads from disk
         //
         // TODO: if these disk reads show up in profiles, run them in parallel, using std::thread::spawn()
@@ -624,7 +724,7 @@ impl NonFinalizedState {
     }
 
     /// Return the invalidated blocks.
-    pub fn invalidated_blocks(&self) -> HashMap<block::Hash, Arc<Vec<ContextuallyVerifiedBlock>>> {
+    pub fn invalidated_blocks(&self) -> IndexMap<Height, Arc<Vec<ContextuallyVerifiedBlock>>> {
         self.invalidated_blocks.clone()
     }
 

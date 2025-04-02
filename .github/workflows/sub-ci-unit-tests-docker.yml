@@ -53,10 +53,15 @@ jobs:
       - name: Run all tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run -t \
+          docker run --tty \
           -e RUN_ALL_TESTS=1 \
           -e FEATURES="journald prometheus filter-reload" \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Run state tests with fake activation heights.
@@ -85,9 +90,14 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run -t \
+          docker run --tty \
           -e TEST_FAKE_ACTIVATION_HEIGHTS=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
@@ -108,7 +118,15 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e TEST_ZEBRA_EMPTY_SYNC=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e TEST_ZEBRA_EMPTY_SYNC=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   test-lightwalletd-integration:
@@ -128,7 +146,13 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e ZEBRA_TEST_LIGHTWALLETD=1 -e TEST_LWD_INTEGRATION=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e ZEBRA_TEST_LIGHTWALLETD=1 \
+          -e TEST_LWD_INTEGRATION=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Test that Zebra works using the default config with the latest Zebra version.
   test-configuration-file:
@@ -147,8 +171,8 @@ jobs:
     with:
       test_id: "testnet-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
       test_variables: "-e NETWORK=Testnet"
+      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
 
   # Test that Zebra works using $ZEBRA_CONF_PATH config
   test-zebra-conf-path:
@@ -157,7 +181,7 @@ jobs:
     with:
       test_id: "custom-conf"
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      test_variables: '-e ZEBRA_CONF_PATH="zebrad/tests/common/configs/custom-conf.toml"'
+      test_variables: '-e ZEBRA_CONF_PATH="/home/zebra/zebrad/tests/common/configs/custom-conf.toml"'
       grep_patterns: '-e "extra_coinbase_data:\sSome\(\"do you even shield\?\"\)"'
 
   failure-issue:
@@ -198,4 +222,11 @@ jobs:
       - name: Run check_no_git_refs_in_cargo_lock
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e RUN_CHECK_NO_GIT_REFS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e RUN_CHECK_NO_GIT_REFS=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
