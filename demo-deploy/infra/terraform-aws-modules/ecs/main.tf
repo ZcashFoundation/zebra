@@ -235,15 +235,6 @@ resource "aws_acm_certificate_validation" "acm_validation" {
   validation_record_fqdns = [for record in aws_route53_record.validation_records : record.fqdn]
 }
 
-
-# If we assume there is one already
-# data "aws_acm_certificate" "cert" {
-#   count       = var.enable_domain && var.domain != "false.com" ? 1 : 0
-#   domain      = var.enable_domain ? var.domain : null
-#   statuses    = ["ISSUED"]
-#   most_recent = true
-# }
-
 # Conditional Load Balancer Listener
 resource "aws_lb_listener" "tls" {
   count            = var.enable_domain && var.domain != "false.com" ? 1 : 0
@@ -319,6 +310,7 @@ resource "aws_efs_file_system" "persistent_efs" {
 }
 
 ### Volume backup
+
 resource "aws_efs_backup_policy" "policy" {
   count = var.enable_backup ? 1 : 0
   file_system_id = aws_efs_file_system.persistent_efs[0].id

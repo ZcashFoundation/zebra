@@ -58,14 +58,8 @@ resource "aws_iam_policy" "ecr_public_push_policy" {
   })
 }
 
-# Attache the policy to the github CICD user
+# Attach the policy to the github CICD user
 resource "aws_iam_user_policy_attachment" "attach_ecr_public_push_user" {
   user       = "dev-zebra-github-actions-user"
-  policy_arn = aws_iam_policy.ecr_public_push_policy.arn
-}
-
-# Attache the policy to the admin user group
-resource "aws_iam_group_policy_attachment" "attach_ecr_public_push_group" {
-  group      = "admin"
   policy_arn = aws_iam_policy.ecr_public_push_policy.arn
 }

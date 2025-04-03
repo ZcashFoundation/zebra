@@ -3,8 +3,8 @@ locals {
   environment_vars = read_terragrunt_config(find_in_parent_folders("env.hcl"))
   account_vars = read_terragrunt_config(find_in_parent_folders("account.hcl"))
 
-# Extract out common variables for reuse
-env = local.environment_vars.locals.environment
+  # Extract out common variables for reuse
+  env = local.environment_vars.locals.environment
 }
 
 # Terragrunt will copy the Terraform configurations specified by the source parameter, along with any files in the
@@ -15,7 +15,7 @@ terraform {
 
 # Include all settings from the root terragrunt.hcl file
 include {
-path = find_in_parent_folders()
+  path = find_in_parent_folders()
 }
 
 inputs = {

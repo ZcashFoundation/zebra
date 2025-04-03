@@ -1,6 +1,8 @@
 # Infrastructure Deployment Makefile
 
 This repository includes a `Makefile` to streamline the deployment, management, and teardown of AWS infrastructure using Terragrunt. The script ensures all prerequisites are met and simplifies executing commands for planning, applying, and destroying infrastructure across all modules in a specific environment.
+After creating the infrastructure, which includes the ECR repository, you can use the push-deploy Github workflow to deploy the Zebra Server to ECR and the ECS cluster.
+You can see the workflow in this repository's `.github/workflows/push-deploy.yaml` file.
 
 ## Prerequisites
 

@@ -55,11 +55,3 @@ jobs:
           # Output the image URIs
           echo "image_latest=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" >> $GITHUB_OUTPUT
           echo "image_commit=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT" >> $GITHUB_OUTPUT
-
-      - name: Update ECS Service to use the latest image
-        run: |
-          # Force a new deployment of the ECS service
-          aws ecs update-service \
-            --cluster ${{ env.ECS_CLUSTER }} \
-            --service ${{ env.ECS_SERVICE }} \
-            --force-new-deployment

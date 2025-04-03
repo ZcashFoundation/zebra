@@ -2,10 +2,10 @@ locals {
   # Automatically load environment-level variables
   environment_vars = read_terragrunt_config(find_in_parent_folders("env.hcl"))
 
-region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
-account_vars = read_terragrunt_config(find_in_parent_folders("account.hcl"))
-# Extract out common variables for reuse
-env = local.environment_vars.locals.environment
+  region_vars = read_terragrunt_config(find_in_parent_folders("region.hcl"))
+  account_vars = read_terragrunt_config(find_in_parent_folders("account.hcl"))
+  # Extract out common variables for reuse
+  env = local.environment_vars.locals.environment
 }
 
 # Terragrunt will copy the Terraform configurations specified by the source parameter, along with any files in the

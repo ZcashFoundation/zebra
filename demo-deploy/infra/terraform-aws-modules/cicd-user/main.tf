@@ -44,7 +44,7 @@ resource "aws_iam_policy" "ecr_ecs_policy" {
         Action = [
           "lambda:*"
         ]
-        Resource = "arn:aws:lambda:eu-central-1:496038263219:function:watch-zebra-logs"
+        Resource = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:watch-zebra-logs"
       }
     ]
   })

@@ -29,7 +29,7 @@ inputs = {
           "ecr:GetDownloadUrlForLayer",
           "ecr:BatchGetImage"
         ]
-        Resource = "arn:aws:ecr:eu-central-1:496038263219:repository/*"
+        Resource = "arn:aws:ecr:${local.region_vars.locals.aws_region}:${local.account_vars.locals.aws_account_id}:repository/*"
       }
     ]
   })

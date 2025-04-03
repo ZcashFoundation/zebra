@@ -15,7 +15,7 @@ resource "aws_ecr_lifecycle_policy" "policy" {
         selection    = {
           tagStatus = "any"
           countType = "imageCountMoreThan"
-          countNumber = 50  # Keep the last 50 images
+          countNumber = 15  # Keep the last 15 images
         }
         action = {
           type = "expire"

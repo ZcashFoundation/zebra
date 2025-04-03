@@ -32,7 +32,7 @@ inputs = {
           "logs:CreateLogStream",
           "logs:CreateLogGroup"
         ]
-        Resource = "arn:aws:logs:eu-central-1:496038263219:log-group:/dev/ecs/zebra-task:*"
+        Resource = "arn:aws:logs:${local.region_vars.locals.aws_region}:${local.account_vars.locals.aws_account_id}:log-group:/dev/ecs/zebra-task:*"
       }
     ]
   })
