@@ -198,7 +198,7 @@ impl<FL: ShieldedDataFlavor> ShieldedData<FL> {
     pub fn shared_anchors(&self) -> impl Iterator<Item = tree::Root> + '_ {
         self.action_groups
             .iter()
-            .map(|action_group| action_group.shared_anchor.clone())
+            .map(|action_group| action_group.shared_anchor)
     }
 
     /// Iterate over the [`AuthorizedAction`]s in this
