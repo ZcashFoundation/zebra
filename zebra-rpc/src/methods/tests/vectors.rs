@@ -17,7 +17,7 @@ use zebra_chain::{
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 
-use zebra_state::{GetBlockTemplateChainInfo, LatestChainTip, ReadStateService};
+use zebra_state::{GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadStateService};
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -190,6 +190,21 @@ async fn rpc_getblock() {
 
         let get_block = rpc
             .get_block(block.hash().to_string(), Some(0u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
+    }
+
+    // Test negative heights: -1 should return block 10, -2 block 9, etc.
+    for neg_height in (-10..=-1).rev() {
+        // Convert negative height to corresponding index
+        let index = (neg_height + (blocks.len() as i32)) as usize;
+
+        let expected_result = GetBlock::Raw(blocks[index].clone().into());
+
+        let get_block = rpc
+            .get_block(neg_height.to_string(), Some(0u8))
             .await
             .expect("We should have a GetBlock struct");
 
@@ -682,6 +697,21 @@ async fn rpc_getblockheader() {
                 .expect("we should have a GetBlockHeader struct");
             assert_eq!(get_block_header, expected_result);
         }
+    }
+
+    // Test negative heights: -1 should return a header for block 10, -2 block header 9, etc.
+    for neg_height in (-10..=-1).rev() {
+        // Convert negative height to corresponding index
+        let index = (neg_height + (blocks.len() as i32)) as usize;
+
+        let expected_result = GetBlockHeader::Raw(HexData(blocks[index].header.clone().as_bytes()));
+
+        let get_block = rpc
+            .get_block_header(neg_height.to_string(), Some(false))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
     }
 
     mempool.expect_no_requests().await;
