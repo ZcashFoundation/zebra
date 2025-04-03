@@ -1,6 +1,6 @@
 //! The Bitcoin-inherited Merkle tree of transactions.
 
-use std::{fmt, io::Write, iter};
+use std::{fmt, io::Write};
 
 use hex::{FromHex, ToHex};
 
@@ -404,7 +404,7 @@ impl std::iter::FromIterator<transaction::AuthDigest> for AuthDataRoot {
         // https://zips.z.cash/zip-0244#block-header-changes
         // Pad with enough leaves to make the tree full (a power of 2).
         let pad_count = hashes.len().next_power_of_two() - hashes.len();
-        hashes.extend(iter::repeat([0u8; 32]).take(pad_count));
+        hashes.extend(std::iter::repeat_n([0u8; 32], pad_count));
         assert!(hashes.len().is_power_of_two());
 
         while hashes.len() > 1 {
