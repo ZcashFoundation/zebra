@@ -22,19 +22,18 @@ use crate::{
 
 use super::{OrchardVanilla, ShieldedDataFlavor};
 
-/// A bundle of [`Action`] descriptions and signature data.
+// FIXME: wrap all ActionGroup usages withj tx-v6 feature flag?
+/// FIXME: add doc
+#[cfg(feature = "tx-v6")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(bound(
     serialize = "FL::EncryptedNote: serde::Serialize, FL::BurnType: serde::Serialize",
     deserialize = "FL::BurnType: serde::Deserialize<'de>"
 ))]
-pub struct ShieldedData<FL: ShieldedDataFlavor> {
+pub struct ActionGroup<FL: ShieldedDataFlavor> {
     /// The orchard flags for this transaction.
     /// Denoted as `flagsOrchard` in the spec.
     pub flags: Flags,
-    /// The net value of Orchard spends minus outputs.
-    /// Denoted as `valueBalanceOrchard` in the spec.
-    pub value_balance: Amount,
     /// The shared anchor for all `Spend`s in this transaction.
     /// Denoted as `anchorOrchard` in the spec.
     pub shared_anchor: tree::Root,
@@ -44,27 +43,65 @@ pub struct ShieldedData<FL: ShieldedDataFlavor> {
     /// The Orchard Actions, in the order they appear in the transaction.
     /// Denoted as `vActionsOrchard` and `vSpendAuthSigsOrchard` in the spec.
     pub actions: AtLeastOne<AuthorizedAction<FL>>,
-    /// A signature on the transaction `sighash`.
-    /// Denoted as `bindingSigOrchard` in the spec.
-    pub binding_sig: Signature<Binding>,
 
     #[cfg(feature = "tx-v6")]
     /// Assets intended for burning
     /// Denoted as `vAssetBurn` in the spec (ZIP 230).
-    pub burn: FL::BurnType,
+    pub(crate) burn: FL::BurnType,
+}
+
+impl<FL: ShieldedDataFlavor> ActionGroup<FL> {
+    /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this
+    /// action group, in the order they appear in it.
+    pub fn actions(&self) -> impl Iterator<Item = &Action<FL>> {
+        self.actions.actions()
+    }
+}
+
+/// A bundle of [`Action`] descriptions and signature data.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(bound(
+    serialize = "FL::EncryptedNote: serde::Serialize, FL::BurnType: serde::Serialize",
+    deserialize = "FL::BurnType: serde::Deserialize<'de>"
+))]
+pub struct ShieldedData<FL: ShieldedDataFlavor> {
+    /// FIXME: add doc
+    pub action_groups: AtLeastOne<ActionGroup<FL>>,
+    /// Denoted as `valueBalanceOrchard` in the spec.
+    pub value_balance: Amount,
+    /// A signature on the transaction `sighash`.
+    /// Denoted as `bindingSigOrchard` in the spec.
+    pub binding_sig: Signature<Binding>,
+}
+
+impl<FL: ShieldedDataFlavor> fmt::Display for ActionGroup<FL> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut fmter = f.debug_struct("orchard::ActionGroup");
+
+        // FIXME: reorder fields here according the struct/spec?
+
+        fmter.field("actions", &self.actions.len());
+        fmter.field("flags", &self.flags);
+
+        fmter.field("proof_len", &self.proof.zcash_serialized_size());
+
+        fmter.field("shared_anchor", &self.shared_anchor);
+
+        #[cfg(feature = "tx-v6")]
+        fmter.field("burn", &self.burn.as_ref().len());
+
+        fmter.finish()
+    }
 }
 
 impl<FL: ShieldedDataFlavor> fmt::Display for ShieldedData<FL> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut fmter = f.debug_struct("orchard::ShieldedData");
 
-        fmter.field("actions", &self.actions.len());
+        fmter.field("action_groups", &self.action_groups);
         fmter.field("value_balance", &self.value_balance);
-        fmter.field("flags", &self.flags);
 
-        fmter.field("proof_len", &self.proof.zcash_serialized_size());
-
-        fmter.field("shared_anchor", &self.shared_anchor);
+        // FIXME: format binding_sig as well?
 
         fmter.finish()
     }
@@ -74,13 +111,14 @@ impl<FL: ShieldedDataFlavor> ShieldedData<FL> {
     /// Iterate over the [`Action`]s for the [`AuthorizedAction`]s in this
     /// transaction, in the order they appear in it.
     pub fn actions(&self) -> impl Iterator<Item = &Action<FL>> {
-        self.actions.actions()
+        self.authorized_actions()
+            .map(|authorized_action| &authorized_action.action)
     }
 
     /// Return an iterator for the [`ActionCommon`] copy of the Actions in this
     /// transaction, in the order they appear in it.
     pub fn action_commons(&self) -> impl Iterator<Item = ActionCommon> + '_ {
-        self.actions.actions().map(|action| action.into())
+        self.actions().map(|action| action.into())
     }
 
     /// Collect the [`Nullifier`]s for this transaction.
@@ -123,7 +161,14 @@ impl<FL: ShieldedDataFlavor> ShieldedData<FL> {
 
         // FIXME: use asset to create ValueCommitment here for burns and above for value_balance?
         #[cfg(feature = "tx-v6")]
-        let key_bytes: [u8; 32] = (cv - cv_balance - self.burn.clone().into()).into();
+        let key_bytes: [u8; 32] = (cv
+            - cv_balance
+            - self
+                .action_groups
+                .iter()
+                .map(|action_group| action_group.burn.clone().into())
+                .sum::<ValueCommitment>())
+        .into();
 
         key_bytes.into()
     }
@@ -139,6 +184,29 @@ impl<FL: ShieldedDataFlavor> ShieldedData<FL> {
     /// outputs, in the order they appear in the transaction.
     pub fn note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
         self.actions().map(|action| &action.cm_x)
+    }
+
+    /// Makes a union of the flags for this transaction.
+    pub fn flags_union(&self) -> Flags {
+        self.action_groups
+            .iter()
+            .map(|action_group| &action_group.flags)
+            .fold(Flags::empty(), |result, flags| result.union(*flags))
+    }
+
+    /// Collect the shared anchors for this transaction.
+    pub fn shared_anchors(&self) -> impl Iterator<Item = tree::Root> + '_ {
+        self.action_groups
+            .iter()
+            .map(|action_group| action_group.shared_anchor.clone())
+    }
+
+    /// Iterate over the [`AuthorizedAction`]s in this
+    /// transaction, in the order they appear in it.
+    pub fn authorized_actions(&self) -> impl Iterator<Item = &AuthorizedAction<FL>> {
+        self.action_groups
+            .iter()
+            .flat_map(|action_group| action_group.actions.iter())
     }
 }
 

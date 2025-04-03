@@ -1136,6 +1136,7 @@ where
         let mut async_checks = AsyncChecks::new();
 
         if let Some(orchard_shielded_data) = orchard_shielded_data {
+            // FIXME: update the comment to describe action groups
             // # Consensus
             //
             // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
@@ -1147,13 +1148,15 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            async_checks.push(
-                V::get_verifier()
-                    .clone()
-                    .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
-            );
+            for action_group in orchard_shielded_data.action_groups.iter() {
+                async_checks.push(
+                    V::get_verifier()
+                        .clone()
+                        .oneshot(primitives::halo2::Item::from(action_group)),
+                )
+            }
 
-            for authorized_action in orchard_shielded_data.actions.iter().cloned() {
+            for authorized_action in orchard_shielded_data.authorized_actions().cloned() {
                 let (action, spend_auth_sig) = authorized_action.into_parts();
 
                 // # Consensus

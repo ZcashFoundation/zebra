@@ -80,8 +80,8 @@ macro_rules! orchard_shielded_data_iter {
 
 // FIXME: doc this
 // Move down
-macro_rules! orchard_shielded_data_field {
-    ($self:expr, $field:ident) => {
+macro_rules! orchard_shielded_data_method {
+    ($self:expr, $method:ident) => {
         match $self {
             // No Orchard shielded data
             Transaction::V1 { .. }
@@ -92,13 +92,13 @@ macro_rules! orchard_shielded_data_field {
             Transaction::V5 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+            } => orchard_shielded_data.as_ref().map(|data| data.$method()),
 
             #[cfg(feature = "tx-v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+            } => orchard_shielded_data.as_ref().map(|data| data.$method()),
         }
     };
 }
@@ -354,11 +354,12 @@ impl Transaction {
     ///
     /// See [`Self::has_transparent_or_shielded_inputs`] for details.
     pub fn has_shielded_inputs(&self) -> bool {
+        // FIXME: is it correct to use orchard_flags_union here?
         self.joinsplit_count() > 0
             || self.sapling_spends_per_anchor().count() > 0
             || (self.orchard_actions().count() > 0
                 && self
-                    .orchard_flags()
+                    .orchard_flags_union()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_SPENDS))
     }
@@ -372,11 +373,12 @@ impl Transaction {
     ///
     /// See [`Self::has_transparent_or_shielded_outputs`] for details.
     pub fn has_shielded_outputs(&self) -> bool {
+        // FIXME: is it correct to use orchard_flags_union here?
         self.joinsplit_count() > 0
             || self.sapling_outputs().count() > 0
             || (self.orchard_actions().count() > 0
                 && self
-                    .orchard_flags()
+                    .orchard_flags_union()
                     .unwrap_or_else(orchard::Flags::empty)
                     .contains(orchard::Flags::ENABLE_OUTPUTS))
     }
@@ -386,7 +388,7 @@ impl Transaction {
         if self.version() < 5 || self.orchard_actions().count() == 0 {
             return true;
         }
-        self.orchard_flags()
+        self.orchard_flags_union()
             .unwrap_or_else(orchard::Flags::empty)
             .intersects(orchard::Flags::ENABLE_SPENDS | orchard::Flags::ENABLE_OUTPUTS)
     }
@@ -1070,20 +1072,20 @@ impl Transaction {
 
     /// Access the [`orchard::Flags`] in this transaction, if there is any,
     /// regardless of version.
-    pub fn orchard_flags(&self) -> Option<orchard::shielded_data::Flags> {
-        orchard_shielded_data_field!(self, flags)
+    pub fn orchard_flags_union(&self) -> Option<orchard::shielded_data::Flags> {
+        orchard_shielded_data_method!(self, flags_union)
     }
 
     /// Access the [`orchard::tree::Root`] in this transaction, if there is any,
     /// regardless of version.
-    pub fn orchard_shared_anchor(&self) -> Option<orchard::tree::Root> {
-        orchard_shielded_data_field!(self, shared_anchor)
+    pub fn orchard_shared_anchors(&self) -> Box<dyn Iterator<Item = orchard::tree::Root> + '_> {
+        orchard_shielded_data_iter!(self, orchard::ShieldedData::shared_anchors)
     }
 
     /// Return if the transaction has any Orchard shielded data,
     /// regardless of version.
     pub fn has_orchard_shielded_data(&self) -> bool {
-        self.orchard_flags().is_some()
+        orchard_shielded_data_method!(self, value_balance).is_some()
     }
 
     // value balances
@@ -1458,7 +1460,7 @@ impl Transaction {
     /// <https://zebra.zfnd.org/dev/rfcs/0012-value-pools.html#definitions>
     pub fn orchard_value_balance(&self) -> ValueBalance<NegativeAllowed> {
         let orchard_value_balance =
-            orchard_shielded_data_field!(self, value_balance).unwrap_or_else(Amount::zero);
+            orchard_shielded_data_method!(self, value_balance).unwrap_or_else(Amount::zero);
 
         ValueBalance::from_orchard_amount(orchard_value_balance)
     }

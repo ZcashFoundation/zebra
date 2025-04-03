@@ -1134,9 +1134,11 @@ fn transaction_v5_with_orchard_shielded_data(
 
     if let Some(ref mut orchard_shielded_data) = orchard_shielded_data {
         // make sure there are no other nullifiers, by replacing all the authorized_actions
-        orchard_shielded_data.actions = authorized_actions.try_into().expect(
-            "unexpected invalid orchard::ShieldedData: must have at least one AuthorizedAction",
-        );
+        // FIXME: works for V5 or V6 with a single action group only
+        orchard_shielded_data.action_groups.first_mut().actions =
+            authorized_actions.try_into().expect(
+                "unexpected invalid orchard::ShieldedData: must have at least one AuthorizedAction",
+            );
 
         // set value balance to 0 to pass the chain value pool checks
         let zero_amount = 0.try_into().expect("unexpected invalid zero amount");

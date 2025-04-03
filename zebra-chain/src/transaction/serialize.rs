@@ -11,7 +11,7 @@ use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
-    orchard::{OrchardVanilla, OrchardZSA},
+    orchard::{ActionGroup, OrchardVanilla, OrchardZSA},
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
@@ -351,11 +351,18 @@ impl ZcashSerialize for Option<orchard::ShieldedData<OrchardVanilla>> {
 
 impl ZcashSerialize for orchard::ShieldedData<OrchardVanilla> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        assert!(
+            self.action_groups.len() == 1,
+            "only one action group is supported for transaction V5"
+        );
+
+        let action_group = self.action_groups.first();
+
         // Split the AuthorizedAction
         let (actions, sigs): (
             Vec<orchard::Action<OrchardVanilla>>,
             Vec<Signature<SpendAuth>>,
-        ) = self
+        ) = action_group
             .actions
             .iter()
             .cloned()
@@ -366,16 +373,16 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardVanilla> {
         actions.zcash_serialize(&mut writer)?;
 
         // Denoted as `flagsOrchard` in the spec.
-        self.flags.zcash_serialize(&mut writer)?;
+        action_group.flags.zcash_serialize(&mut writer)?;
 
         // Denoted as `valueBalanceOrchard` in the spec.
         self.value_balance.zcash_serialize(&mut writer)?;
 
         // Denoted as `anchorOrchard` in the spec.
-        self.shared_anchor.zcash_serialize(&mut writer)?;
+        action_group.shared_anchor.zcash_serialize(&mut writer)?;
 
         // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
-        self.proof.zcash_serialize(&mut writer)?;
+        action_group.proof.zcash_serialize(&mut writer)?;
 
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
         zcash_serialize_external_count(&sigs, &mut writer)?;
@@ -415,30 +422,39 @@ impl ZcashSerialize for Option<orchard::ShieldedData<OrchardZSA>> {
 #[allow(clippy::unwrap_in_result)]
 impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
+        // FIXME: support multiple action groups
+        assert!(
+            self.action_groups.len() == 1,
+            "only one action group is supported for transaction V6 for now"
+        );
+
+        let action_group = self.action_groups.first();
+
         // Exactly one action group for NU7
         CompactSizeMessage::try_from(1)
             .expect("1 should convert to CompactSizeMessage")
             .zcash_serialize(&mut writer)?;
 
         // Split the AuthorizedAction
-        let (actions, sigs): (Vec<orchard::Action<OrchardZSA>>, Vec<Signature<SpendAuth>>) = self
-            .actions
-            .iter()
-            .cloned()
-            .map(orchard::AuthorizedAction::into_parts)
-            .unzip();
+        let (actions, sigs): (Vec<orchard::Action<OrchardZSA>>, Vec<Signature<SpendAuth>>) =
+            action_group
+                .actions
+                .iter()
+                .cloned()
+                .map(orchard::AuthorizedAction::into_parts)
+                .unzip();
 
         // Denoted as `nActionsOrchard` and `vActionsOrchard` in the spec.
         actions.zcash_serialize(&mut writer)?;
 
         // Denoted as `flagsOrchard` in the spec.
-        self.flags.zcash_serialize(&mut writer)?;
+        action_group.flags.zcash_serialize(&mut writer)?;
 
         // Denoted as `anchorOrchard` in the spec.
-        self.shared_anchor.zcash_serialize(&mut writer)?;
+        action_group.shared_anchor.zcash_serialize(&mut writer)?;
 
         // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
-        self.proof.zcash_serialize(&mut writer)?;
+        action_group.proof.zcash_serialize(&mut writer)?;
 
         // Timelimit must be zero for NU7
         writer.write_u32::<LittleEndian>(0)?;
@@ -450,7 +466,7 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
         self.value_balance.zcash_serialize(&mut writer)?;
 
         // Denoted as `vAssetBurn` in the spec (ZIP 230).
-        self.burn.zcash_serialize(&mut writer)?;
+        action_group.burn.zcash_serialize(&mut writer)?;
 
         // Denoted as `bindingSigOrchard` in the spec.
         self.binding_sig.zcash_serialize(&mut writer)?;
@@ -523,12 +539,14 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
             authorized_actions.try_into()?;
 
         Ok(Some(orchard::ShieldedData::<OrchardVanilla> {
-            flags,
+            action_groups: AtLeastOne::from_one(ActionGroup {
+                flags,
+                shared_anchor,
+                proof,
+                actions,
+                burn: Default::default(),
+            }),
             value_balance,
-            burn: Default::default(),
-            shared_anchor,
-            proof,
-            actions,
             binding_sig,
         }))
     }
@@ -615,12 +633,14 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
             authorized_actions.try_into()?;
 
         Ok(Some(orchard::ShieldedData::<OrchardZSA> {
-            flags,
+            action_groups: AtLeastOne::from_one(ActionGroup {
+                flags,
+                shared_anchor,
+                proof,
+                actions,
+                burn,
+            }),
             value_balance,
-            burn,
-            shared_anchor,
-            proof,
-            actions,
             binding_sig,
         }))
     }
