@@ -279,8 +279,8 @@ impl<'a> PrecomputedTxData<'a> {
 ///   signature hash is being computed.
 /// - `hash_type`: the type of hash (SIGHASH) being used.
 /// - `input_index_script_code`: a tuple with the index of the transparent Input
-///    for which we are producing a sighash and the respective script code being
-///    validated, or None if it's a shielded input.
+///   for which we are producing a sighash and the respective script code being
+///   validated, or None if it's a shielded input.
 pub(crate) fn sighash(
     precomputed_tx_data: &PrecomputedTxData,
     hash_type: HashType,
