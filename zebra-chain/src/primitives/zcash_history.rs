@@ -111,10 +111,9 @@ impl Entry {
 impl<V> Tree<V>
 where
     V: Version,
-    <V as zcash_history::Version>::EntryLink: From<EntryLink> + Copy,
-    V: zcash_history::Version<EntryLink = EntryLink>,
-    <V as zcash_history::Version>::EntryKind: From<EntryKind>,
-    V: zcash_history::Version<EntryKind = EntryKind>,
+    V::EntryLink: From<EntryLink> + Copy,
+    V::EntryKind: From<EntryKind>,
+    EntryLink: From<V::EntryLink>,
 {
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
