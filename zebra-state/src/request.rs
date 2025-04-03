@@ -149,7 +149,8 @@ impl HashOrHeight {
                     .parse()
                     .map_err(|_| "could not parse negative height")
                     .and_then(|d: HeightDiff| {
-                        if d.is_negative() { {
+                        if d.is_negative() {
+                            {
                                 Ok(HashOrHeight::Height(
                                     tip_height
                                         .ok_or("missing tip height")?
@@ -158,7 +159,10 @@ impl HashOrHeight {
                                         .next()
                                         .map_err(|_| "height -1 needs to point to tip")?,
                                 ))
-                            } } else { Err("height was not negative") }
+                            }
+                        } else {
+                            Err("height was not negative")
+                        }
                     })
             })
             .map_err(|_| {
