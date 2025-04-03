@@ -715,6 +715,14 @@ pub enum Request {
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
 
+    //// Same as Block, but also returns serialized block size.
+    ////
+    /// Returns
+    ///
+    /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
+    /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
+    BlockAndSize(HashOrHeight),
+
     /// Looks up a block header by hash or height in the current best chain.
     ///
     /// Returns
@@ -734,7 +742,7 @@ pub enum Request {
     /// This request is purely informational, and there are no guarantees about
     /// whether the UTXO remains unspent or is on the best chain, or any chain.
     /// Its purpose is to allow asynchronous script verification or to wait until
-    /// the UTXO arrives in the state before validating dependant transactions.
+    /// the UTXO arrives in the state before validating dependent transactions.
     ///
     /// # Correctness
     ///
@@ -837,6 +845,7 @@ impl Request {
             Request::Transaction(_) => "transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
+            Request::BlockAndSize(_) => "block_and_size",
             Request::BlockHeader(_) => "block_header",
             Request::FindBlockHashes { .. } => "find_block_hashes",
             Request::FindBlockHeaders { .. } => "find_block_headers",
@@ -896,6 +905,14 @@ pub enum ReadRequest {
     /// Note: the [`HashOrHeight`] can be constructed from a [`block::Hash`] or
     /// [`block::Height`] using `.into()`.
     Block(HashOrHeight),
+
+    //// Same as Block, but also returns serialized block size.
+    ////
+    /// Returns
+    ///
+    /// * [`ReadResponse::BlockAndSize(Some((Arc<Block>, usize)))`](ReadResponse::BlockAndSize) if the block is in the best chain;
+    /// * [`ReadResponse::BlockAndSize(None)`](ReadResponse::BlockAndSize) otherwise.
+    BlockAndSize(HashOrHeight),
 
     /// Looks up a block header by hash or height in the current best chain.
     ///
@@ -1143,6 +1160,7 @@ impl ReadRequest {
             ReadRequest::TipPoolValues => "tip_pool_values",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
+            ReadRequest::BlockAndSize(_) => "block_and_size",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
@@ -1200,6 +1218,7 @@ impl TryFrom<Request> for ReadRequest {
             Request::BestChainBlockHash(hash) => Ok(ReadRequest::BestChainBlockHash(hash)),
 
             Request::Block(hash_or_height) => Ok(ReadRequest::Block(hash_or_height)),
+            Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
             Request::UnspentBestChainUtxo(outpoint) => {

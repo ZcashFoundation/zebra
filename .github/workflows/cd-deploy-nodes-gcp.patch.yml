@@ -55,10 +55,3 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
-
-  test-zebra-conf-path:
-    name: Test CD custom Docker config file / Test custom-conf in Docker
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "No build required"'

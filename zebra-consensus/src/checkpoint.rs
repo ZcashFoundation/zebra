@@ -1164,7 +1164,6 @@ where
                 let tip = match state_service
                     .oneshot(zs::Request::Tip)
                     .await
-                    .map_err(Into::into)
                     .map_err(VerifyCheckpointError::Tip)?
                 {
                     zs::Response::Tip(tip) => tip,

@@ -66,7 +66,7 @@ impl<S> HttpRequestMiddleware<S> {
 
     /// Check if the request is authenticated.
     pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
-        self.cookie.as_ref().map_or(true, |internal_cookie| {
+        self.cookie.as_ref().is_none_or(|internal_cookie| {
             headers
                 .get(header::AUTHORIZATION)
                 .and_then(|auth_header| auth_header.to_str().ok())

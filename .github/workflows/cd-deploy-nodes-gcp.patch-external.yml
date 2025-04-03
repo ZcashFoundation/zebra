@@ -45,11 +45,3 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "Skipping job on fork"'
-
-  test-zebra-conf-path:
-    name: Test CD custom Docker config file / Test custom-conf in Docker
-    needs: build
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "Skipping job on fork"'
