@@ -10,9 +10,6 @@ concurrency:
   cancel-in-progress: true
 
 on:
-  merge_group:
-    types: [checks_requested]
-
   schedule:
     # Run this job every Friday at mid-day UTC
     # This is limited to the Zebra and lightwalletd Full Sync jobs
@@ -21,25 +18,6 @@ on:
 
   workflow_dispatch:
     inputs:
-      network:
-        default: "Mainnet"
-        description: "Network to deploy: Mainnet or Testnet"
-        required: true
-      regenerate-disks:
-        type: boolean
-        default: false
-        description: "Just run a Zebra checkpoint sync and update checkpoint disks"
-        required: true
-      run-full-sync:
-        type: boolean
-        default: false
-        description: "Just run a Zebra full sync on `network`, and update tip disks"
-        required: true
-      run-lwd-sync:
-        type: boolean
-        default: false
-        description: "Just run a lightwalletd full sync and update tip disks"
-        required: true
       force_save_to_disk:
         required: false
         type: boolean
