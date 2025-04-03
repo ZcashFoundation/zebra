@@ -541,7 +541,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // FIXME: Implement deserialization of multiple action groups (under a feature flag)
 
-        // Denoted as `nActionGroupsOrchard` in the spec  (ZIP 230) (must be one for V6/NU7).
+        // Denoted as `nActionGroupsOrchard` in the spec (ZIP 230) (must be one for V6/NU7).
         let n_action_groups: usize = (&mut reader)
             .zcash_deserialize_into::<CompactSizeMessage>()?
             .into();

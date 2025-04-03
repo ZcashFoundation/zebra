@@ -22,8 +22,8 @@ use crate::{
 
 use super::{OrchardVanilla, ShieldedDataFlavor};
 
-// FIXME: wrap all ActionGroup usages withj tx-v6 feature flag?
-/// FIXME: add doc
+// FIXME: wrap all ActionGroup usages with tx-v6 feature flag?
+/// Action Group description.
 #[cfg(feature = "tx-v6")]
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(bound(
@@ -65,7 +65,8 @@ impl<FL: ShieldedDataFlavor> ActionGroup<FL> {
     deserialize = "FL::BurnType: serde::Deserialize<'de>"
 ))]
 pub struct ShieldedData<FL: ShieldedDataFlavor> {
-    /// FIXME: add doc
+    /// Action Group descriptions.
+    /// Denoted as `vActionGroupsOrchard` in the spec (ZIP 230).
     pub action_groups: AtLeastOne<ActionGroup<FL>>,
     /// Denoted as `valueBalanceOrchard` in the spec.
     pub value_balance: Amount,
