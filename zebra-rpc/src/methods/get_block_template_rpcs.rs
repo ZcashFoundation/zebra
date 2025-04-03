@@ -1106,7 +1106,7 @@ where
             .recently_live_peers(chrono::Utc::now())
             .into_iter()
             .filter(|meta_addr| meta_addr.has_connection_recently_responded(chrono::Utc::now()))
-            .map(|meta_addr| PeerInfo::new(meta_addr, meta_addr.is_inbound()))
+            .map(PeerInfo::new)
             .collect())
     }
 

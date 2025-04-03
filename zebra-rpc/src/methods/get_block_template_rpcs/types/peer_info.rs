@@ -14,11 +14,8 @@ pub struct PeerInfo {
 
 impl PeerInfo {
     /// Create a new `PeerInfo` from a `MetaAddr`
-    pub fn new(meta_addr: MetaAddr, inbound: bool) -> Self {
-        Self {
-            addr: meta_addr.addr(),
-            inbound,
-        }
+    pub fn new(meta_addr: MetaAddr) -> Self {
+        Self::from(meta_addr)
     }
 }
 
