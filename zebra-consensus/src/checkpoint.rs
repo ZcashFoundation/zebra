@@ -86,7 +86,7 @@ type QueuedBlockList = Vec<QueuedBlock>;
 ///
 /// This value is a tradeoff between:
 /// - rejecting bad blocks: if we queue more blocks, we need fewer network
-///                         retries, but use a bit more CPU when verifying,
+///   retries, but use a bit more CPU when verifying,
 /// - avoiding a memory DoS: if we queue fewer blocks, we use less memory.
 ///
 /// Memory usage is controlled by the sync service, because it controls block
