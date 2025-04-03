@@ -894,8 +894,7 @@ impl Service<Request> for Mempool {
                     Request::Queue(gossiped_txs) => Response::Queued(
                         // Special case; we can signal the error inside the response,
                         // because the inbound service ignores inner errors.
-                        iter::repeat(MempoolError::Disabled)
-                            .take(gossiped_txs.len())
+                        iter::repeat_n(MempoolError::Disabled, gossiped_txs.len())
                             .map(BoxError::from)
                             .map(Err)
                             .collect(),

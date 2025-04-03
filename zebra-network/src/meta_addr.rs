@@ -163,11 +163,11 @@ pub struct MetaAddr {
     ///
     /// The exact meaning depends on `last_connection_state`:
     ///   - `Responded`: the services advertised by this peer, the last time we
-    ///      performed a handshake with it
+    ///     performed a handshake with it
     ///   - `NeverAttempted`: the unverified services advertised by another peer,
-    ///      then gossiped by the peer that sent us this address
+    ///     then gossiped by the peer that sent us this address
     ///   - `Failed` or `AttemptPending`: unverified services via another peer,
-    ///      or services advertised in a previous handshake
+    ///     or services advertised in a previous handshake
     ///
     /// ## Security
     ///

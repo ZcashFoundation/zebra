@@ -42,7 +42,7 @@ mod tests;
 /// - `network`: the Zcash [`Network`] used for this connection.
 ///
 /// - `data_stream`: an existing data stream. This can be a non-anonymised TCP connection,
-///                  or a Tor client `arti_client::DataStream`.
+///   or a Tor client `arti_client::DataStream`.
 ///
 /// - `user_agent`: a valid BIP14 user-agent, e.g., the empty string.
 pub fn connect_isolated<PeerTransport>(
