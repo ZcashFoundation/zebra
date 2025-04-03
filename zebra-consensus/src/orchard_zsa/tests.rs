@@ -73,7 +73,7 @@ fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
         let is_finalized = action.is_finalized();
 
         for note in action.notes() {
-            let amount = note.value().into();
+            let amount = note.value();
 
             // FIXME: check for issuance specific errors?
             match asset_records.entry(note.asset()) {
