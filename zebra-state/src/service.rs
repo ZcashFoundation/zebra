@@ -86,11 +86,11 @@ use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, 
 ///
 /// This service modifies and provides access to:
 /// - the non-finalized state: the ~100 most recent blocks.
-///                            Zebra allows chain forks in the non-finalized state,
-///                            stores it in memory, and re-downloads it when restarted.
+///   Zebra allows chain forks in the non-finalized state,
+///   stores it in memory, and re-downloads it when restarted.
 /// - the finalized state: older blocks that have many confirmations.
-///                        Zebra stores the single best chain in the finalized state,
-///                        and re-loads it from disk when restarted.
+///   Zebra stores the single best chain in the finalized state,
+///   and re-loads it from disk when restarted.
 ///
 /// Read requests to this service are buffered, then processed concurrently.
 /// Block write requests are buffered, then queued, then processed in order by a separate task.

@@ -41,7 +41,7 @@ lazy_static! {
 /// given index is read. Therefore, we just need a list where `array[index]`
 /// is the given `output`.
 fn mock_pre_v5_output_list(output: transparent::Output, index: usize) -> Vec<transparent::Output> {
-    iter::repeat(output).take(index + 1).collect()
+    std::iter::repeat_n(output, index + 1).collect()
 }
 
 #[test]
@@ -233,9 +233,7 @@ fn deserialize_large_transaction() {
     let tx_inputs_num = MAX_BLOCK_BYTES as usize / input_data.len();
 
     // Set the precalculated amount of inputs and a single output.
-    let inputs = std::iter::repeat(input)
-        .take(tx_inputs_num)
-        .collect::<Vec<_>>();
+    let inputs = std::iter::repeat_n(input, tx_inputs_num).collect::<Vec<_>>();
 
     // Create an oversized transaction. Adding the output and lock time causes
     // the transaction to overflow the threshold.

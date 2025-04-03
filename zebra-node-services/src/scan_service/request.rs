@@ -53,9 +53,7 @@ impl Request {
 
 #[test]
 fn test_check_num_keys() {
-    let fake_keys: Vec<_> = std::iter::repeat(String::new())
-        .take(MAX_REQUEST_KEYS + 1)
-        .collect();
+    let fake_keys: Vec<_> = std::iter::repeat_n(String::new(), MAX_REQUEST_KEYS + 1).collect();
 
     let bad_requests = [
         Request::DeleteKeys(vec![]),
