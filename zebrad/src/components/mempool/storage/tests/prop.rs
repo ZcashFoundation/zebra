@@ -961,7 +961,12 @@ impl OrchardSpendConflict {
                 .actions
                 .first_mut()
                 .action
-                .nullifier = self.new_shielded_data.actions().next().action.nullifier;
+                .nullifier = self
+                .new_shielded_data
+                .actions()
+                .next()
+                .expect("at least one action")
+                .nullifier;
         } else {
             *orchard_shielded_data = Some(self.new_shielded_data.0);
         }
