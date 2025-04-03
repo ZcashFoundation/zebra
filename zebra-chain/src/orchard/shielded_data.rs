@@ -47,7 +47,7 @@ pub struct ActionGroup<FL: ShieldedDataFlavor> {
     #[cfg(feature = "tx-v6")]
     /// Assets intended for burning
     /// Denoted as `vAssetBurn` in the spec (ZIP 230).
-    pub(crate) burn: FL::BurnType,
+    pub burn: FL::BurnType,
 }
 
 impl<FL: ShieldedDataFlavor> ActionGroup<FL> {
