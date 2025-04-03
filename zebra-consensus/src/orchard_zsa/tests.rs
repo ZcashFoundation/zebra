@@ -1,16 +1,15 @@
 // FIXME: consider merging it with router/tests.rs
 
-use std::sync::Arc;
+use std::{
+    collections::{hash_map, HashMap},
+    sync::Arc,
+};
 
 use color_eyre::eyre::Report;
 use tower::ServiceExt;
 
 use orchard::{
-    issuance::Error as IssuanceError,
-    issuance::IssueAction,
-    note::AssetBase,
-    supply_info::{AssetSupply, SupplyInfo},
-    value::ValueSum,
+    asset_record::AssetRecord, issuance::IssueAction, note::AssetBase, value::NoteValue,
 };
 
 use zebra_chain::{
@@ -29,24 +28,36 @@ use zebra_test::{
 
 use crate::{block::Request, Config};
 
+type AssetRecords = HashMap<AssetBase, AssetRecord>;
+
 type TranscriptItem = (Request, Result<Hash, ExpectedTranscriptError>);
+
+#[derive(Debug)]
+enum AssetRecordsError {
+    BurnAssetMissing,
+    AmountOverflow,
+    MissingRefNote,
+    ModifyFinalized,
+}
 
 /// Processes orchard burns, decreasing asset supply.
 fn process_burns<'a, I: Iterator<Item = &'a BurnItem>>(
-    supply_info: &mut SupplyInfo,
+    asset_records: &mut AssetRecords,
     burns: I,
-) -> Result<(), IssuanceError> {
+) -> Result<(), AssetRecordsError> {
     for burn in burns {
-        // Burns reduce supply, so negate the amount.
-        let amount = (-ValueSum::from(burn.amount())).ok_or(IssuanceError::ValueSumOverflow)?;
+        // FIXME: check for burn specific errors?
+        let asset_record = asset_records
+            .get_mut(&burn.asset())
+            .ok_or(AssetRecordsError::BurnAssetMissing)?;
 
-        supply_info.add_supply(
-            burn.asset(),
-            AssetSupply {
-                amount,
-                is_finalized: false,
-            },
-        )?;
+        asset_record.amount = NoteValue::from_raw(
+            asset_record
+                .amount
+                .inner()
+                .checked_sub(burn.amount().inner())
+                .ok_or(AssetRecordsError::AmountOverflow)?,
+        );
     }
 
     Ok(())
@@ -54,30 +65,46 @@ fn process_burns<'a, I: Iterator<Item = &'a BurnItem>>(
 
 /// Processes orchard issue actions, increasing asset supply.
 fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
-    supply_info: &mut SupplyInfo,
+    asset_records: &mut AssetRecords,
     issue_actions: I,
-) -> Result<(), IssuanceError> {
+) -> Result<(), AssetRecordsError> {
     for action in issue_actions {
+        let reference_note = action.get_reference_note();
         let is_finalized = action.is_finalized();
 
         for note in action.notes() {
-            supply_info.add_supply(
-                note.asset(),
-                AssetSupply {
-                    amount: note.value().into(),
-                    is_finalized,
-                },
-            )?;
+            let amount = note.value().into();
+
+            // FIXME: check for issuance specific errors?
+            match asset_records.entry(note.asset()) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    let asset_record = entry.get_mut();
+                    asset_record.amount =
+                        (asset_record.amount + amount).ok_or(AssetRecordsError::AmountOverflow)?;
+                    if asset_record.is_finalized {
+                        return Err(AssetRecordsError::ModifyFinalized);
+                    }
+                    asset_record.is_finalized = is_finalized;
+                }
+
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(AssetRecord {
+                        amount,
+                        is_finalized,
+                        reference_note: *reference_note.ok_or(AssetRecordsError::MissingRefNote)?,
+                    });
+                }
+            }
         }
     }
 
     Ok(())
 }
 
-/// Calculates supply info for all assets in the given blocks.
-fn calc_asset_supply_info<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
+/// Builds assets records for the given blocks.
+fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
     blocks: I,
-) -> Result<SupplyInfo, IssuanceError> {
+) -> Result<AssetRecords, AssetRecordsError> {
     blocks
         .into_iter()
         .filter_map(|(request, _)| match request {
@@ -86,10 +113,10 @@ fn calc_asset_supply_info<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
             Request::CheckProposal(_) => None,
         })
         .flatten()
-        .try_fold(SupplyInfo::new(), |mut supply_info, tx| {
-            process_burns(&mut supply_info, tx.orchard_burns().iter())?;
-            process_issue_actions(&mut supply_info, tx.orchard_issue_actions())?;
-            Ok(supply_info)
+        .try_fold(HashMap::new(), |mut asset_records, tx| {
+            process_burns(&mut asset_records, tx.orchard_burns().iter())?;
+            process_issue_actions(&mut asset_records, tx.orchard_issue_actions())?;
+            Ok(asset_records)
         })
 }
 
@@ -136,11 +163,11 @@ async fn check_zsa_workflow() -> Result<(), Report> {
     let transcript_data =
         create_transcript_data(ORCHARD_ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();
 
-    let asset_supply_info =
-        calc_asset_supply_info(&transcript_data).expect("should calculate asset_supply_info");
+    let asset_records =
+        build_asset_records(&transcript_data).expect("should calculate asset_records");
 
     // Before applying the blocks, ensure that none of the assets exist in the state.
-    for &asset_base in asset_supply_info.assets.keys() {
+    for &asset_base in asset_records.keys() {
         assert!(
             request_asset_state(&read_state_service, asset_base)
                 .await
@@ -155,20 +182,20 @@ async fn check_zsa_workflow() -> Result<(), Report> {
         .await?;
 
     // After processing the transcript blocks, verify that the state matches the expected supply info.
-    for (&asset_base, asset_supply) in &asset_supply_info.assets {
+    for (&asset_base, asset_record) in &asset_records {
         let asset_state = request_asset_state(&read_state_service, asset_base)
             .await
             .expect("State should contain this asset now.");
 
         assert_eq!(
-            asset_state.is_finalized, asset_supply.is_finalized,
+            asset_state.is_finalized, asset_record.is_finalized,
             "Finalized state does not match for asset {:?}.",
             asset_base
         );
 
         assert_eq!(
             asset_state.total_supply,
-            u64::try_from(i128::from(asset_supply.amount))
+            u64::try_from(i128::from(asset_record.amount))
                 .expect("asset supply amount should be within u64 range"),
             "Total supply mismatch for asset {:?}.",
             asset_base

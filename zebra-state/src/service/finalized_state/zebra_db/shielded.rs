@@ -33,8 +33,9 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::RawBytes,
         zebra_db::ZebraDb,
+        TypedColumnFamily,
     },
-    BoxError, TypedColumnFamily,
+    BoxError,
 };
 
 // Doc-only items
