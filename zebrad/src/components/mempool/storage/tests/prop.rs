@@ -746,22 +746,18 @@ impl SpendConflictTestInput {
         maybe_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
-        if let Some(shielded_data) = maybe_shielded_data.take() {
-            // FIXME: works for V5 or V6 with a single action group only
-            let updated_actions: Vec<_> = shielded_data
-                .action_groups
-                .first()
-                .actions
-                .into_vec()
-                .into_iter()
-                .filter(|action| !conflicts.contains(&action.action.nullifier))
-                .collect();
+        if let Some(shielded_data) = maybe_shielded_data {
+            for action_group in shielded_data.action_groups.iter_mut() {
+                let updated_actions: Vec<_> = action_group
+                    .actions
+                    .clone()
+                    .into_iter()
+                    .filter(|action| !conflicts.contains(&action.action.nullifier))
+                    .collect();
 
-            if let Ok(actions) = AtLeastOne::try_from(updated_actions) {
-                *maybe_shielded_data = Some(orchard::ShieldedData {
-                    actions,
-                    ..shielded_data
-                });
+                if let Ok(actions) = AtLeastOne::try_from(updated_actions) {
+                    action_group.actions = actions;
+                }
             }
         }
     }
@@ -965,7 +961,7 @@ impl OrchardSpendConflict {
                 .actions
                 .first_mut()
                 .action
-                .nullifier = self.new_shielded_data.actions.first().action.nullifier;
+                .nullifier = self.new_shielded_data.actions().next().action.nullifier;
         } else {
             *orchard_shielded_data = Some(self.new_shielded_data.0);
         }
