@@ -10,6 +10,15 @@
 
 set -eo pipefail
 
+
+# These are the default cached state directories for Zebra and lightwalletd.
+#
+# They are set to `${HOME}/.cache/zebra` and `${HOME}/.cache/lwd`
+# respectively, but can be overridden by setting the
+# `ZEBRA_CACHE_DIR` and `LWD_CACHE_DIR` environment variables.
+: "${ZEBRA_CACHE_DIR:=${HOME}/.cache/zebra}"
+: "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
+
 # Exit early if `ZEBRA_CONF_PATH` does not point to a file.
 if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   echo "ERROR: No Zebra config file found at ZEBRA_CONF_PATH (${ZEBRA_CONF_PATH})."
@@ -17,13 +26,9 @@ if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
   exit 1
 fi
 
-# Define function to execute commands as the specified user
+# Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
-  if [[ "$(id -u)" = '0' ]]; then
-    exec gosu "${USER}" "$@"
-  else
-    exec "$@"
-  fi
+  exec gosu "${UID}:${GID}" "$@"
 }
 
 # Modifies the existing Zebra config file at ZEBRA_CONF_PATH using environment variables.
@@ -32,7 +37,6 @@ exec_as_user() {
 #
 # This function modifies the existing file in-place and prints its location.
 prepare_conf_file() {
-
   # Set a custom network.
   if [[ -n "${NETWORK}" ]]; then
     sed -i '/network = ".*"/s/".*"/"'"${NETWORK//\"/}"'"/' "${ZEBRA_CONF_PATH}"
@@ -57,12 +61,14 @@ prepare_conf_file() {
   # use them to set the cache dirs separately if needed.
   if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
     mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
+    chown -R "${UID}:${GID}" "${ZEBRA_CACHE_DIR//\"/}"
     sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-    # Fix permissions right after creating/configuring the directory
-    if [[ "$(id -u)" = '0' ]]; then
-      # "Setting permissions for the cache directory
-      chown -R "${USER}:${USER}" "${ZEBRA_CACHE_DIR//\"/}"
-    fi
+  fi
+
+  # Set a custom lightwalletd cache dir.
+  if [[ -n "${LWD_CACHE_DIR}" ]]; then
+    mkdir -p "${LWD_CACHE_DIR//\"/}"
+    chown -R "${UID}:${GID}" "${LWD_CACHE_DIR//\"/}"
   fi
 
   # Enable the Prometheus metrics endpoint.
@@ -73,12 +79,8 @@ prepare_conf_file() {
   # Enable logging to a file by setting a custom log file path.
   if [[ -n "${LOG_FILE}" ]]; then
     mkdir -p "$(dirname "${LOG_FILE//\"/}")"
+    chown -R "${UID}:${GID}" "$(dirname "${LOG_FILE//\"/}")"
     sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-    # Fix permissions right after creating/configuring the log directory
-    if [[ "$(id -u)" = '0' ]]; then
-      # "Setting permissions for the log directory
-      chown -R "${USER}:${USER}" "$(dirname "${LOG_FILE//\"/}")"
-    fi
   fi
 
   # Enable or disable colored logs.
@@ -103,29 +105,9 @@ prepare_conf_file() {
   echo "${ZEBRA_CONF_PATH}"
 }
 
-# Checks if a directory contains subdirectories
-#
-# Exits with 0 if it does, and 1 otherwise.
-check_directory_files() {
-  local dir="$1"
-  # Check if the directory exists
-  if [[ -d "${dir}" ]]; then
-    # Check if there are any subdirectories
-    if find "${dir}" -mindepth 1 -type d | read -r; then
-      :
-    else
-      echo "No subdirectories found in ${dir}."
-      exit 1
-    fi
-  else
-    echo "Directory ${dir} does not exist."
-    exit 1
-  fi
-}
-
 # Runs cargo test with an arbitrary number of arguments.
 #
-# ## Positional Parameters
+# Positional Parameters
 #
 # - '$1' must contain
 #   - either cargo FEATURES as described here:
@@ -134,34 +116,29 @@ check_directory_files() {
 # - The remaining params will be appended to a command starting with
 #   `exec_as_user cargo test ... -- ...`
 run_cargo_test() {
-  # Start constructing the command, ensuring that $1 is enclosed in single
-  # quotes as it's a feature list
-  local cmd="exec_as_user cargo test --locked --release --features '$1' --package zebrad --test acceptance -- --nocapture --include-ignored"
-
   # Shift the first argument, as it's already included in the cmd
+  local features="$1"
   shift
+
+  # Start constructing the command array
+  local cmd=(cargo test --locked --release --features "${features}" --package zebrad --test acceptance -- --nocapture --include-ignored)
 
   # Loop through the remaining arguments
   for arg in "$@"; do
     if [[ -n ${arg} ]]; then
       # If the argument is non-empty, add it to the command
-      cmd+=" ${arg}"
+      cmd+=("${arg}")
     fi
   done
 
-  # Run the command using eval. This will replace the current process with the
-  # cargo command.
-  echo "Running:"
-  echo "${cmd}"
-  eval "${cmd}" || {
-    echo "Cargo test failed"
-    exit 1
-  }
+  echo "Running: ${cmd[*]}"
+  # Execute directly to become PID 1
+  exec_as_user "${cmd[@]}"
 }
 
 # Runs tests depending on the env vars.
 #
-# Positional Parameters
+# ## Positional Parameters
 #
 # - $@: Arbitrary command that will be executed if no test env var is set.
 run_tests() {
@@ -280,11 +257,14 @@ run_tests() {
 # Main Script Logic
 
 prepare_conf_file "${ZEBRA_CONF_PATH}"
+echo "INFO: Using the following environment variables:"
+printenv
+
 echo "Prepared the following Zebra config:"
 cat "${ZEBRA_CONF_PATH}"
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
-# - If "$1" is "tests":
+# - If "$1" is "test":
 #   - and "$2" is "zebrad", run `zebrad` with the remaining params,
 #   - else run tests with the remaining params.
 # - TODO: If "$1" is "monitoring", start a monitoring node.

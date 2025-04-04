@@ -86,11 +86,11 @@ use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, 
 ///
 /// This service modifies and provides access to:
 /// - the non-finalized state: the ~100 most recent blocks.
-///                            Zebra allows chain forks in the non-finalized state,
-///                            stores it in memory, and re-downloads it when restarted.
+///   Zebra allows chain forks in the non-finalized state,
+///   stores it in memory, and re-downloads it when restarted.
 /// - the finalized state: older blocks that have many confirmations.
-///                        Zebra stores the single best chain in the finalized state,
-///                        and re-loads it from disk when restarted.
+///   Zebra stores the single best chain in the finalized state,
+///   and re-loads it from disk when restarted.
 ///
 /// Read requests to this service are buffered, then processed concurrently.
 /// Block write requests are buffered, then queued, then processed in order by a separate task.
@@ -1092,6 +1092,7 @@ impl Service<Request> for StateService {
             | Request::Transaction(_)
             | Request::UnspentBestChainUtxo(_)
             | Request::Block(_)
+            | Request::BlockAndSize(_)
             | Request::BlockHeader(_)
             | Request::FindBlockHashes { .. }
             | Request::FindBlockHeaders { .. }
@@ -1306,6 +1307,31 @@ impl Service<ReadRequest> for ReadStateService {
                         timer.finish(module_path!(), line!(), "ReadRequest::Block");
 
                         Ok(ReadResponse::Block(block))
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            // Used by the get_block (raw) RPC and the StateService.
+            ReadRequest::BlockAndSize(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let block_and_size = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block_and_size(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::BlockAndSize");
+
+                        Ok(ReadResponse::BlockAndSize(block_and_size))
                     })
                 })
                 .wait_for_panics()

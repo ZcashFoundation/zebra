@@ -138,12 +138,12 @@ impl Encoder<Message> for Codec {
         // of length 12, as they must be &[u8; 12].
         let command = match item {
             Version { .. } => b"version\0\0\0\0\0",
-            Verack { .. } => b"verack\0\0\0\0\0\0",
+            Verack => b"verack\0\0\0\0\0\0",
             Ping { .. } => b"ping\0\0\0\0\0\0\0\0",
             Pong { .. } => b"pong\0\0\0\0\0\0\0\0",
             Reject { .. } => b"reject\0\0\0\0\0\0",
             Addr { .. } => b"addr\0\0\0\0\0\0\0\0",
-            GetAddr { .. } => b"getaddr\0\0\0\0\0",
+            GetAddr => b"getaddr\0\0\0\0\0",
             Block { .. } => b"block\0\0\0\0\0\0\0",
             GetBlocks { .. } => b"getblocks\0\0\0",
             Headers { .. } => b"headers\0\0\0\0\0",
@@ -152,10 +152,10 @@ impl Encoder<Message> for Codec {
             GetData { .. } => b"getdata\0\0\0\0\0",
             NotFound { .. } => b"notfound\0\0\0\0",
             Tx { .. } => b"tx\0\0\0\0\0\0\0\0\0\0",
-            Mempool { .. } => b"mempool\0\0\0\0\0",
+            Mempool => b"mempool\0\0\0\0\0",
             FilterLoad { .. } => b"filterload\0\0",
             FilterAdd { .. } => b"filteradd\0\0\0",
-            FilterClear { .. } => b"filterclear\0",
+            FilterClear => b"filterclear\0",
         };
         trace!(?item, len = body_length);
 

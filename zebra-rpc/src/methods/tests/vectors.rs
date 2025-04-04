@@ -17,7 +17,7 @@ use zebra_chain::{
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 
-use zebra_state::{GetBlockTemplateChainInfo, LatestChainTip, ReadStateService};
+use zebra_state::{GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadStateService};
 use zebra_test::mock_service::MockService;
 
 use super::super::*;
@@ -196,6 +196,21 @@ async fn rpc_getblock() {
         assert_eq!(get_block, expected_result);
     }
 
+    // Test negative heights: -1 should return block 10, -2 block 9, etc.
+    for neg_height in (-10..=-1).rev() {
+        // Convert negative height to corresponding index
+        let index = (neg_height + (blocks.len() as i32)) as usize;
+
+        let expected_result = GetBlock::Raw(blocks[index].clone().into());
+
+        let get_block = rpc
+            .get_block(neg_height.to_string(), Some(0u8))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
+    }
+
     // Create empty note commitment tree information.
     let sapling = SaplingTrees { size: 0 };
     let orchard = OrchardTrees { size: 0 };
@@ -326,7 +341,7 @@ async fn rpc_getblock() {
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(size, &None);
+            assert_eq!(size, &Some(block.zcash_serialize_to_vec().unwrap().len() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -411,7 +426,7 @@ async fn rpc_getblock() {
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(size, &None);
+            assert_eq!(size, &Some(block.zcash_serialize_to_vec().unwrap().len() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -756,6 +771,21 @@ async fn rpc_getblockheader() {
                 .expect("we should have a GetBlockHeader struct");
             assert_eq!(get_block_header, expected_result);
         }
+    }
+
+    // Test negative heights: -1 should return a header for block 10, -2 block header 9, etc.
+    for neg_height in (-10..=-1).rev() {
+        // Convert negative height to corresponding index
+        let index = (neg_height + (blocks.len() as i32)) as usize;
+
+        let expected_result = GetBlockHeader::Raw(HexData(blocks[index].header.clone().as_bytes()));
+
+        let get_block = rpc
+            .get_block_header(neg_height.to_string(), Some(false))
+            .await
+            .expect("We should have a GetBlock struct");
+
+        assert_eq!(get_block, expected_result);
     }
 
     mempool.expect_no_requests().await;
@@ -1676,7 +1706,6 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         amount::NonNegative,
         block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
         chain_sync_status::MockSyncStatus,
-        parameters::NetworkKind,
         serialization::DateTime32,
         transaction::{zip317, VerifiedUnminedTx},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
@@ -1708,15 +1737,21 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
-    let network = NetworkKind::Mainnet;
+    let network = Network::Mainnet;
     let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(network, [0x7e; 20])),
-        true => Some(transparent::Address::from_pub_key_hash(network, [0x7e; 20])),
+        false => Some(transparent::Address::from_script_hash(
+            network.kind(),
+            [0x7e; 20],
+        )),
+        true => Some(transparent::Address::from_pub_key_hash(
+            network.kind(),
+            [0x7e; 20],
+        )),
     };
 
     #[allow(clippy::unnecessary_struct_initialization)]
     let mining_config = crate::config::mining::Config {
-        miner_address,
+        miner_address: miner_address.clone(),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
         // TODO: Use default field values when optional features are enabled in tests #8183
@@ -1801,6 +1836,19 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     else {
         panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
     };
+
+    let coinbase_transaction =
+        Transaction::zcash_deserialize(get_block_template.coinbase_txn.data.as_ref())
+            .expect("coinbase transaction data should be deserializable");
+
+    assert_eq!(
+        coinbase_transaction
+            .outputs()
+            .first()
+            .unwrap()
+            .address(&network),
+        miner_address
+    );
 
     assert_eq!(
         get_block_template.capabilities,
