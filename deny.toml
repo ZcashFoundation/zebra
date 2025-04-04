@@ -96,8 +96,8 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
+    # wait until zcash_client_backend update rustix
     { name = "rustix", version = "=0.38.44" },
-
 ]
 
 # This section is considered when running `cargo deny check sources`.
