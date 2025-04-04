@@ -3673,25 +3673,13 @@ dependencies = [
 
 [[package]]
 name = "redjubjub"
-version = "0.7.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a60db2c3bc9c6fd1e8631fee75abc008841d27144be744951d6b9b75f9b569c"
-dependencies = [
- "rand_core 0.6.4",
- "reddsa",
- "serde",
- "thiserror 1.0.69",
- "zeroize",
-]
-
-[[package]]
-name = "redjubjub"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "89b0ac1bc6bb3696d2c6f52cff8fba57238b81da8c0214ee6cd146eb8fde364e"
 dependencies = [
  "rand_core 0.6.4",
  "reddsa",
+ "serde",
  "thiserror 1.0.69",
  "zeroize",
 ]
@@ -4031,7 +4019,7 @@ dependencies = [
  "memuse",
  "rand 0.8.5",
  "rand_core 0.6.4",
- "redjubjub 0.8.0",
+ "redjubjub",
  "subtle",
  "tracing",
  "zcash_note_encryption",
@@ -5982,7 +5970,7 @@ dependencies = [
  "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
- "redjubjub 0.8.0",
+ "redjubjub",
  "ripemd 0.1.3",
  "sapling-crypto",
  "secp256k1",
@@ -6014,7 +6002,7 @@ dependencies = [
  "known-folders",
  "lazy_static",
  "rand_core 0.6.4",
- "redjubjub 0.8.0",
+ "redjubjub",
  "sapling-crypto",
  "tracing",
  "xdg",
@@ -6116,7 +6104,7 @@ dependencies = [
  "rand_core 0.6.4",
  "rayon",
  "reddsa",
- "redjubjub 0.7.0",
+ "redjubjub",
  "ripemd 0.1.3",
  "sapling-crypto",
  "secp256k1",
