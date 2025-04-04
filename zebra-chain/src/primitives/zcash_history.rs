@@ -9,6 +9,7 @@ mod tests;
 use std::{collections::BTreeMap, io, sync::Arc};
 
 use serde_big_array::BigArray;
+use zcash_history::{EntryKind, EntryLink};
 pub use zcash_history::{V1, V2};
 
 use crate::{
@@ -33,6 +34,22 @@ pub trait Version: zcash_history::Version {
 ///
 /// Currently it should not be used as a long-term data structure because it
 /// may grow without limits.
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    serde(bound(
+        serialize = "V: serde::Serialize, 
+                     V::NodeData: serde::Serialize, 
+                     zcash_history::Tree<V>: serde::Serialize",
+        deserialize = "V: serde::de::DeserializeOwned, 
+                       V::NodeData: serde::de::DeserializeOwned, 
+                       zcash_history::Tree<V>: 
+                       serde::de::DeserializeOwned"
+    ))
+)]
 pub struct Tree<V: zcash_history::Version> {
     network: Network,
     network_upgrade: NetworkUpgrade,
@@ -91,7 +108,13 @@ impl Entry {
     }
 }
 
-impl<V: Version> Tree<V> {
+impl<V> Tree<V>
+where
+    V: Version,
+    V::EntryLink: From<EntryLink> + Copy,
+    V::EntryKind: From<EntryKind>,
+    EntryLink: From<V::EntryLink>,
+{
     /// Create a MMR tree with the given length from the given cache of nodes.
     ///
     /// The `peaks` are the peaks of the MMR tree to build and their position in the
@@ -117,12 +140,12 @@ impl<V: Version> Tree<V> {
             .expect("unexpected pre-Overwinter MMR history tree");
         let mut peaks_vec = Vec::new();
         for (idx, entry) in peaks {
-            let inner_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.inner)?;
+            let inner_entry = zcash_history::Entry::from_bytes(branch_id.0, entry.inner)?;
             peaks_vec.push((*idx, inner_entry));
         }
         let mut extra_vec = Vec::new();
         for (idx, entry) in extra {
-            let inner_entry = zcash_history::Entry::from_bytes(branch_id.into(), entry.inner)?;
+            let inner_entry = zcash_history::Entry::from_bytes(branch_id.0, entry.inner)?;
             extra_vec.push((*idx, inner_entry));
         }
         let inner = zcash_history::Tree::new(length, peaks_vec, extra_vec);

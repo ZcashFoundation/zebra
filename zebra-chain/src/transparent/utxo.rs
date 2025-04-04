@@ -12,8 +12,13 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(proptest_derive::Arbitrary, serde::Serialize)
+    derive(proptest_derive::Arbitrary)
 )]
+#[cfg_attr(
+    any(test, feature = "proptest-impl", feature = "remote_read_state_service"),
+    derive(serde::Serialize)
+)]
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Deserialize))]
 pub struct Utxo {
     /// The output itself.
     pub output: transparent::Output,
@@ -38,6 +43,10 @@ pub struct Utxo {
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
     derive(proptest_derive::Arbitrary)
+)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
 )]
 //
 // TODO: after modifying UTXO to contain an OutputLocation, replace this type with UTXO

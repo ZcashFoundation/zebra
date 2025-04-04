@@ -118,6 +118,7 @@ pub const FUNDING_STREAM_SPECIFICATION: &str = "https://zips.z.cash/zip-0214";
 pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/zip-1015";
 
 /// Funding stream recipients and height ranges.
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Serialize))]
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct FundingStreams {
     /// Start and end Heights for funding streams
@@ -160,6 +161,7 @@ impl FundingStreams {
 /// A funding stream recipient as specified in [protocol specification §7.10.1][7.10.1]
 ///
 /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
+#[cfg_attr(feature = "remote_read_state_service", derive(serde::Serialize))]
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct FundingStreamRecipient {
     /// The numerator for each funding stream receiver category

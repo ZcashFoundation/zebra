@@ -22,6 +22,10 @@ use proptest_derive::Arbitrary;
 /// following the u256 convention set by Bitcoin and zcashd.
 ///
 /// [ZIP-244]: https://zips.z.cash/zip-0244
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDigest(pub [u8; 32]);

@@ -538,6 +538,10 @@ impl Constraint for NegativeAllowed {
 /// );
 /// ```
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
+#[cfg_attr(
+    feature = "remote_read_state_service",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 pub struct NonNegative;
 
 impl Constraint for NonNegative {

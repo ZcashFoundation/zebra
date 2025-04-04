@@ -48,6 +48,15 @@ elasticsearch = [
     "zebra-chain/elasticsearch",
 ]
 
+# Remote support for the [`ReadStateService`].
+remote_read_state_service = [
+    "dep:url", 
+    "dep:http",
+    "dep:jsonrpsee", 
+    "jsonrpsee/http-client",
+    "jsonrpsee/client-core",
+]
+
 [dependencies]
 bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }
@@ -75,6 +84,11 @@ rayon = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
+
+# remote_read_state_service specific dependencies.
+url = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
+jsonrpsee = { workspace = true, optional = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
