@@ -6151,6 +6151,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "metrics",
+ "nonempty",
  "num-integer",
  "once_cell",
  "orchard",

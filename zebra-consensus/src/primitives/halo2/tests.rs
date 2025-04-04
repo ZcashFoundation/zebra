@@ -156,8 +156,13 @@ async fn verify_generated_halo2_proofs() {
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
-            (|item: Item| ready(item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)))
-                as fn(_) -> _,
+            (|item: Item| {
+                ready(
+                    item.verify_single(&VERIFYING_KEY)
+                        .then_some(())
+                        .ok_or("could not validate orchard proof"),
+                )
+            }) as fn(_) -> _,
         ),
     );
 
@@ -223,8 +228,13 @@ async fn correctly_err_on_invalid_halo2_proofs() {
             crate::primitives::MAX_BATCH_LATENCY,
         ),
         tower::service_fn(
-            (|item: Item| ready(item.verify_single(&VERIFYING_KEY).map_err(Halo2Error::from)))
-                as fn(_) -> _,
+            (|item: Item| {
+                ready(
+                    item.verify_single(&VERIFYING_KEY)
+                        .then_some(())
+                        .ok_or("could not validate orchard proof"),
+                )
+            }) as fn(_) -> _,
         ),
     );
 
