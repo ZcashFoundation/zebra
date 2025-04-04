@@ -17,6 +17,7 @@ categories = ["asynchronous", "cryptography::cryptocurrencies"]
 [features]
 #default = []
 default = ["tx-v6"]
+#default = ["tx-v6", "zsa-swap"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -39,6 +40,12 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "ze
 tx-v6 = [
     "zebra-state/tx-v6",
     "zebra-chain/tx-v6"
+]
+
+# Support for ZSA asset swaps
+zsa-swap = [
+    "zebra-state/zsa-swap",
+    "zebra-chain/zsa-swap"
 ]
 
 [dependencies]
