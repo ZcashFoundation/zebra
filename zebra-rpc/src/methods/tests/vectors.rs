@@ -341,7 +341,10 @@ async fn rpc_getblock() {
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(size, &Some(block.zcash_serialize_to_vec().unwrap().len() as i64));
+            assert_eq!(
+                size,
+                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
+            );
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -426,7 +429,10 @@ async fn rpc_getblock() {
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(size, &Some(block.zcash_serialize_to_vec().unwrap().len() as i64));
+            assert_eq!(
+                size,
+                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
+            );
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
