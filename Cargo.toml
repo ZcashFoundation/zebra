@@ -110,7 +110,7 @@ reqwest = { version = "0.12.9", default-features = false }
 ripemd = "0.1.3"
 rlimit = "0.10.2"
 rocksdb = { version = "0.22.0", default-features = false }
-secp256k1 = "0.27.0"
+secp256k1 = "0.29"
 semver = "1.0.25"
 sentry = { version = "0.36.0", default-features = false }
 serde = "1.0.217"
