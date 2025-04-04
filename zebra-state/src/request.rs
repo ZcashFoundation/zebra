@@ -2,13 +2,13 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    ops::{Deref, DerefMut, RangeInclusive},
+    ops::{Add, Deref, DerefMut, RangeInclusive},
     sync::Arc,
 };
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
-    block::{self, Block},
+    block::{self, Block, HeightDiff},
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -132,6 +132,42 @@ impl HashOrHeight {
         } else {
             None
         }
+    }
+
+    /// Constructs a new [`HashOrHeight`] from a string containing a hash or a positive or negative
+    /// height.
+    ///
+    /// When the provided `hash_or_height` contains a negative height, the `tip_height` parameter
+    /// needs to be `Some` since height `-1` points to the tip.
+    pub fn new(hash_or_height: &str, tip_height: Option<block::Height>) -> Result<Self, String> {
+        hash_or_height
+            .parse()
+            .map(Self::Hash)
+            .or_else(|_| hash_or_height.parse().map(Self::Height))
+            .or_else(|_| {
+                hash_or_height
+                    .parse()
+                    .map_err(|_| "could not parse negative height")
+                    .and_then(|d: HeightDiff| {
+                        if d.is_negative() {
+                            {
+                                Ok(HashOrHeight::Height(
+                                    tip_height
+                                        .ok_or("missing tip height")?
+                                        .add(d)
+                                        .ok_or("underflow when adding negative height to tip")?
+                                        .next()
+                                        .map_err(|_| "height -1 needs to point to tip")?,
+                                ))
+                            }
+                        } else {
+                            Err("height was not negative")
+                        }
+                    })
+            })
+            .map_err(|_| {
+                "parse error: could not convert the input string to a hash or height".to_string()
+            })
     }
 }
 
