@@ -490,7 +490,8 @@ impl Transaction {
             },
             #[cfg(feature = "tx_v6")]
             Transaction::V6 { expiry_height, .. } => match expiry_height {
-                // Consensus rule:
+                // # Consensus
+                //
                 // > No limit: To set no limit on transactions (so that they do not expire), nExpiryHeight should be set to 0.
                 // https://zips.z.cash/zip-0203#specification
                 block::Height(0) => None,
