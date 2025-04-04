@@ -834,11 +834,11 @@ where
             None
         };
 
-        let hash_or_height: HashOrHeight = hash_or_height
-            .parse()
-            // Reference for the legacy error code:
-            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-            .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
             let request = zebra_state::ReadRequest::Block(hash_or_height);
@@ -1006,9 +1006,11 @@ where
         let verbose = verbose.unwrap_or(true);
         let network = self.network.clone();
 
-        let hash_or_height: HashOrHeight = hash_or_height
-            .parse()
-            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
         let zebra_state::ReadResponse::BlockHeader {
             header,
             hash,
@@ -1301,11 +1303,11 @@ where
         let mut state = self.state.clone();
         let network = self.network.clone();
 
-        // Reference for the legacy error code:
-        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-        let hash_or_height = hash_or_height
-            .parse()
-            .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         // Fetch the block referenced by [`hash_or_height`] from the state.
         //
