@@ -23,7 +23,7 @@ struct TransparentAuth<'a> {
     all_prev_outputs: &'a [transparent::Output],
 }
 
-impl zp_tx::components::transparent::Authorization for TransparentAuth<'_> {
+impl zcash_transparent::bundle::Authorization for TransparentAuth<'_> {
     type ScriptSig = zcash_primitives::legacy::Script;
 }
 
@@ -61,22 +61,17 @@ struct MapTransparent<'a> {
 }
 
 impl<'a>
-    zp_tx::components::transparent::MapAuth<
-        zp_tx::components::transparent::Authorized,
-        TransparentAuth<'a>,
-    > for MapTransparent<'a>
+    zcash_transparent::bundle::MapAuth<zcash_transparent::bundle::Authorized, TransparentAuth<'a>>
+    for MapTransparent<'a>
 {
     fn map_script_sig(
         &self,
-        s: <zp_tx::components::transparent::Authorized as zp_tx::components::transparent::Authorization>::ScriptSig,
-    ) -> <TransparentAuth as zp_tx::components::transparent::Authorization>::ScriptSig {
+        s: <zcash_transparent::bundle::Authorized as zcash_transparent::bundle::Authorization>::ScriptSig,
+    ) -> <TransparentAuth as zcash_transparent::bundle::Authorization>::ScriptSig {
         s
     }
 
-    fn map_authorization(
-        &self,
-        _: zp_tx::components::transparent::Authorized,
-    ) -> TransparentAuth<'a> {
+    fn map_authorization(&self, _: zcash_transparent::bundle::Authorized) -> TransparentAuth<'a> {
         // TODO: This map should consume self, so we can move self.auth
         self.auth.clone()
     }

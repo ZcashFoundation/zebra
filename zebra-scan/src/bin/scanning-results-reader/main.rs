@@ -14,7 +14,7 @@ use jsonrpc::Client;
 use zcash_client_backend::decrypt_transaction;
 use zcash_primitives::consensus::{BlockHeight, BranchId};
 use zcash_primitives::transaction::Transaction;
-use zcash_primitives::zip32::AccountId;
+use zip32::AccountId;
 
 use zebra_scan::scan::{dfvk_to_ufvk, sapling_key_to_dfvk};
 use zebra_scan::{storage::Storage, Config};

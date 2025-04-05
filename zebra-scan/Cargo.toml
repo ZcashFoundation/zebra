@@ -74,8 +74,10 @@ futures = { workspace = true }
 zcash_client_backend.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
+zcash_protocol.workspace = true
 zcash_address.workspace = true
 sapling-crypto.workspace = true
+zip32 = { workspace = true, features = ["std"] }
 
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.45", features = ["shielded-scan"] }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.45", features = ["shielded-scan"] }
