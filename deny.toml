@@ -86,13 +86,8 @@ skip-tree = [
     { name = "thiserror", version = "=1.0.69" },
     { name = "thiserror-impl", version = "=1.0.69" },
 
-    # Remove after release candicate period is over and the ECC crates are not patched anymore
-    { name = "equihash", version = "=0.2.0" },
-
     # wait for all librustzcash crates to update sha2, secp256k1, and ripemd
     { name = "sha2", version = "=0.10.8" },
-    { name = "secp256k1", version = "=0.27.0" },
-    { name = "redjubjub", version = "=0.7.0" },
     { name = "ripemd", version = "=0.1.3" },
 
     # wait for zcash_script to update itertools
@@ -100,6 +95,9 @@ skip-tree = [
 
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
+
+    # wait until zcash_client_backend update rustix
+    { name = "rustix", version = "=0.38.44" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
