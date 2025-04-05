@@ -8,7 +8,7 @@
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 use std::collections::HashMap;
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{collections::HashSet, fmt::Debug};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
@@ -65,6 +65,7 @@ pub mod types;
 use types::GetRawMempool;
 #[cfg(feature = "getblocktemplate-rpcs")]
 use types::MempoolObject;
+use types::TransactionObject;
 
 #[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
@@ -934,6 +935,7 @@ where
                                         .try_into()
                                         .expect("should be less than max block height, i32::MAX"),
                                 ),
+                                &network,
                             ))
                         })
                         .collect();
@@ -1258,6 +1260,7 @@ where
                             tx.transaction.clone(),
                             None,
                             None,
+                            &self.network,
                         ))
                     } else {
                         let hex = tx.transaction.clone().into();
@@ -1281,6 +1284,7 @@ where
                     tx.tx.clone(),
                     Some(tx.height),
                     Some(tx.confirmations),
+                    &self.network,
                 ))
             } else {
                 let hex = tx.tx.into();
@@ -2393,7 +2397,7 @@ impl Default for GetBlockHash {
 /// Response to a `getrawtransaction` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_transaction` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
@@ -2405,52 +2409,6 @@ pub enum GetRawTransaction {
 impl Default for GetRawTransaction {
     fn default() -> Self {
         Self::Object(TransactionObject::default())
-    }
-}
-
-/// A Transaction object as returned by `getrawtransaction` and `getblock` RPC
-/// requests.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct TransactionObject {
-    /// The raw transaction, encoded as hex bytes.
-    #[serde(with = "hex")]
-    pub hex: SerializedTransaction,
-    /// The height of the block in the best chain that contains the tx or `None` if the tx is in
-    /// the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub height: Option<u32>,
-    /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
-    /// if the tx is in the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub confirmations: Option<u32>,
-    // TODO: many fields not yet supported
-}
-
-impl Default for TransactionObject {
-    fn default() -> Self {
-        Self {
-            hex: SerializedTransaction::from(
-                [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
-            ),
-            height: Option::default(),
-            confirmations: Option::default(),
-        }
-    }
-}
-
-impl TransactionObject {
-    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
-    #[allow(clippy::unwrap_in_result)]
-    fn from_transaction(
-        tx: Arc<Transaction>,
-        height: Option<block::Height>,
-        confirmations: Option<u32>,
-    ) -> Self {
-        Self {
-            hex: tx.into(),
-            height: height.map(|height| height.0),
-            confirmations,
-        }
     }
 }
 
