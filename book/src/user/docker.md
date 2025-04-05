@@ -59,19 +59,22 @@ All available Cargo features are listed at
 
 ## Configuring Zebra
 
-To configure Zebra, edit the `docker/default-zebra-config.toml` config file and
-uncomment the `configs` mapping in `docker/docker-compose.yml` so your config
-takes effect. You can see if your config works as intended by looking at Zebra's
-logs.
+To configure Zebra, you have three options:
 
-Alternatively, you can configure Zebra by setting the environment variables in
-the `docker/.env` file. Note that the config options of this file are limited to
-the variables already present in the commented out blocks in it and adding new
-ones will not be effective. Also note that the values of the variables take
-precedence over the values set in the `docker/default-zebra-config.toml` config
-file. The `docker/.env` file serves as a quick way to override the most commonly
-used settings for Zebra, whereas the `docker/default-zebra-config.toml` file
-provides full config capabilities.
+1. Edit the `docker/default-zebra-config.toml` config file and uncomment the `configs` mapping in `docker/docker-compose.yml` so your config takes effect.
+2. Provide a path to your own config file via the `ZEBRA_CONF_PATH` environment variable.
+3. Let Zebra generate a default config file automatically from environment variables (if neither of the above methods is used).
+
+The entrypoint script follows this sequence:
+
+1. If `ZEBRA_CONF_PATH` is set and a file exists at that path, it uses that file
+2. If `ZEBRA_CONF_PATH` is not set but a default config exists at `${HOME}/.config/zebrad.toml`, it uses that file
+3. If neither exists, it generates a default config at `${HOME}/.config/zebrad.toml` based on environment variables
+4. Environment variables from the `docker/.env` only take effect if a configuration file is not mounted, and thus are only effective if you don't provide a custom config file.
+
+You can see if your config works as intended by looking at Zebra's logs.
+
+Note that the environment variable overrides in the `docker/.env` file are limited to the variables already present in the commented out blocks and adding new ones will not be effective. The `docker/.env` file serves as a quick way to override the most commonly used settings, whereas a custom config file provides full configuration capabilities.
 
 ### RPC
 
