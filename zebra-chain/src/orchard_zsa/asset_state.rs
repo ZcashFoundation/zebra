@@ -233,8 +233,10 @@ impl AssetStateChange {
 
     /// Accepts an iterator of [`BurnItem`]s and returns an iterator of asset bases and issued asset state changes
     /// that should be applied to those asset bases when committing the provided asset burns to the chain state.
-    fn from_burns(burns: &[BurnItem]) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
-        burns.iter().map(Self::from_burn)
+    fn from_burns<'a>(
+        burns: impl Iterator<Item = &'a BurnItem> + 'a,
+    ) -> impl Iterator<Item = (AssetBase, Self)> + 'a {
+        burns.map(Self::from_burn)
     }
 
     /// Accepts an [`BurnItem`] and returns an iterator of asset bases and issued asset state changes
