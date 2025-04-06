@@ -17,6 +17,7 @@ categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 [features]
 #default = []
 default = ["tx-v6"]
+#default = ["tx-v6", "zsa-swap"]
 
 # Production features that activate extra functionality
 
@@ -66,6 +67,9 @@ bench = ["zebra-test"]
 tx-v6 = [
     "nonempty"
 ]
+
+# Support for ZSA asset swaps
+zsa-swap = []
 
 [dependencies]
 

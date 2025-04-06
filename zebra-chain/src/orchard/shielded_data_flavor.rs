@@ -57,6 +57,8 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
     type BurnType: Clone
         + Debug
         + Default
+        + PartialEq
+        + Eq
         + ZcashDeserialize
         + ZcashSerialize
         + Into<ValueCommitment>

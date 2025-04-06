@@ -88,9 +88,12 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
     // > earlier block’s final Orchard treestate.
     //
     // <https://zips.z.cash/protocol/protocol.pdf#actions>
-    if let Some(shared_anchor) = transaction.orchard_shared_anchor() {
+    for (shared_anchor_index_in_tx, shared_anchor) in
+        transaction.orchard_shared_anchors().enumerate()
+    {
         tracing::debug!(
             ?shared_anchor,
+            ?shared_anchor_index_in_tx,
             ?tx_index_in_block,
             ?height,
             "observed orchard anchor",
@@ -111,6 +114,7 @@ fn sapling_orchard_anchors_refer_to_final_treestates(
 
         tracing::debug!(
             ?shared_anchor,
+            ?shared_anchor_index_in_tx,
             ?tx_index_in_block,
             ?height,
             "validated orchard anchor",
