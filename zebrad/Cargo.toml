@@ -49,12 +49,11 @@ features = [
     "prometheus",
     "sentry",
     "indexer",
-    "getblocktemplate-rpcs"
 ]
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs"]
+default = ["release_max_level_info", "progress-bar"]
 
 # Default features for official ZF binary release builds
 default-release-binaries = ["default", "sentry"]
@@ -64,22 +63,12 @@ default-release-binaries = ["default", "sentry"]
 # Indexer support
 indexer = ["zebra-rpc/indexer-rpcs", "zebra-state/indexer"]
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-    "zebra-rpc/getblocktemplate-rpcs",
-    "zebra-consensus/getblocktemplate-rpcs",
-    "zebra-state/getblocktemplate-rpcs",
-    "zebra-node-services/getblocktemplate-rpcs",
-    "zebra-chain/getblocktemplate-rpcs",
-]
-
 # Experimental internal miner support
 internal-miner = [
     "thread-priority",
     "zebra-chain/internal-miner",
     # TODO: move common code into zebra-chain or zebra-node-services and remove the RPC dependency
     "zebra-rpc/internal-miner",
-    "zebra-rpc/getblocktemplate-rpcs",
 ]
 
 # Experimental elasticsearch indexing

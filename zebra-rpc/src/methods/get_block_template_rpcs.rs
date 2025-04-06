@@ -1,4 +1,4 @@
-//! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
+//! Mining-related RPCs.
 
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
@@ -83,10 +83,6 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
     /// method: post
     /// tags: blockchain
-    ///
-    /// # Notes
-    ///
-    /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[method(name = "getblockcount")]
     fn get_block_count(&self) -> Result<u32>;
 
@@ -105,7 +101,6 @@ pub trait GetBlockTemplateRpc {
     ///
     /// - If `index` is positive then index = block height.
     /// - If `index` is negative then -1 is the last known valid block.
-    /// - This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[method(name = "getblockhash")]
     async fn get_block_hash(&self, index: i32) -> Result<GetBlockHash>;
 
@@ -130,8 +125,6 @@ pub trait GetBlockTemplateRpc {
     ///
     /// Zebra verifies blocks in parallel, and keeps recent chains in parallel,
     /// so moving between chains and forking chains is very cheap.
-    ///
-    /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[method(name = "getblocktemplate")]
     async fn get_block_template(
         &self,
@@ -218,10 +211,6 @@ pub trait GetBlockTemplateRpc {
     /// # Parameters
     ///
     /// - `address`: (string, required) The zcash address to validate.
-    ///
-    /// # Notes
-    ///
-    /// - No notes
     #[method(name = "validateaddress")]
     async fn validate_address(&self, address: String) -> Result<validate_address::Response>;
 

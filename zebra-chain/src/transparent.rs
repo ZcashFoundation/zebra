@@ -218,7 +218,6 @@ impl Input {
     /// # Panics
     ///
     /// If the coinbase data is greater than [`MAX_COINBASE_DATA_LEN`].
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub fn new_coinbase(
         height: block::Height,
         data: Option<Vec<u8>>,
@@ -409,7 +408,6 @@ pub struct Output {
 
 impl Output {
     /// Returns a new coinbase output that pays `amount` using `lock_script`.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub fn new_coinbase(amount: Amount<NonNegative>, lock_script: Script) -> Output {
         Output {
             value: amount,

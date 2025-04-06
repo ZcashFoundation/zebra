@@ -2,7 +2,7 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
+//! cargo insta test --review --delete-unreferenced-snapshots
 //! ```
 
 use std::{

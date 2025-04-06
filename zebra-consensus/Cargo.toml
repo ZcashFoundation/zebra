@@ -24,13 +24,6 @@ progress-bar = [
     "zebra-state/progress-bar",
 ]
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-     "zebra-state/getblocktemplate-rpcs",
-     "zebra-node-services/getblocktemplate-rpcs",
-     "zebra-chain/getblocktemplate-rpcs",
-]
-
 # Test-only features
 proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "zebra-state/proptest-impl"]
 
