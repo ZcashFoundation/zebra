@@ -114,7 +114,7 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
         })
         .flatten()
         .try_fold(HashMap::new(), |mut asset_records, tx| {
-            process_burns(&mut asset_records, tx.orchard_burns().iter())?;
+            process_burns(&mut asset_records, tx.orchard_burns())?;
             process_issue_actions(&mut asset_records, tx.orchard_issue_actions())?;
             Ok(asset_records)
         })
