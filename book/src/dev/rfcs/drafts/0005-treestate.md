@@ -35,7 +35,8 @@ Many terms used here are defined in the [Zcash Protocol Specification](https://z
 which is spendable by the recipient who holds the spending key corresponding to
 a given shielded payment address.
 
-**nullifiers**: Revealed by `Spend` descriptions when its associated `Note` is spent.
+**nullifiers**: A value that prevents double-spending of a shielded payment.
+Revealed by `Spend` descriptions when its associated `Note` is spent.
 
 **nullifier set**: The set of unique `Nullifier`s revealed by any `Transaction`s
 within a `Block`. `Nullifier`s are enforced to be unique within a valid block chain
@@ -53,7 +54,7 @@ append-only: that's what the `Nullifier` set is for.
 
 **note position**: The index of a `NoteCommitment` at the leafmost layer,
 counting leftmost to rightmost. The [position in the tree is determined by the
-order of transactions in the block](https://zips.z.cash/protocol/canopy.pdf#transactions).
+order of transactions in the block](https://zips.z.cash/protocol/protocol.pdf#transactions).
 
 **root**: The layer 0 node of a Merkle tree.
 
@@ -111,7 +112,7 @@ For Sprout, we must compute/update interstitial `NoteCommitmentTree`s between
 `JoinSplit`s that may reference an earlier one's root as its anchor. If we do
 this at the transaction layer, we can iterate through all the `JoinSplit`s and
 compute the Sprout `NoteCommitmentTree` and nullifier set similar to how we do
-the Sapling ones as described above, but at each state change (ie,
+the Sapling ones as described below, but at each state change (ie,
 per-`JoinSplit`) we note the root and cache it for lookup later. As the
 `JoinSplit`s are validated without context, we check for its specified anchor
 amongst the interstitial roots we've already calculated (according to the spec,
@@ -143,7 +144,7 @@ the transaction validations. When the Sapling transactions are all validated,
 the `NoteCommitmentTree` root should be computed: this is the anchor for this
 block.
 
-## Anchor Validation Across Network Upgrades
+### Anchor Validation Across Network Upgrades
 
 For Sapling and Blossom blocks, we need to check that this root matches
 the `RootHash` bytes in this block's header, as the `FinalSaplingRoot`. Once all
@@ -170,6 +171,7 @@ time).
 ## State Management
 
 ### Orchard
+
 - There is a single copy of the latest Orchard Note Commitment Tree for the finalized tip.
 - When finalizing a block, the finalized tip is updated with a serialization of the latest Orchard Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
 - Each non-finalized chain gets its own copy of the Orchard note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
@@ -177,6 +179,7 @@ time).
 - When a block is rolled back from a non-finalized chain tip, the Orchard tree state is restored to its previous state before the block was added. This involves either keeping a reference to the previous state or recalculating from the fork point.
 
 ### Sapling
+
 - There is a single copy of the latest Sapling Note Commitment Tree for the finalized tip.
 - When finalizing a block, the finalized tip is updated with a serialization of the Sapling Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
 - Each non-finalized chain gets its own copy of the Sapling note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
@@ -184,6 +187,7 @@ time).
 - When a block is rolled back from a non-finalized chain tip, the Sapling tree state is restored to its previous state, similar to the Orchard process. This involves either maintaining a history of tree states or recalculating from the fork point.
 
 ### Sprout
+
 - Every finalized block stores a separate copy of the Sprout note commitment tree (😿), as of that block.
 - When finalizing a block, the Sprout note commitment tree for that block is stored in the state. (The trees for previous blocks also remain in the state.)
 - Every block in each non-finalized chain gets its own copy of the Sprout note commitment tree. The initial tree is cloned from the note commitment tree of the finalized tip or fork root.
@@ -191,6 +195,7 @@ time).
 - When a block is rolled back from a non-finalized chain tip, the trees for each block are deleted, along with that block.
 
 We can't just compute a fresh tree with just the note commitments within a block, we are adding them to the tree referenced by the anchor, but we cannot update that tree with just the anchor, we need the 'frontier' nodes and leaves of the incremental merkle tree.
+
 
 # Reference-level explanation
 [reference-level-explanation]: #reference-level-explanation
@@ -212,6 +217,7 @@ The implementation involves several key components:
 
 5. **Re-insertion Prevention**: Our implementation should prevent re-inserts of keys that have been deleted from the database, as this could lead to inconsistencies. The state service tracks deletion events and validates insertion operations accordingly.
 
+
 # Drawbacks
 [drawbacks]: #drawbacks
 
@@ -222,6 +228,7 @@ The implementation involves several key components:
 3. **Implementation Complexity**: Managing multiple tree states across different protocols adds complexity to the codebase.
 
 4. **Fork Handling**: Maintaining correct tree states during chain reorganizations requires careful handling.
+
 
 # Rationale and alternatives
 [rationale-and-alternatives]: #rationale-and-alternatives
@@ -244,6 +251,7 @@ Alternative approaches considered:
 
 3. **Full History Storage**: Store complete tree states for all blocks. This would optimize validation speed but require excessive storage.
 
+
 # Prior art
 [prior-art]: #prior-art
 
@@ -252,6 +260,7 @@ Alternative approaches considered:
 2. **Lightwalletd**: Provides a simplified approach to tree state management focused on scanning rather than full validation.
 
 3. **Incrementalmerkletree Crate**: Our implementation leverages this existing Rust crate for efficient tree management.
+
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
@@ -263,6 +272,7 @@ Alternative approaches considered:
 3. **Re-insertion Prevention**: What's the most efficient approach to prevent re-inserts of deleted keys?
 
 4. **Concurrency Model**: How do we best handle concurrent access to tree states during parallel validation?
+
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
