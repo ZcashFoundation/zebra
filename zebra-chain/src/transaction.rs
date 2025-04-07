@@ -1110,11 +1110,11 @@ impl Transaction {
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => Box::new(orchard_shielded_data.iter().flat_map(|data| {
-                data.action_groups
+            } => Box::new(
+                orchard_shielded_data
                     .iter()
-                    .flat_map(|action_group| action_group.burn.as_ref().iter())
-            })),
+                    .flat_map(|data| data.burn.as_ref().iter()),
+            ),
         }
     }
 
