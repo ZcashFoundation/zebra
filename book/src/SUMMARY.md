@@ -45,6 +45,7 @@
     - [Asynchronous Script Verification](dev/rfcs/0004-asynchronous-script-verification.md)
     - [State Updates](dev/rfcs/0005-state-updates.md)
     - [Contextual Difficulty Validation](dev/rfcs/0006-contextual-difficulty.md)
+    - [Tree States](dev/rfcs/0007-treestate.md)
     - [Zebra Client](dev/rfcs/0009-zebra-client.md)
     - [V5 Transaction](dev/rfcs/0010-v5-transaction.md)
     - [Async Rust in Zebra](dev/rfcs/0011-async-rust-in-zebra.md)
