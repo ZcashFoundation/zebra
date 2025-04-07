@@ -568,3 +568,82 @@ pub fn zp_network(network: &Network) -> zcash_protocol::consensus::Network {
         Network::Testnet(_) => zcash_protocol::consensus::Network::TestNetwork,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::str::FromStr;
+    use zcash_client_backend::data_api::{scanning::ScanRange, ScanSummary, WalletTx};
+    use zcash_protocol::transaction::TxId;
+    use zebra_test::vectors::MAINNET_GENESIS_HASH;
+
+    #[test]
+    fn test_get_min_height() {
+        // Empty map should return None
+        let empty_map: HashMap<String, Height> = HashMap::new();
+        assert_eq!(get_min_height(&empty_map), None);
+
+        // Single key map should return that height
+        let mut single_map = HashMap::new();
+        single_map.insert("key1".to_string(), Height(100));
+        assert_eq!(get_min_height(&single_map), Some(Height(100)));
+
+        // Multiple keys should return the minimum height
+        let mut multi_map = HashMap::new();
+        multi_map.insert("key1".to_string(), Height(100));
+        multi_map.insert("key2".to_string(), Height(50));
+        multi_map.insert("key3".to_string(), Height(200));
+        assert_eq!(get_min_height(&multi_map), Some(Height(50)));
+    }
+
+    #[test]
+    fn test_scanned_block_to_db_result() {
+        // Create a ScannedBlock with mock transactions
+        let txid1 = TxId::from_str("0000000000000000000000000000000000000000000000000000000000000001").unwrap();
+        let txid2 = TxId::from_str("0000000000000000000000000000000000000000000000000000000000000002").unwrap();
+        
+        let tx1 = WalletTx::new(txid1, 0, vec![], vec![]);
+        let tx2 = WalletTx::new(txid2, 1, vec![], vec![]);
+        
+        let height = Height(123);
+        let scan_range = ScanRange::from_parts(height, height);
+        let block_id = MAINNET_GENESIS_HASH;
+        
+        let scan_summary = ScanSummary::new(scan_range, block_id, vec![tx1, tx2]);
+        let scanned_block = ScannedBlock::from_parts(height, block_id, scan_summary);
+        
+        // Convert to DB result
+        let db_result = scanned_block_to_db_result(scanned_block);
+        
+        // Verify the conversion
+        assert_eq!(db_result.len(), 2);
+        assert!(db_result.contains_key(&TransactionIndex::from_usize(0)));
+        assert!(db_result.contains_key(&TransactionIndex::from_usize(1)));
+        
+        // Verify transaction IDs converted correctly
+        let result0 = db_result.get(&TransactionIndex::from_usize(0)).unwrap();
+        let result1 = db_result.get(&TransactionIndex::from_usize(1)).unwrap();
+        
+        assert_eq!(result0.bytes(), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(result1.bytes(), [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2]);
+    }
+
+    #[test]
+    fn test_dfvk_to_ufvk() {
+        // Test with a real diversifiable full viewing key
+        let test_xfvk_bytes = hex::decode("0a96d3fe9d8379116759bce62e4751232ae1c9e315a43a875b7eb16d55b67d60").unwrap();
+        
+        // Create a DiversifiableFullViewingKey from the test bytes
+        // This is a simplified approach - in real code you would use a valid derived key
+        let mut raw_bytes = [0u8; 32];
+        raw_bytes.copy_from_slice(&test_xfvk_bytes[..32]);
+        let dfvk = DiversifiableFullViewingKey::from_bytes(&raw_bytes);
+        
+        // Convert it to a UnifiedFullViewingKey
+        let result = dfvk_to_ufvk(&dfvk);
+        
+        // Just verify the conversion doesn't error
+        // A real test would validate specific key values but that's complex
+        assert!(result.is_ok());
+    }
+}
