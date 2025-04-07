@@ -10,9 +10,9 @@
 
 To validate blocks involving shielded transactions, we have to check the
 computed treestate from the included transactions against the block header
-metadata (for Sapling and Orchard) or previously finalized state (for Sprout). This document
-describes how we compute and manage that data, assuming a finalized state
-service as described in the [State Updates RFC](https://zebra.zfnd.org/dev/rfcs/0005-state-updates.md).
+metadata (for Sapling and Orchard) or previously finalized state (for Sprout).
+This document describes how we compute and manage that data, assuming a finalized
+state service as described in the [State Updates RFC](https://zebra.zfnd.org/dev/rfcs/0005-state-updates.md).
 
 
 # Motivation
@@ -80,9 +80,9 @@ an anchor of some previous `Block`'s `NoteCommitment` tree.
 
 ## Orchard Definitions
 
-**action descriptions**: A shielded Orchard transfer that spends and/or creates a `Note`. 
-Does not include an anchor, because that is encoded once in the `anchorOrchard` 
-field of a V5 `Transaction`.
+**action descriptions**: A shielded Orchard transfer that spends and/or creates a
+`Note`. Does not include an anchor, because that is encoded once in the
+`anchorOrchard` field of a V5 `Transaction`.
 
 
 # Guide-level explanation
@@ -127,12 +127,12 @@ root pops out, that `JoinSplit` passes that check.
 
 As the transactions within a block are parsed, Sapling shielded transactions
 including `Spend` descriptions and `Output` descriptions describe the spending and
-creation of Zcash Sapling notes. `Spend` descriptions specify an anchor, which references a previous 
-`NoteCommitment` tree root. This is a previous block's anchor as defined in their block header. 
-This is convenient because we can query our state service for
-previously finalized Sapling block anchors, and if they are found, then that
-[consensus check](https://zips.z.cash/protocol/canopy.pdf#spendsandoutputs) has
-been satisfied and the `Spend` description can be validated independently.
+creation of Zcash Sapling notes. `Spend` descriptions specify an anchor, which
+references a previous `NoteCommitment` tree root. This is a previous block's anchor
+as defined in their block header. This is convenient because we can query our state
+service for previously finalized Sapling block anchors, and if they are found, then
+that [consensus check](https://zips.z.cash/protocol/canopy.pdf#spendsandoutputs)
+has been satisfied and the `Spend` description can be validated independently.
 
 For Sapling, at the block layer, we can iterate over all the transactions in
 order and if they have `Spend`s and/or `Output`s, we update our Nullifer set for
@@ -152,49 +152,80 @@ other consensus and validation checks are done, this will be saved down to our
 finalized state to our `sapling_anchors` set, making it available for lookup by
 other Sapling descriptions in future transactions.
 
-In Heartwood and Canopy, the rules for final Sapling roots are modified to support empty blocks by allowing an empty subtree hash instead of requiring the root to match the previous block's final Sapling root when there are no Sapling transactions.
+In Heartwood and Canopy, the rules for final Sapling roots are modified to support
+empty blocks by allowing an empty subtree hash instead of requiring the root to
+match the previous block's final Sapling root when there are no Sapling transactions.
 
-In NU5, the rules are further extended to include Orchard note commitment trees, with similar logic applied to the `anchorOrchard` field in V5 transactions.
+In NU5, the rules are further extended to include Orchard note commitment trees,
+with similar logic applied to the `anchorOrchard` field in V5 transactions.
 
 ## Orchard Processing
 
-For Orchard, similar to Sapling, action descriptions can spend and create notes. The anchor is specified at the transaction level in the `anchorOrchard` field of a V5 transaction. The process follows similar steps to Sapling for validation and inclusion in blocks.
+For Orchard, similar to Sapling, action descriptions can spend and create notes.
+The anchor is specified at the transaction level in the `anchorOrchard` field of
+a V5 transaction. The process follows similar steps to Sapling for validation and
+inclusion in blocks.
 
 ## Block Finalization
 
-To finalize the block, the Sprout, Sapling, and Orchard treestates are the ones resulting
-from the last transaction in the block, and determines the respective anchors that will be associated with this block as we commit it to our finalized
-state. The nullifiers revealed in the block will be merged
-with the existing ones in our finalized state (ie, it should strictly grow over
-time).
+To finalize the block, the Sprout, Sapling, and Orchard treestates are the ones
+resulting from the last transaction in the block, and determines the respective
+anchors that will be associated with this block as we commit it to our finalized
+state. The nullifiers revealed in the block will be merged with the existing ones
+in our finalized state (ie, it should strictly grow over time).
 
 ## State Management
 
 ### Orchard
 
-- There is a single copy of the latest Orchard Note Commitment Tree for the finalized tip.
-- When finalizing a block, the finalized tip is updated with a serialization of the latest Orchard Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
-- Each non-finalized chain gets its own copy of the Orchard note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
-- When a block is added to a non-finalized chain tip, the Orchard note commitment tree is updated with the note commitments from that block.
-- When a block is rolled back from a non-finalized chain tip, the Orchard tree state is restored to its previous state before the block was added. This involves either keeping a reference to the previous state or recalculating from the fork point.
+- There is a single copy of the latest Orchard Note Commitment Tree for the
+finalized tip.
+- When finalizing a block, the finalized tip is updated with a serialization of
+the latest Orchard Note Commitment Tree. (The previous tree should be deleted as
+part of the same database transaction.)
+- Each non-finalized chain gets its own copy of the Orchard note commitment tree,
+cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Orchard note commitment
+tree is updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip, the Orchard tree
+state is restored to its previous state before the block was added. This involves
+either keeping a reference to the previous state or recalculating from the fork
+point.
 
 ### Sapling
 
-- There is a single copy of the latest Sapling Note Commitment Tree for the finalized tip.
-- When finalizing a block, the finalized tip is updated with a serialization of the Sapling Note Commitment Tree. (The previous tree should be deleted as part of the same database transaction.)
-- Each non-finalized chain gets its own copy of the Sapling note commitment tree, cloned from the note commitment tree of the finalized tip or fork root.
-- When a block is added to a non-finalized chain tip, the Sapling note commitment tree is updated with the note commitments from that block.
-- When a block is rolled back from a non-finalized chain tip, the Sapling tree state is restored to its previous state, similar to the Orchard process. This involves either maintaining a history of tree states or recalculating from the fork point.
+- There is a single copy of the latest Sapling Note Commitment Tree for the
+finalized tip.
+- When finalizing a block, the finalized tip is updated with a serialization of
+the Sapling Note Commitment Tree. (The previous tree should be deleted as part
+of the same database transaction.)
+- Each non-finalized chain gets its own copy of the Sapling note commitment tree,
+cloned from the note commitment tree of the finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Sapling note commitment
+tree is updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip, the Sapling tree
+state is restored to its previous state, similar to the Orchard process. This
+involves either maintaining a history of tree states or recalculating from the
+fork point.
 
 ### Sprout
 
-- Every finalized block stores a separate copy of the Sprout note commitment tree (😿), as of that block.
-- When finalizing a block, the Sprout note commitment tree for that block is stored in the state. (The trees for previous blocks also remain in the state.)
-- Every block in each non-finalized chain gets its own copy of the Sprout note commitment tree. The initial tree is cloned from the note commitment tree of the finalized tip or fork root.
-- When a block is added to a non-finalized chain tip, the Sprout note commitment tree is cloned, then updated with the note commitments from that block.
-- When a block is rolled back from a non-finalized chain tip, the trees for each block are deleted, along with that block.
+- Every finalized block stores a separate copy of the Sprout note commitment
+tree (😿), as of that block.
+- When finalizing a block, the Sprout note commitment tree for that block is stored
+in the state. (The trees for previous blocks also remain in the state.)
+- Every block in each non-finalized chain gets its own copy of the Sprout note
+commitment tree. The initial tree is cloned from the note commitment tree of the
+finalized tip or fork root.
+- When a block is added to a non-finalized chain tip, the Sprout note commitment
+tree is cloned, then updated with the note commitments from that block.
+- When a block is rolled back from a non-finalized chain tip, the trees for each
+block are deleted, along with that block.
 
-We can't just compute a fresh tree with just the note commitments within a block, we are adding them to the tree referenced by the anchor, but we cannot update that tree with just the anchor, we need the 'frontier' nodes and leaves of the incremental merkle tree.
+We can't just compute a fresh tree with just the note commitments within a block,
+we are adding them to the tree referenced by the anchor, but we cannot update that
+tree with just the anchor, we need the 'frontier' nodes and leaves of the
+incremental merkle tree.
 
 
 # Reference-level explanation
@@ -202,9 +233,11 @@ We can't just compute a fresh tree with just the note commitments within a block
 
 The implementation involves several key components:
 
-1. **Incremental Merkle Trees**: We use the `incrementalmerkletree` crate to implement the note commitment trees for each shielded pool.
+1. **Incremental Merkle Trees**: We use the `incrementalmerkletree` crate to
+implement the note commitment trees for each shielded pool.
 
-2. **Nullifier Storage**: We maintain nullifier sets in RocksDB to efficiently check for duplicates.
+2. **Nullifier Storage**: We maintain nullifier sets in RocksDB to efficiently
+check for duplicates.
 
 3. **Tree State Management**: 
    - For finalized blocks, we store the tree states in RocksDB.
@@ -212,22 +245,30 @@ The implementation involves several key components:
 
 4. **Anchor Verification**:
    - For Sprout: we check anchors against our stored Sprout tree roots.
-   - For Sapling: we compare the computed root against the block header's `FinalSaplingRoot`.
+   - For Sapling: we compare the computed root against the block header's
+`FinalSaplingRoot`.
    - For Orchard: we validate the `anchorOrchard` field in V5 transactions.
 
-5. **Re-insertion Prevention**: Our implementation should prevent re-inserts of keys that have been deleted from the database, as this could lead to inconsistencies. The state service tracks deletion events and validates insertion operations accordingly.
+5. **Re-insertion Prevention**: Our implementation should prevent re-inserts
+of keys that have been deleted from the database, as this could lead to
+inconsistencies. The state service tracks deletion events and validates insertion
+operations accordingly.
 
 
 # Drawbacks
 [drawbacks]: #drawbacks
 
-1. **Storage Requirements**: Storing separate tree states (especially for Sprout) requires significant disk space.
+1. **Storage Requirements**: Storing separate tree states (especially for Sprout)
+requires significant disk space.
 
-2. **Performance Impact**: Computing and verifying tree states can be computationally expensive, potentially affecting sync performance.
+2. **Performance Impact**: Computing and verifying tree states can be
+computationally expensive, potentially affecting sync performance.
 
-3. **Implementation Complexity**: Managing multiple tree states across different protocols adds complexity to the codebase.
+3. **Implementation Complexity**: Managing multiple tree states across different
+protocols adds complexity to the codebase.
 
-4. **Fork Handling**: Maintaining correct tree states during chain reorganizations requires careful handling.
+4. **Fork Handling**: Maintaining correct tree states during chain reorganizations
+requires careful handling.
 
 
 # Rationale and alternatives
@@ -235,54 +276,71 @@ The implementation involves several key components:
 
 We chose this approach because:
 
-1. **Protocol Compatibility**: Our implementation follows the Zcash protocol specification requirements for handling note commitment trees and anchors.
+1. **Protocol Compatibility**: Our implementation follows the Zcash protocol
+specification requirements for handling note commitment trees and anchors.
 
-2. **Performance Optimization**: By caching tree states, we avoid recomputing them for every validation operation.
+2. **Performance Optimization**: By caching tree states, we avoid recomputing
+them for every validation operation.
 
-3. **Memory Efficiency**: For non-finalized chains, we only keep necessary tree states in memory.
+3. **Memory Efficiency**: For non-finalized chains, we only keep necessary tree
+states in memory.
 
-4. **Scalability**: The design scales with chain growth by efficiently managing storage requirements.
+4. **Scalability**: The design scales with chain growth by efficiently managing
+storage requirements.
 
 Alternative approaches considered:
 
-1. **Recompute Trees On-Demand**: Instead of storing tree states, recompute them when needed. This would save storage but significantly impact performance.
+1. **Recompute Trees On-Demand**: Instead of storing tree states, recompute them
+when needed. This would save storage but significantly impact performance.
 
-2. **Single Tree State**: Maintain only the latest tree state and recompute for historical blocks. This would simplify implementation but make historical validation harder.
+2. **Single Tree State**: Maintain only the latest tree state and recompute for
+historical blocks. This would simplify implementation but make historical validation harder.
 
-3. **Full History Storage**: Store complete tree states for all blocks. This would optimize validation speed but require excessive storage.
+3. **Full History Storage**: Store complete tree states for all blocks. This would optimize
+validation speed but require excessive storage.
 
 
 # Prior art
 [prior-art]: #prior-art
 
-1. **Zcashd**: Uses similar concepts but with differences in implementation details, particularly around storage and concurrency.
+1. **Zcashd**: Uses similar concepts but with differences in implementation details,
+particularly around storage and concurrency.
 
-2. **Lightwalletd**: Provides a simplified approach to tree state management focused on scanning rather than full validation.
+2. **Lightwalletd**: Provides a simplified approach to tree state management focused
+on scanning rather than full validation.
 
-3. **Incrementalmerkletree Crate**: Our implementation leverages this existing Rust crate for efficient tree management.
+3. **Incrementalmerkletree Crate**: Our implementation leverages this existing Rust
+crate for efficient tree management.
 
 
 # Unresolved questions
 [unresolved-questions]: #unresolved-questions
 
-1. **Optimization Opportunities**: Are there further optimizations we can make to reduce storage requirements while maintaining performance?
+1. **Optimization Opportunities**: Are there further optimizations we can make to reduce
+storage requirements while maintaining performance?
 
-2. **Root Storage**: Should we store the `Root` hash in `sprout_note_commitment_tree`, and use it to look up the complete tree state when needed?
+2. **Root Storage**: Should we store the `Root` hash in `sprout_note_commitment_tree`,
+and use it to look up the complete tree state when needed?
 
-3. **Re-insertion Prevention**: What's the most efficient approach to prevent re-inserts of deleted keys?
+3. **Re-insertion Prevention**: What's the most efficient approach to prevent re-inserts
+of deleted keys?
 
-4. **Concurrency Model**: How do we best handle concurrent access to tree states during parallel validation?
+4. **Concurrency Model**: How do we best handle concurrent access to tree states during
+parallel validation?
 
 
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
-1. **Pruning Strategies**: Implement advanced pruning strategies for historical tree states to reduce storage requirements.
+1. **Pruning Strategies**: Implement advanced pruning strategies for historical tree states
+to reduce storage requirements.
 
 2. **Parallelization**: Further optimize tree state updates for parallel processing.
 
 3. **Checkpoint Verification**: Use tree states for efficient checkpoint-based verification.
 
-4. **Light Client Support**: Leverage tree states to support Zebra-based light clients with efficient proof verification.
+4. **Light Client Support**: Leverage tree states to support Zebra-based light clients with
+efficient proof verification.
 
-5. **State Storage Optimization**: Investigate more efficient serialization formats and storage mechanisms for tree states.
+5. **State Storage Optimization**: Investigate more efficient serialization formats and storage
+mechanisms for tree states.
