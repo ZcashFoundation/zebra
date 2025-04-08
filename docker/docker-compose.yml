@@ -15,13 +15,12 @@ services:
       - zebrad-cache:/home/zebra/.cache/zebra
     # Having `tty` set to true makes Zebra use colored logs.
     tty: true
-    #! Uncomment the `configs` mapping below to make your custom configuration
-    #! take effect.
-    #
-    # configs:
-    #   - source: zebra-config
-    #     target: /home/zebra/.config/zebrad.toml
-    #
+    # ! Comment out the `configs` mapping below to not use our default configuration file.
+    # ! This will use the environment variables in the `.env` file.
+    configs:
+      - source: zebra-config
+        target: /home/zebra/.config/zebrad.toml
+
     # Uncomment the `ports` mapping below to map ports between the container and
     # host.
     #
