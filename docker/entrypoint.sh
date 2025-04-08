@@ -43,7 +43,7 @@ prepare_conf_file() {
   cat >"${ZEBRA_CONF_PATH}" <<EOF
 [network]
 network = "${NETWORK:=Mainnet}"
-listen_addr = "${ZEBRA_LISTEN_ADDR:=0.0.0.0}"
+listen_addr = "0.0.0.0"
 cache_dir = "${ZEBRA_CACHE_DIR}"
 
 [state]
@@ -53,7 +53,7 @@ $( [[ -n ${ZEBRA_RPC_PORT} ]] && cat <<-SUB_EOF
 
 [rpc]
 listen_addr = "${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
-enable_cookie_auth = ${ENABLE_COOKIE_AUTH:=false}
+enable_cookie_auth = ${ENABLE_COOKIE_AUTH:=true}
 $( [[ -n ${ZEBRA_COOKIE_DIR} ]] && echo "cookie_dir = \"${ZEBRA_COOKIE_DIR}\"" )
 SUB_EOF
 )
