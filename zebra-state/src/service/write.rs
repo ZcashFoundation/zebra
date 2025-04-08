@@ -162,7 +162,7 @@ pub(super) struct BlockWriteSender {
 }
 
 impl BlockWriteSender {
-    /// Creates a new [`WriteBlockWorker`] with the given receivers and states.
+    /// Creates a new [`BlockWriteSender`] with the given receivers and states.
     #[instrument(
         level = "debug",
         skip_all,

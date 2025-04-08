@@ -2988,7 +2988,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let _init_guard = zebra_test::init();
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
     config.state.ephemeral = false;
-    // let network = config.network.network.clone();
 
     let test_dir = testdir()?.with_config(&mut config)?;
 
@@ -3091,7 +3090,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
             .await;
 
-        tracing::info!(?fut, "iojads");
 
         let (block, _height) = fut?;
 

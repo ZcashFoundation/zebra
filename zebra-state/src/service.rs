@@ -326,8 +326,6 @@ impl StateService {
         let (non_finalized_state_sender, non_finalized_state_receiver) =
             watch::channel(NonFinalizedState::new(&finalized_state.network()));
 
-        // Security: The number of blocks in these channels is limited by
-        //           the syncer and inbound lookahead limits.
         let finalized_state_for_writing = finalized_state.clone();
         let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
             write::BlockWriteSender::spawn(
