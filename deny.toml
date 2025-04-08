@@ -100,7 +100,10 @@ skip-tree = [
     { name = "rustix", version = "=0.38.44" },
 
     # wait for reqwest to update windows-registry
-    { name = "windows-strings", version = "=0.3.1" }
+    { name = "windows-strings", version = "=0.3.1" },
+
+    # wait for sentry to update windows-core
+    { name = "windows-core", version = "=0.52.0" }
 ]
 
 # This section is considered when running `cargo deny check sources`.
