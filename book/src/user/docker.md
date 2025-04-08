@@ -54,11 +54,8 @@ docker build \
 
 ### Alternatives
 
-See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) for more information.
+See [Building Zebra](https://github.com/ZcashFoundation/zebra#manual-build) for more information.
 
-## Advanced usage
-
-You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like metrics with Prometheus.
 
 ### Building with Custom Features
 
