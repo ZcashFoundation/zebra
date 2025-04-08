@@ -21,15 +21,6 @@ set -eo pipefail
 : "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
 : "${ZEBRA_COOKIE_DIR:=${HOME}/.config/cookie}"
 
-# Set default RPC_PORT based on NETWORK if RPC_PORT is not already set.
-if [[ -z "${RPC_PORT}" ]]; then
-  if [[ "${NETWORK}" = "Mainnet" ]]; then
-    : "${RPC_PORT:=8232}"
-  elif [[ "${NETWORK}" = "Testnet" ]]; then
-    : "${RPC_PORT:=18232}"
-  fi
-fi
-
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
   user=$(id -u)
@@ -61,7 +52,7 @@ cache_dir = "${ZEBRA_CACHE_DIR}"
 $( [[ -n ${ZEBRA_RPC_PORT} ]] && cat <<-SUB_EOF
 
 [rpc]
-listen_addr = "${RPC_LISTEN_ADDR:=0.0.0.0}:${RPC_PORT:=8232}"
+listen_addr = "${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
 enable_cookie_auth = ${ENABLE_COOKIE_AUTH:=false}
 $( [[ -n ${ZEBRA_COOKIE_DIR} ]] && echo "cookie_dir = \"${ZEBRA_COOKIE_DIR}\"" )
 SUB_EOF
