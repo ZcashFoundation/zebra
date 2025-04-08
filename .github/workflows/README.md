@@ -49,7 +49,7 @@ graph TB
     subgraph "Unit Test Flow"
         direction TB
         C[sub-ci-unit-tests-docker.yml]
-        H[test-all] & I[test-fake-activation-heights] & J[test-empty-sync] & K[test-lightwalletd-integration] & L[test-configuration-file]
+        H[test-all] & I[test-fake-activation-heights] & J[test-empty-sync] & K[test-lightwalletd-integration] & L[test-docker-configurations]
         C --> H
         C --> I
         C --> J
