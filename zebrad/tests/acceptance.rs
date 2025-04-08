@@ -3090,7 +3090,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
             .await;
 
-
         let (block, _height) = fut?;
 
         rpc_client.submit_block(block.clone()).await?;
