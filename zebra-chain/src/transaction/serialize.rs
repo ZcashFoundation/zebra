@@ -683,8 +683,8 @@ impl ZcashSerialize for Transaction {
                 sapling_shielded_data,
                 orchard_shielded_data,
             } => {
-                // Transaction V5 spec:
-                // https://zips.z.cash/protocol/protocol.pdf#txnencoding
+                // Transaction V6 spec:
+                // https://zips.z.cash/zip-0230#specification
 
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
