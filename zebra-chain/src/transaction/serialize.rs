@@ -718,6 +718,8 @@ impl ZcashSerialize for Transaction {
                 // `flagsOrchard`,`valueBalanceOrchard`, `anchorOrchard`, `sizeProofsOrchard`,
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
+                
+                // TODO: Add the rest of v6 transaction fields.
             }
         }
         Ok(())
