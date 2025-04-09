@@ -1041,7 +1041,7 @@ where
     }
 
     /// Passthrough to verify_v5_transaction, but for V6 transactions.
-    #[cfg(feature="tx_v6")]
+    #[cfg(feature = "tx_v6")]
     fn verify_v6_transaction(
         request: &Request,
         network: &Network,
