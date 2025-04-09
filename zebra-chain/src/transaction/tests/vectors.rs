@@ -920,7 +920,7 @@ fn binding_signatures() {
                         ..
                     } => {
                         if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            // V5 txs have the outputs spent by their transparent inputs hashed into
+                            // V6 txs have the outputs spent by their transparent inputs hashed into
                             // their SIGHASH, so we need to exclude txs with transparent inputs.
                             //
                             // References:
