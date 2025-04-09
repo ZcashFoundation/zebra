@@ -60,6 +60,8 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
+tx_v6 = []
+
 [dependencies]
 
 # Cryptography
