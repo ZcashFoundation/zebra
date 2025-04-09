@@ -925,7 +925,7 @@ pub fn transaction_to_fake_v5(
         },
         v5 @ V5 { .. } => v5.clone(),
         #[cfg(feature = "tx_v6")]
-        v5 @ V6 { .. } => v5.clone(),
+        v6 @ V6 { .. } => v6.clone(),
     }
 }
 

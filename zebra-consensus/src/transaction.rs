@@ -528,7 +528,7 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } => Self::verify_v5_transaction(
+                } => Self::verify_v6_transaction(
                     &req,
                     &network,
                     script_verifier,
@@ -1038,6 +1038,26 @@ where
                 network_upgrade,
             )),
         }
+    }
+
+    /// Passthrough to verify_v5_transaction, but for V6 transactions.
+    #[cfg(feature="tx_v6")]
+    fn verify_v6_transaction(
+        request: &Request,
+        network: &Network,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        Self::verify_v5_transaction(
+            request,
+            network,
+            script_verifier,
+            cached_ffi_transaction,
+            sapling_shielded_data,
+            orchard_shielded_data,
+        )
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
