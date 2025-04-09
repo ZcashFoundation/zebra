@@ -254,6 +254,22 @@ impl Input {
         }
     }
 
+    /// Returns the full coinbase script (the encoded height along with the
+    /// extra data) if this is an [`Input::Coinbase`]. Also returns `None` if
+    /// the coinbase is for the genesis block but does not match the expected
+    /// genesis coinbase data.
+    pub fn coinbase_script(&self) -> Option<Vec<u8>> {
+        match self {
+            Input::PrevOut { .. } => None,
+            Input::Coinbase { height, data, .. } => {
+                let mut height_and_data = Vec::new();
+                serialize::write_coinbase_height(*height, data, &mut height_and_data).ok()?;
+                height_and_data.extend(&data.0);
+                Some(height_and_data)
+            }
+        }
+    }
+
     /// Returns the input's sequence number.
     pub fn sequence(&self) -> u32 {
         match self {

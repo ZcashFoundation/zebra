@@ -9,7 +9,7 @@ use zebra_chain::{
     parameters::Network,
     sapling::NotSmallOrderValueCommitment,
     transaction::{SerializedTransaction, Transaction},
-    transparent::{CoinbaseData, Script},
+    transparent::Script,
 };
 use zebra_consensus::groth16::Description;
 use zebra_state::IntoDisk;
@@ -70,7 +70,7 @@ pub enum Input {
     Coinbase {
         /// The coinbase scriptSig as hex.
         #[serde(with = "hex")]
-        coinbase: CoinbaseData,
+        coinbase: Vec<u8>,
         /// The script sequence number.
         sequence: u32,
     },
@@ -104,6 +104,9 @@ pub struct Output {
     /// The value in zats.
     #[serde(rename = "valueZat")]
     value_zat: i64,
+    /// The value in zats (again with a different name for some reason).
+    #[serde(rename = "valueSat")]
+    value_sat: i64,
     /// index.
     n: u32,
     /// The scriptPubKey.
@@ -265,9 +268,11 @@ impl TransactionObject {
                 tx.inputs()
                     .iter()
                     .map(|input| match input {
-                        zebra_chain::transparent::Input::Coinbase { sequence, data, .. } => {
+                        zebra_chain::transparent::Input::Coinbase { sequence, .. } => {
                             Input::Coinbase {
-                                coinbase: data.clone(),
+                                coinbase: input
+                                    .coinbase_script()
+                                    .expect("we know it is a valid coinbase script"),
                                 sequence: *sequence,
                             }
                         }
@@ -303,6 +308,7 @@ impl TransactionObject {
                         Output {
                             value: types::Zec::from(output.1.value).lossy_zec(),
                             value_zat: output.1.value.zatoshis(),
+                            value_sat: output.1.value.zatoshis(),
                             n: output.0 as u32,
                             script_pub_key: ScriptPubKey {
                                 asm: "".to_string(),
