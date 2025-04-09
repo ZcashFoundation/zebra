@@ -78,7 +78,7 @@ docker build -f ./docker/Dockerfile --target runtime \
 All available Cargo features are listed at
 <https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags>.
 
-## Configuring Zebra with Docker Compose
+## Configuring Zebra
 
 To configure Zebra, edit the `docker/default-zebra-config.toml` config file and
 uncomment the `configs` mapping in `docker/docker-compose.yml` so your config
