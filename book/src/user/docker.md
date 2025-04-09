@@ -17,6 +17,8 @@ If you want to preserve Zebra's state, you can create a Docker volume:
 docker volume create zebrad-cache
 ```
 
+And mount it before you start the container:
+
 ```shell
 docker run \
   --mount source=zebrad-cache,target=/home/zebra/.cache/zebra \
