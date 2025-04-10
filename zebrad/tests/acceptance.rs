@@ -1974,6 +1974,21 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         )?;
     }
 
+    // Wait for zebrad to sync the genesis block before launching lightwalletd,
+    // if lightwalletd is launched and zebrad starts with an empty state.
+    // This prevents lightwalletd from exiting early due to an empty state.
+    if test_type.launches_lightwalletd() && !test_type.needs_zebra_cached_state() {
+        tracing::info!(
+            ?test_type,
+            "waiting for zebrad to sync genesis block before launching lightwalletd...",
+        );
+        // Wait for zebrad to commit the genesis block to the state.
+        // Use the syncer's state tip log message, as the specific commit log might not appear reliably.
+        zebrad.expect_stdout_line_matches(
+            "starting sync, obtaining new tips state_tip=Some\\(Height\\(0\\)\\)",
+        )?;
+    }
+
     // Launch lightwalletd, if needed
     let lightwalletd_and_port = if test_type.launches_lightwalletd() {
         tracing::info!(
