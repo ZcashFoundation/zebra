@@ -78,8 +78,10 @@ RUN addgroup --quiet --gid ${GID} ${USER} && \
     adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
 # Set the working directory for the build.
-ARG CARGO_HOME
 WORKDIR ${HOME}
+
+ARG CARGO_HOME
+ARG CARGO_TARGET_DIR=${HOME}/target
 
 # Build Zebra test binaries, but don't run them
 #
@@ -106,12 +108,12 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${HOME}/target/ \
+    --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
     cargo test --locked --release --workspace --no-run \
     --features "${FEATURES} zebra-checkpoints" && \
-    cp ${HOME}/target/release/zebrad /usr/local/bin && \
-    cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
+    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin
 
 # Copy the lightwalletd binary and source files to be able to run tests
 # COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
@@ -121,9 +123,8 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
 COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 
 # As the build has already run with the root user,
-# we need to set the correct permissions for the home and cargo home dirs owned by it.
-RUN chown -R ${UID}:${GID} "${HOME}" && \
-    chown -R ${UID}:${GID} "${CARGO_HOME}"
+# we need to set the correct permissions for the home dir owned by it.
+RUN chown -R ${UID}:${GID} ${HOME}
 
 COPY --link --chown=${UID}:${GID} ./ ${HOME}
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
@@ -139,8 +140,10 @@ FROM deps AS release
 
 # Set the working directory for the build.
 ARG HOME
-ARG CARGO_HOME
 WORKDIR ${HOME}
+
+ARG CARGO_HOME
+ARG CARGO_TARGET_DIR=${HOME}/target
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
