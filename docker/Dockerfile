@@ -94,7 +94,7 @@ ARG CARGO_TARGET_DIR
 # for compiled dependencies which will speed up subsequent builds.
 # Bind mounts to each crate directory are not leveraged here as we need to copy
 # the source code into the container anyways for some tests to run as expected.
-# Once built, copy the executable to an output directory before the cache
+# Once built, copy the executables to an output directory before the cache
 # mounted ${CARGO_TARGET_DIR} is unmounted, and copy the cargo home directory
 # to a temporary directory to avoid having to re-download dependencies for
 # subsequent builds.
@@ -107,10 +107,13 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --features "${FEATURES} zebra-checkpoints" && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
-    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home
+    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home && \
+    cp -a ${CARGO_TARGET_DIR} ${HOME}/tmp_cargo_target
 
 RUN mv ${HOME}/tmp_cargo_home/* ${CARGO_HOME} && \
-    rm -rf ${HOME}/tmp_cargo_home
+    mv ${HOME}/tmp_cargo_target/* ${CARGO_TARGET_DIR} && \
+    rm -rf ${HOME}/tmp_cargo_home && \
+    rm -rf ${HOME}/tmp_cargo_target
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
