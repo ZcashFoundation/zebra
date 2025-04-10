@@ -99,7 +99,7 @@ ARG CARGO_TARGET_DIR
 # to a temporary directory to avoid having to re-download dependencies for
 # subsequent builds.
 
-COPY --link --chown=${UID}:${GID} ./ ${HOME}
+COPY --link ./ ${HOME}
 
 RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
@@ -107,8 +107,8 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --features "${FEATURES} zebra-checkpoints" && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
-    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home && \
-    cp -a ${CARGO_TARGET_DIR} ${HOME}/tmp_cargo_target
+    cp -a ${CARGO_TARGET_DIR} ${HOME}/tmp_cargo_target && \
+    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home
 
 RUN mv ${HOME}/tmp_cargo_home/* ${CARGO_HOME} && \
     mv ${HOME}/tmp_cargo_target/* ${CARGO_TARGET_DIR} && \
@@ -160,10 +160,10 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${HOME}/target/ \
+    --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
-    cp ${HOME}/target/release/zebrad /usr/local/bin
+    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
 # from the `release` stage along with other binaries and files.

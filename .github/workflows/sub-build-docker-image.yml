@@ -63,7 +63,7 @@ jobs:
     name: Build images
     if: github.repository_owner == 'ZcashFoundation'
     timeout-minutes: 210
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     outputs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
