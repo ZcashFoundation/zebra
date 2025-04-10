@@ -9,7 +9,7 @@ use zebra_chain::{
     parameters::Network,
     sapling::NotSmallOrderValueCommitment,
     transaction::{SerializedTransaction, Transaction},
-    transparent::{CoinbaseData, Script},
+    transparent::Script,
 };
 use zebra_consensus::groth16::Description;
 use zebra_state::IntoDisk;
@@ -70,7 +70,7 @@ pub enum Input {
     Coinbase {
         /// The coinbase scriptSig as hex.
         #[serde(with = "hex")]
-        coinbase: CoinbaseData,
+        coinbase: Vec<u8>,
         /// The script sequence number.
         sequence: u32,
     },
@@ -265,9 +265,11 @@ impl TransactionObject {
                 tx.inputs()
                     .iter()
                     .map(|input| match input {
-                        zebra_chain::transparent::Input::Coinbase { sequence, data, .. } => {
+                        zebra_chain::transparent::Input::Coinbase { sequence, .. } => {
                             Input::Coinbase {
-                                coinbase: data.clone(),
+                                coinbase: input
+                                    .coinbase_script()
+                                    .expect("we know it is a valid coinbase script"),
                                 sequence: *sequence,
                             }
                         }
