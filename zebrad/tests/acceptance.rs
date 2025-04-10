@@ -1983,7 +1983,8 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
             "waiting for zebrad to sync genesis block before launching lightwalletd...",
         );
         // Wait for zebrad to commit the genesis block to the state.
-        zebrad.expect_stdout_line_matches("committed finalized block.*Height(0)")?;
+        // Use the syncer's state tip log message, as the specific commit log might not appear reliably.
+        zebrad.expect_stdout_line_matches("starting sync, obtaining new tips state_tip=Some\\(Height\\(0\\)\\)")?;
     }
 
     // Launch lightwalletd, if needed
