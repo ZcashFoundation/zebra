@@ -2654,25 +2654,13 @@ fn build_height_range(
     chain_height: Height,
 ) -> Result<RangeInclusive<Height>> {
     // Convert optional values to Height, using 0 (as Height(0)) when missing.
-    let start = start.map(Height).unwrap_or(Height(0));
     // If start is above chain_height, clamp it to chain_height.
-    let start = if start > chain_height {
-        chain_height
-    } else {
-        start
-    };
+    let start = Height(start.unwrap_or(0)).min(chain_height);
 
     // For `end`, treat a zero value or missing value as `chain_height`:
     let end = match end {
         Some(0) | None => chain_height,
-        Some(val) => {
-            let val_height = Height(val);
-            if val_height > chain_height {
-                chain_height
-            } else {
-                val_height
-            }
-        }
+        Some(val) => Height(val).min(chain_height),
     };
 
     if start > end {

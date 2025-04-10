@@ -1076,6 +1076,7 @@ async fn rpc_getaddresstxids_response() {
                 &address,
                 &read_state,
                 &latest_chain_tip,
+                // response should be limited to the chain size.
                 10,
             )
             .await;
