@@ -106,27 +106,26 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${HOME}/target/ \
-    --mount=type=cache,target=/usr/local/cargo/git/db \
-    --mount=type=cache,target=/usr/local/cargo/registry/ \
+    --mount=type=cache,target=${CARGO_HOME} \
     cargo test --locked --release --workspace --no-run \
     --features "${FEATURES} zebra-checkpoints" && \
     cp ${HOME}/target/release/zebrad /usr/local/bin && \
     cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
 
 # Copy the lightwalletd binary and source files to be able to run tests
-COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
+COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
-COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 
 # As the build has already run with the root user,
 # we need to set the correct permissions for the home and cargo home dirs owned by it.
 RUN chown -R ${UID}:${GID} "${HOME}" && \
     chown -R ${UID}:${GID} "${CARGO_HOME}"
 
-COPY --chown=${UID}:${GID} ./ ${HOME}
-COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --link --chown=${UID}:${GID} ./ ${HOME}
+COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
 CMD [ "cargo", "test" ]
@@ -158,8 +157,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${HOME}/target/ \
-    --mount=type=cache,target=/usr/local/cargo/git/db \
-    --mount=type=cache,target=/usr/local/cargo/registry/ \
+    --mount=type=cache,target=${CARGO_HOME} \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${HOME}/target/release/zebrad /usr/local/bin
 
@@ -206,9 +204,9 @@ RUN chown -R ${UID}:${GID} ${HOME}
 # User with UID=${UID} is created above and used via gosu in entrypoint.sh.
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
-COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
-COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
-COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
+COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
