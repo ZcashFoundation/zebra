@@ -109,7 +109,8 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
     cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home
 
-RUN mv ${HOME}/tmp_cargo_home ${CARGO_HOME}
+RUN mv ${HOME}/tmp_cargo_home/* ${CARGO_HOME} && \
+    rm -rf ${HOME}/tmp_cargo_home
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
