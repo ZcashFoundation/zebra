@@ -78,6 +78,7 @@ RUN addgroup --quiet --gid ${GID} ${USER} && \
     adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
 # Set the working directory for the build.
+ARG CARGO_HOME
 WORKDIR ${HOME}
 
 # Build Zebra test binaries, but don't run them
@@ -113,7 +114,7 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
 
 # Copy the lightwalletd binary and source files to be able to run tests
-COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
+# COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
@@ -137,6 +138,7 @@ FROM deps AS release
 
 # Set the working directory for the build.
 ARG HOME
+ARG CARGO_HOME
 WORKDIR ${HOME}
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
