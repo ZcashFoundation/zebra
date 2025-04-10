@@ -24,6 +24,7 @@ ARG GID=${UID}
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
 ARG CARGO_HOME="${HOME}/.cargo"
+ARG CARGO_TARGET_DIR="${HOME}/target"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
@@ -42,6 +43,9 @@ ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
 
 ARG CARGO_HOME
 ENV CARGO_HOME=${CARGO_HOME}
+
+ARG CARGO_TARGET_DIR
+ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 
 ARG FEATURES
 ENV FEATURES=${FEATURES}
@@ -81,7 +85,7 @@ RUN addgroup --quiet --gid ${GID} ${USER} && \
 WORKDIR ${HOME}
 
 ARG CARGO_HOME
-ARG CARGO_TARGET_DIR=${HOME}/target
+ARG CARGO_TARGET_DIR
 
 # Build Zebra test binaries, but don't run them
 #
@@ -142,7 +146,7 @@ ARG HOME
 WORKDIR ${HOME}
 
 ARG CARGO_HOME
-ARG CARGO_TARGET_DIR=${HOME}/target
+ARG CARGO_TARGET_DIR
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
