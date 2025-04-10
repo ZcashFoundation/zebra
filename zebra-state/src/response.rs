@@ -90,7 +90,6 @@ pub enum Response {
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal,
 }
@@ -254,15 +253,12 @@ pub enum ReadResponse {
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
     ValidBlockProposal,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
 }
@@ -362,10 +358,8 @@ impl TryFrom<ReadResponse> for Response {
             #[cfg(feature = "indexer")]
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }

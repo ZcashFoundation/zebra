@@ -113,13 +113,13 @@
 //! Example of how to run the get_block_template test:
 //!
 //! ```console
-//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test get_block_template --features getblocktemplate-rpcs --release -- --ignored --nocapture
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test get_block_template --release -- --ignored --nocapture
 //! ```
 //!
 //! Example of how to run the submit_block test:
 //!
 //! ```console
-//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test submit_block --features getblocktemplate-rpcs --release -- --ignored --nocapture
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test submit_block --release -- --ignored --nocapture
 //! ```
 //!
 //! Example of how to run the has_spending_transaction_ids test:
@@ -218,9 +218,6 @@ use crate::common::cached_state::{
 ///
 /// This limit only applies to some tests.
 pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
-
-/// The test config file prefix for `--feature getblocktemplate-rpcs` configs.
-pub const GET_BLOCK_TEMPLATE_CONFIG_PREFIX: &str = "getblocktemplate-";
 
 /// The test config file prefix for `--feature shielded-scan` configs.
 pub const SHIELDED_SCAN_CONFIG_PREFIX: &str = "shieldedscan-";
@@ -949,17 +946,6 @@ fn stored_configs_parsed_correctly() -> Result<()> {
             continue;
         }
 
-        // ignore files starting with getblocktemplate prefix
-        // if we were not built with the getblocktemplate-rpcs feature.
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config_file_name.starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX) {
-            tracing::info!(
-                ?config_file_path,
-                "skipping getblocktemplate-rpcs config file path"
-            );
-            continue;
-        }
-
         // ignore files starting with shieldedscan prefix
         // if we were not built with the shielded-scan feature.
         if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
@@ -1004,17 +990,6 @@ fn stored_configs_work() -> Result<()> {
             tracing::info!(
                 ?config_file_path,
                 "skipping hidden/temporary config file path"
-            );
-            continue;
-        }
-
-        // ignore files starting with getblocktemplate prefix
-        // if we were not built with the getblocktemplate-rpcs feature.
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config_file_name.starts_with(GET_BLOCK_TEMPLATE_CONFIG_PREFIX) {
-            tracing::info!(
-                ?config_file_path,
-                "skipping getblocktemplate-rpcs config file path"
             );
             continue;
         }
@@ -2552,7 +2527,6 @@ async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::get_peer_info`] for more information.
 #[tokio::test]
-#[cfg(feature = "getblocktemplate-rpcs")]
 async fn get_peer_info() -> Result<()> {
     common::get_block_template_rpcs::get_peer_info::run().await
 }
@@ -2561,8 +2535,6 @@ async fn get_peer_info() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::get_block_template`] for more information.
 #[tokio::test]
-#[ignore]
-#[cfg(feature = "getblocktemplate-rpcs")]
 async fn get_block_template() -> Result<()> {
     common::get_block_template_rpcs::get_block_template::run().await
 }
@@ -2571,8 +2543,6 @@ async fn get_block_template() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::submit_block`] for more information.
 #[tokio::test]
-#[ignore]
-#[cfg(feature = "getblocktemplate-rpcs")]
 async fn submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
@@ -2983,14 +2953,12 @@ fn external_address() -> Result<()> {
 /// See [`common::regtest::submit_blocks`] for more information.
 // TODO: Test this with an NU5 activation height too once config can be serialized.
 #[tokio::test]
-#[cfg(feature = "getblocktemplate-rpcs")]
 async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     common::regtest::submit_blocks_test().await?;
     Ok(())
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(feature = "getblocktemplate-rpcs")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;
 
@@ -3263,9 +3231,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 /// Test successful block template submission as a block proposal or submission on a custom Testnet.
 ///
 /// This test can be run locally with:
-/// `cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
+/// `cargo test --package zebrad --test acceptance -- nu6_funding_streams_and_coinbase_balance --exact --show-output`
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(feature = "getblocktemplate-rpcs")]
 async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
@@ -3736,7 +3703,7 @@ fn check_no_git_refs_in_cargo_lock() {
 
 // /// Check that Zebra will disconnect from misbehaving peers.
 // #[tokio::test]
-// #[cfg(all(feature = "getblocktemplate-rpcs", not(target_os = "windows")))]
+// #[cfg(not(target_os = "windows"))]
 // async fn disconnects_from_misbehaving_peers() -> Result<()> {
 //     use std::sync::{atomic::AtomicBool, Arc};
 

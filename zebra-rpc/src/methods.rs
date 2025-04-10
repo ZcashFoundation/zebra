@@ -6,7 +6,6 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use std::collections::HashMap;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
@@ -63,13 +62,10 @@ pub mod trees;
 pub mod types;
 
 use types::GetRawMempool;
-#[cfg(feature = "getblocktemplate-rpcs")]
 use types::MempoolObject;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub use get_block_template_rpcs::{GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer};
 
 #[cfg(test)]
@@ -1140,24 +1136,18 @@ where
         #[allow(unused)]
         let verbose = verbose.unwrap_or(false);
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         // Determines whether the output of this RPC is sorted like zcashd
         let should_use_zcashd_order = self.debug_like_zcashd;
 
         let mut mempool = self.mempool.clone();
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         let request = if should_use_zcashd_order || verbose {
             mempool::Request::FullTransactions
         } else {
             mempool::Request::TransactionIds
         };
-
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        let request = mempool::Request::TransactionIds;
 
         // `zcashd` doesn't check if it is synced to the tip here, so we don't either.
         let response = mempool
@@ -1167,7 +1157,6 @@ where
             .map_misc_error()?;
 
         match response {
-            #[cfg(feature = "getblocktemplate-rpcs")]
             mempool::Response::FullTransactions {
                 mut transactions,
                 transaction_dependencies,
