@@ -2929,7 +2929,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(None, None);
+    let network = Network::new_regtest(Default::default());
     let state = zebra_state::init_test(&network);
     let (
         block_verifier_router,
@@ -3005,7 +3005,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
     config.state.ephemeral = false;
     let network = config.network.network.clone();
 

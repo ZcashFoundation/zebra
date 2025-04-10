@@ -1218,7 +1218,7 @@ where
                 // Separate the funding streams into deferred and non-deferred streams
                 .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
-        let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
+        let is_nu6 = NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu6;
 
         let [lockbox_total, funding_streams_total]: [std::result::Result<
             Amount<NonNegative>,
