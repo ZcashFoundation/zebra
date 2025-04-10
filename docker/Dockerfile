@@ -105,15 +105,19 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
     cargo test --locked --release --workspace --no-run \
     --features "${FEATURES} zebra-checkpoints" && \
+    # Copy necessary executables first
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    # Perform the copy-and-move
     cp -a ${CARGO_TARGET_DIR} ${HOME}/tmp_cargo_target && \
-    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home
-
-RUN mv ${HOME}/tmp_cargo_home/* ${CARGO_HOME} && \
-    mv ${HOME}/tmp_cargo_target/* ${CARGO_TARGET_DIR} && \
-    rm -rf ${HOME}/tmp_cargo_home && \
-    rm -rf ${HOME}/tmp_cargo_target
+    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo_home && \
+    # Clean original mount points (optional, they are tmpfs during RUN)
+    rm -rf ${CARGO_TARGET_DIR} ${CARGO_HOME} && \
+    # Move temp copies into final locations
+    mv ${HOME}/tmp_cargo_home/* ${CARGO_HOME}/ && \
+    mv ${HOME}/tmp_cargo_target/* ${CARGO_TARGET_DIR}/ && \
+    # Clean up temp dirs
+    rm -rf ${HOME}/tmp_cargo_home ${HOME}/tmp_cargo_target
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
