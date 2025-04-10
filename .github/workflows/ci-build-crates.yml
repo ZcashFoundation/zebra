@@ -108,18 +108,34 @@ jobs:
           echo $matrix | jq .
           echo $matrix | json2yaml
 
+  # Larger runners are only available for organizations and enterprises
+  # This makes it imposible for individual contributors to run this jobs in their forks
+  runner-setup:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.step1.outputs.runner }}
+    steps:
+      - name: Check owner
+        id: step1
+        run: |
+          if [ github.repository_owner == 'ZcashFoundation' ]; then
+            echo "runner=ubuntu-latest-m" >> $GITHUB_OUTPUT
+          else
+            echo "runner=ubuntu-latest" >> $GITHUB_OUTPUT
+          fi
+
   build:
     name: Build ${{ matrix.crate }} crate
     timeout-minutes: 90
-    needs: [ matrix, check-matrix ]
+    needs: [ matrix, check-matrix, runner-setup ]
     # Some of these builds take more than 14GB disk space
     # TODO: This is using a default runner, to allow external contributors to run this workflow.
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.runner-setup.outputs.runner }}
     strategy:
       # avoid rate-limit errors by only launching a few of these jobs at a time,
       # but still finish in a similar time to the longest tests
       max-parallel: 4
-      fail-fast: true
+      fail-fast: false
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
