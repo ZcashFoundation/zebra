@@ -311,8 +311,8 @@ pub trait Rpc {
     ///
     /// - `request`: (object, required, example={\"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"], \"start\": 1000, \"end\": 2000}) A struct with the following named fields:
     ///     - `addresses`: (json array of string, required) The addresses to get transactions from.
-    ///     - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
-    ///     - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
+    ///     - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
+    ///     - `end`: (numeric, optional) The top height to stop looking for transactions (inclusive).
     ///
     /// # Notes
     ///
