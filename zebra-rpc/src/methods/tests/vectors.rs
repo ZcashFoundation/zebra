@@ -1,6 +1,5 @@
 //! Fixed test vectors for RPC methods.
 
-use std::ops::RangeInclusive;
 use std::sync::Arc;
 
 use futures::FutureExt;
@@ -989,8 +988,8 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let rpc_rsp = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: vec!["t1invalidaddress".to_owned()],
-            start: 1,
-            end: 2,
+            start: Some(1),
+            end: Some(2),
         })
         .await
         .unwrap_err();
@@ -1004,8 +1003,8 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let addresses = vec![address.clone()];
 
     // call the method with start greater than end
-    let start: u32 = 2;
-    let end: u32 = 1;
+    let start: Option<u32> = Some(2);
+    let end: Option<u32> = Some(1);
     let error = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
@@ -1017,38 +1016,6 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     assert_eq!(
         error.message(),
         "start Height(2) must be less than or equal to end Height(1)".to_string()
-    );
-
-    // call the method with start equal zero
-    let start: u32 = 0;
-    let end: u32 = 1;
-    let error = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses: addresses.clone(),
-            start,
-            end,
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(
-        error.message(),
-        "start Height(0) and end Height(1) must both be greater than zero".to_string()
-    );
-
-    // call the method outside the chain tip height
-    let start: u32 = 1;
-    let end: u32 = 11;
-    let error = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
-            addresses,
-            start,
-            end,
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(
-        error.message(),
-        "start Height(1) and end Height(11) must both be less than or equal to the chain tip Height(10)".to_string()
     );
 
     mempool.expect_no_requests().await;
@@ -1086,16 +1053,16 @@ async fn rpc_getaddresstxids_response() {
 
         if network == Mainnet {
             // Exhaustively test possible block ranges for mainnet.
-            //
-            // TODO: if it takes too long on slower machines, turn this into a proptest with 10-20 cases
             for start in 1..=10 {
                 for end in start..=10 {
                     rpc_getaddresstxids_response_with(
                         &network,
-                        start..=end,
+                        Some(start),
+                        Some(end),
                         &address,
                         &read_state,
                         &latest_chain_tip,
+                        (end - start + 1) as usize,
                     )
                     .await;
                 }
@@ -1104,22 +1071,86 @@ async fn rpc_getaddresstxids_response() {
             // Just test the full range for testnet.
             rpc_getaddresstxids_response_with(
                 &network,
-                1..=10,
+                Some(1),
+                Some(10),
                 &address,
                 &read_state,
                 &latest_chain_tip,
+                10,
             )
             .await;
         }
+
+        // No range arguments should be equivalent to the full range.
+        rpc_getaddresstxids_response_with(
+            &network,
+            None,
+            None,
+            &address,
+            &read_state,
+            &latest_chain_tip,
+            10,
+        )
+        .await;
+
+        // Range of 0s should be equivalent to the full range.
+        rpc_getaddresstxids_response_with(
+            &network,
+            Some(0),
+            Some(0),
+            &address,
+            &read_state,
+            &latest_chain_tip,
+            10,
+        )
+        .await;
+
+        // Start and and outside of the range should use the chain tip.
+        rpc_getaddresstxids_response_with(
+            &network,
+            Some(11),
+            Some(11),
+            &address,
+            &read_state,
+            &latest_chain_tip,
+            1,
+        )
+        .await;
+
+        // End outside the range should use the chain tip.
+        rpc_getaddresstxids_response_with(
+            &network,
+            None,
+            Some(11),
+            &address,
+            &read_state,
+            &latest_chain_tip,
+            10,
+        )
+        .await;
+
+        // Start outside the range should use the chain tip.
+        rpc_getaddresstxids_response_with(
+            &network,
+            Some(11),
+            None,
+            &address,
+            &read_state,
+            &latest_chain_tip,
+            1,
+        )
+        .await;
     }
 }
 
 async fn rpc_getaddresstxids_response_with(
     network: &Network,
-    range: RangeInclusive<u32>,
+    start: Option<u32>,
+    end: Option<u32>,
     address: &transparent::Address,
     read_state: &ReadStateService,
     latest_chain_tip: &LatestChainTip,
+    expected_response_len: usize,
 ) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
@@ -1142,14 +1173,14 @@ async fn rpc_getaddresstxids_response_with(
     let response = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses,
-            start: *range.start(),
-            end: *range.end(),
+            start,
+            end,
         })
         .await
         .expect("arguments are valid so no error can happen here");
 
     // One founders reward output per coinbase transactions, no other transactions.
-    assert_eq!(response.len(), range.count());
+    assert_eq!(response.len(), expected_response_len);
 
     mempool.expect_no_requests().await;
 
