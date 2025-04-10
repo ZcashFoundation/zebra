@@ -112,10 +112,7 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     # Step 3: Copy cache contents *into* temporary locations within the RUN step
     cp -aL ${CARGO_TARGET_DIR}/. ${HOME}/tmp_target && \
     cp -aL ${CARGO_HOME}/. ${HOME}/tmp_cargo && \
-    # Step 4: Remove the original cache mount points (they are tmpfs/overlays)
-    # This ensures the move destination is clear.
-    rm -rf ${CARGO_TARGET_DIR} ${CARGO_HOME} && \
-    # Step 5: Move the temporary copies to the final destination paths in the image layer
+    # Step 4: Move the temporary copies to the final destination paths in the image layer
     mv ${HOME}/tmp_target ${CARGO_TARGET_DIR} && \
     mv ${HOME}/tmp_cargo ${CARGO_HOME}
 
