@@ -105,16 +105,19 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
     # Step 1: Compile using the cache mounts
     cargo test --locked --release --workspace --no-run \
-    --features "${FEATURES} zebra-checkpoints" && \
+        --features "${FEATURES} zebra-checkpoints" && \
     # Step 2: Copy final binaries needed at runtime
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
-    # Step 3: Copy cache contents *into* the final image layer locations
-    # Ensure target directories exist first!
-    mkdir -p ${CARGO_TARGET_DIR} ${CARGO_HOME} && \
-    # Use cp -aL to copy contents and follow symlinks from the cache mounts
-    cp -aL ${CARGO_TARGET_DIR}/. ${CARGO_TARGET_DIR}/ && \
-    cp -aL ${CARGO_HOME}/. ${CARGO_HOME}/
+    # Step 3: Copy cache contents *into* temporary locations within the RUN step
+    cp -aL ${CARGO_TARGET_DIR}/. ${HOME}/tmp_target && \
+    cp -aL ${CARGO_HOME}/. ${HOME}/tmp_cargo && \
+    # Step 4: Remove the original cache mount points (they are tmpfs/overlays)
+    # This ensures the move destination is clear.
+    rm -rf ${CARGO_TARGET_DIR} ${CARGO_HOME} && \
+    # Step 5: Move the temporary copies to the final destination paths in the image layer
+    mv ${HOME}/tmp_target ${CARGO_TARGET_DIR} && \
+    mv ${HOME}/tmp_cargo ${CARGO_HOME}
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
