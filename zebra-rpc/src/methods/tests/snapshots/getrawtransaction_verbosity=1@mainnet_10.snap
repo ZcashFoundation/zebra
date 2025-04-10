@@ -9,7 +9,7 @@ expression: rsp
     "confirmations": 10,
     "vin": [
       {
-        "coinbase": "00",
+        "coinbase": "5100",
         "sequence": 4294967295
       }
     ],

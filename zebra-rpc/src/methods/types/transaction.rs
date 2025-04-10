@@ -104,9 +104,6 @@ pub struct Output {
     /// The value in zats.
     #[serde(rename = "valueZat")]
     value_zat: i64,
-    /// The value in zats (again with a different name for some reason).
-    #[serde(rename = "valueSat")]
-    value_sat: i64,
     /// index.
     n: u32,
     /// The scriptPubKey.
@@ -308,7 +305,6 @@ impl TransactionObject {
                         Output {
                             value: types::Zec::from(output.1.value).lossy_zec(),
                             value_zat: output.1.value.zatoshis(),
-                            value_sat: output.1.value.zatoshis(),
                             n: output.0 as u32,
                             script_pub_key: ScriptPubKey {
                                 asm: "".to_string(),
