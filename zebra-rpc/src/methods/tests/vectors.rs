@@ -1370,7 +1370,7 @@ async fn rpc_getblockcount_empty_state() {
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getpeerinfo() {
     use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
+    use zebra_network::{address_book_peers::MockAddressBookPeers, types::PeerServices};
 
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -1393,10 +1393,41 @@ async fn rpc_getpeerinfo() {
     )
     .await;
 
-    let mock_peer_address = zebra_network::types::MetaAddr::new_initial_peer(
+    // Add a connected outbound peer
+    let outbound_mock_peer_address = zebra_network::types::MetaAddr::new_connected(
         std::net::SocketAddr::new(
             std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
+        )
+        .into(),
+        &PeerServices::NODE_NETWORK,
+        false,
+    )
+    .into_new_meta_addr(
+        std::time::Instant::now(),
+        zebra_chain::serialization::DateTime32::now(),
+    );
+
+    // Add a connected inbound peer
+    let inbound_mock_peer_address = zebra_network::types::MetaAddr::new_connected(
+        std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+            44444,
+        )
+        .into(),
+        &PeerServices::NODE_NETWORK,
+        true,
+    )
+    .into_new_meta_addr(
+        std::time::Instant::now(),
+        zebra_chain::serialization::DateTime32::now(),
+    );
+
+    // Add a peer that is not connected and will not be displayed in the RPC output
+    let not_connected_mock_peer_adderess = zebra_network::types::MetaAddr::new_initial_peer(
+        std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1)),
+            55555,
         )
         .into(),
     )
@@ -1405,7 +1436,11 @@ async fn rpc_getpeerinfo() {
         zebra_chain::serialization::DateTime32::now(),
     );
 
-    let mock_address_book = MockAddressBookPeers::new(vec![mock_peer_address]);
+    let mock_address_book = MockAddressBookPeers::new(vec![
+        outbound_mock_peer_address,
+        inbound_mock_peer_address,
+        not_connected_mock_peer_adderess,
+    ]);
 
     // Init RPC
     let get_block_template_rpc = get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
@@ -1426,12 +1461,24 @@ async fn rpc_getpeerinfo() {
         .await
         .expect("We should have an array of addresses");
 
+    // Response of length should be 2. We have 2 connected peers and 1 unconnected peer in the address book.
+    assert_eq!(get_peer_info.len(), 2);
+
+    let mut res_iter = get_peer_info.into_iter();
+    // Check for the outbound peer
     assert_eq!(
-        get_peer_info
-            .into_iter()
+        res_iter
             .next()
             .expect("there should be a mock peer address"),
-        mock_peer_address.into()
+        outbound_mock_peer_address.into()
+    );
+
+    // Check for the inbound peer
+    assert_eq!(
+        res_iter
+            .next()
+            .expect("there should be a mock peer address"),
+        inbound_mock_peer_address.into()
     );
 
     mempool.expect_no_requests().await;
