@@ -119,7 +119,7 @@ jobs:
         id: step1
         run: |
           if [ github.repository_owner == 'ZcashFoundation' ]; then
-            echo "runner=ubuntu-latest-m" >> $GITHUB_OUTPUT
+            echo "runner=ubuntu-latest-xl" >> $GITHUB_OUTPUT
           else
             echo "runner=ubuntu-latest" >> $GITHUB_OUTPUT
           fi
