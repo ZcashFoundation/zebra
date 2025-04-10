@@ -430,7 +430,7 @@ jobs:
       saves_to_disk: false
     secrets: inherit
 
-  ## getblocktemplate-rpcs using cached Zebra state on mainnet
+  ## getblocktemplate RPC tests using cached Zebra state on mainnet
   #
   # TODO: move these below the rest of the mainnet jobs that just use Zebra cached state
 

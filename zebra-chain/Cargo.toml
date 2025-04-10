@@ -29,10 +29,6 @@ async-error = [
     "tokio",
 ]
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-]
-
 # Experimental shielded scanning support
 shielded-scan = [
     "zcash_client_backend"
