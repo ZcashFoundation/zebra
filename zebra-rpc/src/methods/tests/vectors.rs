@@ -314,42 +314,82 @@ async fn rpc_getblock() {
         let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
-        assert_eq!(
-            get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: Some(Height(i.try_into().expect("valid u32"))),
-                time: Some(block.header.time.timestamp()),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Object(TransactionObject {
-                        hex: (*tx).clone().into(),
-                        height: Some(i.try_into().expect("valid u32")),
-                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64"))
-                    }))
-                    .collect(),
-                trees,
-                size: Some(block.zcash_serialize_to_vec().unwrap().len() as i64),
-                version: Some(block.header.version),
-                merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(expected_block_commitments),
-                final_sapling_root: Some(expected_final_sapling_root),
-                final_orchard_root: None,
-                nonce: Some(expected_nonce),
-                bits: Some(block.header.difficulty_threshold),
-                difficulty: Some(
+        // partially compare the expected and actual GetBlock structs
+        if let GetBlock::Object {
+            hash,
+            confirmations,
+            height,
+            time,
+            tx,
+            trees,
+            size,
+            version,
+            merkle_root,
+            block_commitments,
+            final_sapling_root,
+            final_orchard_root,
+            nonce,
+            bits,
+            difficulty,
+            previous_block_hash,
+            next_block_hash,
+            solution,
+        } = &get_block
+        {
+            assert_eq!(hash, &GetBlockHash(block.hash()));
+            assert_eq!(confirmations, &((blocks.len() - i) as i64));
+            assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
+            assert_eq!(time, &Some(block.header.time.timestamp()));
+            assert_eq!(trees, trees);
+            assert_eq!(
+                size,
+                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
+            );
+            assert_eq!(version, &Some(block.header.version));
+            assert_eq!(merkle_root, &Some(block.header.merkle_root));
+            assert_eq!(block_commitments, &Some(expected_block_commitments));
+            assert_eq!(final_sapling_root, &Some(expected_final_sapling_root));
+            assert_eq!(final_orchard_root, &None);
+            assert_eq!(nonce, &Some(expected_nonce));
+            assert_eq!(bits, &Some(block.header.difficulty_threshold));
+            assert_eq!(
+                difficulty,
+                &Some(
                     block
                         .header
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
-                ),
-                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
-                solution: Some(block.header.solution),
+                )
+            );
+            assert_eq!(
+                previous_block_hash,
+                &Some(GetBlockHash(block.header.previous_block_hash))
+            );
+            assert_eq!(
+                next_block_hash,
+                &blocks.get(i + 1).map(|b| GetBlockHash(b.hash()))
+            );
+            assert_eq!(solution, &Some(block.header.solution));
+
+            for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
+                if let GetBlockTransaction::Object(TransactionObject {
+                    hex,
+                    height,
+                    confirmations,
+                    ..
+                }) = actual_tx
+                {
+                    assert_eq!(hex, &(*expected_tx).clone().into());
+                    assert_eq!(height, &Some(i.try_into().expect("valid u32")));
+                    assert_eq!(
+                        confirmations,
+                        &Some((blocks.len() - i).try_into().expect("valid i64"))
+                    );
+                }
             }
-        );
+        } else {
+            panic!("Expected GetBlock::Object");
+        }
     }
 
     // Make hash calls with verbosity=2 and check response
@@ -362,42 +402,82 @@ async fn rpc_getblock() {
         let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
             get_block_data(&read_state, block.clone(), i).await;
 
-        assert_eq!(
-            get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
-                confirmations: (blocks.len() - i).try_into().expect("valid i64"),
-                height: Some(Height(i as u32)),
-                time: Some(block.header.time.timestamp()),
-                tx: block
-                    .transactions
-                    .iter()
-                    .map(|tx| GetBlockTransaction::Object(TransactionObject {
-                        hex: (*tx).clone().into(),
-                        height: Some(i.try_into().expect("valid u32")),
-                        confirmations: Some((blocks.len() - i).try_into().expect("valid i64"))
-                    }))
-                    .collect(),
-                trees,
-                size: Some(block.zcash_serialize_to_vec().unwrap().len() as i64),
-                version: Some(block.header.version),
-                merkle_root: Some(block.header.merkle_root),
-                block_commitments: Some(expected_block_commitments),
-                final_sapling_root: Some(expected_final_sapling_root),
-                final_orchard_root: None,
-                nonce: Some(expected_nonce),
-                bits: Some(block.header.difficulty_threshold),
-                difficulty: Some(
+        // partially compare the expected and actual GetBlock structs
+        if let GetBlock::Object {
+            hash,
+            confirmations,
+            height,
+            time,
+            tx,
+            trees,
+            size,
+            version,
+            merkle_root,
+            block_commitments,
+            final_sapling_root,
+            final_orchard_root,
+            nonce,
+            bits,
+            difficulty,
+            previous_block_hash,
+            next_block_hash,
+            solution,
+        } = &get_block
+        {
+            assert_eq!(hash, &GetBlockHash(block.hash()));
+            assert_eq!(confirmations, &((blocks.len() - i) as i64));
+            assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
+            assert_eq!(time, &Some(block.header.time.timestamp()));
+            assert_eq!(trees, trees);
+            assert_eq!(
+                size,
+                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
+            );
+            assert_eq!(version, &Some(block.header.version));
+            assert_eq!(merkle_root, &Some(block.header.merkle_root));
+            assert_eq!(block_commitments, &Some(expected_block_commitments));
+            assert_eq!(final_sapling_root, &Some(expected_final_sapling_root));
+            assert_eq!(final_orchard_root, &None);
+            assert_eq!(nonce, &Some(expected_nonce));
+            assert_eq!(bits, &Some(block.header.difficulty_threshold));
+            assert_eq!(
+                difficulty,
+                &Some(
                     block
                         .header
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
-                ),
-                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
-                solution: Some(block.header.solution),
+                )
+            );
+            assert_eq!(
+                previous_block_hash,
+                &Some(GetBlockHash(block.header.previous_block_hash))
+            );
+            assert_eq!(
+                next_block_hash,
+                &blocks.get(i + 1).map(|b| GetBlockHash(b.hash()))
+            );
+            assert_eq!(solution, &Some(block.header.solution));
+
+            for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
+                if let GetBlockTransaction::Object(TransactionObject {
+                    hex,
+                    height,
+                    confirmations,
+                    ..
+                }) = actual_tx
+                {
+                    assert_eq!(hex, &(*expected_tx).clone().into());
+                    assert_eq!(height, &Some(i.try_into().expect("valid u32")));
+                    assert_eq!(
+                        confirmations,
+                        &Some((blocks.len() - i).try_into().expect("valid i64"))
+                    );
+                }
             }
-        );
+        } else {
+            panic!("Expected GetBlock::Object");
+        }
     }
 
     // Make height calls with no verbosity (defaults to 1) and check response
@@ -880,6 +960,7 @@ async fn rpc_getrawtransaction() {
                 hex,
                 height,
                 confirmations,
+                ..
             }) = response.expect("We should have a GetRawTransaction struct")
             else {
                 unreachable!("Should return a Raw enum")

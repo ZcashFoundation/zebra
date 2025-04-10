@@ -952,3 +952,21 @@ fn binding_signatures() {
         assert!(at_least_one_v5_checked);
     }
 }
+
+#[test]
+fn test_coinbase_script() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let tx = hex::decode("0400008085202f89010000000000000000000000000000000000000000000000000000000000000000ffffffff0503b0e72100ffffffff04e8bbe60e000000001976a914ba92ff06081d5ff6542af8d3b2d209d29ba6337c88ac40787d010000000017a914931fec54c1fea86e574462cc32013f5400b891298738c94d010000000017a914c7a4285ed7aed78d8c0e28d7f1839ccb4046ab0c87286bee000000000017a914d45cb1adffb5215a42720532a076f02c7c778c908700000000b0e721000000000000000000000000").unwrap();
+
+    let transaction = tx.zcash_deserialize_into::<Transaction>()?;
+
+    let recoded_tx = transaction.zcash_serialize_to_vec().unwrap();
+    assert_eq!(tx, recoded_tx);
+
+    let data = transaction.inputs()[0].coinbase_script().unwrap();
+    let expected = hex::decode("03b0e72100").unwrap();
+    assert_eq!(data, expected);
+
+    Ok(())
+}
