@@ -5,6 +5,6 @@ expression: transactions
 {
   "Err": {
     "code": -32602,
-    "message": "start Height(3) and end Height(16777216) must both be less than or equal to the chain tip Height(10)"
+    "message": "start Height(2) must be less than or equal to end Height(1)"
   }
 }
