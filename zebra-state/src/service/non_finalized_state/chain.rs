@@ -1751,21 +1751,22 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         for (transaction, transaction_hash) in
             block.transactions.iter().zip(transaction_hashes.iter())
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-            ) = match transaction.deref() {
+            let transaction_data = match transaction.deref() {
                 V4 {
                     inputs,
                     outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                    #[cfg(feature = "tx-v6")]
+                    &None),
                 V5 {
                     inputs,
                     outputs,
@@ -1779,13 +1780,15 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    #[cfg(feature = "tx-v6")]
+                    &None,
                 ),
                 #[cfg(feature = "tx-v6")]
                 V6 {
                     inputs,
                     outputs,
                     sapling_shielded_data,
-                    orchard_shielded_data: _,
+                    orchard_shielded_data,
                     ..
                 } => (
                     inputs,
@@ -1793,13 +1796,34 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     &None,
                     sapling_shielded_data,
-                    // FIXME: support V6 shielded data?
-                    &None, //orchard_shielded_data,
+                    &None,
+                    orchard_shielded_data,
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
+
+            #[cfg(not(feature = "tx-v6"))]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+            ) = transaction_data;
+
+            #[cfg(feature = "tx-v6")]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+                orchard_shielded_data_zsa,
+            ) = transaction_data;
 
             // remove the utxos this produced
             self.revert_chain_with(&(outputs, transaction_hash, new_outputs), position);
@@ -1817,7 +1841,9 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
             self.revert_chain_with(joinsplit_data, position);
             self.revert_chain_with(sapling_shielded_data_per_spend_anchor, position);
             self.revert_chain_with(sapling_shielded_data_shared_anchor, position);
-            self.revert_chain_with(orchard_shielded_data, position);
+            self.revert_chain_with(orchard_shielded_data_vanilla, position);
+            #[cfg(feature = "tx-v6")]
+            self.revert_chain_with(orchard_shielded_data_zsa, position);
         }
 
         // TODO: move these to the shielded UpdateWith.revert...()?
