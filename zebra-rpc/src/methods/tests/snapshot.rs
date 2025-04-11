@@ -466,8 +466,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 1,
-            end: 10,
+            start: Some(1),
+            end: Some(10),
         })
         .await
         .expect("We should have a vector of strings");
@@ -476,8 +476,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 2,
-            end: 2,
+            start: Some(2),
+            end: Some(2),
         })
         .await
         .expect("We should have a vector of strings");
@@ -486,20 +486,31 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 3,
-            end: EXCESSIVE_BLOCK_HEIGHT,
+            start: Some(3),
+            end: Some(EXCESSIVE_BLOCK_HEIGHT),
         })
-        .await;
-    snapshot_rpc_getaddresstxids_invalid("excessive_end", get_address_tx_ids, &settings);
+        .await
+        .expect("We should have a vector of strings");
+    snapshot_rpc_getaddresstxids_valid("excessive_end", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: EXCESSIVE_BLOCK_HEIGHT,
-            end: EXCESSIVE_BLOCK_HEIGHT + 1,
+            start: Some(EXCESSIVE_BLOCK_HEIGHT),
+            end: Some(EXCESSIVE_BLOCK_HEIGHT + 1),
+        })
+        .await
+        .expect("We should have a vector of strings");
+    snapshot_rpc_getaddresstxids_valid("excessive_start", get_address_tx_ids, &settings);
+
+    let get_address_tx_ids = rpc
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: Some(2),
+            end: Some(1),
         })
         .await;
-    snapshot_rpc_getaddresstxids_invalid("excessive_start", get_address_tx_ids, &settings);
+    snapshot_rpc_getaddresstxids_invalid("end_greater_start", get_address_tx_ids, &settings);
 
     // `getaddressutxos`
     let get_address_utxos = rpc
