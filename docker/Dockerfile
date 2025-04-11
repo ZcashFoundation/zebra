@@ -24,6 +24,7 @@ ARG GID=${UID}
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
 ARG CARGO_HOME="${HOME}/.cargo"
+ARG CARGO_TARGET_DIR="${HOME}/target"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
@@ -42,6 +43,9 @@ ENV CARGO_INCREMENTAL=${CARGO_INCREMENTAL:-0}
 
 ARG CARGO_HOME
 ENV CARGO_HOME=${CARGO_HOME}
+
+ARG CARGO_TARGET_DIR
+ENV CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
 
 ARG FEATURES
 ENV FEATURES=${FEATURES}
@@ -80,65 +84,20 @@ RUN addgroup --quiet --gid ${GID} ${USER} && \
 # Set the working directory for the build.
 WORKDIR ${HOME}
 
+ARG CARGO_HOME
+ARG CARGO_TARGET_DIR
+
 # Build Zebra test binaries, but don't run them
 #
-# Leverage a cache mount to /usr/local/cargo/registry/
-# for downloaded dependencies, a cache mount to /usr/local/cargo/git/db
-# for git repository dependencies, and a cache mount to ${HOME}/target/ for
-# compiled dependencies which will speed up subsequent builds.
-# Leverage a bind mount to each crate directory to avoid having to copy the
-# source code into the container. Once built, copy the executable to an
-# output directory before the cache mounted ${HOME}/target/ is unmounted.
-RUN --mount=type=bind,source=zebrad,target=zebrad \
-    --mount=type=bind,source=zebra-chain,target=zebra-chain \
-    --mount=type=bind,source=zebra-network,target=zebra-network \
-    --mount=type=bind,source=zebra-state,target=zebra-state \
-    --mount=type=bind,source=zebra-script,target=zebra-script \
-    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
-    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
-    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
-    --mount=type=bind,source=zebra-test,target=zebra-test \
-    --mount=type=bind,source=zebra-utils,target=zebra-utils \
-    --mount=type=bind,source=zebra-scan,target=zebra-scan \
-    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
-    --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
-    --mount=type=bind,source=tower-fallback,target=tower-fallback \
-    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
-    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${HOME}/target/ \
-    --mount=type=cache,target=/usr/local/cargo/git/db \
-    --mount=type=cache,target=/usr/local/cargo/registry/ \
-    cargo test --locked --release --workspace --no-run \
-    --features "${FEATURES} zebra-checkpoints" && \
-    cp ${HOME}/target/release/zebrad /usr/local/bin && \
-    cp ${HOME}/target/release/zebra-checkpoints /usr/local/bin
-
-# Copy the lightwalletd binary and source files to be able to run tests
-COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
-
-# Copy the gosu binary to be able to run the entrypoint as non-root user
-# and allow to change permissions for mounted cache directories
-COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
-
-# As the build has already run with the root user,
-# we need to set the correct permissions for the home and cargo home dirs owned by it.
-RUN chown -R ${UID}:${GID} "${HOME}" && \
-    chown -R ${UID}:${GID} "${CARGO_HOME}"
-
-COPY --chown=${UID}:${GID} ./ ${HOME}
-COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-
-ENTRYPOINT [ "entrypoint.sh", "test" ]
-
-# This stage builds the zebrad release binary.
-#
-# It also adds `cache mounts` as this stage is completely independent from the
-# `test` stage. The resulting zebrad binary is used in the `runtime` stage.
-FROM deps AS release
-
-# Set the working directory for the build.
-ARG HOME
-WORKDIR ${HOME}
+# Leverage a cache mount to ${CARGO_HOME} for downloaded dependencies,
+# and for git repository dependencies, and a cache mount to ${CARGO_TARGET_DIR}
+# for compiled dependencies which will speed up subsequent builds.
+# Bind mounts to each crate directory are not leveraged here as we need to copy
+# the source code into the container anyways for some tests to run as expected.
+# Once built, copy the executables to an output directory before the cache
+# mounted ${CARGO_TARGET_DIR} is unmounted, and copy the cargo home directory
+# to a temporary directory to avoid having to re-download dependencies for
+# subsequent builds.
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
@@ -156,11 +115,73 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${HOME}/target/ \
-    --mount=type=cache,target=/usr/local/cargo/git/db \
-    --mount=type=cache,target=/usr/local/cargo/registry/ \
+    --mount=type=cache,target=${CARGO_TARGET_DIR} \
+    --mount=type=cache,target=${CARGO_HOME} \
+    # Step 1: Compile using the cache mounts
+    cargo test --locked --release --workspace --no-run \
+    --features "${FEATURES} zebra-checkpoints" && \
+    # Step 2: Copy final binaries needed at runtime
+    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    # Step 3: Copy cache contents *into* temporary locations within the RUN step
+    cp -a ${CARGO_TARGET_DIR} ${HOME}/tmp_target && \
+    cp -a ${CARGO_HOME} ${HOME}/tmp_cargo
+
+    # Step 4: Move the *contents* of the temporary copies to the final destination paths
+RUN mkdir -p ${CARGO_TARGET_DIR} ${CARGO_HOME} && \
+    mv ${HOME}/tmp_target/* ${CARGO_TARGET_DIR}/ && \
+    mv ${HOME}/tmp_cargo/* ${CARGO_HOME}/ && \
+    rm -rf ${HOME}/tmp_target ${HOME}/tmp_cargo
+
+# Copy the lightwalletd binary and source files to be able to run tests
+COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
+
+# Copy the gosu binary to be able to run the entrypoint as non-root user
+# and allow to change permissions for mounted cache directories
+COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+
+# As the build has already run with the root user,
+# we need to set the correct permissions for the home dir owned by it.
+RUN chown -R ${UID}:${GID} ${HOME}
+
+COPY --link ./ ${HOME}
+COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+ENTRYPOINT [ "entrypoint.sh", "test" ]
+
+# This stage builds the zebrad release binary.
+#
+# It also adds `cache mounts` as this stage is completely independent from the
+# `test` stage. The resulting zebrad binary is used in the `runtime` stage.
+FROM deps AS release
+
+# Set the working directory for the build.
+ARG HOME
+WORKDIR ${HOME}
+
+ARG CARGO_HOME
+ARG CARGO_TARGET_DIR
+
+RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
+    --mount=type=bind,source=tower-fallback,target=tower-fallback \
+    --mount=type=bind,source=zebra-chain,target=zebra-chain \
+    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
+    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
+    --mount=type=bind,source=zebra-network,target=zebra-network \
+    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
+    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
+    --mount=type=bind,source=zebra-scan,target=zebra-scan \
+    --mount=type=bind,source=zebra-script,target=zebra-script \
+    --mount=type=bind,source=zebra-state,target=zebra-state \
+    --mount=type=bind,source=zebra-test,target=zebra-test \
+    --mount=type=bind,source=zebra-utils,target=zebra-utils \
+    --mount=type=bind,source=zebrad,target=zebrad \
+    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
+    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
+    --mount=type=cache,target=${CARGO_TARGET_DIR} \
+    --mount=type=cache,target=${CARGO_HOME} \
     cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
-    cp ${HOME}/target/release/zebrad /usr/local/bin
+    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
 # from the `release` stage along with other binaries and files.
@@ -205,9 +226,9 @@ RUN chown -R ${UID}:${GID} ${HOME}
 # User with UID=${UID} is created above and used via gosu in entrypoint.sh.
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
-COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
-COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
-COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
+COPY --link --from=release /usr/local/bin/zebrad /usr/local/bin/
+COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
 CMD ["zebrad"]
