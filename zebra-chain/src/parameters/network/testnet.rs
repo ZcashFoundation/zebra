@@ -118,35 +118,24 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
         let mut configured_activation_heights = ConfiguredActivationHeights::default();
 
         for (height, network_upgrade) in activation_heights.iter() {
-            match network_upgrade {
+            let field = match network_upgrade {
                 NetworkUpgrade::BeforeOverwinter => {
-                    configured_activation_heights.before_overwinter = Some(height.0);
+                    &mut configured_activation_heights.before_overwinter
                 }
-                NetworkUpgrade::Overwinter => {
-                    configured_activation_heights.overwinter = Some(height.0);
-                }
-                NetworkUpgrade::Sapling => {
-                    configured_activation_heights.sapling = Some(height.0);
-                }
-                NetworkUpgrade::Blossom => {
-                    configured_activation_heights.blossom = Some(height.0);
-                }
-                NetworkUpgrade::Heartwood => {
-                    configured_activation_heights.heartwood = Some(height.0);
-                }
-                NetworkUpgrade::Canopy => {
-                    configured_activation_heights.canopy = Some(height.0);
-                }
-                NetworkUpgrade::Nu5 => {
-                    configured_activation_heights.nu5 = Some(height.0);
-                }
-                NetworkUpgrade::Nu6 => {
-                    configured_activation_heights.nu6 = Some(height.0);
-                }
+                NetworkUpgrade::Overwinter => &mut configured_activation_heights.overwinter,
+                NetworkUpgrade::Sapling => &mut configured_activation_heights.sapling,
+                NetworkUpgrade::Blossom => &mut configured_activation_heights.blossom,
+                NetworkUpgrade::Heartwood => &mut configured_activation_heights.heartwood,
+                NetworkUpgrade::Canopy => &mut configured_activation_heights.canopy,
+                NetworkUpgrade::Nu5 => &mut configured_activation_heights.nu5,
+                NetworkUpgrade::Nu6 => &mut configured_activation_heights.nu6,
+                NetworkUpgrade::Nu7 => &mut configured_activation_heights.nu7,
                 NetworkUpgrade::Genesis => {
                     continue;
                 }
-            }
+            };
+
+            *field = Some(height.0)
         }
 
         configured_activation_heights
@@ -271,6 +260,9 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU6` network upgrade.
     #[serde(rename = "NU6")]
     pub nu6: Option<u32>,
+    /// Activation height for `NU7` network upgrade.
+    #[serde(rename = "NU7")]
+    pub nu7: Option<u32>,
 }
 
 /// Builder for the [`Parameters`] struct.
@@ -405,6 +397,7 @@ impl ParametersBuilder {
             canopy,
             nu5,
             nu6,
+            nu7,
         }: ConfiguredActivationHeights,
     ) -> Self {
         use NetworkUpgrade::*;
@@ -427,6 +420,7 @@ impl ParametersBuilder {
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
             .chain(nu5.into_iter().map(|h| (h, Nu5)))
             .chain(nu6.into_iter().map(|h| (h, Nu6)))
+            .chain(nu7.into_iter().map(|h| (h, Nu7)))
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();
 
@@ -672,11 +666,10 @@ impl Parameters {
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     pub fn new_regtest(
-        nu5_activation_height: Option<u32>,
-        nu6_activation_height: Option<u32>,
+        ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
     ) -> Self {
         #[cfg(any(test, feature = "proptest-impl"))]
-        let nu5_activation_height = nu5_activation_height.or(Some(100));
+        let nu5 = nu5.or(Some(100));
 
         let parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
@@ -689,8 +682,9 @@ impl Parameters {
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(ConfiguredActivationHeights {
                 canopy: Some(1),
-                nu5: nu5_activation_height,
-                nu6: nu6_activation_height,
+                nu5,
+                nu6,
+                nu7,
                 ..Default::default()
             })
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
@@ -735,7 +729,7 @@ impl Parameters {
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
-        } = Self::new_regtest(None, None);
+        } = Self::new_regtest(Default::default());
 
         self.network_name == network_name
             && self.genesis_hash == genesis_hash
