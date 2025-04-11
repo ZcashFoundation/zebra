@@ -41,17 +41,3 @@ jobs:
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
-
-  test-configuration-file:
-    name: Test CD default Docker config file / Test default-conf in Docker
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "No build required"'
-
-  test-configuration-file-testnet:
-    name: Test CD testnet Docker config file / Test testnet-conf in Docker
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "No build required"'
