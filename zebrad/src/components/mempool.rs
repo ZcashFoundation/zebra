@@ -717,10 +717,7 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
-                #[cfg(feature = "getblocktemplate-rpcs")]
                 last_seen_tip_hash,
-                #[cfg(not(feature = "getblocktemplate-rpcs"))]
-                    last_seen_tip_hash: _,
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -791,7 +788,6 @@ impl Service<Request> for Mempool {
                     response_fut.boxed()
                 }
 
-                #[cfg(feature = "getblocktemplate-rpcs")]
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
 
@@ -878,7 +874,6 @@ impl Service<Request> for Mempool {
                         .boxed()
                     }
 
-                    #[cfg(feature = "getblocktemplate-rpcs")]
                     Request::FullTransactions => {
                         return async move {
                             Err("mempool is not active: wait for Zebra to sync to the tip".into())
