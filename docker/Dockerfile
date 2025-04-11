@@ -120,10 +120,6 @@ COPY --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/
 # and allow to change permissions for mounted cache directories
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 
-# Use the same default config as in the production environment.
-ENV ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
-
 # As the build has already run with the root user,
 # we need to set the correct permissions for the home and cargo home dirs owned by it.
 RUN chown -R ${UID}:${GID} "${HOME}" && \
@@ -141,7 +137,9 @@ CMD [ "cargo", "test" ]
 # `test` stage. The resulting zebrad binary is used in the `runtime` stage.
 FROM deps AS release
 
+# Set the working directory for the build.
 ARG HOME
+WORKDIR ${HOME}
 
 RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=tower-fallback,target=tower-fallback \
@@ -199,14 +197,7 @@ RUN addgroup --quiet --gid ${GID} ${USER} && \
     adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
 WORKDIR ${HOME}
-
-# We set the default locations of the conf and cache dirs according to the XDG
-# spec: https://specifications.freedesktop.org/basedir-spec/latest/
-
 RUN chown -R ${UID}:${GID} ${HOME}
-
-ARG ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
 
 # We're explicitly NOT using the USER directive here.
 # Instead, we run as root initially and use gosu in the entrypoint.sh
@@ -217,7 +208,6 @@ ENV ZEBRA_CONF_PATH=${ZEBRA_CONF_PATH}
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 COPY --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 COPY --from=release /usr/local/bin/zebrad /usr/local/bin/
-COPY --chown=${UID}:${GID} ./docker/default-zebra-config.toml ${ZEBRA_CONF_PATH}
 COPY --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh" ]
