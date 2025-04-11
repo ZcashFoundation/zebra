@@ -99,13 +99,27 @@ ARG CARGO_TARGET_DIR
 # to a temporary directory to avoid having to re-download dependencies for
 # subsequent builds.
 
-COPY --link ./ ${HOME}
-
-RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
+RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
+    --mount=type=bind,source=tower-fallback,target=tower-fallback \
+    --mount=type=bind,source=zebra-chain,target=zebra-chain \
+    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
+    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
+    --mount=type=bind,source=zebra-network,target=zebra-network \
+    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
+    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
+    --mount=type=bind,source=zebra-scan,target=zebra-scan \
+    --mount=type=bind,source=zebra-script,target=zebra-script \
+    --mount=type=bind,source=zebra-state,target=zebra-state \
+    --mount=type=bind,source=zebra-test,target=zebra-test \
+    --mount=type=bind,source=zebra-utils,target=zebra-utils \
+    --mount=type=bind,source=zebrad,target=zebrad \
+    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
+    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
+    --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
     # Step 1: Compile using the cache mounts
     cargo test --locked --release --workspace --no-run \
-        --features "${FEATURES} zebra-checkpoints" && \
+    --features "${FEATURES} zebra-checkpoints" && \
     # Step 2: Copy final binaries needed at runtime
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
@@ -130,6 +144,7 @@ COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
 # we need to set the correct permissions for the home dir owned by it.
 RUN chown -R ${UID}:${GID} ${HOME}
 
+COPY --link ./ ${HOME}
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
 ENTRYPOINT [ "entrypoint.sh", "test" ]
