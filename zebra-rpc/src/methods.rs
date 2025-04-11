@@ -6,9 +6,11 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-use std::collections::HashMap;
-use std::{collections::HashSet, fmt::Debug, ops::RangeInclusive, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    ops::RangeInclusive,
+};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
@@ -63,13 +65,11 @@ pub mod trees;
 pub mod types;
 
 use types::GetRawMempool;
-#[cfg(feature = "getblocktemplate-rpcs")]
 use types::MempoolObject;
+use types::TransactionObject;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub use get_block_template_rpcs::{GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer};
 
 #[cfg(test)]
@@ -934,6 +934,7 @@ where
                                         .try_into()
                                         .expect("should be less than max block height, i32::MAX"),
                                 ),
+                                &network,
                             ))
                         })
                         .collect();
@@ -1140,24 +1141,18 @@ where
         #[allow(unused)]
         let verbose = verbose.unwrap_or(false);
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         // Determines whether the output of this RPC is sorted like zcashd
         let should_use_zcashd_order = self.debug_like_zcashd;
 
         let mut mempool = self.mempool.clone();
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         let request = if should_use_zcashd_order || verbose {
             mempool::Request::FullTransactions
         } else {
             mempool::Request::TransactionIds
         };
-
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        let request = mempool::Request::TransactionIds;
 
         // `zcashd` doesn't check if it is synced to the tip here, so we don't either.
         let response = mempool
@@ -1167,7 +1162,6 @@ where
             .map_misc_error()?;
 
         match response {
-            #[cfg(feature = "getblocktemplate-rpcs")]
             mempool::Response::FullTransactions {
                 mut transactions,
                 transaction_dependencies,
@@ -1258,6 +1252,7 @@ where
                             tx.transaction.clone(),
                             None,
                             None,
+                            &self.network,
                         ))
                     } else {
                         let hex = tx.transaction.clone().into();
@@ -1281,6 +1276,7 @@ where
                     tx.tx.clone(),
                     Some(tx.height),
                     Some(tx.confirmations),
+                    &self.network,
                 ))
             } else {
                 let hex = tx.tx.into();
@@ -2391,7 +2387,7 @@ impl Default for GetBlockHash {
 /// Response to a `getrawtransaction` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_transaction` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
@@ -2403,52 +2399,6 @@ pub enum GetRawTransaction {
 impl Default for GetRawTransaction {
     fn default() -> Self {
         Self::Object(TransactionObject::default())
-    }
-}
-
-/// A Transaction object as returned by `getrawtransaction` and `getblock` RPC
-/// requests.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct TransactionObject {
-    /// The raw transaction, encoded as hex bytes.
-    #[serde(with = "hex")]
-    pub hex: SerializedTransaction,
-    /// The height of the block in the best chain that contains the tx or `None` if the tx is in
-    /// the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub height: Option<u32>,
-    /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
-    /// if the tx is in the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub confirmations: Option<u32>,
-    // TODO: many fields not yet supported
-}
-
-impl Default for TransactionObject {
-    fn default() -> Self {
-        Self {
-            hex: SerializedTransaction::from(
-                [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
-            ),
-            height: Option::default(),
-            confirmations: Option::default(),
-        }
-    }
-}
-
-impl TransactionObject {
-    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
-    #[allow(clippy::unwrap_in_result)]
-    fn from_transaction(
-        tx: Arc<Transaction>,
-        height: Option<block::Height>,
-        confirmations: Option<u32>,
-    ) -> Self {
-        Self {
-            hex: tx.into(),
-            height: height.map(|height| height.0),
-            confirmations,
-        }
     }
 }
 

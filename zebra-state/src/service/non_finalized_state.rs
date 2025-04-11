@@ -65,7 +65,6 @@ pub struct NonFinalizedState {
     /// with a commit to a cloned non-finalized state.
     //
     // TODO: make this field private and set it via an argument to NonFinalizedState::new()
-    #[cfg(feature = "getblocktemplate-rpcs")]
     should_count_metrics: bool,
 
     /// Number of chain forks transmitter.
@@ -87,7 +86,6 @@ impl std::fmt::Debug for NonFinalizedState {
         f.field("chain_set", &self.chain_set)
             .field("network", &self.network);
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         f.field("should_count_metrics", &self.should_count_metrics);
 
         f.finish()
@@ -100,14 +98,10 @@ impl Clone for NonFinalizedState {
             chain_set: self.chain_set.clone(),
             network: self.network.clone(),
             invalidated_blocks: self.invalidated_blocks.clone(),
-
-            #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: self.should_count_metrics,
-
             // Don't track progress in clones.
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
-
             #[cfg(feature = "progress-bar")]
             chain_fork_length_bars: Vec::new(),
         }
@@ -121,7 +115,6 @@ impl NonFinalizedState {
             chain_set: Default::default(),
             network: network.clone(),
             invalidated_blocks: Default::default(),
-            #[cfg(feature = "getblocktemplate-rpcs")]
             should_count_metrics: true,
             #[cfg(feature = "progress-bar")]
             chain_count_bar: None,
@@ -753,13 +746,8 @@ impl NonFinalizedState {
     }
 
     /// Should this `NonFinalizedState` instance track metrics and progress bars?
-    #[allow(dead_code)]
     fn should_count_metrics(&self) -> bool {
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        return self.should_count_metrics;
-
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        return true;
+        self.should_count_metrics
     }
 
     /// Update the metrics after `block` is committed
@@ -901,10 +889,7 @@ impl NonFinalizedState {
 
     /// Stop tracking metrics for this non-finalized state and all its chains.
     pub fn disable_metrics(&mut self) {
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        {
-            self.should_count_metrics = false;
-        }
+        self.should_count_metrics = false;
 
         #[cfg(feature = "progress-bar")]
         {

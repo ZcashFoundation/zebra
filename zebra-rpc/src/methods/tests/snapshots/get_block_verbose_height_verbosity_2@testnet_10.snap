@@ -15,7 +15,45 @@ expression: block
     {
       "hex": "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff03510101ffffffff0250c30000000000002321025229e1240a21004cf8338db05679fa34753706e84f6aebba086ba04317fd8f99acd43000000000000017a914ef775f1f997f122a062fff1a2d7443abd1f9c6428700000000",
       "height": 1,
-      "confirmations": 10
+      "confirmations": 10,
+      "vin": [
+        {
+          "coinbase": "510101",
+          "sequence": 4294967295
+        }
+      ],
+      "vout": [
+        {
+          "value": 0.0005,
+          "valueZat": 50000,
+          "n": 0,
+          "scriptPubKey": {
+            "asm": "",
+            "hex": "21025229e1240a21004cf8338db05679fa34753706e84f6aebba086ba04317fd8f99ac",
+            "reqSigs": 0,
+            "type": "",
+            "addresses": []
+          }
+        },
+        {
+          "value": 0.000125,
+          "valueZat": 12500,
+          "n": 1,
+          "scriptPubKey": {
+            "asm": "",
+            "hex": "a914ef775f1f997f122a062fff1a2d7443abd1f9c64287",
+            "reqSigs": 1,
+            "type": "",
+            "addresses": [
+              "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi"
+            ]
+          }
+        }
+      ],
+      "vShieldedSpend": [],
+      "vShieldedOutput": [],
+      "valueBalance": 0.0,
+      "valueBalanceZat": 0
     }
   ],
   "time": 1477674473,

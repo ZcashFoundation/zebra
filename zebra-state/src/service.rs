@@ -39,7 +39,6 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
 };
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::{block::Height, serialization::ZcashSerialize};
 
 use crate::{
@@ -1113,7 +1112,6 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
@@ -1894,7 +1892,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { num_blocks, height } => {
                 let state = self.clone();
 
@@ -1946,7 +1943,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
                 let state = self.clone();
 
@@ -1994,7 +1990,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => {
                 let state = self.clone();
 
