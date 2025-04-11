@@ -157,7 +157,6 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(30), Canopy),
     (block::Height(35), Nu5),
     (block::Height(40), Nu6),
-    (block::Height(45), Nu7),
 ];
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
