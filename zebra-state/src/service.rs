@@ -777,10 +777,7 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        read::best_tip(
-            &self.read_service.latest_non_finalized_state(),
-            &self.read_service.db,
-        )
+        self.read_service.best_tip()
     }
 
     /// Assert some assumptions about the semantically verified `block` before it is queued.
@@ -816,6 +813,11 @@ impl ReadStateService {
         tracing::debug!("created new read-only state service");
 
         read_service
+    }
+
+    /// Return the tip of the current best chain.
+    pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
+        read::best_tip(&self.latest_non_finalized_state(), &self.db)
     }
 
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
