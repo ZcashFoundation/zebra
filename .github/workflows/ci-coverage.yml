@@ -64,16 +64,19 @@ jobs:
   # Larger runners are only available for organizations and enterprises
   # This makes it imposible for individual contributors to run this jobs in their forks
   runner-setup:
+    name: Select runner
     runs-on: ubuntu-latest
     outputs:
-      runner: ${{ steps.step1.outputs.runner }}
+      runner: ${{ steps.select-runner.outputs.runner }}
     steps:
       - name: Check owner
-        id: step1
+        id: select-runner
         run: |
-          if [ github.repository_owner == 'ZcashFoundation' ]; then
+          if [ "${{ github.repository_owner }}" = "ZcashFoundation" ]; then
+            echo "Running on the largest runner available"
             echo "runner=ubuntu-latest-xl" >> $GITHUB_OUTPUT
           else
+            echo "Running on the default runner"
             echo "runner=ubuntu-latest" >> $GITHUB_OUTPUT
           fi
 

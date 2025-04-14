@@ -57,6 +57,7 @@ jobs:
   # Larger runners are only available for organizations and enterprises
   # This makes it imposible for individual contributors to run this jobs in their forks
   runner-setup:
+    name: Select runner
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.select-runner.outputs.runner }}
