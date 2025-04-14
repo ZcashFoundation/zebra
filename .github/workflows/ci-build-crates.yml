@@ -54,6 +54,24 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
+  # Larger runners are only available for organizations and enterprises
+  # This makes it imposible for individual contributors to run this jobs in their forks
+  runner-setup:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.select-runner.outputs.runner }}
+    steps:
+      - name: Check owner
+        id: select-runner
+        run: |
+          if [ github.repository_owner == 'ZcashFoundation' ]; then
+            echo "Running on the largest runner available"
+            echo "runner=ubuntu-latest-xl" >> $GITHUB_OUTPUT
+          else
+            echo "Running on the default runner"
+            echo "runner=ubuntu-latest" >> $GITHUB_OUTPUT
+          fi
+
   matrix:
     name: Generate crates matrix
     runs-on: ubuntu-latest
@@ -107,22 +125,6 @@ jobs:
           echo $matrix
           echo $matrix | jq .
           echo $matrix | json2yaml
-
-  # Larger runners are only available for organizations and enterprises
-  # This makes it imposible for individual contributors to run this jobs in their forks
-  runner-setup:
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.step1.outputs.runner }}
-    steps:
-      - name: Check owner
-        id: step1
-        run: |
-          if [ github.repository_owner == 'ZcashFoundation' ]; then
-            echo "runner=ubuntu-latest-xl" >> $GITHUB_OUTPUT
-          else
-            echo "runner=ubuntu-latest" >> $GITHUB_OUTPUT
-          fi
 
   build:
     name: Build ${{ matrix.crate }} crate
