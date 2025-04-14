@@ -67,7 +67,7 @@ jobs:
         run: |
           if [ "${{ github.repository_owner }}" = "ZcashFoundation" ]; then
             echo "Running on the largest runner available"
-            echo "runner=ubuntu-latest-xl" >> $GITHUB_OUTPUT
+            echo "runner=ubuntu-latest-m" >> $GITHUB_OUTPUT
           else
             echo "Running on the default runner"
             echo "runner=ubuntu-latest" >> $GITHUB_OUTPUT
