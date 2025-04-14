@@ -61,33 +61,12 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
 
 jobs:
-  # Larger runners are only available for organizations and enterprises
-  # This makes it imposible for individual contributors to run this jobs in their forks
-  runner-setup:
-    name: Select runner
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.select-runner.outputs.runner }}
-    steps:
-      - name: Check owner
-        id: select-runner
-        run: |
-          if [ "${{ github.repository_owner }}" = "ZcashFoundation" ]; then
-            echo "Running on the largest runner available"
-            echo "runner=ubuntu-latest-xl" >> $GITHUB_OUTPUT
-          else
-            echo "Running on the default runner"
-            echo "runner=ubuntu-latest" >> $GITHUB_OUTPUT
-          fi
-
   coverage:
     name: Coverage on stable
     # The large timeout is to accommodate:
     # - stable builds (typically 50-90 minutes), and
     timeout-minutes: 180
-    needs: [ runner-setup ]
-    # TODO: This is using a default runner, to allow external contributors to run this workflow.
-    runs-on: ${{ needs.runner-setup.outputs.runner }}
+    runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-xl' || 'ubuntu-latest' }}
 
     steps:
       - uses: actions/checkout@v4.2.2

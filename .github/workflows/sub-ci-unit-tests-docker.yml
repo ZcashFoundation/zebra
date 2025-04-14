@@ -36,8 +36,7 @@ jobs:
   test-all:
     name: Test all
     timeout-minutes: 180
-    # TODO: This is using a default runner, to allow external contributors to run this workflow.
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-xl' || 'ubuntu-latest' }}
     steps:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
