@@ -113,12 +113,12 @@ jobs:
     timeout-minutes: 90
     needs: [ matrix, check-matrix ]
     # Some of these builds take more than 14GB disk space
-    runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-xl' || 'ubuntu-latest' }}
+    runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-m' || 'ubuntu-latest' }}
     strategy:
       # avoid rate-limit errors by only launching a few of these jobs at a time,
       # but still finish in a similar time to the longest tests
       max-parallel: 4
-      fail-fast: false
+      fail-fast: true
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
