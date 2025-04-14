@@ -64,7 +64,7 @@ jobs:
       - name: Check owner
         id: select-runner
         run: |
-          if [ github.repository_owner == 'ZcashFoundation' ]; then
+          if [ "${{ github.repository_owner }}" = "ZcashFoundation" ]; then
             echo "Running on the largest runner available"
             echo "runner=ubuntu-latest-xl" >> $GITHUB_OUTPUT
           else
