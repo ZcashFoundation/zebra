@@ -19,7 +19,7 @@ set -eo pipefail
 # `ZEBRA_CACHE_DIR` and `LWD_CACHE_DIR` environment variables.
 : "${ZEBRA_CACHE_DIR:=${HOME}/.cache/zebra}"
 : "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
-: "${ZEBRA_COOKIE_DIR:=${HOME}/.config/cookie}"
+: "${ZEBRA_COOKIE_DIR:=${HOME}/.cache/zebra}"
 
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
