@@ -62,8 +62,8 @@ All available Cargo features are listed at
 To configure Zebra using Docker, you have a few options, processed in this order:
 
 1. **Provide a specific config file path:** Set the `ZEBRA_CONF_PATH` environment variable to point to your config file within the container.
-2. **Use the default config file:** If `ZEBRA_CONF_PATH` is not set, Zebra will look for a config file at `/home/zebra/.config/zebrad.toml`. You can mount your custom config file to this location, for example, by uncommenting the `configs` mapping in `docker/docker-compose.yml`.
-3. **Generate config from environment variables:** If neither of the above methods provides a config file, the container's entrypoint script will *automatically generate* a default configuration file at `/home/zebra/.config/zebrad.toml`. This generated file uses specific environment variables (like `NETWORK`, `ZEBRA_RPC_PORT`, `ENABLE_COOKIE_AUTH`, `MINER_ADDRESS`, etc.) to define the settings. Using the `docker/.env` file is the primary way to set these variables for this auto-generation mode.
+2. **Use the default config file:** By default, the `docker-compose.yml` file mounts `./default-zebra-config.toml` to `/home/zebra/.config/zebrad.toml` using the `configs:` mapping. Zebra will use this file if `ZEBRA_CONF_PATH` is not set. To use environment variables instead, you must **comment out** the `configs:` mapping in `docker/docker-compose.yml`.
+3. **Generate config from environment variables:** If neither of the above methods provides a config file (i.e., `ZEBRA_CONF_PATH` is unset *and* the `configs:` mapping in `docker-compose.yml` is commented out), the container's entrypoint script will *automatically generate* a default configuration file at `/home/zebra/.config/zebrad.toml`. This generated file uses specific environment variables (like `NETWORK`, `ZEBRA_RPC_PORT`, `ENABLE_COOKIE_AUTH`, `MINER_ADDRESS`, etc.) to define the settings. Using the `docker/.env` file is the primary way to set these variables for this auto-generation mode.
 
 You can see if your config works as intended by looking at Zebra's logs.
 
@@ -73,8 +73,8 @@ Note that if you provide a configuration file using methods 1 or 2, environment 
 
 Zebra's RPC server is disabled by default. To enable it, you need to define the RPC settings in Zebra's configuration. You can achieve this using one of the configuration methods described above:
 
-*   **Using a config file (methods 1 or 2):** Add or uncomment the `[rpc]` section in your `zebrad.toml` file (like the one provided in `docker/default-zebra-config.toml`). Ensure you set the `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
-*   **Using environment variables (method 3):** Set the `ZEBRA_RPC_PORT` environment variable (e.g., in `docker/.env`). This tells the entrypoint script to include an enabled `[rpc]` section listening on `0.0.0.0:<ZEBRA_RPC_PORT>` in the auto-generated configuration file.
+* **Using a config file (methods 1 or 2):** Add or uncomment the `[rpc]` section in your `zebrad.toml` file (like the one provided in `docker/default-zebra-config.toml`). Ensure you set the `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
+* **Using environment variables (method 3):** Set the `ZEBRA_RPC_PORT` environment variable (e.g., in `docker/.env`). This tells the entrypoint script to include an enabled `[rpc]` section listening on `0.0.0.0:<ZEBRA_RPC_PORT>` in the auto-generated configuration file.
 
 **Cookie Authentication:**
 
