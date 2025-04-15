@@ -92,16 +92,28 @@ exit_error() {
 }
 
 # Creates a directory if it doesn't exist and sets ownership to specified UID:GID.
+# Also ensures the parent directories have the correct ownership.
 #
 # ## Parameters
 #
 # - $1: Directory path to create and own
 create_owned_directory() {
   local dir="$1"
+  # Skip if directory is empty
   [[ -z ${dir} ]] && return
 
+  # Create directory with parents
   mkdir -p "${dir}" || exit_error "Failed to create directory: ${dir}"
+
+  # Set ownership for the created directory
   chown -R "${UID}:${GID}" "${dir}" || exit_error "Failed to secure directory: ${dir}"
+
+  # Set ownership for parent directory (but not if it's root or home)
+  local parent_dir
+  parent_dir="$(dirname "${dir}")"
+  if [[ "${parent_dir}" != "/" && "${parent_dir}" != "${HOME}" ]]; then
+    chown "${UID}:${GID}" "${parent_dir}"
+  fi
 }
 
 # Create and own cache and config directories
@@ -282,7 +294,7 @@ else
     echo "ZEBRA_CONF_PATH was not set and no default config found at ${HOME}/.config/zebrad.toml"
     echo "Preparing a default one..."
     ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-    mkdir -p "$(dirname "${ZEBRA_CONF_PATH}")"
+    create_owned_directory "$(dirname "${ZEBRA_CONF_PATH}")"
     prepare_conf_file
   fi
 fi
