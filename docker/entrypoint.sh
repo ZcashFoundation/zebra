@@ -83,6 +83,13 @@ miner_address = "${MINER_ADDRESS}"
 SUB_EOF
 )
 EOF
+
+# Ensure the config file itself has the correct ownership
+#
+# This is safe in this context because prepare_conf_file is called only when
+# ZEBRA_CONF_PATH is not set, and there's no file mounted at that path.
+chown "${UID}:${GID}" "${ZEBRA_CONF_PATH}" || exit_error "Failed to secure config file: ${ZEBRA_CONF_PATH}"
+
 }
 
 # Helper function
