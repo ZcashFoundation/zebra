@@ -6,10 +6,11 @@
 #
 # ## Notes
 #
-# - `$ZEBRA_CONF_PATH` must point to a Zebra conf file.
+# - `$ZEBRA_CONF_PATH` can point to an existing Zebra config file, or if not set,
+#   the script will look for a default config at ${HOME}/.config/zebrad.toml,
+#   or generate one using environment variables.
 
 set -eo pipefail
-
 
 # These are the default cached state directories for Zebra and lightwalletd.
 #
@@ -18,101 +19,122 @@ set -eo pipefail
 # `ZEBRA_CACHE_DIR` and `LWD_CACHE_DIR` environment variables.
 : "${ZEBRA_CACHE_DIR:=${HOME}/.cache/zebra}"
 : "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
-
-# Exit early if `ZEBRA_CONF_PATH` does not point to a file.
-if [[ ! -f "${ZEBRA_CONF_PATH}" ]]; then
-  echo "ERROR: No Zebra config file found at ZEBRA_CONF_PATH (${ZEBRA_CONF_PATH})."
-  echo "Please ensure the file exists or mount your custom config file and set ZEBRA_CONF_PATH accordingly."
-  exit 1
-fi
+: "${ZEBRA_COOKIE_DIR:=${HOME}/.cache/zebra}"
 
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
-  exec gosu "${UID}:${GID}" "$@"
+  user=$(id -u)
+  if [[ ${user} == '0' ]]; then
+    exec gosu "${UID}:${GID}" "$@"
+  else
+    exec "$@"
+  fi
 }
 
-# Modifies the existing Zebra config file at ZEBRA_CONF_PATH using environment variables.
+# Modifies the Zebra config file using environment variables.
 #
-# The config options this function supports are also listed in the "docker/.env" file.
+# This function generates a new config file from scratch at ZEBRA_CONF_PATH
+# using the provided environment variables.
 #
-# This function modifies the existing file in-place and prints its location.
+# It creates a complete configuration with network settings, state, RPC,
+# metrics, tracing, and mining sections based on environment variables.
 prepare_conf_file() {
-  # Set a custom network.
-  if [[ -n "${NETWORK}" ]]; then
-    sed -i '/network = ".*"/s/".*"/"'"${NETWORK//\"/}"'"/' "${ZEBRA_CONF_PATH}"
-  fi
+  # Base configuration
+  cat >"${ZEBRA_CONF_PATH}" <<EOF
+[network]
+network = "${NETWORK:=Mainnet}"
+listen_addr = "0.0.0.0"
+cache_dir = "${ZEBRA_CACHE_DIR}"
 
-  # Enable the RPC server by setting its port.
-  if [[ -n "${ZEBRA_RPC_PORT}" ]]; then
-    sed -i '/# listen_addr = "0.0.0.0:18232" # Testnet/d' "${ZEBRA_CONF_PATH}"
-    sed -i 's/ *# Mainnet$//' "${ZEBRA_CONF_PATH}"
-    sed -i '/# listen_addr = "0.0.0.0:8232"/s/^# //; s/8232/'"${ZEBRA_RPC_PORT//\"/}"'/' "${ZEBRA_CONF_PATH}"
-  fi
+[state]
+cache_dir = "${ZEBRA_CACHE_DIR}"
 
-  # Disable or enable cookie authentication.
-  if [[ -n "${ENABLE_COOKIE_AUTH}" ]]; then
-    sed -i '/# enable_cookie_auth = true/s/^# //; s/true/'"${ENABLE_COOKIE_AUTH//\"/}"'/' "${ZEBRA_CONF_PATH}"
-  fi
+$( [[ -n ${ZEBRA_RPC_PORT} ]] && cat <<-SUB_EOF
 
-  # Set a custom state, network and cookie cache dirs.
-  #
-  # We're pointing all three cache dirs at the same location, so users will find
-  # all cached data in that single location. We can introduce more env vars and
-  # use them to set the cache dirs separately if needed.
-  if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
-    mkdir -p "${ZEBRA_CACHE_DIR//\"/}"
-    chown -R "${UID}:${GID}" "${ZEBRA_CACHE_DIR//\"/}"
-    sed -i 's|_dir = ".*"|_dir = "'"${ZEBRA_CACHE_DIR//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-  fi
+[rpc]
+listen_addr = "${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
+enable_cookie_auth = ${ENABLE_COOKIE_AUTH:=true}
+$( [[ -n ${ZEBRA_COOKIE_DIR} ]] && echo "cookie_dir = \"${ZEBRA_COOKIE_DIR}\"" )
+SUB_EOF
+)
 
-  # Set a custom lightwalletd cache dir.
-  if [[ -n "${LWD_CACHE_DIR}" ]]; then
-    mkdir -p "${LWD_CACHE_DIR//\"/}"
-    chown -R "${UID}:${GID}" "${LWD_CACHE_DIR//\"/}"
-  fi
+$( [[ " ${FEATURES} " =~ " prometheus " ]] && cat <<-SUB_EOF
 
-  # Enable the Prometheus metrics endpoint.
-  if [[ "${FEATURES}" == *"prometheus"* ]]; then
-    sed -i '/# endpoint_addr = "0.0.0.0:9999" # Prometheus/s/^# //' "${ZEBRA_CONF_PATH}"
-  fi
+[metrics]
+endpoint_addr = "${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
+SUB_EOF
+)
 
-  # Enable logging to a file by setting a custom log file path.
-  if [[ -n "${LOG_FILE}" ]]; then
-    mkdir -p "$(dirname "${LOG_FILE//\"/}")"
-    chown -R "${UID}:${GID}" "$(dirname "${LOG_FILE//\"/}")"
-    sed -i 's|# log_file = ".*"|log_file = "'"${LOG_FILE//\"/}"'"|' "${ZEBRA_CONF_PATH}"
-  fi
+$( [[ -n ${LOG_FILE} || -n ${LOG_COLOR} || -n ${TRACING_ENDPOINT_ADDR} || -n ${USE_JOURNALD} ]] && cat <<-SUB_EOF
 
-  # Enable or disable colored logs.
-  if [[ -n "${LOG_COLOR}" ]]; then
-    sed -i '/# force_use_color = true/s/^# //' "${ZEBRA_CONF_PATH}"
-    sed -i '/use_color = true/s/true/'"${LOG_COLOR//\"/}"'/' "${ZEBRA_CONF_PATH}"
-  fi
+[tracing]
+$( [[ -n ${USE_JOURNALD} ]] && echo "use_journald = ${USE_JOURNALD}" )
+$( [[ " ${FEATURES} " =~ " filter-reload " ]] && echo "endpoint_addr = \"${TRACING_ENDPOINT_ADDR:=0.0.0.0}:${TRACING_ENDPOINT_PORT:=3000}\"" )
+$( [[ -n ${LOG_FILE} ]] && echo "log_file = \"${LOG_FILE}\"" )
+$( [[ ${LOG_COLOR} == "true" ]] && echo "force_use_color = true" )
+$( [[ ${LOG_COLOR} == "false" ]] && echo "use_color = false" )
+SUB_EOF
+)
 
-  # Enable or disable logging to systemd-journald.
-  if [[ -n "${USE_JOURNALD}" ]]; then
-    sed -i '/# use_journald = true/s/^# //; s/true/'"${USE_JOURNALD//\"/}"'/' "${ZEBRA_CONF_PATH}"
-  fi
+$( [[ -n ${MINER_ADDRESS} ]] && cat <<-SUB_EOF
 
-  # Set a mining address.
-  if [[ -n "${MINER_ADDRESS}" ]]; then
-    sed -i '/# miner_address = ".*"/{s/^# //; s/".*"/"'"${MINER_ADDRESS//\"/}"'"/}' "${ZEBRA_CONF_PATH}"
-  fi
+[mining]
+miner_address = "${MINER_ADDRESS}"
+SUB_EOF
+)
+EOF
 
-  # Trim all comments and empty lines.
-  sed -i '/^#/d; /^$/d' "${ZEBRA_CONF_PATH}"
+# Ensure the config file itself has the correct ownership
+#
+# This is safe in this context because prepare_conf_file is called only when
+# ZEBRA_CONF_PATH is not set, and there's no file mounted at that path.
+chown "${UID}:${GID}" "${ZEBRA_CONF_PATH}" || exit_error "Failed to secure config file: ${ZEBRA_CONF_PATH}"
 
-  echo "${ZEBRA_CONF_PATH}"
 }
+
+# Helper function
+exit_error() {
+  echo "$1" >&2
+  exit 1
+}
+
+# Creates a directory if it doesn't exist and sets ownership to specified UID:GID.
+# Also ensures the parent directories have the correct ownership.
+#
+# ## Parameters
+#
+# - $1: Directory path to create and own
+create_owned_directory() {
+  local dir="$1"
+  # Skip if directory is empty
+  [[ -z ${dir} ]] && return
+
+  # Create directory with parents
+  mkdir -p "${dir}" || exit_error "Failed to create directory: ${dir}"
+
+  # Set ownership for the created directory
+  chown -R "${UID}:${GID}" "${dir}" || exit_error "Failed to secure directory: ${dir}"
+
+  # Set ownership for parent directory (but not if it's root or home)
+  local parent_dir
+  parent_dir="$(dirname "${dir}")"
+  if [[ "${parent_dir}" != "/" && "${parent_dir}" != "${HOME}" ]]; then
+    chown "${UID}:${GID}" "${parent_dir}"
+  fi
+}
+
+# Create and own cache and config directories
+[[ -n ${ZEBRA_CACHE_DIR} ]] && create_owned_directory "${ZEBRA_CACHE_DIR}"
+[[ -n ${LWD_CACHE_DIR} ]] && create_owned_directory "${LWD_CACHE_DIR}"
+[[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
+[[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
 # Runs cargo test with an arbitrary number of arguments.
 #
 # Positional Parameters
 #
-# - '$1' must contain
-#   - either cargo FEATURES as described here:
-#     https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options,
-#   - or be empty.
+# - '$1' must contain cargo FEATURES as described here:
+#   https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options
 # - The remaining params will be appended to a command starting with
 #   `exec_as_user cargo test ... -- ...`
 run_cargo_test() {
@@ -255,12 +277,39 @@ run_tests() {
 }
 
 # Main Script Logic
+#
+# 1. First check if ZEBRA_CONF_PATH is explicitly set or if a file exists at that path
+# 2. If not set but default config exists, use that
+# 3. If neither exists, generate a default config at ${HOME}/.config/zebrad.toml
+# 4. Print environment variables and config for debugging
+# 5. Process command-line arguments and execute appropriate action
+if [[ -n ${ZEBRA_CONF_PATH} ]]; then
+  if [[ -f ${ZEBRA_CONF_PATH} ]]; then
+    echo "ZEBRA_CONF_PATH was set to ${ZEBRA_CONF_PATH} and a file exists."
+    echo "Using user-provided config file"
+  else
+    echo "ERROR: ZEBRA_CONF_PATH was set and no config file found at ${ZEBRA_CONF_PATH}."
+    echo "Please ensure a config file exists or set ZEBRA_CONF_PATH to point to your config file."
+    exit 1
+  fi
+else
+  if [[ -f "${HOME}/.config/zebrad.toml" ]]; then
+    echo "ZEBRA_CONF_PATH was not set."
+    echo "Using default config at ${HOME}/.config/zebrad.toml"
+    ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
+  else
+    echo "ZEBRA_CONF_PATH was not set and no default config found at ${HOME}/.config/zebrad.toml"
+    echo "Preparing a default one..."
+    ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
+    create_owned_directory "$(dirname "${ZEBRA_CONF_PATH}")"
+    prepare_conf_file
+  fi
+fi
 
-prepare_conf_file "${ZEBRA_CONF_PATH}"
 echo "INFO: Using the following environment variables:"
 printenv
 
-echo "Prepared the following Zebra config:"
+echo "Using Zebra config at ${ZEBRA_CONF_PATH}:"
 cat "${ZEBRA_CONF_PATH}"
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
