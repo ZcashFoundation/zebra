@@ -4,8 +4,7 @@
 #
 # 1. `versioning`: Extracts the major version from the release semver. Useful for segregating instances based on major versions.
 # 2. `build`: Builds a Docker image named `zebrad` with the necessary tags derived from Git.
-# 3. `test-configuration-file`: Validates Zebra using the default config with the latest version.
-# 4. `test-configuration-file-testnet`: Tests the Docker image for the testnet configuration.
+# 3. `test-docker-configurations`: Validates all Zebra Docker configurations by running a matrix of configuration tests.
 # 6. `deploy-nodes`: Deploys Managed Instance Groups (MiGs) for Mainnet and Testnet. If triggered by main branch pushes, it always replaces the MiG. For releases, MiGs are replaced only if deploying the same major version; otherwise, a new major version is deployed.
 # 7. `deploy-instance`: Deploys a single node in a specified GCP zone for testing specific commits. Instances from this job aren't auto-replaced or deleted.
 #
@@ -178,27 +177,13 @@ jobs:
     # This step needs access to Docker Hub secrets to run successfully
     secrets: inherit
 
-  # Test that Zebra works using the default config with the latest Zebra version.
-  test-configuration-file:
-    name: Test CD default Docker config file
+  # Run a matrix of configuration tests against the Docker image
+  test-docker-configurations:
+    name: Test Zebra Docker configurations
     needs: build
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: "default-conf"
       docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-      grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
-
-  # Test reconfiguring the docker image for testnet.
-  test-configuration-file-testnet:
-    name: Test CD testnet Docker config file
-    needs: build
-    # Make sure Zebra can sync the genesis block on testnet
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      test_id: "testnet-conf"
-      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
-      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: "-e NETWORK=Testnet"
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -242,7 +227,7 @@ jobs:
         set-matrix,
         build,
         versioning,
-        test-configuration-file,
+        test-docker-configurations,
         get-disk-name,
       ]
     runs-on: ubuntu-latest
