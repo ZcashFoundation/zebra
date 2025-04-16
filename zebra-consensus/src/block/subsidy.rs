@@ -4,5 +4,3 @@
 
 /// Funding Streams functions apply for blocks at and after Canopy.
 pub mod funding_streams;
-/// General subsidy functions apply for blocks after slow-start mining.
-pub mod general;

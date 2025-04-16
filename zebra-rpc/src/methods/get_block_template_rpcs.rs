@@ -17,7 +17,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
-        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        subsidy::{
+            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
+            ParameterSubsidy,
+        },
         Network, NetworkKind, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
@@ -26,9 +29,7 @@ use zebra_chain::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, RouterError,
-};
+use zebra_consensus::{funding_stream_address, RouterError};
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{ReadRequest, ReadResponse};

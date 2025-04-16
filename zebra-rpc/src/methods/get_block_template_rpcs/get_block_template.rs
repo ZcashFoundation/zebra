@@ -15,14 +15,15 @@ use zebra_chain::{
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{subsidy::FundingStreamReceiver, Network, NetworkUpgrade},
+    parameters::{
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
+        Network, NetworkUpgrade,
+    },
     serialization::ZcashDeserializeInto,
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
-};
+use zebra_consensus::funding_stream_address;
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
