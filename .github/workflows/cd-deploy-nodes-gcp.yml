@@ -343,7 +343,6 @@ jobs:
           gcloud compute instance-groups managed create \
           "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${NETWORK}" \
           --template "zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
-          --health-check zebrad-tracing-filter \
           --initial-delay 30 \
           --region "${{ vars.GCP_REGION }}" \
           --size 1
