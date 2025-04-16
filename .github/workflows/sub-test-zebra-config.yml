@@ -31,7 +31,7 @@ jobs:
   test-docker-config:
     name: Test ${{ inputs.test_id }} in Docker
     timeout-minutes: 30
-    runs-on: ubuntu-latest-m
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.2.2
         with:
