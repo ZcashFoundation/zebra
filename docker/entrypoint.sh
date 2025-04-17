@@ -10,7 +10,7 @@
 #   the script will look for a default config at ${HOME}/.config/zebrad.toml,
 #   or generate one using environment variables.
 
-set -eo pipefail
+set -aeo pipefail
 
 # These are the default cached state directories for Zebra and lightwalletd.
 #
