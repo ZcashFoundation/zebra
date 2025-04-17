@@ -359,4 +359,8 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
 
         Ok(Ok(()))
     }
+
+    fn should_freeze_block_commits(&self) -> bool {
+        true
+    }
 }

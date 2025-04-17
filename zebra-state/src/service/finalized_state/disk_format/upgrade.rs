@@ -2,7 +2,7 @@
 
 use std::{
     cmp::Ordering,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     thread::{self, JoinHandle},
 };
 
@@ -79,11 +79,16 @@ pub trait DiskFormatUpgrade {
     fn needs_migration(&self) -> bool {
         true
     }
+
+    /// Returns true if block commits should be paused until after this format upgrade has been applied.
+    fn should_freeze_block_commits(&self) -> bool {
+        false
+    }
 }
 
 fn format_upgrades(
     min_version: Option<Version>,
-) -> impl Iterator<Item = Box<dyn DiskFormatUpgrade>> {
+) -> impl DoubleEndedIterator<Item = Box<dyn DiskFormatUpgrade>> {
     let min_version = move || min_version.clone().unwrap_or(Version::new(0, 0, 0));
 
     // Note: Disk format upgrades must be run in order of database version.
@@ -294,6 +299,7 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits: Arc<AtomicBool>,
     ) -> DbFormatChangeThreadHandle {
         // # Correctness
         //
@@ -304,7 +310,12 @@ impl DbFormatChange {
         let span = Span::current();
         let update_task = thread::spawn(move || {
             span.in_scope(move || {
-                self.format_change_run_loop(db, initial_tip_height, cancel_receiver)
+                self.format_change_run_loop(
+                    db,
+                    initial_tip_height,
+                    should_freeze_block_commits,
+                    cancel_receiver,
+                )
             })
         });
 
@@ -327,9 +338,15 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits: Arc<AtomicBool>,
         cancel_receiver: Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        self.run_format_change_or_check(&db, initial_tip_height, &cancel_receiver)?;
+        self.run_format_change_or_check(
+            &db,
+            initial_tip_height,
+            Some(should_freeze_block_commits),
+            &cancel_receiver,
+        )?;
 
         let Some(debug_validity_check_interval) = db.config().debug_validity_check_interval else {
             return Ok(());
@@ -348,6 +365,7 @@ impl DbFormatChange {
             Self::check_new_blocks(&db).run_format_change_or_check(
                 &db,
                 initial_tip_height,
+                None,
                 &cancel_receiver,
             )?;
         }
@@ -359,11 +377,24 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits: Option<Arc<AtomicBool>>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        match (self, should_freeze_block_commits.clone()) {
+            (Upgrade { .. }, _) | (_, None) => {}
+            (_, Some(should_freeze_block_commits)) => {
+                should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst)
+            }
+        };
+
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
-            Upgrade { .. } => self.apply_format_upgrade(db, initial_tip_height, cancel_receiver)?,
+            Upgrade { .. } => self.apply_format_upgrade(
+                db,
+                initial_tip_height,
+                should_freeze_block_commits.expect("must be provided for upgrades"),
+                cancel_receiver,
+            )?,
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(db);
@@ -506,6 +537,7 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits: Arc<AtomicBool>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
@@ -527,6 +559,7 @@ impl DbFormatChange {
                 "marking empty database as upgraded"
             );
 
+            should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst);
             Self::mark_as_upgraded_to(db, newer_running_version);
 
             info!(
@@ -536,6 +569,17 @@ impl DbFormatChange {
             );
 
             return Ok(());
+        };
+
+        let last_blocking_version = if let Some(last_blocking_upgrade) =
+            format_upgrades(Some(older_disk_version.clone()))
+                .rev()
+                .find(|upgrade| upgrade.should_freeze_block_commits())
+        {
+            Some(last_blocking_upgrade.version())
+        } else {
+            should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst);
+            None
         };
 
         // Apply or validate format upgrades
@@ -560,8 +604,18 @@ impl DbFormatChange {
                 newer_running_version = ?upgrade.version(),
                 "Zebra automatically upgraded the database format"
             );
+
+            if Some(upgrade.version()) == last_blocking_version {
+                should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+
             Self::mark_as_upgraded_to(db, &upgrade.version());
         }
+
+        assert!(
+            !should_freeze_block_commits.load(std::sync::atomic::Ordering::SeqCst),
+            "should always be false at this point"
+        );
 
         Ok(())
     }
