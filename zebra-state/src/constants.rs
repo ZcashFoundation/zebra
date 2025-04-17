@@ -118,5 +118,5 @@ pub const MAX_INVALIDATED_BLOCKS: usize = 100;
 
 lazy_static! {
     /// Regex that matches the RocksDB error when its lock file is already open.
-    pub static ref LOCK_FILE_ERROR: Regex = Regex::new("(lock file).*(temporarily unavailable)|(in use)|(being used by another process)").expect("regex is valid");
+    pub static ref LOCK_FILE_ERROR: Regex = Regex::new("(Database already open).*").expect("regex is valid");
 }
