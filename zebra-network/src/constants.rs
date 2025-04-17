@@ -340,7 +340,16 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// This version of Zebra draws the current network protocol version from
 /// [ZIP-253](https://zips.z.cash/zip-0253).
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = {
+    #[cfg(not(zcash_unstable = "nu6" /* TODO nu7 */))]
+    {
+        Version(170_120)
+    }
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */)]
+    {
+        Version(170_140)
+    }
+};
 
 /// The default RTT estimate for peer responses.
 ///
@@ -398,6 +407,7 @@ lazy_static! {
     /// Testnet network upgrades.
     // TODO: Change `Nu5` to `Nu6` after NU6 activation.
     // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
+    // TODO: FIXME: Change `Nu...` to `Nu7` after NU7 activation?
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<NetworkKind, Version> = {
         let mut hash_map = HashMap::new();
 

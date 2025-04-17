@@ -7,7 +7,7 @@ use serde::{de::DeserializeOwned, Serialize};
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 
-use orchard::{note_encryption::OrchardDomainCommon, orchard_flavor};
+use orchard::{domain::OrchardDomainCommon, orchard_flavor};
 
 use crate::{
     orchard::ValueCommitment,

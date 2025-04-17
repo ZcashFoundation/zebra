@@ -16,6 +16,6 @@ pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 ///
 /// Orchard transactions must use transaction version 5 and this version
 /// group ID.
-// FIXME: use a proper value!
+// TODO: FIXME: use a proper value!
 #[cfg(feature = "tx-v6")]
-pub const TX_V6_VERSION_GROUP_ID: u32 = 0x124A_69F8;
+pub const TX_V6_VERSION_GROUP_ID: u32 = 0x7777_7777;
