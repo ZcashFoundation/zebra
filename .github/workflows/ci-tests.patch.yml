@@ -70,29 +70,6 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  test-configuration-file:
-    name: Unit tests / Test CI default Docker config file / Test default-conf in Docker
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "No build required"'
-
-  test-configuration-file-testnet:  
-    name: Unit tests / Test CI testnet Docker config file / Test testnet-conf in Docker
-    needs: build
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "No build required"'
-
-  test-zebra-conf-path:
-    name: Unit tests / Test CI custom Docker config file / Test custom-conf in Docker
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "No build required"'
-
-
   ####
   ## The following jobs are related to sub-ci-integration-tests-gcp.yml
   ###

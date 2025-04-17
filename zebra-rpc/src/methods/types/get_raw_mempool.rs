@@ -1,17 +1,13 @@
 //! Types used in `getrawmempool` RPC method.
 
 use std::collections::HashMap;
-#[cfg(feature = "getblocktemplate-rpcs")]
 use std::collections::HashSet;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use hex::ToHex as _;
 
 use super::Zec;
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::transaction::VerifiedUnminedTx;
 use zebra_chain::{amount::NonNegative, block::Height};
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_node_services::mempool::TransactionDependencies;
 
 /// Response to a `getrawmempool` RPC request.
@@ -55,7 +51,6 @@ pub struct MempoolObject {
 }
 
 impl MempoolObject {
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub(crate) fn from_verified_unmined_tx(
         unmined_tx: &VerifiedUnminedTx,
         transactions: &[VerifiedUnminedTx],

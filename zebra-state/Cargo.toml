@@ -22,11 +22,6 @@ progress-bar = [
     "howudoin",
 ]
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-    "zebra-chain/getblocktemplate-rpcs",
-]
-
 # Indexes spending transaction ids by spent outpoints and revealed nullifiers
 indexer = []
 
@@ -47,6 +42,8 @@ elasticsearch = [
     "dep:serde_json",
     "zebra-chain/elasticsearch",
 ]
+
+tx_v6 = ["zebra-chain/tx_v6"]
 
 [dependencies]
 bincode = { workspace = true }

@@ -49,8 +49,10 @@ fn generate_test_vectors() {
             );
 
             for _ in 0..num_recipients {
+                let mut memo: [u8; 512] = [0; 512];
+                memo[0] = 0xF6;
                 builder
-                    .add_output(None, recipient, NoteValue::from_raw(note_value), None)
+                    .add_output(None, recipient, NoteValue::from_raw(note_value), memo)
                     .unwrap();
             }
 

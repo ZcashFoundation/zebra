@@ -59,6 +59,12 @@ impl ZcashDeserialize for EncryptedNote {
     }
 }
 
+impl From<EncryptedNote> for [u8; 580] {
+    fn from(note: EncryptedNote) -> Self {
+        note.0
+    }
+}
+
 /// A ciphertext component for encrypted output notes.
 ///
 /// Corresponds to Sapling's 'outCiphertext'
@@ -109,6 +115,12 @@ impl ZcashDeserialize for WrappedNoteKey {
         let mut bytes = [0; 80];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
+    }
+}
+
+impl From<WrappedNoteKey> for [u8; 80] {
+    fn from(note: WrappedNoteKey) -> Self {
+        note.0
     }
 }
 

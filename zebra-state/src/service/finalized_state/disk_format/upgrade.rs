@@ -54,9 +54,8 @@ pub trait DiskFormatUpgrade {
 
     /// Check that state has been upgraded to this format correctly.
     ///
-    /// # Panics
-    ///
-    /// If the state has not been upgraded to this format correctly.
+    /// The outer `Result` indicates whether the validation was cancelled (due to e.g. node shutdown).
+    /// The inner `Result` indicates whether the validation itself failed or not.
     fn validate(
         &self,
         _db: &ZebraDb,
@@ -92,7 +91,8 @@ fn format_upgrades(
         Box::new(prune_trees::PruneTrees),
         Box::new(add_subtrees::AddSubtrees),
         Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
-        Box::new(no_migration::NoMigration::new(26, 0, 0)), // Value balance upgrade
+        // Value balance upgrade
+        Box::new(no_migration::NoMigration::new(26, 0, 0)),
         Box::new(add_balance_received::AddAddressBalanceReceived),
     ] as [Box<dyn DiskFormatUpgrade>; 5])
         .into_iter()

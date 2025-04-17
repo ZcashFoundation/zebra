@@ -34,7 +34,6 @@ required-features = ["search-issue-refs"]
 name = "block-template-to-proposal"
 # this setting is required for Zebra's Docker build caches
 path = "src/bin/block-template-to-proposal/main.rs"
-required-features = ["getblocktemplate-rpcs"]
 
 [[bin]]
 name = "openapi-generator"
@@ -59,13 +58,6 @@ search-issue-refs = [
     "tokio"
 ]
 
-# block-template-to-proposal uses the experimental mining RPC support feature name
-getblocktemplate-rpcs = [
-    "zebra-rpc/getblocktemplate-rpcs",
-    "zebra-node-services/getblocktemplate-rpcs",
-    "zebra-chain/getblocktemplate-rpcs",
-]
-
 shielded-scan = [
     "itertools",
     "jsonrpc",
@@ -74,7 +66,6 @@ shielded-scan = [
 ]
 
 openapi-generator = [
-    "zebra-rpc",
     "syn",
     "quote",
     "serde_yml",
@@ -98,7 +89,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.4
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.45" }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.45", optional = true }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.45" }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }

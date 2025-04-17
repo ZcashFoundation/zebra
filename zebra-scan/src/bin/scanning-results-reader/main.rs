@@ -14,7 +14,7 @@ use jsonrpc::Client;
 use zcash_client_backend::decrypt_transaction;
 use zcash_primitives::consensus::{BlockHeight, BranchId};
 use zcash_primitives::transaction::Transaction;
-use zcash_primitives::zip32::AccountId;
+use zip32::AccountId;
 
 use zebra_scan::scan::{dfvk_to_ufvk, sapling_key_to_dfvk};
 use zebra_scan::{storage::Storage, Config};
@@ -62,8 +62,8 @@ pub fn main() {
                 )
                 .expect("TX fetched via RPC should be deserializable from raw bytes");
 
-                for output in
-                    decrypt_transaction(&zp_network, height, &tx, &ufvks).sapling_outputs()
+                for output in decrypt_transaction(&zp_network, Some(height), None, &tx, &ufvks)
+                    .sapling_outputs()
                 {
                     let memo = memo_bytes_to_string(output.memo().as_array());
 

@@ -31,22 +31,16 @@ use zebra_chain::{
 #[non_exhaustive]
 pub enum Error {
     /// script verification failed
-    #[non_exhaustive]
     ScriptInvalid,
     /// could not deserialize tx
-    #[non_exhaustive]
     TxDeserialize,
     /// input index out of bounds
-    #[non_exhaustive]
     TxIndex,
     /// tx has an invalid size
-    #[non_exhaustive]
     TxSizeMismatch,
     /// tx is a coinbase transaction and should not be verified
-    #[non_exhaustive]
     TxCoinbase,
     /// unknown error from zcash_script: {0}
-    #[non_exhaustive]
     Unknown(zcash_script_error_t),
 }
 

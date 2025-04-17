@@ -46,11 +46,32 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 #[error("block is not contextually valid: {}", .0)]
 pub struct CommitSemanticallyVerifiedError(#[from] ValidateContextError);
 
+/// An error describing the reason a block or its descendants could not be reconsidered after
+/// potentially being invalidated from the chain_set.
+#[derive(Debug, Error)]
+pub enum ReconsiderError {
+    #[error("Block with hash {0} was not previously invalidated")]
+    MissingInvalidatedBlock(block::Hash),
+
+    #[error("Parent chain not found for block {0}")]
+    ParentChainNotFound(block::Hash),
+
+    #[error("Invalidated blocks list is empty when it should contain at least one block")]
+    InvalidatedBlocksEmpty,
+
+    #[error("{0}")]
+    ValidationError(#[from] ValidateContextError),
+}
+
 /// An error describing why a block failed contextual validation.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[allow(missing_docs)]
 pub enum ValidateContextError {
+    #[error("block hash {block_hash} was previously invalidated")]
+    #[non_exhaustive]
+    BlockPreviouslyInvalidated { block_hash: block::Hash },
+
     #[error("block parent not found in any chain, or not enough blocks in chain")]
     #[non_exhaustive]
     NotReadyToBeCommitted,

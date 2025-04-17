@@ -86,10 +86,6 @@ impl DiskFormatUpgrade for PruneTrees {
     }
 
     /// Check that note commitment trees were correctly de-duplicated.
-    ///
-    /// # Panics
-    ///
-    /// If a duplicate tree is found.
     #[allow(clippy::unwrap_in_result)]
     fn validate(
         &self,

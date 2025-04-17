@@ -27,9 +27,9 @@ use crate::error::TransactionError;
 ///
 /// Arguments:
 /// - `block_height`: the height of the mined block, or the height of the next block for mempool
-///                   transactions
+///   transactions
 /// - `block_time`: the time in the mined block header, or the median-time-past of the next block
-///                 for the mempool. Optional if the lock time is a height.
+///   for the mempool. Optional if the lock time is a height.
 ///
 /// # Panics
 ///

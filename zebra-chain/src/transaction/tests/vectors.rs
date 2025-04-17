@@ -41,7 +41,7 @@ lazy_static! {
 /// given index is read. Therefore, we just need a list where `array[index]`
 /// is the given `output`.
 fn mock_pre_v5_output_list(output: transparent::Output, index: usize) -> Vec<transparent::Output> {
-    iter::repeat(output).take(index + 1).collect()
+    std::iter::repeat_n(output, index + 1).collect()
 }
 
 #[test]
@@ -233,9 +233,7 @@ fn deserialize_large_transaction() {
     let tx_inputs_num = MAX_BLOCK_BYTES as usize / input_data.len();
 
     // Set the precalculated amount of inputs and a single output.
-    let inputs = std::iter::repeat(input)
-        .take(tx_inputs_num)
-        .collect::<Vec<_>>();
+    let inputs = std::iter::repeat_n(input, tx_inputs_num).collect::<Vec<_>>();
 
     // Create an oversized transaction. Adding the output and lock time causes
     // the transaction to overflow the threshold.
@@ -916,6 +914,36 @@ fn binding_signatures() {
                             at_least_one_v5_checked = true;
                         }
                     }
+                    #[cfg(feature = "tx_v6")]
+                    Transaction::V6 {
+                        sapling_shielded_data,
+                        ..
+                    } => {
+                        if let Some(sapling_shielded_data) = sapling_shielded_data {
+                            // V6 txs have the outputs spent by their transparent inputs hashed into
+                            // their SIGHASH, so we need to exclude txs with transparent inputs.
+                            //
+                            // References:
+                            //
+                            // <https://zips.z.cash/zip-0244#s-2c-amounts-sig-digest>
+                            // <https://zips.z.cash/zip-0244#s-2d-scriptpubkeys-sig-digest>
+                            if tx.has_transparent_inputs() {
+                                continue;
+                            }
+
+                            let sighash = tx.sighash(nu, HashType::ALL, &[], None);
+
+                            let bvk = redjubjub::VerificationKey::try_from(
+                                sapling_shielded_data.binding_verification_key(),
+                            )
+                            .expect("a valid redjubjub::VerificationKey");
+
+                            bvk.verify(sighash.as_ref(), &sapling_shielded_data.binding_sig)
+                                .expect("verification passes");
+
+                            at_least_one_v5_checked = true;
+                        }
+                    }
                 }
             }
         }
@@ -923,4 +951,22 @@ fn binding_signatures() {
         assert!(at_least_one_v4_checked);
         assert!(at_least_one_v5_checked);
     }
+}
+
+#[test]
+fn test_coinbase_script() -> Result<()> {
+    let _init_guard = zebra_test::init();
+
+    let tx = hex::decode("0400008085202f89010000000000000000000000000000000000000000000000000000000000000000ffffffff0503b0e72100ffffffff04e8bbe60e000000001976a914ba92ff06081d5ff6542af8d3b2d209d29ba6337c88ac40787d010000000017a914931fec54c1fea86e574462cc32013f5400b891298738c94d010000000017a914c7a4285ed7aed78d8c0e28d7f1839ccb4046ab0c87286bee000000000017a914d45cb1adffb5215a42720532a076f02c7c778c908700000000b0e721000000000000000000000000").unwrap();
+
+    let transaction = tx.zcash_deserialize_into::<Transaction>()?;
+
+    let recoded_tx = transaction.zcash_serialize_to_vec().unwrap();
+    assert_eq!(tx, recoded_tx);
+
+    let data = transaction.inputs()[0].coinbase_script().unwrap();
+    let expected = hex::decode("03b0e72100").unwrap();
+    assert_eq!(data, expected);
+
+    Ok(())
 }

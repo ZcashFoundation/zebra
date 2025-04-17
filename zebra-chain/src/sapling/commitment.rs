@@ -3,6 +3,7 @@
 use std::{fmt, io};
 
 use bitvec::prelude::*;
+use hex::ToHex;
 use jubjub::ExtendedPoint;
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
@@ -303,6 +304,17 @@ lazy_static! {
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Default))]
 pub struct NotSmallOrderValueCommitment(ValueCommitment);
 
+impl NotSmallOrderValueCommitment {
+    /// Return the hash bytes in big-endian byte-order suitable for printing out byte by byte.
+    ///
+    /// Zebra displays commitment value in big-endian byte-order,
+    /// following the convention set by zcashd.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut reversed_bytes = self.0 .0.to_bytes();
+        reversed_bytes.reverse();
+        reversed_bytes
+    }
+}
 impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {
     type Error = &'static str;
 
@@ -362,6 +374,16 @@ impl ZcashDeserialize for NotSmallOrderValueCommitment {
         let vc = ValueCommitment::try_from(reader.read_32_bytes()?)
             .map_err(SerializationError::Parse)?;
         vc.try_into().map_err(SerializationError::Parse)
+    }
+}
+
+impl ToHex for &NotSmallOrderValueCommitment {
+    fn encode_hex<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex()
+    }
+
+    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
+        self.bytes_in_display_order().encode_hex_upper()
     }
 }
 

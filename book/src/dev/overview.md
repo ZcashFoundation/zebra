@@ -41,8 +41,6 @@ The following are general desiderata for Zebra:
 
 ## Service Dependencies
 
-Note: dotted lines are for "getblocktemplate-rpcs" feature
-
 <div id="service-dep-diagram">
 {{#include diagrams/service-dependencies.svg}}
 </div>
@@ -73,6 +71,8 @@ digraph services {
 
 Render here: https://dreampuf.github.io/GraphvizOnline
  -->
+
+The dotted lines are for the `getblocktemplate` RPC.
 
 ## Architecture
 

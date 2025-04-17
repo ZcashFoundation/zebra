@@ -110,8 +110,8 @@ impl Handler {
             Handler::Ping(_) => "Ping".into(),
             Handler::Peers => "Peers".into(),
 
-            Handler::FindBlocks { .. } => "FindBlocks".into(),
-            Handler::FindHeaders { .. } => "FindHeaders".into(),
+            Handler::FindBlocks => "FindBlocks".into(),
+            Handler::FindHeaders => "FindHeaders".into(),
 
             Handler::BlocksByHash { .. } => "BlocksByHash".into(),
             Handler::TransactionsById { .. } => "TransactionsById".into(),
@@ -1189,7 +1189,7 @@ where
                 self.fail_with(PeerError::DuplicateHandshake).await;
                 Consumed
             }
-            Message::Verack { .. } => {
+            Message::Verack => {
                 self.fail_with(PeerError::DuplicateHandshake).await;
                 Consumed
             }
@@ -1218,9 +1218,7 @@ where
                 Unused
             }
             // These messages should never be sent by peers.
-            Message::FilterLoad { .. }
-            | Message::FilterAdd { .. }
-            | Message::FilterClear { .. } => {
+            Message::FilterLoad { .. } | Message::FilterAdd { .. } | Message::FilterClear => {
                 // # Security
                 //
                 // Zcash connections are not authenticated, so malicious nodes can send fake messages,

@@ -65,7 +65,6 @@ pub enum Request {
     //
     // TODO: make the Transactions response return VerifiedUnminedTx,
     //       and remove the FullTransactions variant
-    #[cfg(feature = "getblocktemplate-rpcs")]
     FullTransactions,
 
     /// Query matching cached rejected transaction IDs in the mempool,
@@ -133,7 +132,6 @@ pub enum Response {
     //
     // TODO: make the Transactions response return VerifiedUnminedTx,
     //       and remove the FullTransactions variant
-    #[cfg(feature = "getblocktemplate-rpcs")]
     FullTransactions {
         /// All [`VerifiedUnminedTx`]s in the mempool
         transactions: Vec<VerifiedUnminedTx>,

@@ -60,14 +60,6 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Return true if `getblocktemplate-rpcs` rust feature is not turned on, false otherwise.
-    ///
-    /// This is used to ignore the mining section of the configuration if the feature is not
-    /// enabled, allowing us to log a warning when the config found is different from the default.
-    pub fn skip_getblocktemplate(&self) -> bool {
-        !cfg!(feature = "getblocktemplate-rpcs")
-    }
-
     /// Is the internal miner enabled using at least one thread?
     #[cfg(feature = "internal-miner")]
     pub fn is_internal_miner_enabled(&self) -> bool {

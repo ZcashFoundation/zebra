@@ -21,7 +21,6 @@ use zebra_network::{
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_rpc::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
@@ -733,17 +732,13 @@ async fn setup(
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     let submitblock_channel = SubmitBlockChannel::new();
 
     let block_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
         chain_tip_change,
         peer_set.clone(),
-        #[cfg(feature = "getblocktemplate-rpcs")]
         Some(submitblock_channel.receiver()),
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        None,
     ));
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
@@ -798,7 +793,6 @@ async fn setup(
     )
 }
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 mod submitblock_test {
     use std::io;
     use std::sync::{Arc, Mutex};

@@ -28,6 +28,8 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
             Transaction::V5 { .. } => self.txid_v5(),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { .. } => self.txid_v6(),
         }
     }
 
@@ -47,5 +49,11 @@ impl<'a> TxIdBuilder<'a> {
 
         // We compute v5 txid (from ZIP-244) using librustzcash.
         Some(Hash(*self.trans.to_librustzcash(nu).ok()?.txid().as_ref()))
+    }
+
+    /// Passthrough to txid_v5 for V6 transactions.
+    #[cfg(feature = "tx_v6")]
+    fn txid_v6(self) -> Option<Hash> {
+        self.txid_v5()
     }
 }

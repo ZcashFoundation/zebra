@@ -218,7 +218,7 @@ pub enum Message {
     /// When a peer requests a list of transaction hashes, `zcashd` returns:
     ///   - a batch of messages containing found transactions, then
     ///   - a `notfound` message containing a list of transaction hashes that
-    ///      aren't available in its mempool or state.
+    ///     aren't available in its mempool or state.
     ///
     /// But when a peer requests blocks or headers, any missing items are
     /// silently skipped, without any `notfound` messages.

@@ -11,18 +11,13 @@
 
 pub mod cached_state;
 pub mod check;
-pub mod config;
-pub mod failure_messages;
-pub mod launch;
-pub mod lightwalletd;
-pub mod sync;
-pub mod test_type;
-
 #[cfg(feature = "zebra-checkpoints")]
 pub mod checkpoints;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
+pub mod config;
+pub mod failure_messages;
 pub mod get_block_template_rpcs;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
+pub mod launch;
+pub mod lightwalletd;
 pub mod regtest;
+pub mod sync;
+pub mod test_type;

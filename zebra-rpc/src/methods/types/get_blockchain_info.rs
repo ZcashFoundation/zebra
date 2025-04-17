@@ -12,7 +12,7 @@ use super::*;
 #[serde(rename_all = "camelCase")]
 pub struct Balance {
     /// Name of the pool
-    #[serde(skip_serializing_if = "String::is_empty")]
+    #[serde(skip_serializing_if = "String::is_empty", default)]
     id: String,
     /// Total amount in the pool, in ZEC
     chain_value: Zec<NonNegative>,

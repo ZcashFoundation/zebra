@@ -68,17 +68,14 @@ pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
     #[allow(unused_mut)]
     let mut mining = zebra_rpc::config::mining::Config::default();
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
-    {
-        let miner_address = if network.network.is_a_test_network() {
-            // Assume test networks all use the same address prefix and format
-            "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
-        } else {
-            "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
-        };
+    let miner_address = if network.network.is_a_test_network() {
+        // Assume test networks all use the same address prefix and format
+        "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
+    } else {
+        "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
+    };
 
-        mining.miner_address = Some(miner_address.parse().expect("hard-coded address is valid"));
-    }
+    mining.miner_address = Some(miner_address.parse().expect("hard-coded address is valid"));
 
     Ok(ZebradConfig {
         network,

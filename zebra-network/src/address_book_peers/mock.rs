@@ -19,7 +19,11 @@ impl MockAddressBookPeers {
 }
 
 impl AddressBookPeers for MockAddressBookPeers {
-    fn recently_live_peers(&self, _now: chrono::DateTime<chrono::Utc>) -> Vec<MetaAddr> {
-        self.recently_live_peers.clone()
+    fn recently_live_peers(&self, now: chrono::DateTime<chrono::Utc>) -> Vec<MetaAddr> {
+        self.recently_live_peers
+            .iter()
+            .filter(|peer| peer.was_recently_live(now))
+            .cloned()
+            .collect()
     }
 }

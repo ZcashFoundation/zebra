@@ -80,12 +80,7 @@ impl Default for Config {
             // Disable indexer RPCs by default.
             indexer_listen_addr: None,
 
-            // Use a single thread, so we can detect RPC port conflicts.
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            parallel_cpu_threads: 1,
-
             // Use multiple threads, because we pause requests during getblocktemplate long polling
-            #[cfg(feature = "getblocktemplate-rpcs")]
             parallel_cpu_threads: 0,
 
             // Debug options are always off by default.

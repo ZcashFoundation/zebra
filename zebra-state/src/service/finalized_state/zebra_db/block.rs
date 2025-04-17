@@ -24,7 +24,7 @@ use zebra_chain::{
     parallel::tree::NoteCommitmentTrees,
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
-    serialization::TrustedPreallocate,
+    serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize as _},
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
@@ -39,6 +39,7 @@ use crate::{
             transparent::{AddressBalanceLocation, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
+        FromDisk, RawBytes,
     },
     BoxError, HashOrHeight,
 };
@@ -132,6 +133,19 @@ impl ZebraDb {
         Some(header)
     }
 
+    /// Returns the raw [`block::Header`] with [`block::Hash`] or [`Height`], if
+    /// it exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_block_header(&self, hash_or_height: HashOrHeight) -> Option<RawBytes> {
+        // Block Header
+        let block_header_by_height = self.db.cf_handle("block_header_by_height").unwrap();
+
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header: RawBytes = self.db.zs_get(&block_header_by_height, &height)?;
+
+        Some(header)
+    }
+
     /// Returns the [`Block`] with [`block::Hash`] or
     /// [`Height`], if it exists in the finalized chain.
     //
@@ -159,6 +173,59 @@ impl ZebraDb {
             header,
             transactions,
         }))
+    }
+
+    /// Returns the [`Block`] with [`block::Hash`] or [`Height`], if it exists
+    /// in the finalized chain, and its serialized size.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn block_and_size(&self, hash_or_height: HashOrHeight) -> Option<(Arc<Block>, usize)> {
+        let (raw_header, raw_txs) = self.raw_block(hash_or_height)?;
+
+        let header = Arc::<block::Header>::from_bytes(raw_header.raw_bytes());
+        let txs: Vec<_> = raw_txs
+            .iter()
+            .map(|raw_tx| Arc::<Transaction>::from_bytes(raw_tx.raw_bytes()))
+            .collect();
+
+        // Compute the size of the block from the size of header and size of
+        // transactions. This requires summing them all and also adding the
+        // size of the CompactSize-encoded transaction count.
+        // See https://developer.bitcoin.org/reference/block_chain.html#serialized-blocks
+        let tx_count = CompactSizeMessage::try_from(txs.len())
+            .expect("must work for a previously serialized block");
+        let tx_raw = tx_count
+            .zcash_serialize_to_vec()
+            .expect("must work for a previously serialized block");
+        let size = raw_header.raw_bytes().len()
+            + raw_txs
+                .iter()
+                .map(|raw_tx| raw_tx.raw_bytes().len())
+                .sum::<usize>()
+            + tx_raw.len();
+
+        let block = Block {
+            header,
+            transactions: txs,
+        };
+        Some((Arc::new(block), size))
+    }
+
+    /// Returns the raw [`Block`] with [`block::Hash`] or
+    /// [`Height`], if it exists in the finalized chain.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_block(&self, hash_or_height: HashOrHeight) -> Option<(RawBytes, Vec<RawBytes>)> {
+        // Block
+        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
+        let header = self.raw_block_header(height.into())?;
+
+        // Transactions
+
+        let transactions = self
+            .raw_transactions_by_height(height)
+            .map(|(_, tx)| tx)
+            .collect();
+
+        Some((header, transactions))
     }
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
@@ -233,6 +300,19 @@ impl ZebraDb {
         )
     }
 
+    /// Returns an iterator of all raw [`Transaction`]s for a provided block
+    /// height in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_transactions_by_height(
+        &self,
+        height: Height,
+    ) -> impl Iterator<Item = (TransactionLocation, RawBytes)> + '_ {
+        self.raw_transactions_by_location_range(
+            TransactionLocation::min_for_height(height)
+                ..=TransactionLocation::max_for_height(height),
+        )
+    }
+
     /// Returns an iterator of all [`Transaction`]s in the provided range
     /// of [`TransactionLocation`]s in finalized state.
     #[allow(clippy::unwrap_in_result)]
@@ -240,6 +320,20 @@ impl ZebraDb {
         &self,
         range: R,
     ) -> impl Iterator<Item = (TransactionLocation, Transaction)> + '_
+    where
+        R: RangeBounds<TransactionLocation>,
+    {
+        let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
+        self.db.zs_forward_range_iter(tx_by_loc, range)
+    }
+
+    /// Returns an iterator of all raw [`Transaction`]s in the provided range
+    /// of [`TransactionLocation`]s in finalized state.
+    #[allow(clippy::unwrap_in_result)]
+    fn raw_transactions_by_location_range<R>(
+        &self,
+        range: R,
+    ) -> impl Iterator<Item = (TransactionLocation, RawBytes)> + '_
     where
         R: RangeBounds<TransactionLocation>,
     {

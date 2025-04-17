@@ -193,7 +193,7 @@ pub fn are_zebrad_and_lightwalletd_tips_synced(
             // Block number is the last word of the message. We rely on that specific for this to work.
             let last = msg
                 .split(' ')
-                .last()
+                .next_back()
                 .expect("always possible to get the last word of a separated by space string");
             lightwalletd_next_height = last
                 .parse()

@@ -1,7 +1,6 @@
 //! Fixed test vectors for the network consensus parameters.
 
-use zcash_primitives::consensus::{self as zp_consensus, Parameters};
-use zcash_protocol::consensus::NetworkConstants as _;
+use zcash_protocol::consensus::{self as zp_consensus, NetworkConstants as _, Parameters};
 
 use crate::{
     block::Height,
@@ -20,7 +19,7 @@ use crate::{
 };
 
 /// Checks that every method in the `Parameters` impl for `zebra_chain::Network` has the same output
-/// as the Parameters impl for `zcash_primitives::consensus::Network` on Mainnet and the default Testnet.
+/// as the Parameters impl for `zcash_protocol::consensus::NetworkType` on Mainnet and the default Testnet.
 #[test]
 fn check_parameters_impl() {
     let zp_network_upgrades = [

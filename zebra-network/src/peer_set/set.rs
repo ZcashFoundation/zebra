@@ -281,16 +281,16 @@ where
     /// - `discover`: handles peer connects and disconnects;
     /// - `demand_signal`: requests more peers when all peers are busy (unready);
     /// - `handle_rx`: receives background task handles,
-    ///                monitors them to make sure they're still running,
-    ///                and shuts down all the tasks as soon as one task exits;
+    ///   monitors them to make sure they're still running,
+    ///   and shuts down all the tasks as soon as one task exits;
     /// - `inv_stream`: receives inventory changes from peers,
-    ///                 allowing the peer set to direct inventory requests;
+    ///   allowing the peer set to direct inventory requests;
     /// - `bans_receiver`: receives a map of banned IP addresses that should be dropped;
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
     /// - `minimum_peer_version`: endpoint to see the minimum peer protocol version in real time.
     /// - `max_conns_per_ip`: configured maximum number of peers that can be in the
-    ///                       peer set per IP, defaults to the config value or to
-    ///                       [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
+    ///   peer set per IP, defaults to the config value or to
+    ///   [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
         discover: D,

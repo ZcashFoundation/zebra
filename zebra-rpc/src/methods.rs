@@ -6,9 +6,11 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-#[cfg(feature = "getblocktemplate-rpcs")]
-use std::collections::HashMap;
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    ops::RangeInclusive,
+};
 
 use chrono::Utc;
 use futures::{stream::FuturesOrdered, StreamExt, TryFutureExt};
@@ -63,13 +65,11 @@ pub mod trees;
 pub mod types;
 
 use types::GetRawMempool;
-#[cfg(feature = "getblocktemplate-rpcs")]
 use types::MempoolObject;
+use types::TransactionObject;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub mod get_block_template_rpcs;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub use get_block_template_rpcs::{GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer};
 
 #[cfg(test)]
@@ -172,12 +172,7 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Zebra previously partially supported verbosity=1 by returning only the
-    /// fields required by lightwalletd ([`lightwalletd` only reads the `tx`
-    /// field of the result](https://github.com/zcash/lightwalletd/blob/dfac02093d85fb31fb9a8475b884dd6abca966c7/common/common.go#L152)).
-    /// That verbosity level was migrated to "3"; so while lightwalletd will
-    /// still work by using verbosity=1, it will sync faster if it is changed to
-    /// use verbosity=3.
+    /// The `size` field is only returned with verbosity=2.
     ///
     /// The undocumented `chainwork` field is not returned.
     #[method(name = "getblock")]
@@ -316,8 +311,8 @@ pub trait Rpc {
     ///
     /// - `request`: (object, required, example={\"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"], \"start\": 1000, \"end\": 2000}) A struct with the following named fields:
     ///     - `addresses`: (json array of string, required) The addresses to get transactions from.
-    ///     - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
-    ///     - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
+    ///     - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
+    ///     - `end`: (numeric, optional) The top height to stop looking for transactions (inclusive).
     ///
     /// # Notes
     ///
@@ -840,11 +835,11 @@ where
             None
         };
 
-        let hash_or_height: HashOrHeight = hash_or_height
-            .parse()
-            // Reference for the legacy error code:
-            // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-            .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         if verbosity == 0 {
             let request = zebra_state::ReadRequest::Block(hash_or_height);
@@ -888,7 +883,7 @@ where
 
             let transactions_request = match verbosity {
                 1 => zebra_state::ReadRequest::TransactionIdsForBlock(hash_or_height),
-                2 => zebra_state::ReadRequest::Block(hash_or_height),
+                2 => zebra_state::ReadRequest::BlockAndSize(hash_or_height),
                 _other => panic!("get_block_header_fut should be none"),
             };
 
@@ -917,28 +912,35 @@ where
             }
 
             let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
-            let tx: Vec<_> = match tx_ids_response.map_misc_error()? {
-                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => tx_ids
-                    .ok_or_misc_error("block not found")?
-                    .iter()
-                    .map(|tx_id| GetBlockTransaction::Hash(*tx_id))
-                    .collect(),
-                zebra_state::ReadResponse::Block(block) => block
-                    .ok_or_misc_error("Block not found")?
-                    .transactions
-                    .iter()
-                    .map(|tx| {
-                        GetBlockTransaction::Object(TransactionObject::from_transaction(
-                            tx.clone(),
-                            Some(height),
-                            Some(
-                                confirmations
-                                    .try_into()
-                                    .expect("should be less than max block height, i32::MAX"),
-                            ),
-                        ))
-                    })
-                    .collect(),
+            let (tx, size): (Vec<_>, Option<usize>) = match tx_ids_response.map_misc_error()? {
+                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => (
+                    tx_ids
+                        .ok_or_misc_error("block not found")?
+                        .iter()
+                        .map(|tx_id| GetBlockTransaction::Hash(*tx_id))
+                        .collect(),
+                    None,
+                ),
+                zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
+                    let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
+                    let transactions = block
+                        .transactions
+                        .iter()
+                        .map(|tx| {
+                            GetBlockTransaction::Object(TransactionObject::from_transaction(
+                                tx.clone(),
+                                Some(height),
+                                Some(
+                                    confirmations
+                                        .try_into()
+                                        .expect("should be less than max block height, i32::MAX"),
+                                ),
+                                &network,
+                            ))
+                        })
+                        .collect();
+                    (transactions, Some(size))
+                }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
             };
 
@@ -985,7 +987,7 @@ where
                 difficulty: Some(difficulty),
                 tx,
                 trees,
-                size: None,
+                size: size.map(|size| size as i64),
                 block_commitments: Some(block_commitments),
                 final_sapling_root: Some(final_sapling_root),
                 final_orchard_root,
@@ -1006,9 +1008,11 @@ where
         let verbose = verbose.unwrap_or(true);
         let network = self.network.clone();
 
-        let hash_or_height: HashOrHeight = hash_or_height
-            .parse()
-            .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
         let zebra_state::ReadResponse::BlockHeader {
             header,
             hash,
@@ -1138,24 +1142,18 @@ where
         #[allow(unused)]
         let verbose = verbose.unwrap_or(false);
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         // Determines whether the output of this RPC is sorted like zcashd
         let should_use_zcashd_order = self.debug_like_zcashd;
 
         let mut mempool = self.mempool.clone();
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         let request = if should_use_zcashd_order || verbose {
             mempool::Request::FullTransactions
         } else {
             mempool::Request::TransactionIds
         };
-
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        let request = mempool::Request::TransactionIds;
 
         // `zcashd` doesn't check if it is synced to the tip here, so we don't either.
         let response = mempool
@@ -1165,7 +1163,6 @@ where
             .map_misc_error()?;
 
         match response {
-            #[cfg(feature = "getblocktemplate-rpcs")]
             mempool::Response::FullTransactions {
                 mut transactions,
                 transaction_dependencies,
@@ -1256,6 +1253,7 @@ where
                             tx.transaction.clone(),
                             None,
                             None,
+                            &self.network,
                         ))
                     } else {
                         let hex = tx.transaction.clone().into();
@@ -1279,6 +1277,7 @@ where
                     tx.tx.clone(),
                     Some(tx.height),
                     Some(tx.confirmations),
+                    &self.network,
                 ))
             } else {
                 let hex = tx.tx.into();
@@ -1301,11 +1300,11 @@ where
         let mut state = self.state.clone();
         let network = self.network.clone();
 
-        // Reference for the legacy error code:
-        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
-        let hash_or_height = hash_or_height
-            .parse()
-            .map_error(server::error::LegacyCode::InvalidParameter)?;
+        let hash_or_height =
+            HashOrHeight::new(&hash_or_height, self.latest_chain_tip.best_tip_height())
+                // Reference for the legacy error code:
+                // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/blockchain.cpp#L629>
+                .map_error(server::error::LegacyCode::InvalidParameter)?;
 
         // Fetch the block referenced by [`hash_or_height`] from the state.
         //
@@ -1456,13 +1455,11 @@ where
         let mut state = self.state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
-        let start = Height(request.start);
-        let end = Height(request.end);
-
-        let chain_height = best_chain_tip_height(&latest_chain_tip)?;
-
-        // height range checks
-        check_height_range(start, end, chain_height)?;
+        let height_range = build_height_range(
+            request.start,
+            request.end,
+            best_chain_tip_height(&latest_chain_tip)?,
+        )?;
 
         let valid_addresses = AddressStrings {
             addresses: request.addresses,
@@ -1471,7 +1468,7 @@ where
 
         let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
             addresses: valid_addresses,
-            height_range: start..=end,
+            height_range,
         };
         let response = state
             .ready()
@@ -2415,7 +2412,7 @@ impl Default for GetBlockHash {
 /// Response to a `getrawtransaction` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_transaction` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
@@ -2427,52 +2424,6 @@ pub enum GetRawTransaction {
 impl Default for GetRawTransaction {
     fn default() -> Self {
         Self::Object(TransactionObject::default())
-    }
-}
-
-/// A Transaction object as returned by `getrawtransaction` and `getblock` RPC
-/// requests.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct TransactionObject {
-    /// The raw transaction, encoded as hex bytes.
-    #[serde(with = "hex")]
-    pub hex: SerializedTransaction,
-    /// The height of the block in the best chain that contains the tx or `None` if the tx is in
-    /// the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub height: Option<u32>,
-    /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
-    /// if the tx is in the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub confirmations: Option<u32>,
-    // TODO: many fields not yet supported
-}
-
-impl Default for TransactionObject {
-    fn default() -> Self {
-        Self {
-            hex: SerializedTransaction::from(
-                [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
-            ),
-            height: Option::default(),
-            confirmations: Option::default(),
-        }
-    }
-}
-
-impl TransactionObject {
-    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
-    #[allow(clippy::unwrap_in_result)]
-    fn from_transaction(
-        tx: Arc<Transaction>,
-        height: Option<block::Height>,
-        confirmations: Option<u32>,
-    ) -> Self {
-        Self {
-            hex: tx.into(),
-            height: height.map(|height| height.0),
-            confirmations,
-        }
     }
 }
 
@@ -2571,9 +2522,9 @@ pub struct GetAddressTxIdsRequest {
     // A list of addresses to get transactions from.
     addresses: Vec<String>,
     // The height to start looking for transactions.
-    start: u32,
+    start: Option<u32>,
     // The height to end looking for transactions.
-    end: u32,
+    end: Option<u32>,
 }
 
 impl GetAddressTxIdsRequest {
@@ -2581,13 +2532,17 @@ impl GetAddressTxIdsRequest {
     pub fn from_parts(addresses: Vec<String>, start: u32, end: u32) -> Self {
         GetAddressTxIdsRequest {
             addresses,
-            start,
-            end,
+            start: Some(start),
+            end: Some(end),
         }
     }
     /// Returns the contents of [`GetAddressTxIdsRequest`].
     pub fn into_parts(&self) -> (Vec<String>, u32, u32) {
-        (self.addresses.clone(), self.start, self.end)
+        (
+            self.addresses.clone(),
+            self.start.unwrap_or(0),
+            self.end.unwrap_or(0),
+        )
     }
 }
 
@@ -2653,15 +2608,36 @@ impl OrchardTrees {
     }
 }
 
-/// Check if provided height range is valid for address indexes.
-fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
-    if start == Height(0) || end == Height(0) {
-        return Err(ErrorObject::owned(
-            ErrorCode::InvalidParams.code(),
-            format!("start {start:?} and end {end:?} must both be greater than zero"),
-            None::<()>,
-        ));
-    }
+/// Build a valid height range from the given optional start and end numbers.
+///
+/// # Parameters
+///
+/// - `start`: Optional starting height. If not provided, defaults to 0.
+/// - `end`: Optional ending height. A value of 0 or absence of a value indicates to use `chain_height`.
+/// - `chain_height`: The maximum permissible height.
+///
+/// # Returns
+///
+/// A `RangeInclusive<Height>` from the clamped start to the clamped end.
+///
+/// # Errors
+///
+/// Returns an error if the computed start is greater than the computed end.
+fn build_height_range(
+    start: Option<u32>,
+    end: Option<u32>,
+    chain_height: Height,
+) -> Result<RangeInclusive<Height>> {
+    // Convert optional values to Height, using 0 (as Height(0)) when missing.
+    // If start is above chain_height, clamp it to chain_height.
+    let start = Height(start.unwrap_or(0)).min(chain_height);
+
+    // For `end`, treat a zero value or missing value as `chain_height`:
+    let end = match end {
+        Some(0) | None => chain_height,
+        Some(val) => Height(val).min(chain_height),
+    };
+
     if start > end {
         return Err(ErrorObject::owned(
             ErrorCode::InvalidParams.code(),
@@ -2669,15 +2645,8 @@ fn check_height_range(start: Height, end: Height, chain_height: Height) -> Resul
             None::<()>,
         ));
     }
-    if start > chain_height || end > chain_height {
-        return Err(ErrorObject::owned(
-            ErrorCode::InvalidParams.code(),
-            format!("start {start:?} and end {end:?} must both be less than or equal to the chain tip {chain_height:?}"),
-            None::<()>,
-        ));
-    }
 
-    Ok(())
+    Ok(start..=end)
 }
 
 /// Given a potentially negative index, find the corresponding `Height`.
