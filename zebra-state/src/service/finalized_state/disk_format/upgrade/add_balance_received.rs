@@ -35,11 +35,6 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
         let network = &db.network();
         let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
 
-        // Return early if there are no blocks in the state and the database is empty.
-        // Note: The caller should (and as of this writing, does) return early if the database is empty anyway.
-        if initial_tip_height.is_min() {
-            return Ok(());
-        }
 
         // Set the initial query range as all transaction locations up to the max transaction index for the initial tip height.
         let initial_tx_loc_range = ..=TransactionLocation::max_for_height(initial_tip_height);
