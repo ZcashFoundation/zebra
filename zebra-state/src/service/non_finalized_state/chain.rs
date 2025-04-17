@@ -1629,7 +1629,7 @@ impl Chain {
         }
 
         // update the chain value pool balances
-        self.update_chain_tip_with(chain_value_pool_change)?;
+        self.update_chain_tip_with(&(*chain_value_pool_change, height))?;
 
         Ok(())
     }
@@ -1821,7 +1821,7 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         self.remove_history_tree(position, height);
 
         // revert the chain value pool balances, if needed
-        self.revert_chain_with(chain_value_pool_change, position);
+        self.revert_chain_with(&(*chain_value_pool_change, height), position);
     }
 }
 
@@ -2202,22 +2202,26 @@ impl UpdateWith<(&Option<orchard::ShieldedData>, &SpendingTransactionId)> for Ch
     }
 }
 
-impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
+impl UpdateWith<(ValueBalance<NegativeAllowed>, Height)> for Chain {
+    #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
-        block_value_pool_change: &ValueBalance<NegativeAllowed>,
+        (block_value_pool_change, height): &(ValueBalance<NegativeAllowed>, Height),
     ) -> Result<(), ValidateContextError> {
         match self
             .chain_value_pools
             .add_chain_value_pool_change(*block_value_pool_change)
         {
-            Ok(chain_value_pools) => self.chain_value_pools = chain_value_pools,
+            Ok(chain_value_pools) => {
+                self.chain_value_pools = chain_value_pools;
+                self.block_data_by_height
+                    .insert(*height, BlockData::new(chain_value_pools));
+            }
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
                 value_balance_error,
                 chain_value_pools: self.chain_value_pools,
                 block_value_pool_change: *block_value_pool_change,
-                // assume that the current block is added to `blocks` after `update_chain_tip_with`
-                height: self.max_block_height().and_then(|height| height + 1),
+                height: Some(*height),
             })?,
         };
 
@@ -2239,7 +2243,7 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
     /// change.
     fn revert_chain_with(
         &mut self,
-        block_value_pool_change: &ValueBalance<NegativeAllowed>,
+        (block_value_pool_change, height): &(ValueBalance<NegativeAllowed>, Height),
         position: RevertPosition,
     ) {
         use std::ops::Neg;
@@ -2250,6 +2254,7 @@ impl UpdateWith<ValueBalance<NegativeAllowed>> for Chain {
                 .add_chain_value_pool_change(block_value_pool_change.neg())
                 .expect("reverting the tip will leave the pools in a previously valid state");
         }
+        self.block_data_by_height.remove(height);
     }
 }
 
