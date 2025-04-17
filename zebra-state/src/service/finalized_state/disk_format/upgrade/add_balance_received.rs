@@ -1,10 +1,7 @@
 //! Upgrades the database format for the column family tracking funds by address to include information
 //! about funds received in addition to address balances.
 
-use std::{
-    collections::{HashMap, HashSet},
-    time::Duration,
-};
+use std::collections::{HashMap, HashSet};
 
 use crossbeam_channel::{Receiver, TryRecvError};
 use rayon::iter::{IntoParallelRefIterator, ParallelBridge, ParallelIterator};
@@ -94,91 +91,32 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
         // Set the last tip height that was processed and accounted for in the received balances.
         let mut last_tip_height = initial_tip_height;
 
-        // Update the address balances with the received balances, check that they were updated correctly, and repeat until successful.
-        'updater: loop {
-            // Update the address balances until caught up to the finalized tip and prepare a disk write batch.
-            let batch = loop {
-                // Update the address received balances and read the address balances from disk until caught up to the finalized tip.
-                let address_balances = loop {
-                    // Set the start height of the query range as the next height after the last tip height that was processed.
-                    let start_height = last_tip_height.next().expect("should be valid");
-                    // Set the latest finalized tip height as the new last processed tip height.
-                    last_tip_height = db.finalized_tip_height().expect("state has blocks");
+        // Update the address balances until caught up to the finalized tip and prepare a disk write batch.
+        let batch = loop {
+            // Update the address received balances and read the address balances from disk until caught up to the finalized tip.
+            let address_balances = loop {
+                // Set the start height of the query range as the next height after the last tip height that was processed.
+                let start_height = last_tip_height.next().expect("should be valid");
+                // Set the latest finalized tip height as the new last processed tip height.
+                last_tip_height = db.finalized_tip_height().expect("state has blocks");
 
-                    // Process new outputs in blocks from the start height (last processed height) up to the latest finalized tip height.
-                    let start_bound = TransactionLocation::min_for_height(start_height);
-                    let tx_loc_range =
-                        start_bound..=TransactionLocation::max_for_height(last_tip_height);
-                    for output in db
-                        .transactions_by_location_range(tx_loc_range)
-                        .flat_map(|(_, tx)| tx.outputs().to_vec())
-                    {
-                        // Return early before the next disk read if the upgrade was cancelled and Zebra is shutting down.
-                        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                            return Err(CancelFormatChange);
-                        } else {
-                            address_received_map
-                                .entry(output.address(network).expect("should be valid"))
-                                .and_modify(make_modifier(output.value.into()))
-                                .or_insert(output.value.into());
-                        }
-                    }
-
+                // Process new outputs in blocks from the start height (last processed height) up to the latest finalized tip height.
+                let start_bound = TransactionLocation::min_for_height(start_height);
+                let tx_loc_range =
+                    start_bound..=TransactionLocation::max_for_height(last_tip_height);
+                for output in db
+                    .transactions_by_location_range(tx_loc_range)
+                    .flat_map(|(_, tx)| tx.outputs().to_vec())
+                {
                     // Return early before the next disk read if the upgrade was cancelled and Zebra is shutting down.
                     if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                         return Err(CancelFormatChange);
+                    } else {
+                        address_received_map
+                            .entry(output.address(network).expect("should be valid"))
+                            .and_modify(make_modifier(output.value.into()))
+                            .or_insert(output.value.into());
                     }
-
-                    // If the finalized tip has changed while processing the new outputs in blocks since the last tip height,
-                    // continue to the next iteration of the `address_balances` loop to update the received balances by address map.
-                    if last_tip_height != db.finalized_tip_height().expect("state has blocks") {
-                        continue;
-                    }
-
-                    // Read the address balances from disk to an in-memory map of address balances with updated received balances.
-                    let address_balances = address_received_map
-                        // Read balances in parallel by address.
-                        .par_iter()
-                        .map(|(address, &received)| {
-                            // Return an error to short-circuit the parallel iterator and return early
-                            // if the upgrade was cancelled and Zebra is shutting down.
-                            //
-                            // Note: `.collect::<Result<_, _>>()?` will short-circuit a parallel iterator on the first error.
-                            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                                return Err(CancelFormatChange);
-                            }
-
-                            // Read the address balance from disk.
-                            let mut balance = db
-                                .address_balance_location(address)
-                                .expect("should have address balances in finalized state");
-
-                            // Update the address balance with the tallied received balance.
-                            *balance.received_mut() = received;
-
-                            Ok((address, balance))
-                        })
-                        .collect::<Result<HashMap<_, _>, CancelFormatChange>>()?;
-
-                    // Return early before the next disk read if the upgrade was cancelled and Zebra is shutting down.
-                    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                        return Err(CancelFormatChange);
-                    }
-
-                    // If the latest finalized tip height matches the last processed height, break the loop with the map of address balances,
-                    // otherwise, if the finalized tip height has changed while reading address balances from disk and updating their received balances,
-                    // continue to the next iteration of the `address_balances` loop to update the in-memory address received balances and try again.
-                    if last_tip_height == db.finalized_tip_height().expect("state has blocks") {
-                        break address_balances;
-                    }
-                };
-
-                // Prepare a new disk write batch to update the address balances on-disk with the latest received balances.
-                let mut batch = DiskWriteBatch::new();
-
-                // Insert each updated address balances into the write batch.
-                for (addr, balance) in &address_balances {
-                    batch.zs_insert(balance_by_transparent_addr, addr, balance);
                 }
 
                 // Return early before the next disk read if the upgrade was cancelled and Zebra is shutting down.
@@ -186,122 +124,77 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
                     return Err(CancelFormatChange);
                 }
 
-                // Check one last time that the finalized tip height hasn't changed before breaking the `batch` loop with
-                // the prepare disk write batch.
+                // If the finalized tip has changed while processing the new outputs in blocks since the last tip height,
+                // continue to the next iteration of the `address_balances` loop to update the received balances by address map.
+                if last_tip_height != db.finalized_tip_height().expect("state has blocks") {
+                    continue;
+                }
+
+                // Read the address balances from disk to an in-memory map of address balances with updated received balances.
+                let address_balances = address_received_map
+                    // Read balances in parallel by address.
+                    .par_iter()
+                    .map(|(address, &received)| {
+                        // Return an error to short-circuit the parallel iterator and return early
+                        // if the upgrade was cancelled and Zebra is shutting down.
+                        //
+                        // Note: `.collect::<Result<_, _>>()?` will short-circuit a parallel iterator on the first error.
+                        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                            return Err(CancelFormatChange);
+                        }
+
+                        // Read the address balance from disk.
+                        let mut balance = db
+                            .address_balance_location(address)
+                            .expect("should have address balances in finalized state");
+
+                        // Update the address balance with the tallied received balance.
+                        *balance.received_mut() = received;
+
+                        Ok((address, balance))
+                    })
+                    .collect::<Result<HashMap<_, _>, CancelFormatChange>>()?;
+
+                // Return early before the next disk read if the upgrade was cancelled and Zebra is shutting down.
+                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                    return Err(CancelFormatChange);
+                }
+
+                // If the latest finalized tip height matches the last processed height, break the loop with the map of address balances,
+                // otherwise, if the finalized tip height has changed while reading address balances from disk and updating their received balances,
+                // continue to the next iteration of the `address_balances` loop to update the in-memory address received balances and try again.
                 if last_tip_height == db.finalized_tip_height().expect("state has blocks") {
-                    break batch;
+                    break address_balances;
                 }
             };
 
-            // Return early before writing the batch if the upgrade was cancelled.
+            // Prepare a new disk write batch to update the address balances on-disk with the latest received balances.
+            let mut batch = DiskWriteBatch::new();
+
+            // Insert each updated address balances into the write batch.
+            for (addr, balance) in &address_balances {
+                batch.zs_insert(balance_by_transparent_addr, addr, balance);
+            }
+
+            // Return early before the next disk read if the upgrade was cancelled and Zebra is shutting down.
             if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                 return Err(CancelFormatChange);
             }
 
-            // Write the batch to disk.
-            db.write_batch(batch).expect("should write batch");
-
-            // The write block task may read the address balances to prepare to write the next block before
-            // these updates were written, and then overwrite the updated received balances with partial values.
-            //
-            // To ensure that the address balances were updated correctly, check that the address balances were
-            // updated correctly before breaking the `updater` loop.
-            'checker: loop {
-                // Return early before the next disk read if the upgrade was cancelled.
-                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
-
-                // Wait until the block write task has had a chance to overwrite the changes written to disk
-                // from here before checking the updated address balances.
-                while last_tip_height == db.finalized_tip_height().expect("state has blocks") {
-                    // Return early before the next disk read if the upgrade was cancelled.
-                    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                        return Err(CancelFormatChange);
-                    }
-
-                    // Sleep for a short duration between checking the finalized tip height while waiting for
-                    // the block write task to write the next block to avoid busy-waiting.
-                    std::thread::sleep(Duration::from_millis(500));
-                }
-
-                // Read any new outputs in the finalized chain since the last tip height and update the received balances by address.
-
-                // Set the start height of a new query range as the next height after the last tip height that was processed.
-                let start_height = last_tip_height.next().expect("should be valid");
-                // Set the new last tip height as the latest finalized tip height.
-                last_tip_height = db.finalized_tip_height().expect("state has blocks");
-
-                let start_bound = TransactionLocation::min_for_height(start_height);
-                let tx_loc_range =
-                    start_bound..=TransactionLocation::max_for_height(last_tip_height);
-                for (_, tx) in db.transactions_by_location_range(tx_loc_range) {
-                    for output in tx.outputs() {
-                        // Return early before the next disk read if the upgrade was cancelled.
-                        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                            return Err(CancelFormatChange);
-                        } else {
-                            // Update the received balance of the address that received this output in the map of received balances.
-                            address_received_map
-                                .entry(output.address(network).expect("should be valid"))
-                                .and_modify(make_modifier(output.value.into()))
-                                .or_insert(output.value.into());
-                        }
-                    }
-                }
-
-                // Return early before the next disk read if the upgrade was cancelled.
-                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
-
-                // If the finalized tip has changed while processing the new outputs in blocks since the last tip height,
-                // continue to the next iteration of the `checker` loop to keep updating the received balances by address map.
-                if last_tip_height != db.finalized_tip_height().expect("state has blocks") {
-                    continue 'checker;
-                }
-
-                // Check that all in-memory address balances have matching values on-disk (in parallel).
-                // TODO: Retain items that don't have the right received balance instead?
-                // Note: This would require ignoring outputs sent to addresses that are not being tracked
-                //       after the first disk write.
-                let is_updated_on_disk =
-                    address_received_map.par_iter().all(|(address, &received)| {
-                        // If the upgrade was cancelled, short-circuit iteration and return an error in the next iteration of
-                        // the outer loop before the next disk read.
-                        let is_not_cancelled =
-                            matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty));
-                        // Check that the address balance on disk matches the received balance in memory.
-                        is_not_cancelled
-                            && db
-                                .address_balance_location(address)
-                                .expect("should have address balances in finalized state")
-                                .received()
-                                == received
-                    });
-
-                if !is_updated_on_disk {
-                    // The address balances were not updated correctly, try again.
-                    warn!("address balances were not updated correctly, retrying");
-                    break 'checker;
-                }
-
-                // Return early before the next disk read if the upgrade was cancelled.
-                if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                    return Err(CancelFormatChange);
-                }
-
-                // Check one last time that the finalized tip height hasn't changed before breaking the `updater` loop and
-                // finishing in-place migration for the add balance received format upgrade.
-                if last_tip_height == db.finalized_tip_height().expect("state has blocks") {
-                    break 'updater;
-                } else {
-                    // The finalized tip height hasn't changed but the data differs from what's expected, try again.
-                    warn!("address balances were updated while writing, retrying");
-                    break 'checker;
-                }
+            // Check one last time that the finalized tip height hasn't changed before breaking the `batch` loop with
+            // the prepare disk write batch.
+            if last_tip_height == db.finalized_tip_height().expect("state has blocks") {
+                break batch;
             }
+        };
+
+        // Return early before writing the batch if the upgrade was cancelled.
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+            return Err(CancelFormatChange);
         }
+
+        // Write the batch to disk.
+        db.write_batch(batch).expect("should write batch");
 
         Ok(())
     }
