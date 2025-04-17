@@ -1,30 +1,13 @@
-version: "3.8"
-
 services:
   zebra:
+    container_name: zebra
     build:
       context: ../
       dockerfile: docker/Dockerfile
       target: tests
-    restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          cpus: "4"
-          memory: 16G
-    # Change this to the command you want to run, respecting the entrypoint.sh
-    # For example, to run the tests, use the following command:
-    # command: ["cargo", "test", "--locked", "--release", "--features", "${FEATURES}", "--package", "zebrad", "--test", "acceptance", "--", "--nocapture", "--include-ignored", "sync_large_checkpoints_"]
     volumes:
       - zebrad-cache:/home/zebra/.cache/zebra
       - lwd-cache:/home/zebra/.cache/lwd
-    ports:
-      # Zebra uses the following inbound and outbound TCP ports
-      - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
-      - "8233:8233" # Mainnet Network (for peer connections)
-      - "18233:18233" # Testnet Network
-      # - "9999:9999" # Metrics
-      # - "3000:3000" # Tracing
     env_file:
       - test.env
 

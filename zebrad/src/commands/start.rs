@@ -86,11 +86,10 @@ use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
 use zebra_rpc::server::RpcServer;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_rpc::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
 
 use crate::{
-    application::{build_version, user_agent},
+    application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
@@ -240,15 +239,6 @@ impl StartCmd {
         // And give it time to clear its queue
         tokio::task::yield_now().await;
 
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config.mining != zebra_rpc::config::mining::Config::default() {
-            warn!(
-                "Unused mining section in config,\
-                 compile with 'getblocktemplate-rpcs' feature to use mining RPCs"
-            );
-        }
-
-        #[cfg(feature = "getblocktemplate-rpcs")]
         // Create a channel to send mined blocks to the gossip task
         let submit_block_channel = SubmitBlockChannel::new();
 
@@ -269,10 +259,8 @@ impl StartCmd {
                     address_book.clone(),
                     latest_chain_tip.clone(),
                     config.network.network.clone(),
-                    #[cfg(feature = "getblocktemplate-rpcs")]
                     Some(submit_block_channel.sender()),
-                    #[cfg(not(feature = "getblocktemplate-rpcs"))]
-                    None,
+                    LAST_WARN_ERROR_LOG_SENDER.subscribe(),
                 );
                 rpc_task_handle.await.unwrap()
             } else {
@@ -315,10 +303,7 @@ impl StartCmd {
                 sync_status.clone(),
                 chain_tip_change.clone(),
                 peer_set.clone(),
-                #[cfg(feature = "getblocktemplate-rpcs")]
                 Some(submit_block_channel.receiver()),
-                #[cfg(not(feature = "getblocktemplate-rpcs"))]
-                None,
             )
             .in_current_span(),
         );

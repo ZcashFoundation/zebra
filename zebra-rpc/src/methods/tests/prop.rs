@@ -1,6 +1,5 @@
 //! Randomised property tests for RPC methods.
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use std::collections::HashMap;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
@@ -24,12 +23,12 @@ use zebra_chain::{
 };
 
 use zebra_consensus::ParameterCheckpoint;
+use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 
 use zebra_test::mock_service::MockService;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use crate::methods::types::MempoolObject;
 use crate::methods::{
     self,
@@ -245,28 +244,7 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            let (expected_response, mempool_query) = {
-                let transaction_ids: HashSet<_> = transactions
-                    .iter()
-                    .map(|tx| tx.transaction.id)
-                    .collect();
-
-                let mut expected_response: Vec<String> = transaction_ids
-                    .iter()
-                    .map(|id| id.mined_id().encode_hex())
-                    .collect();
-                expected_response.sort();
-
-                let mempool_query = mempool
-                    .expect_request(mempool::Request::TransactionIds)
-                    .map_ok(|r|r.respond(mempool::Response::TransactionIds(transaction_ids)));
-
-                (GetRawMempool::TxIds(expected_response), mempool_query)
-            };
-
             // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
-            #[cfg(feature = "getblocktemplate-rpcs")]
             let (expected_response, mempool_query) = {
                 let mut expected_response = transactions.clone();
 
@@ -968,6 +946,7 @@ fn mock_services<Tip>(
             zebra_state::ReadRequest,
         >,
         Tip,
+        MockAddressBookPeers,
     >,
     tokio::task::JoinHandle<()>,
 )
@@ -977,8 +956,9 @@ where
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, mempool_tx_queue) = RpcImpl::new(
-        "RPC test",
+        "0.0.1",
         "RPC test",
         network,
         false,
@@ -986,6 +966,8 @@ where
         mempool.clone(),
         Buffer::new(state.clone(), 1),
         chain_tip,
+        MockAddressBookPeers::new(vec![]),
+        rx,
     );
 
     (mempool, state, rpc, mempool_tx_queue)

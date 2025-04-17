@@ -50,6 +50,9 @@ pub enum Response {
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
 
+    /// Response to [`Request::BlockAndSize`] with the specified block and size.
+    BlockAndSize(Option<(Arc<Block>, usize)>),
+
     /// The response to a `BlockHeader` request.
     BlockHeader {
         /// The header of the requested block
@@ -87,7 +90,6 @@ pub enum Response {
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal,
 }
@@ -156,6 +158,10 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::Block`] with the specified block.
     Block(Option<Arc<Block>>),
+
+    /// Response to [`ReadRequest::BlockAndSize`] with the specified block and
+    /// serialized size.
+    BlockAndSize(Option<(Arc<Block>, usize)>),
 
     /// The response to a `BlockHeader` request.
     BlockHeader {
@@ -247,15 +253,12 @@ pub enum ReadResponse {
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
     ValidBlockProposal,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
 }
@@ -311,6 +314,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
+            ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
             ReadResponse::BlockHeader {
                 header,
                 hash,
@@ -354,10 +358,8 @@ impl TryFrom<ReadResponse> for Response {
             #[cfg(feature = "indexer")]
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }

@@ -20,9 +20,9 @@
 //! - `GetTaddressBalanceStream`: Covered.
 //!
 //! - `GetMempoolTx`: Covered by the send_transaction_test,
-//!                   currently disabled by `lightwalletd`.
+//!   currently disabled by `lightwalletd`.
 //! - `GetMempoolStream`: Covered by the send_transaction_test,
-//!                       currently disabled by `lightwalletd`.
+//!   currently disabled by `lightwalletd`.
 //!
 //! - `GetTreeState`: Covered.
 //!

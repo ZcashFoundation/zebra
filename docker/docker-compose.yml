@@ -1,13 +1,8 @@
-version: "3.8"
-
 services:
   zebra:
+    container_name: zebra
     image: zfnd/zebra
     platform: linux/amd64
-    build:
-      context: ../
-      dockerfile: docker/Dockerfile
-      target: runtime
     restart: unless-stopped
     deploy:
       resources:
@@ -16,33 +11,32 @@ services:
           memory: 16G
     env_file:
       - .env
-    logging:
-      options:
-        max-size: "10m"
-        max-file: "5"
-    #! Uncomment the `configs` mapping below to use the `zebrad.toml` config file from the host machine
-    #! NOTE: This will override the zebrad.toml in the image and make some variables irrelevant
-    # configs:
-    #   - source: zebra_config
-    #     target: /etc/zebrad/zebrad.toml
-    #     uid: '2001' # Rust's container default user uid
-    #     gid: '2001' # Rust's container default group gid
-    #     mode: 0440
     volumes:
       - zebrad-cache:/home/zebra/.cache/zebra
-    ports:
-      # Zebra uses the following default inbound and outbound TCP ports
-      - "8233:8233" # Mainnet Network (for peer connections)
-      # - "8232:8232" # Opens an RPC endpoint (for wallet storing and mining)
-      # - "18233:18233" # Testnet Network
-      # - "9999:9999" # Metrics
-      # - "3000:3000" # Tracing
+    # Having `tty` set to true makes Zebra use colored logs.
+    tty: true
+    # ! Comment out the `configs` mapping below to use the environment variables in the
+    # ! `.env` file, instead of the default configuration file.
+    configs:
+      - source: zebra-config
+        target: /home/zebra/.config/zebrad.toml
+
+    # Uncomment the `ports` mapping below to map ports between the container and
+    # host.
+    #
+    # ports:
+    #   - "8232:8232"   # RPC endpoint on Mainnet
+    #   - "18232:18232" # RPC endpoint on Testnet
+    #   - "8233:8233"   # peer connections on Mainnet
+    #   - "18233:18233" # peer connections on Testnet
+    #   - "9999:9999"   # Metrics
+    #   - "3000:3000"   # Tracing
 
 configs:
-  zebra_config:
-    # Change the following line to point to a zebrad.toml on your host machine
-    # to allow for easy configuration changes without rebuilding the image
-    file: ../zebrad/tests/common/configs/v1.0.0-rc.2.toml
+  zebra-config:
+    #! To customize the default configuration, edit this file before starting
+    #! the container.
+    file: ./default-zebra-config.toml
 
 volumes:
   zebrad-cache:

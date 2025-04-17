@@ -359,7 +359,7 @@ impl Chain {
         (block, treestate)
     }
 
-    // Returns the block at the provided height and all of its descendant blocks.
+    /// Returns the block at the provided height and all of its descendant blocks.
     pub fn child_blocks(&self, block_height: &block::Height) -> Vec<ContextuallyVerifiedBlock> {
         self.blocks
             .range(block_height..)
@@ -367,7 +367,7 @@ impl Chain {
             .collect()
     }
 
-    // Returns a new chain without the invalidated block or its descendants.
+    /// Returns a new chain without the invalidated block or its descendants.
     pub fn invalidate_block(
         &self,
         block_hash: block::Hash,
@@ -1563,6 +1563,22 @@ impl Chain {
                     sapling_shielded_data,
                     orchard_shielded_data,
                 ),
+                #[cfg(feature="tx_v6")]
+                V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                ),
+
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
@@ -1731,6 +1747,22 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     sapling_shielded_data,
                     orchard_shielded_data,
                 ),
+                #[cfg(feature="tx_v6")]
+                V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                ),
+
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),

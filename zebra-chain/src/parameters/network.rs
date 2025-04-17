@@ -284,7 +284,7 @@ impl FromStr for Network {
 pub struct InvalidNetworkError(String);
 
 impl zcash_protocol::consensus::Parameters for Network {
-    fn network_type(&self) -> zcash_address::Network {
+    fn network_type(&self) -> zcash_protocol::consensus::NetworkType {
         self.kind().into()
     }
 

@@ -218,7 +218,6 @@ impl Input {
     /// # Panics
     ///
     /// If the coinbase data is greater than [`MAX_COINBASE_DATA_LEN`].
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub fn new_coinbase(
         height: block::Height,
         data: Option<Vec<u8>>,
@@ -251,6 +250,22 @@ impl Input {
         match self {
             Input::PrevOut { .. } => None,
             Input::Coinbase { data, .. } => Some(data),
+        }
+    }
+
+    /// Returns the full coinbase script (the encoded height along with the
+    /// extra data) if this is an [`Input::Coinbase`]. Also returns `None` if
+    /// the coinbase is for the genesis block but does not match the expected
+    /// genesis coinbase data.
+    pub fn coinbase_script(&self) -> Option<Vec<u8>> {
+        match self {
+            Input::PrevOut { .. } => None,
+            Input::Coinbase { height, data, .. } => {
+                let mut height_and_data = Vec::new();
+                serialize::write_coinbase_height(*height, data, &mut height_and_data).ok()?;
+                height_and_data.extend(&data.0);
+                Some(height_and_data)
+            }
         }
     }
 
@@ -409,7 +424,6 @@ pub struct Output {
 
 impl Output {
     /// Returns a new coinbase output that pays `amount` using `lock_script`.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     pub fn new_coinbase(amount: Amount<NonNegative>, lock_script: Script) -> Output {
         Output {
             value: amount,

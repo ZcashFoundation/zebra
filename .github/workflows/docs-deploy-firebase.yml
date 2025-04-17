@@ -105,6 +105,7 @@ jobs:
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
+        if: github.repository_owner == 'ZcashFoundation'
         id: auth
         uses: google-github-actions/auth@v2.1.8
         with:
@@ -114,11 +115,13 @@ jobs:
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
 
       - name: Add $GCP_FIREBASE_SA_PATH to env
+        if: github.repository_owner == 'ZcashFoundation'
         run: |
           # shellcheck disable=SC2002
           echo "GCP_FIREBASE_SA_PATH=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy Zebra book to firebase
+        if: github.repository_owner == 'ZcashFoundation'
         uses: FirebaseExtended/action-hosting-deploy@v0.9.0
         with:
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}
@@ -155,7 +158,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.7.7
+      - uses: Swatinem/rust-cache@v2.7.8
 
       - name: Build internal docs
         run: |
@@ -163,6 +166,7 @@ jobs:
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
+        if: github.repository_owner == 'ZcashFoundation'
         id: auth
         uses: google-github-actions/auth@v2.1.8
         with:
@@ -171,11 +175,13 @@ jobs:
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
       - name: Add $GCP_FIREBASE_SA_PATH to env
+        if: github.repository_owner == 'ZcashFoundation'
         run: |
           # shellcheck disable=SC2002
           echo "GCP_FIREBASE_SA_PATH=$(cat ${{ steps.auth.outputs.credentials_file_path }} | tr -d '\n')" >> "$GITHUB_ENV"
 
       - name: Deploy internal docs to firebase
+        if: github.repository_owner == 'ZcashFoundation'
         uses: FirebaseExtended/action-hosting-deploy@v0.9.0
         with:
           firebaseServiceAccount: ${{ env.GCP_FIREBASE_SA_PATH }}

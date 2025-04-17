@@ -1,7 +1,6 @@
 scrape_configs:
-  - job_name: 'zebrad'
+  - job_name: "zebrad"
     scrape_interval: 500ms
-    metrics_path: '/'
+    metrics_path: "/"
     static_configs:
-      - targets: ['localhost:9999']
-
+      - targets: ["localhost:9999"]

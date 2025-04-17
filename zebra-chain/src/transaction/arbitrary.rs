@@ -924,6 +924,8 @@ pub fn transaction_to_fake_v5(
             orchard_shielded_data: None,
         },
         v5 @ V5 { .. } => v5.clone(),
+        #[cfg(feature = "tx_v6")]
+        v6 @ V6 { .. } => v6.clone(),
     }
 }
 
@@ -1008,6 +1010,8 @@ pub fn v5_transactions<'b>(
         | Transaction::V3 { .. }
         | Transaction::V4 { .. } => None,
         ref tx @ Transaction::V5 { .. } => Some(tx.clone()),
+        #[cfg(feature = "tx_v6")]
+        ref tx @ Transaction::V6 { .. } => Some(tx.clone()),
     })
 }
 

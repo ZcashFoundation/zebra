@@ -61,6 +61,7 @@ env:
 jobs:
   build:
     name: Build images
+    if: github.repository_owner == 'ZcashFoundation'
     timeout-minutes: 210
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
@@ -87,7 +88,7 @@ jobs:
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.6.1
+        uses: docker/metadata-action@v5.7.0
         with:
           # list of Docker images to use as base name for tags
           # We only publish images to DockerHub if a release is not a pre-release
@@ -111,7 +112,7 @@ jobs:
             # DockerHub release and CI tags.
             # This tag makes sure tests are using exactly the right image, even when multiple PRs run at the same time.
             type=sha,event=push
-            # These CI-only tags support CI on PRs, the main branch, and scheduled full syncs. 
+            # These CI-only tags support CI on PRs, the main branch, and scheduled full syncs.
             # These tags do not appear on DockerHub, because DockerHub images are only published on the release event.
             type=ref,event=pr
             type=ref,event=branch
@@ -131,14 +132,14 @@ jobs:
           access_token_lifetime: 10800s
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v3.3.0
+        uses: docker/login-action@v3.4.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
       - name: Login to DockerHub
-        uses: docker/login-action@v3.3.0
+        uses: docker/login-action@v3.4.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -146,7 +147,7 @@ jobs:
       # Setup Docker Buildx to use Docker Build Cloud
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v3.8.0
+        uses: docker/setup-buildx-action@v3.10.0
         with:
           version: "lab:latest"
           driver: cloud
@@ -155,7 +156,7 @@ jobs:
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v6.13.0
+        uses: docker/build-push-action@v6.15.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
@@ -165,6 +166,7 @@ jobs:
           build-args: |
             SHORT_SHA=${{ env.GITHUB_SHA_SHORT }}
             RUST_LOG=${{ env.RUST_LOG }}
+            CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}
             FEATURES=${{ env.FEATURES }}
           push: true
           # It's recommended to build images with max-level provenance attestations
@@ -186,7 +188,7 @@ jobs:
         # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@v1.16.1
+        uses: docker/scout-action@v1.17.0
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.
