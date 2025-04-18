@@ -857,8 +857,6 @@ where
             orchard_shielded_data,
             &shielded_sighash,
         )?))
-        // FIXME: Do we need to verify IssueBundle here in a some way?
-        // FIXME: Do we need to verify burns (separately or inside verify_orchard_shielded_data)?
     }
 
     /// Verifies if a V6 `transaction` is supported by `network_upgrade`.
