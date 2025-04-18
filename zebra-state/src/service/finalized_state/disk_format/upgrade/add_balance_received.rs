@@ -35,7 +35,6 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
         let network = &db.network();
         let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
 
-
         // Set the initial query range as all transaction locations up to the max transaction index for the initial tip height.
         let initial_tx_loc_range = ..=TransactionLocation::max_for_height(initial_tip_height);
 
