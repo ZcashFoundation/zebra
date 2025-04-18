@@ -59,14 +59,16 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
                 // if the upgrade was cancelled and Zebra is shutting down.
                 if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
                     Err(CancelFormatChange)
-                } else {
+                } else if let Some(address) = output.address(network) {
                     // Update the received balance of the address that received this output in the accumulating map of received balances.
-                    acc.entry(output.address(network).expect("should be valid"))
+                    acc.entry(address)
                         // Calls `make_modifier` to make a closure that adds the output value to the existing entry.
                         .and_modify(make_modifier(output.value.into()))
                         // Or inserts the output value as the received balance for the address if no entry exists.
                         .or_insert(output.value.into());
 
+                    Ok(acc)
+                } else {
                     Ok(acc)
                 }
             })
@@ -165,7 +167,7 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
         let addresses: HashSet<_> = db
             .transactions_by_location_range(tx_loc_range)
             .flat_map(|(_, tx)| tx.outputs().to_vec())
-            .map(|output| output.address(network).expect("should be valid"))
+            .filter_map(|output| output.address(network))
             .collect();
 
         // Check that no address balances for that set of addresses have a received field of `0`.
