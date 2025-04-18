@@ -291,7 +291,7 @@ impl GetBlockTemplate {
             next_block_height,
             miner_address,
             &mempool_txs,
-            chain_tip_and_local_time.history_tree.clone(),
+            chain_tip_and_local_time.chain_history_root,
             like_zcashd,
             extra_coinbase_data,
         );

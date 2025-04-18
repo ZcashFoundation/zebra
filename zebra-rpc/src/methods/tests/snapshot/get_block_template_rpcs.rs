@@ -256,7 +256,7 @@ pub async fn test_responses<State, ReadState>(
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    history_tree: fake_history_tree(network),
+                    chain_history_root: fake_history_tree(network).hash(),
                 }));
         }
     };

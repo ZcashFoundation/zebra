@@ -9,6 +9,7 @@ use zebra_chain::{
     amount::Amount,
     block::Block,
     chain_tip::{mock::MockChainTip, NoChainTip},
+    history_tree::HistoryTree,
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::UnminedTxId,
@@ -52,7 +53,7 @@ async fn rpc_getinfo() {
         GetBlockTemplateChainInfo {
             tip_hash: Mainnet.genesis_hash(),
             tip_height: Height::MIN,
-            history_tree: Default::default(),
+            chain_history_root: HistoryTree::default().hash(),
             expected_difficulty: Default::default(),
             cur_time: zebra_chain::serialization::DateTime32::now(),
             min_time: zebra_chain::serialization::DateTime32::now(),
@@ -1880,7 +1881,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    history_tree: fake_history_tree(&Mainnet),
+                    chain_history_root: fake_history_tree(&Mainnet).hash(),
                 }));
         }
     };
@@ -2353,7 +2354,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 
@@ -2379,7 +2380,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 
@@ -2402,7 +2403,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 
@@ -2425,7 +2426,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 
