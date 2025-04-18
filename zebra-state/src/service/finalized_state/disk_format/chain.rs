@@ -12,6 +12,7 @@ use bincode::Options;
 use zebra_chain::{
     amount::NonNegative,
     block::Height,
+    block_data::BlockData,
     history_tree::{HistoryTreeError, NonEmptyHistoryTree},
     parameters::{Network, NetworkKind},
     primitives::zcash_history,
@@ -91,5 +92,28 @@ impl FromDisk for HistoryTreeParts {
         bincode::DefaultOptions::new()
             .deserialize(bytes.as_ref())
             .expect("deserialization format should match the serialization format used by IntoDisk")
+    }
+}
+
+impl IntoDisk for BlockData {
+    type Bytes = Vec<u8>;
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.value_pools().as_bytes().to_vec()
+    }
+}
+
+impl FromDisk for BlockData {
+    fn from_bytes(bytes: impl AsRef<[u8]>) -> Self {
+        // We want to be forward-compatible, so this must work even if the
+        // size of the buffer is larger than expected.
+        match bytes.as_ref().len() {
+            40 => {
+                let value_pools = ValueBalance::<NonNegative>::from_bytes(bytes.as_ref())
+                    .expect("must work for 40 bytes");
+                BlockData::new(value_pools)
+            }
+            _ => Default::default(),
+        }
     }
 }
