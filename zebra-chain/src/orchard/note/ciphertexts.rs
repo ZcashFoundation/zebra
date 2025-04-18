@@ -9,7 +9,7 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 /// A ciphertext component for encrypted output notes.
 ///
 /// Corresponds to the Orchard 'encCiphertext's
-#[derive(Deserialize, Serialize, Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq)]
 pub struct EncryptedNote<const N: usize>(#[serde(with = "BigArray")] pub(crate) [u8; N]);
 
 impl<const N: usize> From<[u8; N]> for EncryptedNote<N> {

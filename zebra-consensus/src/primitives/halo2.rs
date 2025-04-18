@@ -80,7 +80,7 @@ lazy_static::lazy_static! {
     /// The halo2 proof verifying key for Orchard Vanilla
     pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
 
-    /// The halo2 proof verifying key for Orchard ZSA
+    /// The halo2 proof verifying key for OrchardZSA
     pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardZSA>();
 }
 

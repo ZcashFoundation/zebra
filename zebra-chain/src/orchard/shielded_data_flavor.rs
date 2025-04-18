@@ -65,13 +65,13 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
 }
 
 impl ShieldedDataFlavor for OrchardVanilla {
-    type EncryptedNote = note::EncryptedNote<{ Self::ENC_CIPHERTEXT_SIZE }>;
+    type EncryptedNote = note::EncryptedNote<{ OrchardVanilla::ENC_CIPHERTEXT_SIZE }>;
     #[cfg(feature = "tx-v6")]
     type BurnType = NoBurn;
 }
 
 #[cfg(feature = "tx-v6")]
 impl ShieldedDataFlavor for OrchardZSA {
-    type EncryptedNote = note::EncryptedNote<{ Self::ENC_CIPHERTEXT_SIZE }>;
+    type EncryptedNote = note::EncryptedNote<{ OrchardZSA::ENC_CIPHERTEXT_SIZE }>;
     type BurnType = Burn;
 }

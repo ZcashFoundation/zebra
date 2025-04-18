@@ -137,7 +137,7 @@ impl Transaction {
 
     /// Helper function to generate the common transaction fields.
     /// This function is generic over the Orchard shielded data type.
-    fn v5_v6_strategy_common<FL: orchard::ShieldedDataFlavor + 'static>(
+    fn v5_v6_strategy_common<Flavor: orchard::ShieldedDataFlavor + 'static>(
         ledger_state: LedgerState,
     ) -> impl Strategy<
         Value = (
@@ -147,7 +147,7 @@ impl Transaction {
             Vec<transparent::Input>,
             Vec<transparent::Output>,
             Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-            Option<orchard::ShieldedData<FL>>,
+            Option<orchard::ShieldedData<Flavor>>,
         ),
     > + 'static {
         (
@@ -157,7 +157,7 @@ impl Transaction {
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedData<FL>>()),
+            option::of(any::<orchard::ShieldedData<Flavor>>()),
         )
             .prop_map(
                 move |(
@@ -781,11 +781,11 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<FL: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedData<FL>
+impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedData<Flavor>
 // FIXME: remove the following lines
 // FIXME: define the constraint in orchard::ShieldedDataFlavor?
 //where
-//    <FL::EncryptedNote as Arbitrary>::Strategy: 'static,
+//    <Flavor::EncryptedNote as Arbitrary>::Strategy: 'static,
 {
     type Parameters = ();
 
@@ -796,12 +796,12 @@ impl<FL: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedD
             any::<orchard::tree::Root>(),
             any::<Halo2Proof>(),
             vec(
-                any::<orchard::shielded_data::AuthorizedAction<FL>>(),
+                any::<orchard::shielded_data::AuthorizedAction<Flavor>>(),
                 1..MAX_ARBITRARY_ITEMS,
             ),
             any::<BindingSignature>(),
             #[cfg(feature = "tx-v6")]
-            any::<FL::BurnType>(),
+            any::<Flavor::BurnType>(),
         )
             .prop_map(|props| {
                 #[cfg(not(feature = "tx-v6"))]

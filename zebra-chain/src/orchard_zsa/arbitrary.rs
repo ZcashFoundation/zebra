@@ -1,4 +1,4 @@
-//! Randomised data generation for Orchard ZSA types.
+//! Randomised data generation for OrchardZSA types.
 
 use proptest::prelude::*;
 

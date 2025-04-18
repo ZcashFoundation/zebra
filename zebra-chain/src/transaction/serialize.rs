@@ -328,9 +328,9 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     }
 }
 
-impl<FL: ShieldedDataFlavor> ZcashSerialize for Option<orchard::ShieldedData<FL>>
+impl<Flavor: ShieldedDataFlavor> ZcashSerialize for Option<orchard::ShieldedData<Flavor>>
 where
-    orchard::ShieldedData<FL>: ZcashSerialize,
+    orchard::ShieldedData<Flavor>: ZcashSerialize,
 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {

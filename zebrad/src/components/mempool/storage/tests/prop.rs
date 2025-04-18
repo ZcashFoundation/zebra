@@ -446,7 +446,21 @@ enum SpendConflictTestInput {
 
         conflict: SpendConflictForTransactionV5,
     },
-    // FIXME: add V6 test
+
+    /// Test V6 transactions to include OrchardZSA nullifier conflicts.
+    V6 {
+        #[proptest(
+            strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        first: DisplayToDebug<Transaction>,
+
+        #[proptest(
+            strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        second: DisplayToDebug<Transaction>,
+
+        conflict: SpendConflictForTransactionV6,
+    },
 }
 
 impl SpendConflictTestInput {
