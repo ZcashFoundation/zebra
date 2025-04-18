@@ -722,12 +722,11 @@ impl SpendConflictTestInput {
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
-                // FIXME: implement for V6
                 #[cfg(feature = "tx-v6")]
                 Transaction::V6 {
-                    orchard_shielded_data: _,
+                    orchard_shielded_data,
                     ..
-                } => {}
+                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
                 // No Spends
                 Transaction::V1 { .. }
@@ -742,8 +741,8 @@ impl SpendConflictTestInput {
     /// present in the `conflicts` set.
     ///
     /// This may clear the entire shielded data.
-    fn remove_orchard_actions_with_conflicts(
-        maybe_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
+    fn remove_orchard_actions_with_conflicts<Flavor: orchard::ShieldedDataFlavor>(
+        maybe_shielded_data: &mut Option<orchard::ShieldedData<Flavor>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
         if let Some(shielded_data) = maybe_shielded_data.take() {
