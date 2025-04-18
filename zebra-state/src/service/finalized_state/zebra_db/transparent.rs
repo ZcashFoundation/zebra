@@ -17,6 +17,7 @@ use std::{
     ops::RangeInclusive,
 };
 
+use rocksdb::ColumnFamily;
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::Height,
@@ -77,6 +78,11 @@ impl ZebraDb {
         self.tx_loc_by_spent_output_loc_cf().zs_get(output_location)
     }
 
+    /// Returns a handle to the `balance_by_transparent_addr` RocksDB column family.
+    pub fn address_balance_cf(&self) -> &ColumnFamily {
+        self.db.cf_handle("balance_by_transparent_addr").unwrap()
+    }
+
     /// Returns the [`AddressBalanceLocation`] for a [`transparent::Address`],
     /// if it is in the finalized state.
     #[allow(clippy::unwrap_in_result)]
@@ -84,7 +90,7 @@ impl ZebraDb {
         &self,
         address: &transparent::Address,
     ) -> Option<AddressBalanceLocation> {
-        let balance_by_transparent_addr = self.db.cf_handle("balance_by_transparent_addr").unwrap();
+        let balance_by_transparent_addr = self.address_balance_cf();
 
         self.db.zs_get(&balance_by_transparent_addr, address)
     }
