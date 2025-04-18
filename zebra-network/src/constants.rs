@@ -407,7 +407,6 @@ lazy_static! {
     /// Testnet network upgrades.
     // TODO: Change `Nu5` to `Nu6` after NU6 activation.
     // TODO: Move the value here to a field on `testnet::Parameters` (#8367)
-    // TODO: FIXME: Change `Nu...` to `Nu7` after NU7 activation?
     pub static ref INITIAL_MIN_NETWORK_PROTOCOL_VERSION: HashMap<NetworkKind, Version> = {
         let mut hash_map = HashMap::new();
 

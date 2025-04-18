@@ -1,5 +1,3 @@
-// FIXME: consider merging it with router/tests.rs
-
 use std::sync::Arc;
 
 use color_eyre::eyre::Report;
