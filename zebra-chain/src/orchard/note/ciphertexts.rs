@@ -99,36 +99,52 @@ impl ZcashDeserialize for WrappedNoteKey {
 }
 
 #[cfg(test)]
-use crate::orchard::{OrchardVanilla, ShieldedDataFlavor};
+mod tests {
+    use crate::{
+        orchard::{OrchardVanilla, OrchardZSA, ShieldedDataFlavor, WrappedNoteKey},
+        serialization::{ZcashDeserialize, ZcashSerialize},
+    };
 
-#[cfg(test)]
-use proptest::prelude::*;
-#[cfg(test)]
-proptest! {
+    use proptest::prelude::*;
 
-    #[test]
-    fn encrypted_ciphertext_roundtrip(ec in any::<<OrchardVanilla as ShieldedDataFlavor>::EncryptedNote>()) {
-        let _init_guard = zebra_test::init();
-
+    fn roundtrip_encrypted_note<EncryptedNote>(note: &EncryptedNote) -> EncryptedNote
+    where
+        EncryptedNote: ZcashSerialize + ZcashDeserialize,
+    {
         let mut data = Vec::new();
-
-        ec.zcash_serialize(&mut data).expect("EncryptedNote should serialize");
-
-        let ec2 = EncryptedNote::zcash_deserialize(&data[..]).expect("randomized EncryptedNote should deserialize");
-
-        prop_assert_eq![ec, ec2];
+        note.zcash_serialize(&mut data)
+            .expect("EncryptedNote should serialize");
+        EncryptedNote::zcash_deserialize(&data[..])
+            .expect("randomized EncryptedNote should deserialize")
     }
 
-    #[test]
-    fn out_ciphertext_roundtrip(oc in any::<WrappedNoteKey>()) {
-        let _init_guard = zebra_test::init();
+    proptest! {
+        #[test]
+        fn encrypted_ciphertext_roundtrip_orchard_vanilla(ec in any::<<OrchardVanilla as ShieldedDataFlavor>::EncryptedNote>()) {
+            let _init_guard = zebra_test::init();
+            let ec2 = roundtrip_encrypted_note(&ec);
+            prop_assert_eq![ec, ec2];
+        }
 
-        let mut data = Vec::new();
 
-        oc.zcash_serialize(&mut data).expect("WrappedNoteKey should serialize");
+        #[test]
+        fn encrypted_ciphertext_roundtrip_orchard_zsa(ec in any::<<OrchardZSA as ShieldedDataFlavor>::EncryptedNote>()) {
+            let _init_guard = zebra_test::init();
+            let ec2 = roundtrip_encrypted_note(&ec);
+            prop_assert_eq![ec, ec2];
+        }
 
-        let oc2 = WrappedNoteKey::zcash_deserialize(&data[..]).expect("randomized WrappedNoteKey should deserialize");
+        #[test]
+        fn out_ciphertext_roundtrip(oc in any::<WrappedNoteKey>()) {
+            let _init_guard = zebra_test::init();
 
-        prop_assert_eq![oc, oc2];
+            let mut data = Vec::new();
+
+            oc.zcash_serialize(&mut data).expect("WrappedNoteKey should serialize");
+
+            let oc2 = WrappedNoteKey::zcash_deserialize(&data[..]).expect("randomized WrappedNoteKey should deserialize");
+
+            prop_assert_eq![oc, oc2];
+        }
     }
 }
