@@ -1343,6 +1343,24 @@ impl Chain {
             "unexpected amount overflow: value balances are valid, so partial sum should be valid",
         )
     }
+    /// Returns the transparent received balance change for `addresses` in this non-finalized chain.
+    ///
+    /// If the received balance doesn't change for any of the addresses, returns zero.
+    ///
+    /// # Correctness
+    ///
+    /// Callers should apply this received balance change to the finalized state received balance for `addresses`.
+    ///
+    /// The total received balance will only be correct if this partial chain matches the finalized state.
+    /// Specifically, the root of this partial chain must be a child block of the finalized tip.
+    pub fn partial_transparent_received_change(
+        &self,
+        addresses: &HashSet<transparent::Address>,
+    ) -> u64 {
+        self.partial_transparent_indexes(addresses)
+            .map(|transfers| transfers.received())
+            .sum()
+    }
 
     /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain.
     ///

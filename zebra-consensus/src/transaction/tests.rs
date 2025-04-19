@@ -712,7 +712,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn skips_verification_of_block_transactions_in_mempool() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
@@ -797,6 +797,9 @@ async fn skips_verification_of_block_transactions_in_mempool() {
             .respond(mempool::Response::UnspentOutput(output));
     });
 
+    // Briefly yield and sleep so the spawned task can first expect an await output request.
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
     let verifier_response = verifier
         .clone()
         .oneshot(Request::Mempool {
@@ -846,6 +849,9 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         height,
         time: Utc::now(),
     };
+
+    // Briefly yield and sleep so the spawned task can first expect the requests.
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let crate::transaction::Response::Block { .. } = verifier
         .clone()
