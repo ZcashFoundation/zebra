@@ -22,7 +22,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, Options, ReadOptions};
+use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
