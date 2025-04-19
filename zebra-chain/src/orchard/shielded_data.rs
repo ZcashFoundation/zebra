@@ -185,10 +185,11 @@ impl<Flavor: ShieldedDataFlavor> AuthorizedAction<Flavor> {
     /// Each serialized `Action` has a corresponding `Signature<SpendAuth>`.
     pub const AUTHORIZED_ACTION_SIZE: u64 = Self::ACTION_SIZE + Self::SPEND_AUTH_SIG_SIZE;
 
-    /// The maximum number of actions in the transaction.
-    // Since a serialized Vec<AuthorizedAction> uses at least one byte for its length,
-    // and the signature is required,
-    // a valid max allocation can never exceed this size
+    /// The maximum number of actions allowed in a transaction.
+    ///
+    /// A serialized `Vec<AuthorizedAction>` requires at least one byte for its length,
+    /// and each action must include a signature. Therefore, the maximum allocation
+    /// is constrained by these factors and cannot exceed this calculated size.
     pub const ACTION_MAX_ALLOCATION: u64 = (MAX_BLOCK_BYTES - 1) / Self::AUTHORIZED_ACTION_SIZE;
 
     // Ensure ACTION_MAX_ALLOCATION is less than 2^16 on compile time
@@ -213,7 +214,7 @@ impl<Flavor: ShieldedDataFlavor> AuthorizedAction<Flavor> {
     }
 }
 
-/// Non-generic fields of an `Action` used in `Transaction` methods.
+/// The common field used both in Vanilla actions and ZSA actions.
 pub struct ActionCommon {
     /// A value commitment to net value of the input note minus the output note
     pub cv: ValueCommitment,

@@ -1,6 +1,3 @@
-/// FIXME: refactor orchard_zsa/tests (possibly move vectors to zebra-tests), remove cfg(test) here etc.
-#[cfg(test)]
-mod blocks;
-
-/// FIXME: pub is needed to access test vectors from other crates, remove it then
-pub mod vectors;
+/// FIXME: refactor orchard_zsa/tests (possibly use vectors from zebra-tests instead of redefining them here).
+mod issue_blocks;
+mod vectors;

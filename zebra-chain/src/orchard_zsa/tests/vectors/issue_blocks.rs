@@ -1,5 +1,4 @@
-/// FIXME: pub is needed to access test vectors from other crates, change it to pub(crate) then
-pub const BLOCKS: [&[u8]; 4] = [
+pub(crate) const BLOCKS: [&[u8]; 4] = [
     // Genesis block
     &[],
     // Issuance block
