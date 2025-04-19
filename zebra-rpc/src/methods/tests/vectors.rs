@@ -1188,7 +1188,7 @@ async fn rpc_getaddresstxids_response() {
         )
         .await;
 
-        // Start and and outside of the range should use the chain tip.
+        // Start and outside of the range should use the chain tip.
         rpc_getaddresstxids_response_with(
             &network,
             Some(11),
