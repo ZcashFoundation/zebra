@@ -836,7 +836,7 @@ impl DiskDb {
     ///
     /// # Panics
     ///
-    /// - If the cache directory do not exist and can't be created.
+    /// - If the cache directory does not exist and can't be created.
     /// - If the database cannot be opened for whatever reason.
     pub fn new(
         config: &Config,
@@ -911,20 +911,16 @@ impl DiskDb {
                 db
             }
 
-            Err(e) => {
-                if e.kind() == rocksdb::ErrorKind::Busy || e.kind() == rocksdb::ErrorKind::IOError {
-                    panic!(
-                        "Database already open {path:?} \
+            Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
+                "Database likely already open {path:?} \
                          Hint: Check if another zebrad process is running."
-                    )
-                } else {
-                    panic!(
-                        "Opening database {path:?} failed. \
+            ),
+
+            Err(e) => panic!(
+                "Opening database {path:?} failed. \
                         Hint: Try changing the state cache_dir in the Zebra config. \
                         Error: {e}",
-                    )
-                }
-            }
+            ),
         }
     }
 
