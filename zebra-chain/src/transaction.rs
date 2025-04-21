@@ -53,8 +53,8 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-// FIXME: doc this
-// Move down
+// Macro to iterate Orchard shielded data via mapper (avoids repeating the
+// same long match block). Empty for Tx V1–V4.
 macro_rules! orchard_shielded_data_iter {
     ($self:expr, $mapper:expr) => {
         match $self {
@@ -78,8 +78,8 @@ macro_rules! orchard_shielded_data_iter {
     };
 }
 
-// FIXME: doc this
-// Move down
+// Macro to to get an Orchard shielded data field (avoids repeating the
+// same long match block). Empty for Tx V1–V4.
 macro_rules! orchard_shielded_data_field {
     ($self:expr, $field:ident) => {
         match $self {
@@ -103,8 +103,8 @@ macro_rules! orchard_shielded_data_field {
     };
 }
 
-// FIXME:
-// Define the macro for including the V6 pattern
+// Define the macro to include the V6 variant.
+// Needed only with the `tx-v6` feature to avoid duplicating code.
 #[cfg(feature = "tx-v6")]
 macro_rules! tx_v5_and_v6 {
     { $($fields:tt)* } => {
@@ -112,6 +112,7 @@ macro_rules! tx_v5_and_v6 {
     };
 }
 
+/// Same as above, without the V6 arm.
 #[cfg(not(feature = "tx-v6"))]
 macro_rules! tx_v5_and_v6 {
     { $($fields:tt)* } => {
