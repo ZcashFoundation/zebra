@@ -27,7 +27,7 @@ impl ZcashDeserialize for AssetBase {
     }
 }
 
-// FIXME: Define BurnItem (or, even Burn/NoBurn) in Orchard and reuse it here?
+// TODO: FIXME: Define BurnItem (or, even Burn/NoBurn) in Orchard and reuse it here?
 /// OrchardZSA burn item.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, NoteValue);
@@ -79,7 +79,6 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
     {
         let (asset_base_bytes, amount) = <([u8; 32], u64)>::deserialize(deserializer)?;
         Ok(BurnItem(
-            // FIXME: duplicates the body of AssetBase::zcash_deserialize?
             Option::from(AssetBase::from_bytes(&asset_base_bytes))
                 .ok_or_else(|| serde::de::Error::custom("Invalid orchard_zsa AssetBase"))?,
             NoteValue::from_raw(amount),
@@ -87,15 +86,14 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
     }
 }
 
-/// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5` transactions.
-/// Useful for unifying ShieldedData serialization and deserialization implementations across various
-/// Orchard protocol variants (i.e. various transaction versions).
+/// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5`
+/// transactions. It is unifying handling and serialization of ShieldedData across various Orchard
+/// protocol variants.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NoBurn;
 
 impl From<NoBurn> for ValueCommitment {
     fn from(_burn: NoBurn) -> ValueCommitment {
-        // FIXME: is there a simpler way to get zero ValueCommitment?
         ValueCommitment::new(pallas::Scalar::zero(), Amount::zero())
     }
 }
@@ -128,12 +126,12 @@ impl From<Vec<BurnItem>> for Burn {
     }
 }
 
-// FIXME: consider conversion from reference to Burn instead, to avoid using `clone` when it's called
 impl From<Burn> for ValueCommitment {
     fn from(burn: Burn) -> ValueCommitment {
         burn.0
             .into_iter()
             .map(|BurnItem(asset, amount)| {
+                // The trapdoor for the burn which is public is always zero.
                 ValueCommitment::with_asset(pallas::Scalar::zero(), amount, &asset)
             })
             .sum()

@@ -487,6 +487,16 @@ impl SpendConflictTestInput {
 
                 (first, second)
             }
+            SpendConflictTestInput::V6 {
+                mut first,
+                mut second,
+                conflict,
+            } => {
+                conflict.clone().apply_to(&mut first);
+                conflict.apply_to(&mut second);
+
+                (first, second)
+            }
         };
 
         (
@@ -512,6 +522,7 @@ impl SpendConflictTestInput {
         let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 { first, second, .. } => (first, second),
             SpendConflictTestInput::V5 { first, second, .. } => (first, second),
+            SpendConflictTestInput::V6 { first, second, .. } => (first, second),
         };
 
         Self::remove_transparent_conflicts(&mut first, &mut second);

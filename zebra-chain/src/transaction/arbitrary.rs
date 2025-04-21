@@ -781,12 +781,7 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedData<Flavor>
-// FIXME: remove the following lines
-// FIXME: define the constraint in orchard::ShieldedDataFlavor?
-//where
-//    <Flavor::EncryptedNote as Arbitrary>::Strategy: 'static,
-{
+impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedData<Flavor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -953,7 +948,7 @@ impl Arbitrary for VerifiedUnminedTx {
 
 /// Convert `trans` into a fake v5 transaction,
 /// converting sapling shielded data from v4 to v5 if possible.
-pub fn transaction_to_fake_min_v5(
+pub fn transaction_to_fake_v5(
     trans: &Transaction,
     network: &Network,
     height: block::Height,
@@ -1023,7 +1018,7 @@ pub fn transaction_to_fake_min_v5(
         },
         v5 @ V5 { .. } => v5.clone(),
         #[cfg(feature = "tx-v6")]
-        _v6 @ V6 { .. } => panic!("V6 transactions are not supported in this test!"),
+        _ => panic!(" other transaction versions are not supported"),
     }
 }
 
@@ -1107,7 +1102,7 @@ pub fn fake_v5_transactions_for_network<'b>(
     blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
 ) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
     transactions_from_blocks(blocks)
-        .map(move |(height, transaction)| transaction_to_fake_min_v5(&transaction, network, height))
+        .map(move |(height, transaction)| transaction_to_fake_v5(&transaction, network, height))
 }
 
 /// Generate an iterator over ([`block::Height`], [`Arc<Transaction>`]).

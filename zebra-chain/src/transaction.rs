@@ -210,7 +210,6 @@ pub enum Transaction {
         /// The orchard data for this transaction, if any.
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     },
-    // FIXME: implement V6 properly (now it's just a copy of V5)
     /// A `version = 6` transaction , OrchardZSA, Orchard, Sapling and transparent, but not Sprout.
     #[cfg(feature = "tx-v6")]
     V6 {
@@ -1019,20 +1018,17 @@ impl Transaction {
 
     // orchard
 
-    /// Iterate over the [`orchard::Action`]s in this transaction, if there are any,
-    /// regardless of version.
+    /// Iterate over the [`orchard::Action`]s in this transaction.
     pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = orchard::ActionCommon> + '_> {
         orchard_shielded_data_iter!(self, orchard::ShieldedData::action_commons)
     }
 
-    /// Access the [`orchard::Nullifier`]s in this transaction, if there are any,
-    /// regardless of version.
+    /// Access the [`orchard::Nullifier`]s in this transaction.
     pub fn orchard_nullifiers(&self) -> Box<dyn Iterator<Item = &orchard::Nullifier> + '_> {
         orchard_shielded_data_iter!(self, orchard::ShieldedData::nullifiers)
     }
 
-    /// Access the note commitments in this transaction, if there are any,
-    /// regardless of version.
+    /// Access the note commitments in this transaction.
     pub fn orchard_note_commitments(&self) -> Box<dyn Iterator<Item = pallas::Base> + '_> {
         match self {
             Transaction::V1 { .. }
