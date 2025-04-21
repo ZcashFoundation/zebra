@@ -3,7 +3,7 @@
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
-#[cfg(any(test, feature = "proptest-impl"))]
+#[cfg(test)]
 mod tests;
 
 mod burn;
