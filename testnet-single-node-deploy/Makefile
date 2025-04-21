@@ -1,11 +1,11 @@
-# This file is a Makefile for the demo-deploy project.
+# This file is a Makefile for the testnet-single-node-deploy project.
 # It is used to plan, apply, and destroy changes to the infrastructure using Terragrunt.
 # Define variables
 ACCOUNT_DIR := dev
 REGION := eu-central-1
 ENVIRONMENT := zsa
 AWS_PROFILE := qed-it
-BASE_DIR := ./zebra/demo-deploy/infra/terragrunt-aws-environments
+BASE_DIR := ./zebra/testnet-single-node-deploy/infra/terragrunt-aws-environments
 
 # Check prerequisites
 .PHONY: check-prerequisites plan-all apply-all destroy-all

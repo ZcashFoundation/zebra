@@ -1,6 +1,3 @@
-# Background
-This repo, along with the 'terraform-aws-modules', creates a solana-node in AWS ECS
-
 ## How do you deploy the infrastructure in this repo?
 
 ### Pre-requisites

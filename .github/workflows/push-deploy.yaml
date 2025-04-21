@@ -46,7 +46,7 @@ jobs:
           IMAGE_TAG_COMMIT: ${{ env.SHORT_SHA }}
         run: |
           # Build a docker container
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT -f demo-deploy/dockerfile .
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT -f testnet-single-node-deploy/dockerfile .
           
           # Push both tags to ECR
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST
