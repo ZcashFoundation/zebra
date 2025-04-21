@@ -10,7 +10,10 @@ use semver::Version;
 use zebra_chain::block::Height;
 
 use super::{CancelFormatChange, DiskFormatUpgrade};
-use crate::{service::finalized_state::ZebraDb, DiskWriteBatch, TransactionLocation, WriteDisk};
+use crate::{
+    service::finalized_state::{DiskWriteBatch, WriteDisk, ZebraDb},
+    TransactionLocation,
+};
 
 /// Implements [`DiskFormatUpgrade`] for tracking funds received by address in the database.
 pub struct AddAddressBalanceReceived;
