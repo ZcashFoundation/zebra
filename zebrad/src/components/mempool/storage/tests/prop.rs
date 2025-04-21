@@ -838,7 +838,8 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
 
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
-struct OrchardSpendConflict<Flavor: orchard::ShieldedDataFlavor> {
+#[proptest(no_bound)]
+struct OrchardSpendConflict<Flavor: orchard::ShieldedDataFlavor + 'static> {
     new_shielded_data: DisplayToDebug<orchard::ShieldedData<Flavor>>,
 }
 
@@ -1001,7 +1002,7 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
     }
 }
 
-impl OrchardSpendConflict {
+impl<Flavor: orchard::ShieldedDataFlavor> OrchardSpendConflict<Flavor> {
     /// Apply a Orchard spend conflict.
     ///
     /// Ensures that a transaction's `orchard_shielded_data` has a nullifier used to represent a
@@ -1010,10 +1011,7 @@ impl OrchardSpendConflict {
     /// the new action is inserted in the transaction.
     ///
     /// The transaction will then conflict with any other transaction with the same new nullifier.
-    pub fn apply_to(
-        self,
-        orchard_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
-    ) {
+    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData<Flavor>>) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
             shielded_data.actions.first_mut().action.nullifier =
                 self.new_shielded_data.actions.first().action.nullifier;
