@@ -61,7 +61,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
             OrchardBundle::OrchardZSA(bundle) => orchard_bundle_decrypts_successfully(bundle),
         };
 
-        if is_decrypted_successfully {
+        if !is_decrypted_successfully {
             return false;
         }
     }
