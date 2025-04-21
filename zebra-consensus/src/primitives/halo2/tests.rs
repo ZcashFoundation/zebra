@@ -63,7 +63,7 @@ fn generate_test_vectors() {
             }
 
             let bundle: Bundle<_, i64, <OrchardVanilla as OrchardFlavorExt>::Flavor> =
-                builder.build(rng).unwrap().unwrap().0;
+                builder.build(rng).unwrap().0;
 
             let bundle = bundle
                 .create_proof(&proving_key, rng)
@@ -88,14 +88,7 @@ fn generate_test_vectors() {
                             rk: <[u8; 32]>::from(a.rk()).into(),
                             cm_x: pallas::Base::from_repr(a.cmx().into()).unwrap(),
                             ephemeral_key: a.encrypted_note().epk_bytes.try_into().unwrap(),
-                            // FIXME: support OrchardZSA too, 580 works for OrchardVanilla only!
-                            // FIXME: consider more "type safe" way to do the following conversion
-                            // (now it goes through &[u8])
-                            enc_ciphertext: <[u8; OrchardVanilla::ENCRYPTED_NOTE_SIZE]>::try_from(
-                                a.encrypted_note().enc_ciphertext.as_ref(),
-                            )
-                            .unwrap()
-                            .into(),
+                            enc_ciphertext: a.encrypted_note().enc_ciphertext.0.into(),
                             out_ciphertext: a.encrypted_note().out_ciphertext.into(),
                         };
                         zebra_chain::orchard::shielded_data::AuthorizedAction {

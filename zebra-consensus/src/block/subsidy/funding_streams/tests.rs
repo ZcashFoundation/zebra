@@ -8,6 +8,7 @@ use crate::block::subsidy::general::block_subsidy;
 use super::*;
 
 /// Checks that the Mainnet funding stream values are correct.
+// FIXME: Would this work after Nu7 activation?
 #[test]
 fn test_funding_stream_values() -> Result<(), Report> {
     let _init_guard = zebra_test::init();

@@ -22,7 +22,7 @@ fn deserialize_blocks() {
                 .inner();
 
             assert_eq!(issue_bundle.actions().len(), 1);
-            assert_eq!(issue_bundle.actions()[0].notes().len(), 1);
+            assert_eq!(issue_bundle.actions()[0].notes().len(), 2);
         }
     }
 }

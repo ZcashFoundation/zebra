@@ -142,23 +142,8 @@ impl<V: OrchardVerifier> From<&zebra_chain::orchard::ShieldedData<V>> for Item {
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
 
-        let enable_spend = shielded_data
-            .flags
-            .contains(zebra_chain::orchard::Flags::ENABLE_SPENDS);
-        let enable_output = shielded_data
-            .flags
-            .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
-
-        // FIXME: simplify the flags creation - make `Flags::from_parts` method pub?
-        // FIXME: support OrchardZSA?
-        let flags = match (enable_spend, enable_output, V::ZSA_ENABLED) {
-            (false, false, _) => orchard::builder::BundleType::DISABLED.flags(),
-            (false, true, false) => orchard::bundle::Flags::SPENDS_DISABLED_WITHOUT_ZSA,
-            (false, true, true) => orchard::bundle::Flags::SPENDS_DISABLED_WITH_ZSA,
-            (true, false, _) => orchard::bundle::Flags::OUTPUTS_DISABLED,
-            (true, true, false) => orchard::bundle::Flags::ENABLED_WITHOUT_ZSA,
-            (true, true, true) => orchard::bundle::Flags::ENABLED_WITH_ZSA,
-        };
+        let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
+            .expect("type should not have unexpected bits");
 
         let instances = shielded_data
             .actions()

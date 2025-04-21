@@ -137,9 +137,7 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
     }
 }
 
-// FIXME: is this implemetation correct?
-// FIXME: remove this cfg
-//#[cfg(zcash_unstable = "nu6")]
+#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
 impl zp_tx::components::issuance::MapIssueAuth<orchard::issuance::Signed, orchard::issuance::Signed>
     for IdentityMap
 {
@@ -158,14 +156,7 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    // FIXME: is this correct?
-    // FIXME: remove this cfg
-    //#[cfg(zcash_unstable = "nu6")]
-    type OrchardZsaAuth = orchard::bundle::Authorized;
-
-    // FIXME: is this correct?
-    // FIXME: remove this cfg
-    //#[cfg(zcash_unstable = "nu6")]
+    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
     type IssueAuth = orchard::issuance::Signed;
 }
 
@@ -296,14 +287,7 @@ impl<'a> PrecomputedTxData<'a> {
         };
         let tx_data: zp_tx::TransactionData<PrecomputedAuth> = alt_tx
             .into_data()
-            // FIXME: do we need to pass another arg values or orchard_zsa and issue instead of IdentityMap?
-            .map_authorization(
-                f_transparent,
-                IdentityMap,
-                IdentityMap,
-                IdentityMap,
-                IdentityMap,
-            );
+            .map_authorization(f_transparent, IdentityMap, IdentityMap, IdentityMap);
 
         PrecomputedTxData {
             tx_data,

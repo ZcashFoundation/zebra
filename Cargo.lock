@@ -1372,7 +1372,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "blake2b_simd",
 ]
@@ -2878,7 +2878,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.8.0"
-source = "git+https://github.com/QED-it/orchard?branch=zsa1#a7c02d22a1e2f4310130ae2e7b9813136071bc75"
+source = "git+https://github.com/QED-it/orchard?branch=zsa1#3dbdbc52c6e2ffeca015ae6eb80ad7f1c870384d"
 dependencies = [
  "aes",
  "bitvec",
@@ -5815,7 +5815,7 @@ checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
 [[package]]
 name = "zcash_address"
 version = "0.3.2"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "bech32",
  "bs58",
@@ -5827,7 +5827,7 @@ dependencies = [
 [[package]]
 name = "zcash_client_backend"
 version = "0.12.1"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "base64 0.21.7",
  "bech32",
@@ -5866,7 +5866,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -5875,7 +5875,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -5885,7 +5885,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -5922,7 +5922,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.15.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "aes",
  "bip0039",
@@ -5983,7 +5983,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.1.1"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "document-features",
  "memuse",
@@ -6524,7 +6524,7 @@ dependencies = [
 [[package]]
 name = "zip321"
 version = "0.0.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#2684455ab69452669132eff8effd1229fb5c8de9"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa1#6e5a4130f5e7fbd6f195d89d34ed9669686f7635"
 dependencies = [
  "base64 0.21.7",
  "nom",
