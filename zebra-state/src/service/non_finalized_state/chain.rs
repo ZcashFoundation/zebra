@@ -2076,7 +2076,9 @@ where
     }
 }
 
-impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<Flavor>>> for Chain {
+impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<Flavor>>>
+    for Chain
+{
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
