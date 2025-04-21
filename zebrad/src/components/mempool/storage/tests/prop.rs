@@ -448,6 +448,7 @@ enum SpendConflictTestInput {
     },
 
     /// Test V6 transactions to include OrchardZSA nullifier conflicts.
+    #[cfg(feature = "tx-v6")]
     V6 {
         #[proptest(
             strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
@@ -487,6 +488,7 @@ impl SpendConflictTestInput {
 
                 (first, second)
             }
+            #[cfg(feature = "tx-v6")]
             SpendConflictTestInput::V6 {
                 mut first,
                 mut second,
@@ -522,6 +524,7 @@ impl SpendConflictTestInput {
         let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 { first, second, .. } => (first, second),
             SpendConflictTestInput::V5 { first, second, .. } => (first, second),
+            #[cfg(feature = "tx-v6")]
             SpendConflictTestInput::V6 { first, second, .. } => (first, second),
         };
 
@@ -801,7 +804,16 @@ enum SpendConflictForTransactionV4 {
 enum SpendConflictForTransactionV5 {
     Transparent(Box<TransparentSpendConflict>),
     Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict>),
+    Orchard(Box<OrchardSpendConflict<orchard::OrchardVanilla>>),
+}
+
+/// A spend conflict valid for V6 transactions.
+#[cfg(feature = "tx-v6")]
+#[derive(Arbitrary, Clone, Debug)]
+enum SpendConflictForTransactionV6 {
+    Transparent(Box<TransparentSpendConflict>),
+    Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
+    Orchard(Box<OrchardSpendConflict<orchard::OrchardZSA>>),
 }
 
 /// A conflict caused by spending the same UTXO.
@@ -824,11 +836,10 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
     fallback_shielded_data: DisplayToDebug<sapling::ShieldedData<A>>,
 }
 
-// FIXME: make it a generic to support V6
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
-struct OrchardSpendConflict {
-    new_shielded_data: DisplayToDebug<orchard::ShieldedData<orchard::OrchardVanilla>>,
+struct OrchardSpendConflict<Flavor: orchard::ShieldedDataFlavor> {
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData<Flavor>>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -871,6 +882,31 @@ impl SpendConflictForTransactionV5 {
         };
 
         use SpendConflictForTransactionV5::*;
+        match self {
+            Transparent(transparent_conflict) => transparent_conflict.apply_to(inputs),
+            Sapling(sapling_conflict) => sapling_conflict.apply_to(sapling_shielded_data),
+            Orchard(orchard_conflict) => orchard_conflict.apply_to(orchard_shielded_data),
+        }
+    }
+}
+
+#[cfg(feature = "tx-v6")]
+impl SpendConflictForTransactionV6 {
+    /// Apply a spend conflict to a V6 transaction.
+    ///
+    /// Changes the `transaction_v6` to include the spend that will result in a conflict.
+    pub fn apply_to(self, transaction_v6: &mut Transaction) {
+        let (inputs, sapling_shielded_data, orchard_shielded_data) = match transaction_v6 {
+            Transaction::V6 {
+                inputs,
+                sapling_shielded_data,
+                orchard_shielded_data,
+                ..
+            } => (inputs, sapling_shielded_data, orchard_shielded_data),
+            _ => unreachable!("incorrect transaction version generated for test"),
+        };
+
+        use SpendConflictForTransactionV6::*;
         match self {
             Transparent(transparent_conflict) => transparent_conflict.apply_to(inputs),
             Sapling(sapling_conflict) => sapling_conflict.apply_to(sapling_shielded_data),
