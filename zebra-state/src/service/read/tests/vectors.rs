@@ -90,6 +90,7 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
                     tx: transaction.clone(),
                     height: block.coinbase_height().unwrap(),
                     confirmations: 1 + tip_height.0 - block.coinbase_height().unwrap().0,
+                    block_time: block.header.time,
                 }))),
             )];
 

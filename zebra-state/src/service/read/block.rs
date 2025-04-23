@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     block::{self, Block, Height},
     serialization::ZcashSerialize as _,
@@ -105,7 +107,7 @@ fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<(Arc<Transaction>, Height)>
+) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)>
 where
     C: AsRef<Chain>,
 {
@@ -119,7 +121,7 @@ where
             chain
                 .as_ref()
                 .transaction(hash)
-                .map(|(tx, height)| (tx.clone(), height))
+                .map(|(tx, height, time)| (tx.clone(), height, time))
         })
         .or_else(|| db.transaction(hash))
 }
@@ -140,10 +142,10 @@ where
     // can only add overlapping blocks, and hashes are unique.
     let chain = chain.as_ref();
 
-    let (tx, height) = transaction(chain, db, hash)?;
+    let (tx, height, time) = transaction(chain, db, hash)?;
     let confirmations = 1 + tip_height(chain, db)?.0 - height.0;
 
-    Some(MinedTx::new(tx, height, confirmations))
+    Some(MinedTx::new(tx, height, confirmations, time))
 }
 
 /// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,

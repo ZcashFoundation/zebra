@@ -19,6 +19,8 @@ pub fn test_transaction_serialization() {
         value_balance: None,
         value_balance_zat: None,
         orchard: None,
+        size: None,
+        time: None,
     });
 
     assert_eq!(
@@ -37,6 +39,8 @@ pub fn test_transaction_serialization() {
         value_balance: None,
         value_balance_zat: None,
         orchard: None,
+        size: None,
+        time: None,
     });
 
     assert_eq!(serde_json::to_string(&tx).unwrap(), r#"{"hex":"42"}"#);

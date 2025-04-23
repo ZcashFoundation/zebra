@@ -922,6 +922,7 @@ where
                 ),
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
+                    let block_time = block.header.time;
                     let transactions = block
                         .transactions
                         .iter()
@@ -935,6 +936,7 @@ where
                                         .expect("should be less than max block height, i32::MAX"),
                                 ),
                                 &network,
+                                Some(block_time),
                             ))
                         })
                         .collect();
@@ -1253,6 +1255,8 @@ where
                             None,
                             None,
                             &self.network,
+                            // No time for mempool transactions
+                            None,
                         ))
                     } else {
                         let hex = tx.transaction.clone().into();
@@ -1277,6 +1281,7 @@ where
                     Some(tx.height),
                     Some(tx.confirmations),
                     &self.network,
+                    Some(tx.block_time),
                 ))
             } else {
                 let hex = tx.tx.into();
