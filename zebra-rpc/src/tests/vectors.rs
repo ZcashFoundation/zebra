@@ -8,7 +8,7 @@ pub fn test_transaction_serialization() {
 
     assert_eq!(serde_json::to_string(&tx).unwrap(), r#""42""#);
 
-    let tx = GetRawTransaction::Object(TransactionObject {
+    let tx = GetRawTransaction::Object(Box::new(TransactionObject {
         hex: vec![0x42].into(),
         height: Some(1),
         confirmations: Some(0),
@@ -21,14 +21,14 @@ pub fn test_transaction_serialization() {
         orchard: None,
         size: None,
         time: None,
-    });
+    }));
 
     assert_eq!(
         serde_json::to_string(&tx).unwrap(),
         r#"{"hex":"42","height":1,"confirmations":0}"#
     );
 
-    let tx = GetRawTransaction::Object(TransactionObject {
+    let tx = GetRawTransaction::Object(Box::new(TransactionObject {
         hex: vec![0x42].into(),
         height: None,
         confirmations: None,
@@ -41,7 +41,7 @@ pub fn test_transaction_serialization() {
         orchard: None,
         size: None,
         time: None,
-    });
+    }));
 
     assert_eq!(serde_json::to_string(&tx).unwrap(), r#"{"hex":"42"}"#);
 }
