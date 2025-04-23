@@ -1256,7 +1256,7 @@ where
                             None,
                             None,
                             &self.network,
-                            // No time for mempool transactions
+                            // TODO: No time for mempool txs, check if this is correct.
                             None,
                         )))
                     } else {
