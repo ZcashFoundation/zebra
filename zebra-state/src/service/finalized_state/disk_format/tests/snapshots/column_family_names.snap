@@ -4,6 +4,7 @@ expression: cf_names
 ---
 [
   "balance_by_transparent_addr",
+  "block_data",
   "block_header_by_height",
   "default",
   "hash_by_height",

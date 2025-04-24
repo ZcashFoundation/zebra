@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 933c998cd42e62c9b80ceae375981200f1039e493262f7d931d973900c75812e # shrinks to (chain, count, network, _history_tree) = (alloc::vec::Vec<zebra_state::request::PreparedBlock><zebra_state::request::PreparedBlock>, len=104, 2, Mainnet, HistoryTree(None))
+cc 913f6cbcbe6632b0bad3d62b2b71c0018697fdea09598c774c1a2610b4dedf08 # shrinks to (chain, count, network, _history_tree) = (alloc::vec::Vec<zebra_state::request::SemanticallyVerifiedBlock><zebra_state::request::SemanticallyVerifiedBlock>, len=104, 3, Mainnet, HistoryTree(None))

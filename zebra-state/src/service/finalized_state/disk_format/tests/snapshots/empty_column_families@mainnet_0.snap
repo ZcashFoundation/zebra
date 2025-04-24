@@ -4,6 +4,7 @@ expression: empty_column_families
 ---
 [
   "balance_by_transparent_addr: no entries",
+  "block_data: no entries",
   "history_tree: no entries",
   "orchard_note_commitment_subtree: no entries",
   "orchard_nullifiers: no entries",

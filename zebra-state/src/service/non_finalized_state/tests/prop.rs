@@ -652,6 +652,9 @@ fn different_blocks_different_chains() -> Result<()> {
                 // chain value pool
                 chain1.chain_value_pools = chain2.chain_value_pools;
 
+                // block data
+                chain1.block_data_by_height = chain2.block_data_by_height.clone();
+
                 // If this check fails, the `Chain` fields are out
                 // of sync with `eq_internal_state` or this test.
                 prop_assert!(

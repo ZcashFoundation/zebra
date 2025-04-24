@@ -47,8 +47,6 @@ use crate::{
 #[cfg(feature = "indexer")]
 use crate::request::Spend;
 
-use super::transparent::TX_LOC_BY_SPENT_OUT_LOC;
-
 #[cfg(test)]
 mod tests;
 
@@ -372,21 +370,6 @@ impl ZebraDb {
         };
 
         self.transaction_hash(tx_loc)
-    }
-
-    /// Returns an iterator of all [`TransactionLocation`]s in the provided range
-    /// of spent [`OutputLocation`]s in finalized state.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn transaction_location_by_spent_output_location_range<R>(
-        &self,
-        range: R,
-    ) -> impl Iterator<Item = (OutputLocation, TransactionLocation)> + '_
-    where
-        R: RangeBounds<OutputLocation>,
-    {
-        let tx_loc_by_spent_out_loc = self.db.cf_handle(TX_LOC_BY_SPENT_OUT_LOC).unwrap();
-        self.db
-            .zs_forward_range_iter(tx_loc_by_spent_out_loc, range)
     }
 
     /// Returns the [`transaction::Hash`]es in the block with `hash_or_height`,

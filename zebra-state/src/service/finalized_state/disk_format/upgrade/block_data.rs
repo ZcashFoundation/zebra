@@ -123,6 +123,7 @@ impl DiskFormatUpgrade for AddBlockData {
         Ok(())
     }
 
+    #[allow(clippy::unwrap_in_result)]
     fn validate(
         &self,
         db: &crate::ZebraDb,
@@ -138,8 +139,12 @@ impl DiskFormatUpgrade for AddBlockData {
             return Ok(Ok(()));
         };
 
-        // Check any outputs in the last 1000 blocks
-        let start_height = (tip_height - 1_000).unwrap_or(Height::MIN);
+        // Check any outputs in the last 1000 blocks. We use MIN + 1 (i.e. 1)
+        // instead of MIN (i.e. 0) as the fallback due to an exception in
+        // DiskWriteBatch::prepare_block_batch() where we don't store the block
+        // data for height 0.
+        let start_height =
+            (tip_height - 1_000).unwrap_or((Height::MIN + 1).expect("cannot overflow"));
 
         if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(super::CancelFormatChange);
@@ -147,11 +152,11 @@ impl DiskFormatUpgrade for AddBlockData {
 
         for height in start_height.0..=tip_height.0 {
             if let Some(block_data) = db.block_data_cf().zs_get(&Height(height)) {
-                if height > 0 && block_data == Default::default() {
+                if block_data == Default::default() {
                     return Ok(Err(format!("zero block data for height: {}", height)));
                 }
             } else {
-                return Ok(Err(format!("missing block data for height{}", height)));
+                return Ok(Err(format!("missing block data for height: {}", height)));
             }
         }
 
