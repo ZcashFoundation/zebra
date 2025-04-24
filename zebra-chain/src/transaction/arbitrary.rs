@@ -233,13 +233,11 @@ impl Transaction {
     pub fn v6_strategy(ledger_state: LedgerState) -> BoxedStrategy<Transaction> {
         Self::v5_v6_strategy_common::<orchard::OrchardZSA>(ledger_state)
             .prop_flat_map(|common_fields| {
-                // FIXME: Can IssueData present in V6 transaction without orchard::ShieldedData?
-                // If no, we possibly need to use something like prop_filter_map to filter wrong
-                // combnations (orchard_shielded_data: None, orchard_zsa_issue_data: Some)
                 option::of(any::<IssueData>())
                     .prop_map(move |issue_data| (common_fields.clone(), issue_data))
             })
-            .prop_map(
+            .prop_filter_map(
+                "orchard_shielded_data can not be None for V6",
                 |(
                     (
                         network_upgrade,
@@ -251,15 +249,17 @@ impl Transaction {
                         orchard_shielded_data,
                     ),
                     orchard_zsa_issue_data,
-                )| Transaction::V6 {
-                    network_upgrade,
-                    lock_time,
-                    expiry_height,
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    orchard_zsa_issue_data,
+                )| {
+                    orchard_shielded_data.is_some().then(|| Transaction::V6 {
+                        network_upgrade,
+                        lock_time,
+                        expiry_height,
+                        inputs,
+                        outputs,
+                        sapling_shielded_data,
+                        orchard_shielded_data,
+                        orchard_zsa_issue_data,
+                    })
                 },
             )
             .boxed()
