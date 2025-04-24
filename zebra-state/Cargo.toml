@@ -43,6 +43,8 @@ elasticsearch = [
     "zebra-chain/elasticsearch",
 ]
 
+tx_v6 = ["zebra-chain/tx_v6"]
+
 [dependencies]
 bincode = { workspace = true }
 chrono = { workspace = true, features = ["clock", "std"] }

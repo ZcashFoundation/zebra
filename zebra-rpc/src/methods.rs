@@ -27,6 +27,7 @@ use std::{
     cmp,
     collections::{HashMap, HashSet},
     fmt,
+    ops::RangeInclusive,
     sync::Arc,
     time::Duration,
 };
@@ -47,6 +48,7 @@ use types::{
     peer_info::PeerInfo,
     submit_block,
     subsidy::BlockSubsidy,
+    transaction::TransactionObject,
     unified_address, validate_address, z_validate_address,
 };
 use zcash_address::{unified::Encoding, TryFromAddress};
@@ -323,8 +325,8 @@ pub trait Rpc {
     ///
     /// - `request`: (object, required, example={\"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"], \"start\": 1000, \"end\": 2000}) A struct with the following named fields:
     ///     - `addresses`: (json array of string, required) The addresses to get transactions from.
-    ///     - `start`: (numeric, required) The lower height to start looking for transactions (inclusive).
-    ///     - `end`: (numeric, required) The top height to stop looking for transactions (inclusive).
+    ///     - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
+    ///     - `end`: (numeric, optional) The top height to stop looking for transactions (inclusive).
     ///
     /// # Notes
     ///
@@ -1201,6 +1203,7 @@ where
                                         .try_into()
                                         .expect("should be less than max block height, i32::MAX"),
                                 ),
+                                &network,
                             ))
                         })
                         .collect();
@@ -1518,6 +1521,7 @@ where
                             tx.transaction.clone(),
                             None,
                             None,
+                            &self.network,
                         ))
                     } else {
                         let hex = tx.transaction.clone().into();
@@ -1541,6 +1545,7 @@ where
                     tx.tx.clone(),
                     Some(tx.height),
                     Some(tx.confirmations),
+                    &self.network,
                 ))
             } else {
                 let hex = tx.tx.into();
@@ -1718,13 +1723,11 @@ where
         let mut state = self.state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
-        let start = Height(request.start);
-        let end = Height(request.end);
-
-        let chain_height = best_chain_tip_height(&latest_chain_tip)?;
-
-        // height range checks
-        check_height_range(start, end, chain_height)?;
+        let height_range = build_height_range(
+            request.start,
+            request.end,
+            best_chain_tip_height(&latest_chain_tip)?,
+        )?;
 
         let valid_addresses = AddressStrings {
             addresses: request.addresses,
@@ -1733,7 +1736,7 @@ where
 
         let request = zebra_state::ReadRequest::TransactionIdsByAddresses {
             addresses: valid_addresses,
-            height_range: start..=end,
+            height_range,
         };
         let response = state
             .ready()
@@ -2219,7 +2222,10 @@ where
         let block: Block = match block_bytes.zcash_deserialize_into() {
             Ok(block_bytes) => block_bytes,
             Err(error) => {
-                tracing::info!(?error, "submit block failed: block bytes could not be deserialized into a structurally valid block");
+                tracing::info!(
+                    ?error,
+                    "submit block failed: block bytes could not be deserialized into a structurally valid block"
+                );
 
                 return Ok(submit_block::ErrorResponse::Rejected.into());
             }
@@ -3446,7 +3452,7 @@ impl Default for GetBlockHash {
 /// Response to a `getrawtransaction` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_transaction` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
@@ -3458,52 +3464,6 @@ pub enum GetRawTransaction {
 impl Default for GetRawTransaction {
     fn default() -> Self {
         Self::Object(TransactionObject::default())
-    }
-}
-
-/// A Transaction object as returned by `getrawtransaction` and `getblock` RPC
-/// requests.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct TransactionObject {
-    /// The raw transaction, encoded as hex bytes.
-    #[serde(with = "hex")]
-    pub hex: SerializedTransaction,
-    /// The height of the block in the best chain that contains the tx or `None` if the tx is in
-    /// the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub height: Option<u32>,
-    /// The height diff between the block containing the tx and the best chain tip + 1 or `None`
-    /// if the tx is in the mempool.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub confirmations: Option<u32>,
-    // TODO: many fields not yet supported
-}
-
-impl Default for TransactionObject {
-    fn default() -> Self {
-        Self {
-            hex: SerializedTransaction::from(
-                [0u8; zebra_chain::transaction::MIN_TRANSPARENT_TX_SIZE as usize].to_vec(),
-            ),
-            height: Option::default(),
-            confirmations: Option::default(),
-        }
-    }
-}
-
-impl TransactionObject {
-    /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
-    #[allow(clippy::unwrap_in_result)]
-    fn from_transaction(
-        tx: Arc<Transaction>,
-        height: Option<block::Height>,
-        confirmations: Option<u32>,
-    ) -> Self {
-        Self {
-            hex: tx.into(),
-            height: height.map(|height| height.0),
-            confirmations,
-        }
     }
 }
 
@@ -3602,9 +3562,9 @@ pub struct GetAddressTxIdsRequest {
     // A list of addresses to get transactions from.
     addresses: Vec<String>,
     // The height to start looking for transactions.
-    start: u32,
+    start: Option<u32>,
     // The height to end looking for transactions.
-    end: u32,
+    end: Option<u32>,
 }
 
 impl GetAddressTxIdsRequest {
@@ -3612,13 +3572,17 @@ impl GetAddressTxIdsRequest {
     pub fn from_parts(addresses: Vec<String>, start: u32, end: u32) -> Self {
         GetAddressTxIdsRequest {
             addresses,
-            start,
-            end,
+            start: Some(start),
+            end: Some(end),
         }
     }
     /// Returns the contents of [`GetAddressTxIdsRequest`].
     pub fn into_parts(&self) -> (Vec<String>, u32, u32) {
-        (self.addresses.clone(), self.start, self.end)
+        (
+            self.addresses.clone(),
+            self.start.unwrap_or(0),
+            self.end.unwrap_or(0),
+        )
     }
 }
 
@@ -3684,15 +3648,36 @@ impl OrchardTrees {
     }
 }
 
-/// Check if provided height range is valid for address indexes.
-fn check_height_range(start: Height, end: Height, chain_height: Height) -> Result<()> {
-    if start == Height(0) || end == Height(0) {
-        return Err(ErrorObject::owned(
-            ErrorCode::InvalidParams.code(),
-            format!("start {start:?} and end {end:?} must both be greater than zero"),
-            None::<()>,
-        ));
-    }
+/// Build a valid height range from the given optional start and end numbers.
+///
+/// # Parameters
+///
+/// - `start`: Optional starting height. If not provided, defaults to 0.
+/// - `end`: Optional ending height. A value of 0 or absence of a value indicates to use `chain_height`.
+/// - `chain_height`: The maximum permissible height.
+///
+/// # Returns
+///
+/// A `RangeInclusive<Height>` from the clamped start to the clamped end.
+///
+/// # Errors
+///
+/// Returns an error if the computed start is greater than the computed end.
+fn build_height_range(
+    start: Option<u32>,
+    end: Option<u32>,
+    chain_height: Height,
+) -> Result<RangeInclusive<Height>> {
+    // Convert optional values to Height, using 0 (as Height(0)) when missing.
+    // If start is above chain_height, clamp it to chain_height.
+    let start = Height(start.unwrap_or(0)).min(chain_height);
+
+    // For `end`, treat a zero value or missing value as `chain_height`:
+    let end = match end {
+        Some(0) | None => chain_height,
+        Some(val) => Height(val).min(chain_height),
+    };
+
     if start > end {
         return Err(ErrorObject::owned(
             ErrorCode::InvalidParams.code(),
@@ -3700,15 +3685,8 @@ fn check_height_range(start: Height, end: Height, chain_height: Height) -> Resul
             None::<()>,
         ));
     }
-    if start > chain_height || end > chain_height {
-        return Err(ErrorObject::owned(
-            ErrorCode::InvalidParams.code(),
-            format!("start {start:?} and end {end:?} must both be less than or equal to the chain tip {chain_height:?}"),
-            None::<()>,
-        ));
-    }
 
-    Ok(())
+    Ok(start..=end)
 }
 
 /// Given a potentially negative index, find the corresponding `Height`.
@@ -3742,7 +3720,7 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
                     ErrorCode::InvalidParams.code(),
                     "Provided index is not valid",
                     None,
-                ))
+                ));
             }
             Some(h) => {
                 if h < 0 {

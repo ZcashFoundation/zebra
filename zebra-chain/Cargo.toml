@@ -35,10 +35,7 @@ shielded-scan = [
 ]
 
 # Experimental internal miner support
-# TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
-#       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L38-L43
-#       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-internal-miner = []
+internal-miner = ["equihash/solver"]
 
 # Experimental elasticsearch support
 elasticsearch = []
@@ -56,6 +53,8 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
+tx_v6 = []
+
 [dependencies]
 
 # Cryptography
@@ -67,9 +66,6 @@ blake2s_simd = { workspace = true }
 bs58 = { workspace = true, features = ["check"] }
 byteorder = { workspace = true }
 
-# TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
-#       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L73-L85
-#       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
 equihash = { workspace = true }
 
 group = { workspace = true }

@@ -28,6 +28,7 @@ use zebra_chain::{
     block::{self, Block, Height},
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
+    history_tree::HistoryTree,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
@@ -395,7 +396,7 @@ proptest! {
                         .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                             tip_hash: genesis_hash,
                             tip_height: Height::MIN,
-                            history_tree: Default::default(),
+                            chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
@@ -469,7 +470,7 @@ proptest! {
                         .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                             tip_hash: block_hash,
                             tip_height: block_height,
-                            history_tree: Default::default(),
+                            chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),

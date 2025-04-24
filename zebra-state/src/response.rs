@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
+    block::{self, Block, ChainHistoryMmrRootHash},
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -277,9 +277,9 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     pub tip_height: block::Height,
 
-    /// The history tree of the current best chain.
+    /// The FlyClient chain history root as of the end of the chain tip block.
     /// Depends on the `tip_hash`.
-    pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    pub chain_history_root: Option<ChainHistoryMmrRootHash>,
 
     // Data derived from the state tip and recent blocks, and the current local clock.
     //

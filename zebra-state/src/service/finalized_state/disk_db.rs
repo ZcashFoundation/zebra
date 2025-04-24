@@ -984,6 +984,11 @@ impl DiskDb {
             let db_kind = db_kind.as_ref();
 
             let old_path = config.db_path(db_kind, major_db_ver - 1, network);
+            // Exit early if the path doesn't exist or there's an error checking it.
+            if !fs::exists(&old_path).unwrap_or(false) {
+                return;
+            }
+
             let new_path = config.db_path(db_kind, major_db_ver, network);
 
             let old_path = match fs::canonicalize(&old_path) {
@@ -1223,7 +1228,7 @@ impl DiskDb {
             );
         } else {
             #[cfg(not(test))]
-            info!(
+            debug!(
                 ?current_limit,
                 min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
                 ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,

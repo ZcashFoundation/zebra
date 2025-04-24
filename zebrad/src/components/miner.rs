@@ -210,7 +210,7 @@ where
 }
 
 /// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
-#[instrument(skip(rpc, template_sender))]
+#[instrument(skip(rpc, template_sender, network))]
 pub async fn generate_block_templates<
     Mempool,
     State,
@@ -267,8 +267,9 @@ where
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
-            info!(
+            warn!(
                 ?BLOCK_TEMPLATE_WAIT_TIME,
+                ?template,
                 "waiting for a valid block template",
             );
 

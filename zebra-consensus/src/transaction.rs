@@ -523,6 +523,19 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                #[cfg(feature="tx_v6")]
+                Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => Self::verify_v6_transaction(
+                    &req,
+                    &network,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )?,
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -925,7 +938,8 @@ where
             | NetworkUpgrade::Heartwood
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
-            | NetworkUpgrade::Nu6 => Ok(()),
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu7 => Ok(()),
 
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
@@ -1011,7 +1025,7 @@ where
             //
             // Note: Here we verify the transaction version number of the above rule, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
-            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => Ok(()),
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu7 => Ok(()),
 
             // Does not support V5 transactions
             NetworkUpgrade::Genesis
@@ -1025,6 +1039,26 @@ where
                 network_upgrade,
             )),
         }
+    }
+
+    /// Passthrough to verify_v5_transaction, but for V6 transactions.
+    #[cfg(feature = "tx_v6")]
+    fn verify_v6_transaction(
+        request: &Request,
+        network: &Network,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        Self::verify_v5_transaction(
+            request,
+            network,
+            script_verifier,
+            cached_ffi_transaction,
+            sapling_shielded_data,
+            orchard_shielded_data,
+        )
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
