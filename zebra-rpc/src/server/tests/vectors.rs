@@ -3,19 +3,17 @@
 // These tests call functions which can take unit arguments if some features aren't enabled.
 #![allow(clippy::unit_arg)]
 
+use super::super::*;
+use config::rpc::Config;
 use std::net::{Ipv4Addr, SocketAddrV4};
-
+use tokio::sync::watch;
 use tower::buffer::Buffer;
-
 use zebra_chain::{
     chain_sync_status::MockSyncStatus, chain_tip::NoChainTip, parameters::Network::*,
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
-
 use zebra_test::mock_service::MockService;
-
-use super::super::*;
 
 /// Test that the JSON-RPC server spawns.
 #[tokio::test]
@@ -28,7 +26,7 @@ async fn rpc_server_spawn_test() {
 async fn rpc_server_spawn() {
     let _init_guard = zebra_test::init();
 
-    let config = Config {
+    let conf = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0).into()),
         indexer_listen_addr: None,
         parallel_cpu_threads: 0,
@@ -45,21 +43,25 @@ async fn rpc_server_spawn() {
     info!("spawning RPC server...");
 
     let (_tx, rx) = watch::channel(None);
-    let _rpc_server_task_handle = RpcServer::spawn(
-        config,
+    let (rpc_impl, _) = RpcImpl::new(
+        Mainnet,
         Default::default(),
+        false,
         "RPC server test",
         "RPC server test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
-        MockAddressBookPeers::default(),
         NoChainTip,
-        Mainnet,
-        None,
+        MockAddressBookPeers::default(),
         rx,
+        None,
     );
+
+    let _ = RpcServer::start(rpc_impl, conf)
+        .await
+        .expect("RPC server should start");
 
     info!("spawned RPC server, checking services...");
 
@@ -90,7 +92,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
     let port = zebra_test::net::random_unallocated_port();
     #[allow(unknown_lints)]
     #[allow(clippy::bool_to_int_with_if)]
-    let config = Config {
+    let conf = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         indexer_listen_addr: None,
         parallel_cpu_threads: 0,
@@ -107,23 +109,25 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
     info!("spawning RPC server...");
 
     let (_tx, rx) = watch::channel(None);
-    let rpc_server_task_handle = RpcServer::spawn(
-        config,
+    let (rpc_impl, _) = RpcImpl::new(
+        Mainnet,
         Default::default(),
+        false,
         "RPC server test",
         "RPC server test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
-        MockAddressBookPeers::default(),
         NoChainTip,
-        Mainnet,
-        None,
+        MockAddressBookPeers::default(),
         rx,
-    )
-    .await
-    .expect("");
+        None,
+    );
+
+    let rpc = RpcServer::start(rpc_impl, conf)
+        .await
+        .expect("server should start");
 
     info!("spawned RPC server, checking services...");
 
@@ -132,7 +136,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
     block_verifier_router.expect_no_requests().await;
 
     if do_shutdown {
-        rpc_server_task_handle.0.abort();
+        rpc.abort();
     }
 }
 
@@ -148,7 +152,7 @@ async fn rpc_server_spawn_port_conflict() {
     let _init_guard = zebra_test::init();
 
     let port = zebra_test::net::random_known_port();
-    let config = Config {
+    let conf = Config {
         listen_addr: Some(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port).into()),
         indexer_listen_addr: None,
         debug_force_finished_sync: false,
@@ -165,43 +169,49 @@ async fn rpc_server_spawn_port_conflict() {
     info!("spawning RPC server 1...");
 
     let (_tx, rx) = watch::channel(None);
-    let _rpc_server_1_task_handle = RpcServer::spawn(
-        config.clone(),
+    let (rpc_impl, _) = RpcImpl::new(
+        Mainnet,
         Default::default(),
-        "RPC server 1 test",
-        "RPC server 1 test",
+        false,
+        "RPC server test",
+        "RPC server test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
-        MockAddressBookPeers::default(),
         NoChainTip,
-        Mainnet,
-        None,
+        MockAddressBookPeers::default(),
         rx.clone(),
-    )
-    .await;
+        None,
+    );
+
+    let _ = RpcServer::start(rpc_impl, conf.clone())
+        .await
+        .expect("server should start");
 
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     info!("spawning conflicted RPC server 2...");
 
-    let _rpc_server_2_task_handle = RpcServer::spawn(
-        config,
+    let (rpc_impl, _) = RpcImpl::new(
+        Mainnet,
         Default::default(),
-        "RPC server 2 conflict test",
-        "RPC server 2 conflict test",
+        false,
+        "RPC server test",
+        "RPC server test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
-        MockAddressBookPeers::default(),
         NoChainTip,
-        Mainnet,
-        None,
+        MockAddressBookPeers::default(),
         rx,
-    )
-    .await;
+        None,
+    );
+
+    let _ = RpcServer::start(rpc_impl, conf)
+        .await
+        .expect("server should start");
 
     info!("spawned RPC servers, checking services...");
 

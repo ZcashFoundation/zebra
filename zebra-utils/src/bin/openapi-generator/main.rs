@@ -8,6 +8,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
 use syn::LitStr;
 
+use types::{get_mining_info, submit_block, subsidy, validate_address, z_validate_address};
 use zebra_rpc::methods::{trees::GetTreestate, *};
 
 // The API server
@@ -484,43 +485,31 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         // mining
         // TODO: missing `getblocktemplate`. It's a complex method that requires a lot of parameters.
         "getnetworkhashps" => default_property(type_, items.clone(), u64::default())?,
-        "getblocksubsidy" => default_property(
-            type_,
-            items.clone(),
-            get_block_template_rpcs::types::subsidy::BlockSubsidy::default(),
-        )?,
-        "getmininginfo" => default_property(
-            type_,
-            items.clone(),
-            get_block_template_rpcs::types::get_mining_info::Response::default(),
-        )?,
+        "getblocksubsidy" => {
+            default_property(type_, items.clone(), subsidy::BlockSubsidy::default())?
+        }
+        "getmininginfo" => {
+            default_property(type_, items.clone(), get_mining_info::Response::default())?
+        }
         "getnetworksolps" => default_property(type_, items.clone(), u64::default())?,
-        "submitblock" => default_property(
-            type_,
-            items.clone(),
-            get_block_template_rpcs::types::submit_block::Response::default(),
-        )?,
+        "submitblock" => default_property(type_, items.clone(), submit_block::Response::default())?,
         // util
-        "validateaddress" => default_property(
-            type_,
-            items.clone(),
-            get_block_template_rpcs::types::validate_address::Response::default(),
-        )?,
+        "validateaddress" => {
+            default_property(type_, items.clone(), validate_address::Response::default())?
+        }
         "z_validateaddress" => default_property(
             type_,
             items.clone(),
-            get_block_template_rpcs::types::z_validate_address::Response::default(),
+            z_validate_address::Response::default(),
         )?,
         // address
         "getaddressbalance" => default_property(type_, items.clone(), AddressBalance::default())?,
         "getaddressutxos" => default_property(type_, items.clone(), GetAddressUtxos::default())?,
         "getaddresstxids" => default_property(type_, items.clone(), Vec::<String>::default())?,
         // network
-        "getpeerinfo" => default_property(
-            type_,
-            items.clone(),
-            get_block_template_rpcs::types::peer_info::PeerInfo::default(),
-        )?,
+        "getpeerinfo" => {
+            default_property(type_, items.clone(), types::peer_info::PeerInfo::default())?
+        }
         // blockchain
         "getdifficulty" => default_property(type_, items.clone(), f64::default())?,
         "getblockchaininfo" => {
@@ -539,7 +528,7 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         "z_listunifiedreceivers" => default_property(
             type_,
             items.clone(),
-            get_block_template_rpcs::types::unified_address::Response::default(),
+            types::unified_address::Response::default(),
         )?,
         // control
         "getinfo" => default_property(type_, items.clone(), GetInfo::default())?,

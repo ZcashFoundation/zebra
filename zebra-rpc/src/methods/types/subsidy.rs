@@ -6,7 +6,7 @@ use zebra_chain::{
     transparent,
 };
 
-use crate::methods::types::Zec;
+use super::zec::Zec;
 
 /// A response to a `getblocksubsidy` RPC request
 #[derive(Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]

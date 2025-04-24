@@ -6,7 +6,7 @@ use zebra_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
-use crate::methods::get_block_template_rpcs::GetBlockTemplate;
+use crate::methods::get_block_template::GetBlockTemplateHandler;
 
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
