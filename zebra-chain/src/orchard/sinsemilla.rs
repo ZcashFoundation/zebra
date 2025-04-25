@@ -54,7 +54,7 @@ pub fn pallas_group_hash(D: &[u8], M: &[u8]) -> pallas::Point {
 /// <https://zips.z.cash/protocol/nu5.pdf#concretesinsemillahash>
 #[allow(non_snake_case)]
 pub fn sinsemilla_hash(D: &[u8], M: &BitVec<u8, Lsb0>) -> Option<pallas::Base> {
-    let domain = std::str::from_utf8(D).unwrap();
+    let domain = std::str::from_utf8(D).expect("must be valid UTF-8");
     let hash_domain = HashDomain::new(domain);
 
     hash_domain.hash(M.iter().map(|b| *b.as_ref())).into()
