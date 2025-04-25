@@ -165,13 +165,27 @@ pub struct AuthorizedAction<Flavor: ShieldedDataFlavor> {
 }
 
 impl<Flavor: ShieldedDataFlavor> AuthorizedAction<Flavor> {
-    // FIXME: change the comments below to fit both OrchardVanilla and OrchardZSA (refs to specs, 820 bytes etc.)
-    /// The size of a single Action
+    /// The size of a single Action description.
     ///
-    /// Actions are 5 * 32 + ENCRYPTED_NOTE_SIZE + 80 bytes so the total size of each Action is 820 bytes.
-    /// [7.5 Action Description Encoding and Consensus][ps]
+    /// Computed as:
+    /// ```text
+    ///   5 × 32               (fields for nullifier, output commitment, etc.)
+    /// + ENC_CIPHERTEXT_SIZE  (580 bytes for OrchardVanilla / Nu5–Nu6,
+    ///                        612 bytes for OrchardZSA / Nu7)
+    /// + 80                   (authentication tag)
+    /// = 820 bytes            (OrchardVanilla)
+    /// = 852 bytes            (OrchardZSA)
+    /// ```
     ///
-    /// [ps]: <https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsen`sus>
+    /// - For OrchardVanilla (Nu5/Nu6), ENC_CIPHERTEXT_SIZE = 580; see
+    ///   [§ 7.5 Action Description Encoding and Consensus][nu5_pdf] and
+    ///   [ZIP-0225 § “Orchard Action Description”][zip225].
+    /// - For OrchardZSA (Nu7), ENC_CIPHERTEXT_SIZE = 612; see
+    ///   [ZIP-0230 § “OrchardZSA Action Description”][zip230].
+    ///
+    /// [nu5_pdf]: https://zips.z.cash/protocol/nu5.pdf#actionencodingandconsen
+    /// [zip225]: https://zips.z.cash/zip-0225#orchard-action-description-orchardaction
+    /// [zip230]: https://zips.z.cash/zip-0230#orchardzsa-action-description-orchardzsaaction
     pub const ACTION_SIZE: u64 = 5 * 32 + (Flavor::ENC_CIPHERTEXT_SIZE as u64) + 80;
 
     /// The size of a single `Signature<SpendAuth>`.

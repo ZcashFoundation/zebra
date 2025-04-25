@@ -414,7 +414,6 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
-                // FIXME: implement proper V6 verification
                 #[cfg(feature = "tx-v6")]
                 Transaction::V6 {
                     sapling_shielded_data,

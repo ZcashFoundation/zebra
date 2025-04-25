@@ -75,7 +75,6 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;
 
-// FIXME: Check if the Orchard code (called from the zebra-consensus) checks burn as a part of bidning signature
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key for Orchard Vanilla
     pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
