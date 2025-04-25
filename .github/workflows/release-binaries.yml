@@ -23,7 +23,6 @@ jobs:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
       image_name: zebra
-      latest_tag: true
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
     # This step needs access to Docker Hub secrets to run successfully
