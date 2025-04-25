@@ -10,6 +10,7 @@ use zebra_chain::{
     block::Block,
     block_data::BlockData,
     chain_tip::{mock::MockChainTip, NoChainTip},
+    history_tree::HistoryTree,
     parameters::Network::*,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
     transaction::UnminedTxId,
@@ -53,7 +54,7 @@ async fn rpc_getinfo() {
         GetBlockTemplateChainInfo {
             tip_hash: Mainnet.genesis_hash(),
             tip_height: Height::MIN,
-            history_tree: Default::default(),
+            chain_history_root: HistoryTree::default().hash(),
             expected_difficulty: Default::default(),
             cur_time: zebra_chain::serialization::DateTime32::now(),
             min_time: zebra_chain::serialization::DateTime32::now(),
@@ -1305,7 +1306,7 @@ async fn rpc_getaddresstxids_response() {
         )
         .await;
 
-        // Start and and outside of the range should use the chain tip.
+        // Start and outside of the range should use the chain tip.
         rpc_getaddresstxids_response_with(
             &network,
             Some(11),
@@ -1949,8 +1950,6 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         miner_address: miner_address.clone(),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
-        // TODO: Use default field values when optional features are enabled in tests #8183
-        #[cfg(feature = "internal-miner")]
         internal_miner: true,
     };
 
@@ -2000,7 +1999,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    history_tree: fake_history_tree(&Mainnet),
+                    chain_history_root: fake_history_tree(&Mainnet).hash(),
                 }));
         }
     };
@@ -2425,8 +2424,6 @@ async fn rpc_getdifficulty() {
         miner_address: None,
         extra_coinbase_data: None,
         debug_like_zcashd: true,
-        // TODO: Use default field values when optional features are enabled in tests #8183
-        #[cfg(feature = "internal-miner")]
         internal_miner: true,
     };
 
@@ -2475,7 +2472,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 
@@ -2501,7 +2498,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 
@@ -2524,7 +2521,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 
@@ -2547,7 +2544,7 @@ async fn rpc_getdifficulty() {
                 cur_time: fake_cur_time,
                 min_time: fake_min_time,
                 max_time: fake_max_time,
-                history_tree: fake_history_tree(&Mainnet),
+                chain_history_root: fake_history_tree(&Mainnet).hash(),
             }));
     };
 

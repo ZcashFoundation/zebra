@@ -78,8 +78,8 @@ impl FundingStreamReceiver {
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
     /// [ZIP-1015]: https://zips.z.cash/zip-1015
-    pub fn info(&self, is_nu6: bool) -> (&'static str, &'static str) {
-        if is_nu6 {
+    pub fn info(&self, is_post_nu6: bool) -> (&'static str, &'static str) {
+        if is_post_nu6 {
             (
                 match self {
                     FundingStreamReceiver::Ecc => "Electric Coin Company",

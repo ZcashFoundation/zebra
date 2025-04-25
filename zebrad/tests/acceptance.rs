@@ -2899,7 +2899,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(None, None);
+    let network = Network::new_regtest(Default::default());
     let state = zebra_state::init_test(&network);
     let (
         block_verifier_router,
@@ -2973,7 +2973,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
     config.state.ephemeral = false;
     let network = config.network.network.clone();
 
@@ -3092,8 +3092,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         header.previous_block_hash = chain_info.tip_hash;
         header.commitment_bytes = chain_info
-            .history_tree
-            .hash()
+            .chain_history_root
             .or(is_chain_history_activation_height.then_some([0; 32].into()))
             .expect("history tree can't be empty")
             .bytes_in_serialized_order()
@@ -3440,8 +3439,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let valid_original_block_template = block_template.clone();
 
-    let zebra_state::GetBlockTemplateChainInfo { history_tree, .. } =
-        fetch_state_tip_and_local_time(read_state.clone()).await?;
+    let zebra_state::GetBlockTemplateChainInfo {
+        chain_history_root, ..
+    } = fetch_state_tip_and_local_time(read_state.clone()).await?;
 
     let network = base_network_params
         .clone()
@@ -3456,7 +3456,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height),
         &miner_address,
         &[],
-        history_tree.clone(),
+        chain_history_root,
         true,
         vec![],
     );
@@ -3499,7 +3499,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height),
         &miner_address,
         &[],
-        history_tree.clone(),
+        chain_history_root,
         true,
         vec![],
     );

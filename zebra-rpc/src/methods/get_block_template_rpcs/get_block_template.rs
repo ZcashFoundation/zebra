@@ -276,7 +276,7 @@ pub fn generate_coinbase_and_roots(
     block_template_height: Height,
     miner_address: &transparent::Address,
     mempool_txs: &[VerifiedUnminedTx],
-    history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    chain_history_root: Option<ChainHistoryMmrRootHash>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
@@ -294,8 +294,7 @@ pub fn generate_coinbase_and_roots(
     // Calculate block default roots
     //
     // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-    let chain_history_root = history_tree
-        .hash()
+    let chain_history_root = chain_history_root
         .or_else(|| {
             (NetworkUpgrade::Heartwood.activation_height(network) == Some(block_template_height))
                 .then_some([0; 32].into())
