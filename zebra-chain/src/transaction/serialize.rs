@@ -423,14 +423,14 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
         // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
         writer.write_u32::<LittleEndian>(0)?;
 
+        // Denoted as `vAssetBurn` in the spec (ZIP 230).
+        self.burn.zcash_serialize(&mut writer)?;
+
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
         zcash_serialize_external_count(&sigs, &mut writer)?;
 
         // Denoted as `valueBalanceOrchard` in the spec.
         self.value_balance.zcash_serialize(&mut writer)?;
-
-        // Denoted as `vAssetBurn` in the spec (ZIP 230).
-        self.burn.zcash_serialize(&mut writer)?;
 
         // Denoted as `bindingSigOrchard` in the spec.
         self.binding_sig.zcash_serialize(&mut writer)?;
@@ -557,15 +557,15 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
             ));
         }
 
+        // Denoted as `vAssetBurn` in the spec  (ZIP 230).
+        let burn = (&mut reader).zcash_deserialize_into()?;
+
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
         let sigs: Vec<Signature<SpendAuth>> =
             zcash_deserialize_external_count(actions.len(), &mut reader)?;
 
         // Denoted as `valueBalanceOrchard` in the spec.
         let value_balance: Amount = (&mut reader).zcash_deserialize_into()?;
-
-        // Denoted as `vAssetBurn` in the spec  (ZIP 230).
-        let burn = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `bindingSigOrchard` in the spec.
         let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
