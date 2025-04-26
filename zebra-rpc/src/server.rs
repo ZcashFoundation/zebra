@@ -83,7 +83,7 @@ impl RpcServer {
     ///
     /// # Panics
     ///
-    /// - If [`Config::listen_addr`] is `None`.
+    /// - If [`Config::listen_addr`](config::rpc::Config::listen_addr) is `None`.
     //
     // TODO:
     // - put some of the configs or services in their own struct?

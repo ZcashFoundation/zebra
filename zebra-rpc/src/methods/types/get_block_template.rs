@@ -53,9 +53,10 @@ use zebra_consensus::{
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
-/// An alias to indicate that a usize value represents the depth of in-block dependencies of a transaction.
+/// An alias to indicate that a usize value represents the depth of in-block dependencies of a
+/// transaction.
 ///
-/// See the `dependencies_depth()` function in [`zip317`](super::super::zip317) for more details.
+/// See the `dependencies_depth()` function in [`zip317`] for more details.
 pub type InBlockTxDependenciesDepth = usize;
 
 /// A serialized `getblocktemplate` RPC response in template mode.
