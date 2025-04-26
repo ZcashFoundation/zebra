@@ -59,7 +59,7 @@ async fn rpc_server_spawn() {
         None,
     );
 
-    let _ = RpcServer::start(rpc_impl, conf)
+    RpcServer::start(rpc_impl, conf)
         .await
         .expect("RPC server should start");
 
@@ -141,12 +141,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
 }
 
 /// Test if the RPC server will panic correctly when there is a port conflict.
-///
-/// This test is sometimes unreliable on Windows, and hangs on macOS.
-/// We believe this is a CI infrastructure issue, not a platform-specific issue.
 #[tokio::test]
-#[should_panic(expected = "Unable to start RPC server")]
-#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 async fn rpc_server_spawn_port_conflict() {
     use std::time::Duration;
     let _init_guard = zebra_test::init();
@@ -166,8 +161,6 @@ async fn rpc_server_spawn_port_conflict() {
     let mut block_verifier_router: MockService<_, _, _, BoxError> =
         MockService::build().for_unit_tests();
 
-    info!("spawning RPC server 1...");
-
     let (_tx, rx) = watch::channel(None);
     let (rpc_impl, _) = RpcImpl::new(
         Mainnet,
@@ -185,35 +178,17 @@ async fn rpc_server_spawn_port_conflict() {
         None,
     );
 
-    let _ = RpcServer::start(rpc_impl, conf.clone())
+    RpcServer::start(rpc_impl.clone(), conf.clone())
         .await
-        .expect("server should start");
+        .expect("RPC server should start");
 
     tokio::time::sleep(Duration::from_secs(3)).await;
 
-    info!("spawning conflicted RPC server 2...");
-
-    let (rpc_impl, _) = RpcImpl::new(
-        Mainnet,
-        Default::default(),
-        false,
-        "RPC server test",
-        "RPC server test",
-        Buffer::new(mempool.clone(), 1),
-        Buffer::new(state.clone(), 1),
-        Buffer::new(block_verifier_router.clone(), 1),
-        MockSyncStatus::default(),
-        NoChainTip,
-        MockAddressBookPeers::default(),
-        rx,
-        None,
-    );
-
-    let _ = RpcServer::start(rpc_impl, conf)
+    RpcServer::start(rpc_impl, conf)
         .await
-        .expect("server should start");
-
-    info!("spawned RPC servers, checking services...");
+        .expect("RPC server should make an attempt to start")
+        .await
+        .expect_err("RPC server should not start");
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
