@@ -1,10 +1,11 @@
 ---
-source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: get_mining_info
 ---
 {
-  "blocks": 1687104,
+  "blocks": 10,
   "currentblocksize": 1617,
+  "currentblocktx": 0,
   "networksolps": 2,
   "networkhashps": 2,
   "chain": "main",
