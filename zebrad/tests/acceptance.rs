@@ -2274,7 +2274,7 @@ fn zebra_rpc_conflict() -> Result<()> {
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
     let dir2 = testdir()?.with_config(&mut config)?;
 
-    check_config_conflict(dir1, regex1.as_str(), dir2, "Unable to start RPC server")?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, "Address already in use")?;
 
     Ok(())
 }

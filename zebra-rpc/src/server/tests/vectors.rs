@@ -186,8 +186,6 @@ async fn rpc_server_spawn_port_conflict() {
 
     RpcServer::start(rpc_impl, conf)
         .await
-        .expect("RPC server should make an attempt to start")
-        .await
         .expect_err("RPC server should not start");
 
     mempool.expect_no_requests().await;

@@ -86,7 +86,6 @@ impl RpcServer {
     /// - If [`Config::listen_addr`](config::rpc::Config::listen_addr) is `None`.
     //
     // TODO:
-    // - put some of the configs or services in their own struct?
     // - replace VersionString with semver::Version, and update the tests to provide valid versions
     #[allow(clippy::too_many_arguments)]
     pub async fn start<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
@@ -144,17 +143,17 @@ impl RpcServer {
             .rpc_logger(1024)
             .layer_fn(FixRpcResponseMiddleware::new);
 
+        let server = Server::builder()
+            .http_only()
+            .set_http_middleware(http_middleware)
+            .set_rpc_middleware(rpc_middleware)
+            .build(listen_addr)
+            .await?;
+
+        info!("{OPENED_RPC_ENDPOINT_MSG}{}", server.local_addr()?);
+
         Ok(tokio::spawn(async move {
-            Server::builder()
-                .http_only()
-                .set_http_middleware(http_middleware)
-                .set_rpc_middleware(rpc_middleware)
-                .build(listen_addr)
-                .await
-                .expect("Unable to start RPC server")
-                .start(rpc.into_rpc())
-                .stopped()
-                .await;
+            server.start(rpc.into_rpc()).stopped().await;
             Ok(())
         }))
     }
