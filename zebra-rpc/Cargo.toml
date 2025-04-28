@@ -56,6 +56,7 @@ hyper = { workspace = true }
 http-body-util = { workspace = true }
 semver = { workspace = true }
 serde_json = { workspace = true }
+serde_with = { workspace = true, features = ["hex"] }
 indexmap = { workspace = true, features = ["serde"] }
 
 # RPC endpoint basic auth
