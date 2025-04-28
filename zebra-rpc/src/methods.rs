@@ -1256,7 +1256,6 @@ where
                             None,
                             None,
                             &self.network,
-                            // TODO: No time for mempool txs, check if this is correct.
                             None,
                         )))
                     } else {
@@ -1282,6 +1281,8 @@ where
                     Some(tx.height),
                     Some(tx.confirmations),
                     &self.network,
+                    // TODO: Performance gain:
+                    // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
                     Some(tx.block_time),
                 )))
             } else {
