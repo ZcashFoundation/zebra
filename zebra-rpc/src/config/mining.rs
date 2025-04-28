@@ -31,7 +31,6 @@ pub struct Config {
     /// TODO: remove this option as part of zcashd deprecation
     pub debug_like_zcashd: bool,
 
-    #[cfg(feature = "internal-miner")]
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
     ///
     /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
@@ -50,7 +49,6 @@ impl Default for Config {
             // TODO: do we want to default to v5 transactions and Zebra coinbase data?
             extra_coinbase_data: None,
             debug_like_zcashd: true,
-            #[cfg(feature = "internal-miner")]
             internal_miner: false,
         }
     }
