@@ -180,6 +180,8 @@ impl BlockWriteSender {
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
         Option<Arc<std::thread::JoinHandle<()>>>,
     ) {
+        // Security: The number of blocks in these channels is limited by
+        //           the syncer and inbound lookahead limits.
         let (non_finalized_block_write_sender, non_finalized_block_write_receiver) =
             tokio::sync::mpsc::unbounded_channel();
         let (finalized_block_write_sender, finalized_block_write_receiver) =
