@@ -111,6 +111,7 @@ impl RpcServer {
         user_agent: UserAgentString,
         mempool: Mempool,
         state: State,
+        read_state: ReadState,
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
