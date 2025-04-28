@@ -14,13 +14,21 @@ pub struct EncryptedNote<const N: usize>(#[serde(with = "BigArray")] pub(crate) 
 
 impl<const N: usize> From<[u8; N]> for EncryptedNote<N> {
     fn from(bytes: [u8; N]) -> Self {
-        EncryptedNote(bytes)
+        Self(bytes)
     }
 }
 
 impl<const N: usize> From<EncryptedNote<N>> for [u8; N] {
     fn from(enc_ciphertext: EncryptedNote<N>) -> Self {
         enc_ciphertext.0
+    }
+}
+
+impl<const N: usize> TryFrom<&[u8]> for EncryptedNote<N> {
+    type Error = std::array::TryFromSliceError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self(bytes.try_into()?))
     }
 }
 

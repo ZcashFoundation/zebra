@@ -49,6 +49,7 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
         + Serialize
         + ZcashDeserialize
         + ZcashSerialize
+        + for<'a> TryFrom<&'a [u8], Error = std::array::TryFromSliceError>
         + test_arbitrary::TestArbitrary;
 
     /// A type representing a burn field for this protocol version.
