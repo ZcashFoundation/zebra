@@ -164,3 +164,9 @@ __pycache__/
 
 # RPC tests cache 
 zebra-rpc/qa/cache/
+
+# Terraform git
+# Local .terraform directories
+**/.terraform/*
+**/.terragrunt/*
+**/.terragrunt-cache/*

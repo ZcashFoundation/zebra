@@ -1,0 +1,57 @@
+# This GitHub Actions workflow automates the deployment of the Zebra Server to Amazon ECS.
+# It triggers on any new tag, builds a Docker image, pushes it to Amazon Elastic Container Registry (ECR), and updates the specified ECS service to use the latest image.
+name: Deploy to Amazon ECS
+
+on:
+  push:
+    tags:
+      - '*' # Triggers the workflow on any new tag
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE || 'dev-zebra' }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'dev-zebra-cluster' }}
+
+jobs:
+  push-deploy:
+    name: Push and Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get short commit hash
+        id: vars
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG_LATEST: latest
+          IMAGE_TAG_COMMIT: ${{ env.SHORT_SHA }}
+        run: |
+          # Build a docker container
+          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT -f testnet-single-node-deploy/dockerfile .
+          
+          # Push both tags to ECR
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT
+
+          # Output the image URIs
+          echo "image_latest=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" >> $GITHUB_OUTPUT
+          echo "image_commit=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT" >> $GITHUB_OUTPUT
