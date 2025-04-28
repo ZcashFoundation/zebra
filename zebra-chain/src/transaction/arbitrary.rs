@@ -250,7 +250,7 @@ impl Transaction {
                     ),
                     orchard_zsa_issue_data,
                 )| {
-                    orchard_shielded_data.is_some().then(|| Transaction::V6 {
+                    orchard_shielded_data.is_some().then_some(Transaction::V6 {
                         network_upgrade,
                         lock_time,
                         expiry_height,
