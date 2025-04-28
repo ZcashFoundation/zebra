@@ -52,9 +52,7 @@ use zebra_chain::{
 use zebra_consensus::Request;
 use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
 use zebra_node_services::{mempool, BoxError};
-use zebra_state::{
-    GetBlockTemplateChainInfo, LatestChainTip, ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT,
-};
+use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
 use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     vectors::BLOCK_MAINNET_1_BYTES,
@@ -138,7 +136,7 @@ async fn test_z_get_treestate() {
         Default::default(),
         false,
         "0.0.1",
-        "RPC server test",
+        "RPC test",
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         state,
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
@@ -226,7 +224,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         network,
         mempool.clone(),
         read_state.clone(),
-        tip.clone(),
         block_verifier_router.clone(),
         settings.clone(),
     )
@@ -239,7 +236,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         Default::default(),
         false,
         "0.0.1",
-        "RPC server test",
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
         block_verifier_router,
@@ -573,7 +570,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         Default::default(),
         false,
         "0.0.1",
-        "RPC server test",
+        "RPC test",
         MockService::build().for_unit_tests(),
         state.clone(),
         MockService::build().for_unit_tests(),
@@ -647,7 +644,7 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
-                assert_eq!(value.as_str().unwrap(), format!("/Zebra:RPC test/"));
+                assert_eq!(value.as_str().unwrap(), format!("RPC test"));
                 // replace with:
                 "[SubVersion]"
             }),
@@ -920,7 +917,6 @@ pub async fn test_mining_rpcs<ReadState>(
         zebra_node_services::BoxError,
     >,
     read_state: ReadState,
-    tip: LatestChainTip,
     block_verifier_router: Buffer<BoxService<Request, Hash, RouterError>, Request>,
     settings: Settings,
 ) where
@@ -968,10 +964,10 @@ pub async fn test_mining_rpcs<ReadState>(
     let fake_difficulty = pow_limit * 2 / 3;
     let fake_difficulty = CompactDifficulty::from(fake_difficulty);
 
-    let (mock_chain_tip, mock_chain_tip_sender) = MockChainTip::new();
-    mock_chain_tip_sender.send_best_tip_height(fake_tip_height);
-    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
-    mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+    let (mock_tip, mock_tip_sender) = MockChainTip::new();
+    mock_tip_sender.send_best_tip_height(fake_tip_height);
+    mock_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
     let mock_address_book = MockAddressBookPeers::new(vec![MetaAddr::new_initial_peer(
         SocketAddr::new(
@@ -989,12 +985,12 @@ pub async fn test_mining_rpcs<ReadState>(
         mining_conf.clone(),
         false,
         "0.0.1",
-        "RPC server test",
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
         block_verifier_router.clone(),
         mock_sync_status.clone(),
-        tip,
+        mock_tip.clone(),
         mock_address_book,
         rx.clone(),
         None,
@@ -1119,19 +1115,19 @@ pub async fn test_mining_rpcs<ReadState>(
     };
 
     // send tip hash and time needed for getblocktemplate rpc
-    mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_tip_sender.send_best_tip_hash(fake_tip_hash);
 
     let (rpc_mock_state, _) = RpcImpl::new(
         network.clone(),
         mining_conf.clone(),
         false,
         "0.0.1",
-        "RPC server test",
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state.clone(),
         block_verifier_router,
         mock_sync_status.clone(),
-        mock_chain_tip.clone(),
+        mock_tip.clone(),
         MockAddressBookPeers::default(),
         rx.clone(),
         None,
@@ -1243,12 +1239,12 @@ pub async fn test_mining_rpcs<ReadState>(
         mining_conf,
         false,
         "0.0.1",
-        "RPC server test",
+        "RPC test",
         Buffer::new(mempool, 1),
         read_state.clone(),
         mock_block_verifier_router.clone(),
         mock_sync_status,
-        mock_chain_tip,
+        mock_tip,
         MockAddressBookPeers::default(),
         rx,
         None,

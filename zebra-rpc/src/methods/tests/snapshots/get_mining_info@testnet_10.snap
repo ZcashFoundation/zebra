@@ -3,9 +3,8 @@ source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: get_mining_info
 ---
 {
-  "blocks": 10,
+  "blocks": 1842420,
   "currentblocksize": 1618,
-  "currentblocktx": 0,
   "networksolps": 0,
   "networkhashps": 0,
   "chain": "test",

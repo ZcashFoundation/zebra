@@ -78,7 +78,7 @@ async fn rpc_getinfo() {
 
     // make sure there is a `subversion` field,
     // and that is equal to the Zebra user agent.
-    assert_eq!(get_info.subversion, format!("/Zebra:RPC test/"));
+    assert_eq!(get_info.subversion, format!("RPC test"));
 
     mempool.expect_no_requests().await;
     read_state.expect_no_requests().await;

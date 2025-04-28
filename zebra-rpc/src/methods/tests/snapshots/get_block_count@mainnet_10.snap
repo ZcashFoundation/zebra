@@ -2,4 +2,4 @@
 source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: block_count
 ---
-10
+1687104
