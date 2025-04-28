@@ -19,11 +19,6 @@ default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-    "zebra-chain/getblocktemplate-rpcs",
-]
-
 # Tool and test features
 
 rpc-client = [

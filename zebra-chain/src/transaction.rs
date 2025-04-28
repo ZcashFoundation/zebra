@@ -14,7 +14,6 @@ mod sighash;
 mod txid;
 mod unmined;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 pub mod builder;
 
 #[cfg(any(test, feature = "proptest-impl"))]

@@ -24,13 +24,6 @@ progress-bar = [
     "zebra-state/progress-bar",
 ]
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-     "zebra-state/getblocktemplate-rpcs",
-     "zebra-node-services/getblocktemplate-rpcs",
-     "zebra-chain/getblocktemplate-rpcs",
-]
-
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6"]
 
 # Test-only features

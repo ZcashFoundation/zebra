@@ -2,7 +2,7 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
+//! cargo insta test --review --delete-unreferenced-snapshots
 //! ```
 
 use std::{
@@ -107,8 +107,6 @@ pub async fn test_responses<State, ReadState>(
         )),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
-        // TODO: Use default field values when optional features are enabled in tests #8183
-        #[cfg(feature = "internal-miner")]
         internal_miner: true,
     };
 
@@ -258,7 +256,7 @@ pub async fn test_responses<State, ReadState>(
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    history_tree: fake_history_tree(network),
+                    chain_history_root: fake_history_tree(network).hash(),
                 }));
         }
     };

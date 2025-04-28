@@ -250,7 +250,7 @@ fn difficulty_time_and_history_tree(
     let mut result = GetBlockTemplateChainInfo {
         tip_hash,
         tip_height,
-        history_tree,
+        chain_history_root: history_tree.hash(),
         expected_difficulty,
         cur_time,
         min_time,

@@ -1,6 +1,5 @@
 //! Randomised property tests for RPC methods.
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use std::collections::HashMap;
 use std::{collections::HashSet, fmt::Debug, sync::Arc};
 
@@ -12,6 +11,7 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::buffer::Buffer;
 
+use zebra_chain::history_tree::HistoryTree;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{Block, Height},
@@ -30,7 +30,6 @@ use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 
 use zebra_test::mock_service::MockService;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use crate::methods::types::MempoolObject;
 use crate::methods::{
     self,
@@ -246,28 +245,7 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            let (expected_response, mempool_query) = {
-                let transaction_ids: HashSet<_> = transactions
-                    .iter()
-                    .map(|tx| tx.transaction.id)
-                    .collect();
-
-                let mut expected_response: Vec<String> = transaction_ids
-                    .iter()
-                    .map(|id| id.mined_id().encode_hex())
-                    .collect();
-                expected_response.sort();
-
-                let mempool_query = mempool
-                    .expect_request(mempool::Request::TransactionIds)
-                    .map_ok(|r|r.respond(mempool::Response::TransactionIds(transaction_ids)));
-
-                (GetRawMempool::TxIds(expected_response), mempool_query)
-            };
-
             // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
-            #[cfg(feature = "getblocktemplate-rpcs")]
             let (expected_response, mempool_query) = {
                 let mut expected_response = transactions.clone();
 
@@ -417,7 +395,7 @@ proptest! {
                         .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                             tip_hash: genesis_hash,
                             tip_height: Height::MIN,
-                            history_tree: Default::default(),
+                            chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
@@ -491,7 +469,7 @@ proptest! {
                         .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                             tip_hash: block_hash,
                             tip_height: block_height,
-                            history_tree: Default::default(),
+                            chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),

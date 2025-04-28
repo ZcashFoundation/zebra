@@ -860,7 +860,6 @@ pub enum Request {
     /// Returns [`Response::KnownBlock(None)`](Response::KnownBlock) otherwise.
     KnownBlock(block::Hash),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
@@ -891,7 +890,6 @@ impl Request {
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             Request::BestChainBlockHash(_) => "best_chain_block_hash",
             Request::KnownBlock(_) => "known_block",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
@@ -1160,7 +1158,6 @@ pub enum ReadRequest {
     /// best chain state information.
     ChainInfo,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Get the average solution rate in the best chain.
     ///
     /// Returns [`ReadResponse::SolutionRate`]
@@ -1172,7 +1169,6 @@ pub enum ReadRequest {
         height: Option<block::Height>,
     },
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// It is the caller's responsibility to perform semantic validation.
@@ -1182,7 +1178,6 @@ pub enum ReadRequest {
     /// the block fails contextual validation.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
@@ -1220,11 +1215,8 @@ impl ReadRequest {
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { .. } => "solution_rate",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => "tip_block_size",
         }
     }
@@ -1282,7 +1274,6 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(semantically_verified) => Ok(
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),
             ),

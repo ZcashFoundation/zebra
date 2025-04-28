@@ -70,10 +70,13 @@ pub use service::finalized_state::{
 // Allow use in the scanner and external tests
 #[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
 pub use service::finalized_state::{
-    DiskWriteBatch, FromDisk, IntoDisk, ReadDisk, TypedColumnFamily, WriteDisk, WriteTypedBatch,
+    DiskWriteBatch, FromDisk, ReadDisk, TypedColumnFamily, WriteDisk, WriteTypedBatch,
 };
 
-pub use service::{finalized_state::ZebraDb, ReadStateService};
+pub use service::{
+    finalized_state::{IntoDisk, ZebraDb},
+    ReadStateService,
+};
 
 // Allow use in external tests
 #[cfg(any(test, feature = "proptest-impl"))]
