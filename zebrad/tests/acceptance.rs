@@ -3459,6 +3459,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         chain_history_root,
         true,
         vec![],
+        #[cfg(feature = "tx_v6")]
         None,
     );
 
@@ -3503,6 +3504,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         chain_history_root,
         true,
         vec![],
+        #[cfg(feature = "tx_v6")]
         None,
     );
 
@@ -3551,7 +3553,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 /// This test can be run locally with:
 /// `cargo test --package zebrad --test acceptance --features getblocktemplate-rpcs -- nu7_nsm_transactions --exact --show-output`
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(feature = "getblocktemplate-rpcs")]
+#[cfg(all(feature = "getblocktemplate-rpcs", feature = "tx_v6"))]
 async fn nu7_nsm_transactions() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,

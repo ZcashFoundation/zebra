@@ -14,4 +14,5 @@ pub const TX_V5_VERSION_GROUP_ID: u32 = 0x26A7_270A;
 
 // TODO: Change this
 /// The version group ID for version 6 transactions.
+#[cfg(feature = "tx_v6")]
 pub const TX_V6_VERSION_GROUP_ID: u32 = 0xFFFFFFFF;

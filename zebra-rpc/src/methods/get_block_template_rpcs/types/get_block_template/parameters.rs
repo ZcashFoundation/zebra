@@ -1,5 +1,6 @@
 //! Parameter types for the `getblocktemplate` RPC.
 
+#[cfg(feature = "tx_v6")]
 use zebra_chain::amount::{Amount, NonNegative};
 
 use crate::methods::{get_block_template_rpcs::types::long_poll::LongPollId, hex_data::HexData};
@@ -93,6 +94,7 @@ pub struct JsonParameters {
     pub _work_id: Option<String>,
 
     /// The amount of money to be burned in a transaction [ZIP-233]
+    #[cfg(feature = "tx_v6")]
     pub zip233_amount: Option<Amount<NonNegative>>,
 }
 

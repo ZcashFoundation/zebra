@@ -159,8 +159,9 @@ impl TryFrom<&Transaction> for zp_tx::Transaction {
         let network_upgrade = match trans {
             Transaction::V5 {
                 network_upgrade, ..
-            }
-            | Transaction::V6 {
+            } => network_upgrade,
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 {
                 network_upgrade, ..
             } => network_upgrade,
             Transaction::V1 { .. }

@@ -4,7 +4,7 @@
 use std::fmt;
 
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount,
     block::{ChainHistoryBlockTxAuthCommitmentHash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     parameters::Network,
     serialization::DateTime32,
@@ -14,6 +14,9 @@ use zebra_chain::{
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_state::GetBlockTemplateChainInfo;
+
+#[cfg(feature = "tx_v6")]
+use zebra_chain::amount::{Amount, NonNegative};
 
 use crate::methods::{
     get_block_template_rpcs::{
@@ -237,7 +240,7 @@ impl GetBlockTemplate {
         submit_old: Option<bool>,
         like_zcashd: bool,
         extra_coinbase_data: Vec<u8>,
-        zip233_amount: Option<Amount<NonNegative>>,
+        #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
     ) -> Self {
         // Calculate the next block height.
         let next_block_height =
@@ -295,6 +298,7 @@ impl GetBlockTemplate {
             chain_tip_and_local_time.chain_history_root,
             like_zcashd,
             extra_coinbase_data,
+            #[cfg(feature = "tx_v6")]
             zip233_amount,
         );
 

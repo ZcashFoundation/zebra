@@ -191,6 +191,7 @@ impl fmt::Display for Transaction {
         fmter.field("sapling_spends", &self.sapling_spends_per_anchor().count());
         fmter.field("sapling_outputs", &self.sapling_outputs().count());
         fmter.field("orchard_actions", &self.orchard_actions().count());
+        #[cfg(feature = "tx_v6")]
         fmter.field("zip233_amount", &self.zip233_amount());
 
         fmter.field("unmined_id", &self.unmined_id());
@@ -317,6 +318,7 @@ impl Transaction {
     }
 
     /// Does this transaction have zip233_amount output?
+    #[cfg(feature = "tx_v6")]
     pub fn has_zip233_amount(&self) -> bool {
         self.zip233_amount() > Amount::<NonNegative>::zero()
     }

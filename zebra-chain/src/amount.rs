@@ -557,7 +557,7 @@ impl Constraint for NonNegative {
 ///     -MAX_MONEY..=0,
 /// );
 /// ```
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct NegativeOrZero;
 
 impl Constraint for NegativeOrZero {

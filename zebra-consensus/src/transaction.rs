@@ -579,7 +579,10 @@ where
                 // TODO: deduplicate this code with remaining_transaction_value()?
                 miner_fee = match value_balance {
                     Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(tx_rtv) => Some(tx_rtv) - zip233_amount,
+                        Ok(tx_rtv) => match tx_rtv - zip233_amount {
+                            Ok(fee) => Some(fee),
+                            Err(_) => return Err(TransactionError::IncorrectFee),
+                        }
                         Err(_) => return Err(TransactionError::IncorrectFee),
                     },
                     Err(_) => return Err(TransactionError::IncorrectFee),

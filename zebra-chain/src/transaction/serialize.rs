@@ -11,10 +11,7 @@ use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 use crate::{
     amount,
     block::MAX_BLOCK_BYTES,
-    parameters::{
-        OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID,
-        TX_V6_VERSION_GROUP_ID,
-    },
+    parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
@@ -22,6 +19,9 @@ use crate::{
         TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
 };
+
+#[cfg(feature = "tx_v6")]
+use crate::parameters::TX_V6_VERSION_GROUP_ID;
 
 use super::*;
 use crate::sapling;
@@ -691,7 +691,7 @@ impl ZcashSerialize for Transaction {
                 // https://zips.z.cash/zip-0230#specification
 
                 // Denoted as `nVersionGroupId` in the spec.
-                writer.write_u32::<LittleEndian>(TX_V5_VERSION_GROUP_ID)?;
+                writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
 
                 // Denoted as `nConsensusBranchId` in the spec.
                 writer.write_u32::<LittleEndian>(u32::from(
@@ -977,6 +977,7 @@ impl ZcashDeserialize for Transaction {
                     orchard_shielded_data,
                 })
             }
+            #[cfg(feature = "tx_v6")]
             (6, true) => {
                 // Denoted as `nVersionGroupId` in the spec.
                 let id = limited_reader.read_u32::<LittleEndian>()?;

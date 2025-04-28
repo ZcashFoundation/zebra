@@ -258,6 +258,7 @@ where
         capabilities: vec![LongPoll, CoinbaseTxn],
         long_poll_id: None,
         _work_id: None,
+        #[cfg(feature = "tx_v6")]
         zip233_amount: None,
     };
 

@@ -75,6 +75,7 @@ pub mod types;
 pub mod zip317;
 
 /// getblocktemplate RPC method signatures.
+#[cfg(not(feature = "tx_v6"))]
 #[rpc(server)]
 pub trait GetBlockTemplateRpc {
     /// Returns the height of the most recent block in the best valid block chain (equivalently,
@@ -287,9 +288,80 @@ pub trait GetBlockTemplateRpc {
     ///
     /// Only works if the network of the running zebrad process is `Regtest`.
     ///
-    /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
+    /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)§
     /// method: post
     /// tags: generating
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        //TODO: uncomment this line and remove the below trait for NU7 release
+        // zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>>;
+}
+
+// The below trait is a copy of the above one with only one change:
+// the generate() method contains extra zip233_amount argument.
+// Seems like that's the only way to use conditional compiling with the rpc macro.
+#[cfg(feature = "tx_v6")]
+#[rpc(server)]
+pub trait GetBlockTemplateRpc {
+    #[method(name = "getblockcount")]
+    fn get_block_count(&self) -> Result<u32>;
+
+    #[method(name = "getblockhash")]
+    async fn get_block_hash(&self, index: i32) -> Result<GetBlockHash>;
+
+    #[method(name = "getblocktemplate")]
+    async fn get_block_template(
+        &self,
+        parameters: Option<get_block_template::JsonParameters>,
+    ) -> Result<get_block_template::Response>;
+
+    #[method(name = "submitblock")]
+    async fn submit_block(
+        &self,
+        hex_data: HexData,
+        _parameters: Option<submit_block::JsonParameters>,
+    ) -> Result<submit_block::Response>;
+
+    #[method(name = "getmininginfo")]
+    async fn get_mining_info(&self) -> Result<get_mining_info::Response>;
+
+    #[method(name = "getnetworksolps")]
+    async fn get_network_sol_ps(&self, num_blocks: Option<i32>, height: Option<i32>)
+        -> Result<u64>;
+
+    #[method(name = "getnetworkhashps")]
+    async fn get_network_hash_ps(
+        &self,
+        num_blocks: Option<i32>,
+        height: Option<i32>,
+    ) -> Result<u64> {
+        self.get_network_sol_ps(num_blocks, height).await
+    }
+
+    #[method(name = "getpeerinfo")]
+    async fn get_peer_info(&self) -> Result<Vec<PeerInfo>>;
+
+    #[method(name = "validateaddress")]
+    async fn validate_address(&self, address: String) -> Result<validate_address::Response>;
+
+    #[method(name = "z_validateaddress")]
+    async fn z_validate_address(
+        &self,
+        address: String,
+    ) -> Result<types::z_validate_address::Response>;
+
+    #[method(name = "getblocksubsidy")]
+    async fn get_block_subsidy(&self, height: Option<u32>) -> Result<BlockSubsidy>;
+
+    #[method(name = "getdifficulty")]
+    async fn get_difficulty(&self) -> Result<f64>;
+
+    #[method(name = "z_listunifiedreceivers")]
+    async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response>;
+
+    #[method(name = "generate")]
     async fn generate(
         &self,
         num_blocks: u32,
@@ -888,6 +960,7 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        #[cfg(feature = "tx_v6")]
         let zip233_amount = if let Some(params) = parameters {
             params.zip233_amount
         } else {
@@ -903,6 +976,7 @@ where
             mempool_tx_deps,
             debug_like_zcashd,
             extra_coinbase_data.clone(),
+            #[cfg(feature = "tx_v6")]
             zip233_amount,
         );
 
@@ -925,6 +999,7 @@ where
             submit_old,
             debug_like_zcashd,
             extra_coinbase_data,
+            #[cfg(feature = "tx_v6")]
             zip233_amount,
         );
 
@@ -1316,7 +1391,7 @@ where
     async fn generate(
         &self,
         num_blocks: u32,
-        zip233_amount: Option<Amount<NonNegative>>,
+        #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
     ) -> Result<Vec<GetBlockHash>> {
         let rpc: GetBlockTemplateRpcImpl<
             Mempool,
@@ -1338,6 +1413,7 @@ where
 
         let mut block_hashes = Vec::new();
         let params = Some(get_block_template::JsonParameters {
+            #[cfg(feature = "tx_v6")]
             zip233_amount,
             ..Default::default()
         });

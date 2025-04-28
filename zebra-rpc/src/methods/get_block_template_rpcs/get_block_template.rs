@@ -279,7 +279,7 @@ pub fn generate_coinbase_and_roots(
     chain_history_root: Option<ChainHistoryMmrRootHash>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
-    zip233_amount: Option<Amount<NonNegative>>,
+    #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
 ) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
     // Generate the coinbase transaction
     let miner_fee = calculate_miner_fee(mempool_txs);
@@ -290,6 +290,7 @@ pub fn generate_coinbase_and_roots(
         miner_fee,
         like_zcashd,
         extra_coinbase_data,
+        #[cfg(feature = "tx_v6")]
         zip233_amount,
     );
 
@@ -323,7 +324,7 @@ pub fn generate_coinbase_transaction(
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
-    zip233_amount: Option<Amount<NonNegative>>,
+    #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
 ) -> UnminedTx {
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee, like_zcashd);
 
@@ -331,19 +332,24 @@ pub fn generate_coinbase_transaction(
         Transaction::new_v4_coinbase(network, height, outputs, like_zcashd, extra_coinbase_data)
             .into()
     } else {
-        let network_upgrade = NetworkUpgrade::current(network, height);
-        if network_upgrade < NetworkUpgrade::Nu7 {
-            Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
-        } else {
-            Transaction::new_v6_coinbase(
-                network,
-                height,
-                outputs,
-                extra_coinbase_data,
-                zip233_amount,
-            )
-            .into()
+        #[cfg(feature = "tx_v6")]
+        {
+            let network_upgrade = NetworkUpgrade::current(network, height);
+            if network_upgrade < NetworkUpgrade::Nu7 {
+                Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
+            } else {
+                Transaction::new_v6_coinbase(
+                    network,
+                    height,
+                    outputs,
+                    extra_coinbase_data,
+                    zip233_amount,
+                )
+                .into()
+            }
         }
+        #[cfg(not(feature = "tx_v6"))]
+        Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
     }
 }
 
