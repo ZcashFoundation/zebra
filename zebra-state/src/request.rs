@@ -2,13 +2,13 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    ops::{Deref, DerefMut, RangeInclusive},
+    ops::{Add, Deref, DerefMut, RangeInclusive},
     sync::Arc,
 };
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
-    block::{self, Block},
+    block::{self, Block, HeightDiff},
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -132,6 +132,42 @@ impl HashOrHeight {
         } else {
             None
         }
+    }
+
+    /// Constructs a new [`HashOrHeight`] from a string containing a hash or a positive or negative
+    /// height.
+    ///
+    /// When the provided `hash_or_height` contains a negative height, the `tip_height` parameter
+    /// needs to be `Some` since height `-1` points to the tip.
+    pub fn new(hash_or_height: &str, tip_height: Option<block::Height>) -> Result<Self, String> {
+        hash_or_height
+            .parse()
+            .map(Self::Hash)
+            .or_else(|_| hash_or_height.parse().map(Self::Height))
+            .or_else(|_| {
+                hash_or_height
+                    .parse()
+                    .map_err(|_| "could not parse negative height")
+                    .and_then(|d: HeightDiff| {
+                        if d.is_negative() {
+                            {
+                                Ok(HashOrHeight::Height(
+                                    tip_height
+                                        .ok_or("missing tip height")?
+                                        .add(d)
+                                        .ok_or("underflow when adding negative height to tip")?
+                                        .next()
+                                        .map_err(|_| "height -1 needs to point to tip")?,
+                                ))
+                            }
+                        } else {
+                            Err("height was not negative")
+                        }
+                    })
+            })
+            .map_err(|_| {
+                "parse error: could not convert the input string to a hash or height".to_string()
+            })
     }
 }
 
@@ -831,7 +867,6 @@ pub enum Request {
     /// Reconsiders a previously invalidated block in the non-finalized state with the provided hash if one is present.
     ReconsiderBlock(block::Hash),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
@@ -864,7 +899,6 @@ impl Request {
             Request::KnownBlock(_) => "known_block",
             Request::InvalidateBlock(_) => "invalidate_block",
             Request::ReconsiderBlock(_) => "reconsider_block",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
@@ -1133,7 +1167,6 @@ pub enum ReadRequest {
     /// best chain state information.
     ChainInfo,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Get the average solution rate in the best chain.
     ///
     /// Returns [`ReadResponse::SolutionRate`]
@@ -1145,7 +1178,6 @@ pub enum ReadRequest {
         height: Option<block::Height>,
     },
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// It is the caller's responsibility to perform semantic validation.
@@ -1155,7 +1187,6 @@ pub enum ReadRequest {
     /// the block fails contextual validation.
     CheckBlockProposalValidity(SemanticallyVerifiedBlock),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
@@ -1193,11 +1224,8 @@ impl ReadRequest {
             #[cfg(feature = "indexer")]
             ReadRequest::SpendingTransactionId(_) => "spending_transaction_id",
             ReadRequest::ChainInfo => "chain_info",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { .. } => "solution_rate",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => "tip_block_size",
         }
     }
@@ -1257,7 +1285,6 @@ impl TryFrom<Request> for ReadRequest {
 
             Request::KnownBlock(_) => Err("ReadService does not track queued blocks"),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(semantically_verified) => Ok(
                 ReadRequest::CheckBlockProposalValidity(semantically_verified),
             ),

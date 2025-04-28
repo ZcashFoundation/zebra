@@ -40,7 +40,6 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
 };
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::{block::Height, serialization::ZcashSerialize};
 
 use crate::{
@@ -87,11 +86,11 @@ use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, 
 ///
 /// This service modifies and provides access to:
 /// - the non-finalized state: the ~100 most recent blocks.
-///                            Zebra allows chain forks in the non-finalized state,
-///                            stores it in memory, and re-downloads it when restarted.
+///   Zebra allows chain forks in the non-finalized state,
+///   stores it in memory, and re-downloads it when restarted.
 /// - the finalized state: older blocks that have many confirmations.
-///                        Zebra stores the single best chain in the finalized state,
-///                        and re-loads it from disk when restarted.
+///   Zebra stores the single best chain in the finalized state,
+///   and re-loads it from disk when restarted.
 ///
 /// Read requests to this service are buffered, then processed concurrently.
 /// Block write requests are buffered, then queued, then processed in order by a separate task.
@@ -751,10 +750,7 @@ impl StateService {
 
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
-        read::best_tip(
-            &self.read_service.latest_non_finalized_state(),
-            &self.read_service.db,
-        )
+        self.read_service.best_tip()
     }
 
     /// Assert some assumptions about the semantically verified `block` before it is queued.
@@ -790,6 +786,11 @@ impl ReadStateService {
         tracing::debug!("created new read-only state service");
 
         read_service
+    }
+
+    /// Return the tip of the current best chain.
+    pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
+        read::best_tip(&self.latest_non_finalized_state(), &self.db)
     }
 
     /// Gets a clone of the latest non-finalized state from the `non_finalized_state_receiver`
@@ -1104,7 +1105,6 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             Request::CheckBlockProposalValidity(_) => {
                 // Redirect the request to the concurrent ReadStateService
                 let read_service = self.read_service.clone();
@@ -1885,7 +1885,6 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by getmininginfo, getnetworksolps, and getnetworkhashps RPCs.
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::SolutionRate { num_blocks, height } => {
                 let state = self.clone();
 
@@ -1937,7 +1936,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::CheckBlockProposalValidity(semantically_verified) => {
                 let state = self.clone();
 
@@ -1985,7 +1983,6 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadRequest::TipBlockSize => {
                 let state = self.clone();
 

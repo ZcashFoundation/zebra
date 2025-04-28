@@ -79,7 +79,7 @@ jobs:
       app_name: zebrad
       test_id: sync-to-checkpoint
       test_description: Test sync up to mandatory checkpoint
-      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_DISK_REBUILD=1"
+      test_variables: "-e NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }} -e TEST_DISK_REBUILD=1 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: false
       saves_to_disk: true
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
@@ -138,7 +138,7 @@ jobs:
       test_description: Test a full sync up to the tip
       # The value of FULL_SYNC_MAINNET_TIMEOUT_MINUTES is currently ignored.
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: "-e NETWORK=Mainnet -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0"
+      test_variables: "-e NETWORK=Mainnet -e FULL_SYNC_MAINNET_TIMEOUT_MINUTES=0 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false
@@ -241,7 +241,7 @@ jobs:
       test_id: full-sync-testnet
       test_description: Test a full sync up to the tip on testnet
       # The value of FULL_SYNC_TESTNET_TIMEOUT_MINUTES is currently ignored.
-      test_variables: "-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0"
+      test_variables: "-e NETWORK=Testnet -e FULL_SYNC_TESTNET_TIMEOUT_MINUTES=0 -e ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       network: "Testnet"
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
@@ -430,7 +430,7 @@ jobs:
       saves_to_disk: false
     secrets: inherit
 
-  ## getblocktemplate-rpcs using cached Zebra state on mainnet
+  ## getblocktemplate RPC tests using cached Zebra state on mainnet
   #
   # TODO: move these below the rest of the mainnet jobs that just use Zebra cached state
 

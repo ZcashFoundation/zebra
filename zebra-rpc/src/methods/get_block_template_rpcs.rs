@@ -1,4 +1,4 @@
-//! RPC methods related to mining only available with `getblocktemplate-rpcs` rust feature.
+//! Mining-related RPCs.
 
 use std::{fmt::Debug, sync::Arc, time::Duration};
 
@@ -83,10 +83,6 @@ pub trait GetBlockTemplateRpc {
     /// zcashd reference: [`getblockcount`](https://zcash.github.io/rpc/getblockcount.html)
     /// method: post
     /// tags: blockchain
-    ///
-    /// # Notes
-    ///
-    /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[method(name = "getblockcount")]
     fn get_block_count(&self) -> Result<u32>;
 
@@ -105,7 +101,6 @@ pub trait GetBlockTemplateRpc {
     ///
     /// - If `index` is positive then index = block height.
     /// - If `index` is negative then -1 is the last known valid block.
-    /// - This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[method(name = "getblockhash")]
     async fn get_block_hash(&self, index: i32) -> Result<GetBlockHash>;
 
@@ -130,8 +125,6 @@ pub trait GetBlockTemplateRpc {
     ///
     /// Zebra verifies blocks in parallel, and keeps recent chains in parallel,
     /// so moving between chains and forking chains is very cheap.
-    ///
-    /// This rpc method is available only if zebra is built with `--features getblocktemplate-rpcs`.
     #[method(name = "getblocktemplate")]
     async fn get_block_template(
         &self,
@@ -218,10 +211,6 @@ pub trait GetBlockTemplateRpc {
     /// # Parameters
     ///
     /// - `address`: (string, required) The zcash address to validate.
-    ///
-    /// # Notes
-    ///
-    /// - No notes
     #[method(name = "validateaddress")]
     async fn validate_address(&self, address: String) -> Result<validate_address::Response>;
 
@@ -1101,10 +1090,11 @@ where
 
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>> {
         let address_book = self.address_book.clone();
+
         Ok(address_book
             .recently_live_peers(chrono::Utc::now())
             .into_iter()
-            .map(PeerInfo::from)
+            .map(PeerInfo::new)
             .collect())
     }
 
@@ -1217,7 +1207,7 @@ where
                 // Separate the funding streams into deferred and non-deferred streams
                 .partition(|(receiver, _)| matches!(receiver, FundingStreamReceiver::Deferred));
 
-        let is_nu6 = NetworkUpgrade::current(&network, height) == NetworkUpgrade::Nu6;
+        let is_post_nu6 = NetworkUpgrade::current(&network, height) >= NetworkUpgrade::Nu6;
 
         let [lockbox_total, funding_streams_total]: [std::result::Result<
             Amount<NonNegative>,
@@ -1239,7 +1229,7 @@ where
                     .into_iter()
                     .map(|(receiver, value)| {
                         let address = funding_stream_address(height, &network, receiver);
-                        FundingStream::new(is_nu6, receiver, value, address)
+                        FundingStream::new(is_post_nu6, receiver, value, address)
                     })
                     .collect()
             });
@@ -1266,9 +1256,11 @@ where
     async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response> {
         use zcash_address::unified::Container;
 
-        let (network, unified_address): (zcash_address::Network, zcash_address::unified::Address) =
-            zcash_address::unified::Encoding::decode(address.clone().as_str())
-                .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+        let (network, unified_address): (
+            zcash_protocol::consensus::NetworkType,
+            zcash_address::unified::Address,
+        ) = zcash_address::unified::Encoding::decode(address.clone().as_str())
+            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
 
         let mut p2pkh = String::new();
         let mut p2sh = String::new();

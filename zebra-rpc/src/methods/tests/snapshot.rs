@@ -32,7 +32,6 @@ use zebra_test::mock_service::MockService;
 
 use super::super::*;
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 mod get_block_template_rpcs;
 
 /// The first block height in the state that can never be stored in the database,
@@ -181,8 +180,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> =
         MockService::build().for_unit_tests();
+
     // Create a populated state service
-    #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::populated_state(blocks.clone(), network).await;
 
@@ -190,8 +189,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_suffix(format!("{}_{}", network_string(network), blocks.len() - 1));
 
-    // Test getblocktemplate-rpcs snapshots
-    #[cfg(feature = "getblocktemplate-rpcs")]
+    // Test the `getblocktemplate` RPC snapshots.
     get_block_template_rpcs::test_responses(
         network,
         mempool.clone(),
@@ -390,7 +388,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // - as we have the mempool mocked we need to expect a request and wait for a response,
     // which will be an empty mempool in this case.
     // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     let mempool_req = mempool
         .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
         .map(|responder| {
@@ -399,15 +396,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
                 transaction_dependencies: Default::default(),
                 last_seen_tip_hash: blocks[blocks.len() - 1].hash(),
             });
-        });
-
-    #[cfg(not(feature = "getblocktemplate-rpcs"))]
-    let mempool_req = mempool
-        .expect_request_that(|request| matches!(request, mempool::Request::TransactionIds))
-        .map(|responder| {
-            responder.respond(mempool::Response::TransactionIds(
-                std::collections::HashSet::new(),
-            ));
         });
 
     // make the api call
@@ -480,8 +468,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 1,
-            end: 10,
+            start: Some(1),
+            end: Some(10),
         })
         .await
         .expect("We should have a vector of strings");
@@ -490,8 +478,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 2,
-            end: 2,
+            start: Some(2),
+            end: Some(2),
         })
         .await
         .expect("We should have a vector of strings");
@@ -500,20 +488,31 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 3,
-            end: EXCESSIVE_BLOCK_HEIGHT,
+            start: Some(3),
+            end: Some(EXCESSIVE_BLOCK_HEIGHT),
         })
-        .await;
-    snapshot_rpc_getaddresstxids_invalid("excessive_end", get_address_tx_ids, &settings);
+        .await
+        .expect("We should have a vector of strings");
+    snapshot_rpc_getaddresstxids_valid("excessive_end", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: EXCESSIVE_BLOCK_HEIGHT,
-            end: EXCESSIVE_BLOCK_HEIGHT + 1,
+            start: Some(EXCESSIVE_BLOCK_HEIGHT),
+            end: Some(EXCESSIVE_BLOCK_HEIGHT + 1),
+        })
+        .await
+        .expect("We should have a vector of strings");
+    snapshot_rpc_getaddresstxids_valid("excessive_start", get_address_tx_ids, &settings);
+
+    let get_address_tx_ids = rpc
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: Some(2),
+            end: Some(1),
         })
         .await;
-    snapshot_rpc_getaddresstxids_invalid("excessive_start", get_address_tx_ids, &settings);
+    snapshot_rpc_getaddresstxids_invalid("end_greater_start", get_address_tx_ids, &settings);
 
     // `getaddressutxos`
     let get_address_utxos = rpc

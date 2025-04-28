@@ -1,7 +1,6 @@
 //! Fixed test vectors for the network consensus parameters.
 
-use zcash_primitives::consensus::{self as zp_consensus, Parameters};
-use zcash_protocol::consensus::NetworkConstants as _;
+use zcash_protocol::consensus::{self as zp_consensus, NetworkConstants as _, Parameters};
 
 use crate::{
     block::Height,
@@ -20,7 +19,7 @@ use crate::{
 };
 
 /// Checks that every method in the `Parameters` impl for `zebra_chain::Network` has the same output
-/// as the Parameters impl for `zcash_primitives::consensus::Network` on Mainnet and the default Testnet.
+/// as the Parameters impl for `zcash_protocol::consensus::NetworkType` on Mainnet and the default Testnet.
 #[test]
 fn check_parameters_impl() {
     let zp_network_upgrades = [
@@ -108,7 +107,7 @@ fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            nu6: Some(expected_activation_height),
+            nu7: Some(expected_activation_height),
             ..Default::default()
         })
         .to_network();
@@ -146,7 +145,7 @@ fn activates_network_upgrades_correctly() {
         (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
         (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
         (
-            Network::new_regtest(None, None),
+            Network::new_regtest(Default::default()),
             expected_default_regtest_activation_heights,
         ),
     ] {
@@ -197,7 +196,7 @@ fn check_configured_network_name() {
         "Mainnet should be displayed as 'Mainnet'"
     );
     assert_eq!(
-        Network::new_regtest(None, None).to_string(),
+        Network::new_regtest(Default::default()).to_string(),
         "Regtest",
         "Regtest should be displayed as 'Regtest'"
     );

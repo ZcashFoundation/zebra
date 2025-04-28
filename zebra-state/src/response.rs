@@ -4,7 +4,7 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
+    block::{self, Block, ChainHistoryMmrRootHash},
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -92,7 +92,6 @@ pub enum Response {
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal,
 }
@@ -256,15 +255,12 @@ pub enum ReadResponse {
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
     ValidBlockProposal,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
 }
@@ -283,9 +279,9 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     pub tip_height: block::Height,
 
-    /// The history tree of the current best chain.
+    /// The FlyClient chain history root as of the end of the chain tip block.
     /// Depends on the `tip_hash`.
-    pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    pub chain_history_root: Option<ChainHistoryMmrRootHash>,
 
     // Data derived from the state tip and recent blocks, and the current local clock.
     //
@@ -364,10 +360,8 @@ impl TryFrom<ReadResponse> for Response {
             #[cfg(feature = "indexer")]
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }

@@ -2,7 +2,7 @@
 //!
 //! To update these snapshots, run:
 //! ```sh
-//! cargo insta test --review --features getblocktemplate-rpcs --delete-unreferenced-snapshots
+//! cargo insta test --review --delete-unreferenced-snapshots
 //! ```
 
 use std::{
@@ -25,7 +25,10 @@ use zebra_chain::{
     transparent,
     work::difficulty::{CompactDifficulty, ParameterDifficulty as _},
 };
-use zebra_network::{address_book_peers::MockAddressBookPeers, types::MetaAddr};
+use zebra_network::{
+    address_book_peers::MockAddressBookPeers,
+    types::{MetaAddr, PeerServices},
+};
 use zebra_node_services::mempool;
 
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
@@ -104,8 +107,6 @@ pub async fn test_responses<State, ReadState>(
         )),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
-        // TODO: Use default field values when optional features are enabled in tests #8183
-        #[cfg(feature = "internal-miner")]
         internal_miner: true,
     };
 
@@ -132,12 +133,14 @@ pub async fn test_responses<State, ReadState>(
     mock_chain_tip_sender.send_best_tip_hash(fake_tip_hash);
     mock_chain_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
-    let mock_address_book = MockAddressBookPeers::new(vec![MetaAddr::new_initial_peer(
+    let mock_address_book = MockAddressBookPeers::new(vec![MetaAddr::new_connected(
         SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             network.default_port(),
         )
         .into(),
+        &PeerServices::NODE_NETWORK,
+        false,
     )
     .into_new_meta_addr(Instant::now(), DateTime32::now())]);
 
@@ -253,7 +256,7 @@ pub async fn test_responses<State, ReadState>(
                     cur_time: fake_cur_time,
                     min_time: fake_min_time,
                     max_time: fake_max_time,
-                    history_tree: fake_history_tree(network),
+                    chain_history_root: fake_history_tree(network).hash(),
                 }));
         }
     };

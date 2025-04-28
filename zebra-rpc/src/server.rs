@@ -31,7 +31,6 @@ use crate::{
     },
 };
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use crate::methods::{GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer};
 
 pub mod cookie;
@@ -107,22 +106,16 @@ impl RpcServer {
         AddressBook,
     >(
         config: Config,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         mining_config: crate::config::mining::Config,
         build_version: VersionString,
         user_agent: UserAgentString,
         mempool: Mempool,
         state: State,
-        read_state: ReadState,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         block_verifier_router: BlockVerifierRouter,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         sync_status: SyncStatus,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         address_book: AddressBook,
         latest_chain_tip: Tip,
         network: Network,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
         last_event: LoggedLastEvent,
     ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
@@ -173,7 +166,6 @@ impl RpcServer {
             .listen_addr
             .expect("caller should make sure listen_addr is set");
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         // Initialize the getblocktemplate rpc method handler
         let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
             &network,
@@ -193,10 +185,7 @@ impl RpcServer {
             user_agent,
             network.clone(),
             config.debug_force_finished_sync,
-            #[cfg(feature = "getblocktemplate-rpcs")]
             mining_config.debug_like_zcashd,
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            true,
             mempool,
             state,
             read_state,
@@ -232,11 +221,7 @@ impl RpcServer {
             .expect("Unable to get local address");
         info!("{OPENED_RPC_ENDPOINT_MSG}{}", addr);
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
         let mut rpc_module = rpc_impl.into_rpc();
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        let rpc_module = rpc_impl.into_rpc();
-        #[cfg(feature = "getblocktemplate-rpcs")]
         rpc_module
             .merge(get_block_template_rpc_impl.into_rpc())
             .unwrap();
