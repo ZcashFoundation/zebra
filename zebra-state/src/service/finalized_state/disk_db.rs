@@ -1228,7 +1228,7 @@ impl DiskDb {
             );
         } else {
             #[cfg(not(test))]
-            info!(
+            debug!(
                 ?current_limit,
                 min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
                 ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,

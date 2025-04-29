@@ -133,21 +133,92 @@ impl Solution {
     #[allow(clippy::unwrap_in_result)]
     pub fn solve<F>(
         mut header: Header,
-        mut _cancel_fn: F,
+        mut cancel_fn: F,
     ) -> Result<AtLeastOne<Header>, SolverCancelled>
     where
         F: FnMut() -> Result<(), SolverCancelled>,
     {
-        // TODO: Function code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
-        // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/src/work/equihash.rs#L115-L166
-        // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-        header.solution = Solution::for_proposal();
-        Ok(AtLeastOne::from_one(header))
+        use crate::shutdown::is_shutting_down;
+
+        let mut input = Vec::new();
+        header
+            .zcash_serialize(&mut input)
+            .expect("serialization into a vec can't fail");
+        // Take the part of the header before the nonce and solution.
+        // This data is kept constant for this solver run.
+        let input = &input[0..Solution::INPUT_LENGTH];
+
+        while !is_shutting_down() {
+            // Don't run the solver if we'd just cancel it anyway.
+            cancel_fn()?;
+
+            let solutions = equihash::tromp::solve_200_9(input, || {
+                // Cancel the solver if we have a new template.
+                if cancel_fn().is_err() {
+                    return None;
+                }
+
+                // This skips the first nonce, which doesn't matter in practice.
+                Self::next_nonce(&mut header.nonce);
+                Some(*header.nonce)
+            });
+
+            let mut valid_solutions = Vec::new();
+
+            for solution in &solutions {
+                header.solution = Self::from_bytes(solution)
+                    .expect("unexpected invalid solution: incorrect length");
+
+                // TODO: work out why we sometimes get invalid solutions here
+                if let Err(error) = header.solution.check(&header) {
+                    info!(?error, "found invalid solution for header");
+                    continue;
+                }
+
+                if Self::difficulty_is_valid(&header) {
+                    valid_solutions.push(header);
+                }
+            }
+
+            match valid_solutions.try_into() {
+                Ok(at_least_one_solution) => return Ok(at_least_one_solution),
+                Err(_is_empty_error) => debug!(
+                    solutions = ?solutions.len(),
+                    "found valid solutions which did not pass the validity or difficulty checks"
+                ),
+            }
+        }
+
+        Err(SolverCancelled)
     }
 
-    // TODO: Some methods were removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
-    // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/src/work/equihash.rs#L171-L196
-    // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
+    /// Returns `true` if the `nonce` and `solution` in `header` meet the difficulty threshold.
+    ///
+    /// # Panics
+    ///
+    /// - If `header` contains an invalid difficulty threshold.  
+    #[cfg(feature = "internal-miner")]
+    fn difficulty_is_valid(header: &Header) -> bool {
+        // Simplified from zebra_consensus::block::check::difficulty_is_valid().
+        let difficulty_threshold = header
+            .difficulty_threshold
+            .to_expanded()
+            .expect("unexpected invalid header template: invalid difficulty threshold");
+
+        // TODO: avoid calculating this hash multiple times
+        let hash = header.hash();
+
+        // Note: this comparison is a u256 integer comparison, like zcashd and bitcoin. Greater
+        // values represent *less* work.
+        hash <= difficulty_threshold
+    }
+
+    /// Modifies `nonce` to be the next integer in big-endian order.
+    /// Wraps to zero if the next nonce would overflow.
+    #[cfg(feature = "internal-miner")]
+    fn next_nonce(nonce: &mut [u8; 32]) {
+        let _ignore_overflow = crate::primitives::byte_array::increment_big_endian(&mut nonce[..]);
+    }
 }
 
 impl PartialEq<Solution> for Solution {

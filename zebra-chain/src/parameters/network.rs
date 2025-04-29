@@ -149,12 +149,10 @@ impl Network {
 
     /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
     pub fn new_regtest(
-        nu5_activation_height: Option<u32>,
-        nu6_activation_height: Option<u32>,
+        configured_activation_heights: testnet::ConfiguredActivationHeights,
     ) -> Self {
         Self::new_configured_testnet(testnet::Parameters::new_regtest(
-            nu5_activation_height,
-            nu6_activation_height,
+            configured_activation_heights,
         ))
     }
 

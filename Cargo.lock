@@ -1325,6 +1325,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ca4f333d4ccc9d23c06593733673026efa71a332e028b00f12cf427b9677dce9"
 dependencies = [
  "blake2b_simd",
+ "cc",
  "core2",
  "document-features",
 ]
@@ -6292,6 +6293,7 @@ dependencies = [
  "serde_json",
  "serde_with",
  "sha2 0.10.8",
+ "sinsemilla",
  "spandoc",
  "static_assertions",
  "tempfile",

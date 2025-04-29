@@ -11,6 +11,7 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::buffer::Buffer;
 
+use zebra_chain::history_tree::HistoryTree;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{Block, Height},
@@ -394,7 +395,7 @@ proptest! {
                         .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                             tip_hash: genesis_hash,
                             tip_height: Height::MIN,
-                            history_tree: Default::default(),
+                            chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),
@@ -468,7 +469,7 @@ proptest! {
                         .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
                             tip_hash: block_hash,
                             tip_height: block_height,
-                            history_tree: Default::default(),
+                            chain_history_root: HistoryTree::default().hash(),
                             expected_difficulty: Default::default(),
                             cur_time: DateTime32::now(),
                             min_time: DateTime32::now(),

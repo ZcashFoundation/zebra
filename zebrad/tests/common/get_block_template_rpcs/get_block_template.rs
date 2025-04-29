@@ -258,7 +258,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
                 let _ = done_tx.send(()).await;
                 for (proposal_result, template, time_source) in proposal_results {
                     let proposal_result = proposal_result
-                        .expect("response should be success output with with a serialized `ProposalResponse`");
+                        .expect("response should be success output with a serialized `ProposalResponse`");
 
                     if let ProposalResponse::Rejected(reject_reason) = proposal_result {
                         tracing::info!(

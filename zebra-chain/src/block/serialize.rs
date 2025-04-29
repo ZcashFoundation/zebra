@@ -39,7 +39,7 @@ fn check_version(version: u32) -> Result<(), &'static str> {
         // but this is not actually part of the consensus rules, and in fact
         // broken mining software created blocks that do not have version 4.
         // There are approximately 4,000 blocks with version 536870912; this
-        // is the bit-reversal of the value 4, indicating that that mining pool
+        // is the bit-reversal of the value 4, indicating that mining pool
         // reversed bit-ordering of the version field. Because the version field
         // was not properly validated, these blocks were added to the chain.
         //
