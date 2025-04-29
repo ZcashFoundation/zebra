@@ -107,7 +107,9 @@ impl ZebraDb {
     ) -> ZebraDb {
         // A boolean flag indicating whether database writes should be frozen until
         // some db format upgrade is complete. Should be unused and false in read-only mode.
-        let should_freeze_block_commits: Arc<AtomicBool> = Arc::new(AtomicBool::new(!read_only));
+        let should_freeze_block_commits: Arc<AtomicBool> = Arc::new(AtomicBool::new(
+            !(read_only || config.ephemeral || debug_skip_format_upgrades || cfg!(test)),
+        ));
 
         let disk_version = database_format_version_on_disk(
             config,
@@ -216,7 +218,7 @@ impl ZebraDb {
     /// Returns true if db writes should be suspended or frozen.
     pub fn should_freeze_writes(&self) -> bool {
         self.should_freeze_block_commits
-            .load(std::sync::atomic::Ordering::Relaxed)
+            .load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Returns the format version of this database on disk.
