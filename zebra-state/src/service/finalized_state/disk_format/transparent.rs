@@ -676,7 +676,7 @@ impl IntoDisk for AddressBalanceLocation {
     fn as_bytes(&self) -> Self::Bytes {
         let balance_bytes = self.balance().as_bytes().to_vec();
         let address_location_bytes = self.address_location().as_bytes().to_vec();
-        let received_bytes = self.received().to_be_bytes().to_vec();
+        let received_bytes = self.received().to_le_bytes().to_vec();
 
         [balance_bytes, address_location_bytes, received_bytes]
             .concat()
@@ -695,7 +695,7 @@ impl FromDisk for AddressBalanceLocation {
         // # Backwards Compatibility
         //
         // If the value is missing a `received` field, default to 0.
-        let received = u64::from_be_bytes(received_bytes.try_into().unwrap_or_default());
+        let received = u64::from_le_bytes(received_bytes.try_into().unwrap_or_default());
 
         let mut address_balance_location = AddressBalanceLocation::new(address_location);
         *address_balance_location.balance_mut() = balance;
