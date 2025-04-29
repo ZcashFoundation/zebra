@@ -148,9 +148,6 @@ fn apply_balance_change(
     let balance = finalized_balance.constrain()? + chain_balance_change;
     // Addresses could receive more than the max money supply by sending to themselves,
     // use u64::MAX if the addition overflows.
-    let received = finalized_received
-        .checked_add(chain_received_change)
-        .unwrap_or(u64::MAX);
-
+    let received = finalized_received.saturating_add(chain_received_change);
     Ok((balance?.constrain()?, received))
 }

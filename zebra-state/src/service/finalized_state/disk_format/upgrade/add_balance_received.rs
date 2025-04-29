@@ -43,7 +43,7 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
         // A factory closure that constructs closures to add a provided value to the received balance of an address.
         let make_modifier = |received: u64| {
             move |received_acc: &mut u64| {
-                *received_acc = received_acc.checked_add(received).unwrap_or(u64::MAX);
+                *received_acc = received_acc.saturating_add(received);
             }
         };
 

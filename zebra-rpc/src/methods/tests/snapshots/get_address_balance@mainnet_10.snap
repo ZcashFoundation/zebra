@@ -1,8 +1,8 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
-assertion_line: 192
 expression: address_balance
 ---
 {
-  "balance": 687500
+  "balance": 687500,
+  "received": 687500
 }

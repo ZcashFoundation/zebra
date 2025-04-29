@@ -320,8 +320,7 @@ impl ZebraDb {
             .try_fold(
                 (Amount::zero(), 0),
                 |(a_balance, a_received): (Amount<NonNegative>, u64), (b_balance, b_received)| {
-                    // Addresses could receive more than the max money supply by sending to themselves, use u64::MAX if the addition overflows.
-                    let received = a_received.checked_add(b_received).unwrap_or(u64::MAX);
+                    let received = a_received.saturating_add(b_received);
                     Ok(((a_balance + b_balance)?, received))
                 },
             );
