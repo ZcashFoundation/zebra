@@ -130,7 +130,7 @@ RUN --mount=type=cache,target=${CARGO_TARGET_DIR} \
     # Step 4: Move the *contents* of the temporary copies to the final destination paths
 RUN rm -rf ${CARGO_TARGET_DIR} && rm -rf ${CARGO_HOME} && \
     mv ${HOME}/tmp_target ${CARGO_TARGET_DIR}  && \
-    mv ${HOME}/tmp_cargo_home ${CARGO_HOME}
+    mv ${HOME}/tmp_cargo ${CARGO_HOME}
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
