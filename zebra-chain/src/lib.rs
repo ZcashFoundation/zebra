@@ -42,6 +42,9 @@ pub mod value_balance;
 pub mod work;
 
 pub use error::Error;
+
+// Re-export librustzcash crates so consumers use Zebra’s versions directly,
+// avoiding duplicate builds or version mismatches.
 pub use zcash_primitives;
 
 #[cfg(any(test, feature = "proptest-impl"))]
