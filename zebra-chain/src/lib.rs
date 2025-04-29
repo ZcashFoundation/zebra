@@ -42,6 +42,7 @@ pub mod value_balance;
 pub mod work;
 
 pub use error::Error;
+pub use zcash_primitives;
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use block::LedgerState;
