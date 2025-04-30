@@ -417,14 +417,14 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
         // Denoted as `anchorOrchard` in the spec.
         self.shared_anchor.zcash_serialize(&mut writer)?;
 
-        // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
-        self.proof.zcash_serialize(&mut writer)?;
-
         // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
         writer.write_u32::<LittleEndian>(0)?;
 
         // Denoted as `vAssetBurn` in the spec (ZIP 230).
         self.burn.zcash_serialize(&mut writer)?;
+
+        // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
+        self.proof.zcash_serialize(&mut writer)?;
 
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
         zcash_serialize_external_count(&sigs, &mut writer)?;
@@ -544,11 +544,6 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
         // Consensus: type is `{0 .. 𝑞_ℙ − 1}`. See [`orchard::tree::Root::zcash_deserialize`].
         let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
 
-        // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
-        // Consensus: type is `ZKAction.Proof`, i.e. a byte sequence.
-        // https://zips.z.cash/protocol/protocol.pdf#halo2encoding
-        let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
-
         // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
         let n_ag_expiry_height = reader.read_u32::<LittleEndian>()?;
         if n_ag_expiry_height != 0 {
@@ -559,6 +554,11 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
 
         // Denoted as `vAssetBurn` in the spec  (ZIP 230).
         let burn = (&mut reader).zcash_deserialize_into()?;
+
+        // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
+        // Consensus: type is `ZKAction.Proof`, i.e. a byte sequence.
+        // https://zips.z.cash/protocol/protocol.pdf#halo2encoding
+        let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `vSpendAuthSigsOrchard` in the spec.
         let sigs: Vec<Signature<SpendAuth>> =
