@@ -92,6 +92,16 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NoBurn;
 
+impl From<&[(AssetBase, NoteValue)]> for NoBurn {
+    fn from(bundle_burn: &[(AssetBase, NoteValue)]) -> Self {
+        assert!(
+            bundle_burn.is_empty(),
+            "Burn must be empty for OrchardVanilla"
+        );
+        Self
+    }
+}
+
 impl From<NoBurn> for ValueCommitment {
     fn from(_burn: NoBurn) -> ValueCommitment {
         ValueCommitment::new(pallas::Scalar::zero(), Amount::zero())
@@ -123,6 +133,17 @@ pub struct Burn(Vec<BurnItem>);
 impl From<Vec<BurnItem>> for Burn {
     fn from(inner: Vec<BurnItem>) -> Self {
         Self(inner)
+    }
+}
+
+impl From<&[(AssetBase, NoteValue)]> for Burn {
+    fn from(bundle_burn: &[(AssetBase, NoteValue)]) -> Self {
+        Self(
+            bundle_burn
+                .iter()
+                .map(|bundle_burn_item| BurnItem::from(*bundle_burn_item))
+                .collect(),
+        )
     }
 }
 
