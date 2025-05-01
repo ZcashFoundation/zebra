@@ -14,7 +14,7 @@ use lazy_static::lazy_static;
 lazy_static! {
     pub static ref ORCHARD_SHIELDED_DATA_ZSA: Vec<&'static [u8]> = [
         ORCHARD_SHIELDED_DATA_ZSA_1_BYTES.as_ref(),
-        ORCHARD_SHIELDED_DATA_ZSA_3_BYTES.as_ref(),
+        ORCHARD_SHIELDED_DATA_ZSA_2_BYTES.as_ref(),
         ORCHARD_SHIELDED_DATA_ZSA_3_BYTES.as_ref(),
         ORCHARD_SHIELDED_DATA_ZSA_4_BYTES.as_ref(),
     ]
