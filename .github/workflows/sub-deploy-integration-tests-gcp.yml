@@ -228,7 +228,7 @@ jobs:
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk="${DISK_PARAMS}" \
-          --container-image=${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
+          --container-image="${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
           --container-tty \
           --container-env="${CONTAINER_ENV}" \
           ${CONTAINER_MOUNT_DISKS} \
