@@ -207,6 +207,21 @@ where
 
         // the lightwalletd cache directory
         if let Some(lightwalletd_state_path) = lightwalletd_state_path.into() {
+            tracing::info!(?lightwalletd_state_path, "using lightwalletd state path");
+            let lwd_cache_dir =
+                std::fs::read_dir(lightwalletd_state_path.join("db/main").as_path())
+                    .expect("unexpected failure reading lightwalletd cache dir");
+            let lwd_cache_dir_size = lwd_cache_dir.iter().fold(0, |acc, entry| {
+                acc + entry
+                    .map(|entry| entry.metadata().map(|meta| meta.len()).unwrap_or(0))
+                    .unwrap_or(0)
+            });
+
+            tracing::info!("{lwd_cache_dir_size} bytes in lightwalletd cache dir");
+            for entry in lwd_cache_dir {
+                tracing::info!("{entry:?} bytes in lightwalletd cache dir");
+            }
+
             args.set_parameter(
                 "--data-dir",
                 lightwalletd_state_path
@@ -214,6 +229,7 @@ where
                     .expect("path is valid Unicode"),
             );
         } else {
+            tracing::info!("using lightwalletd empty state path");
             let empty_state_path = test_dir.join("lightwalletd_state");
 
             std::fs::create_dir(&empty_state_path)
