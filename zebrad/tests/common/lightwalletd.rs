@@ -211,13 +211,18 @@ where
             let lwd_cache_dir =
                 std::fs::read_dir(lightwalletd_state_path.join("db/main").as_path())
                     .expect("unexpected failure reading lightwalletd cache dir");
-            let lwd_cache_dir_size = lwd_cache_dir.iter().fold(0, |acc, entry| {
+            let lwd_cache_dir_size = lwd_cache_dir.into_iter().fold(0, |acc, entry| {
                 acc + entry
                     .map(|entry| entry.metadata().map(|meta| meta.len()).unwrap_or(0))
                     .unwrap_or(0)
             });
 
             tracing::info!("{lwd_cache_dir_size} bytes in lightwalletd cache dir");
+
+            let lwd_cache_dir =
+                std::fs::read_dir(lightwalletd_state_path.join("db/main").as_path())
+                    .expect("unexpected failure reading lightwalletd cache dir");
+
             for entry in lwd_cache_dir {
                 tracing::info!("{entry:?} bytes in lightwalletd cache dir");
             }
