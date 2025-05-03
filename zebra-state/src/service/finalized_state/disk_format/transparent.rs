@@ -510,6 +510,9 @@ fn address_variant(address: &transparent::Address) -> u8 {
         // address variant for `Regtest` transparent addresses in the db format
         (Testnet | Regtest, PayToPublicKeyHash { .. }) => 2,
         (Testnet | Regtest, PayToScriptHash { .. }) => 3,
+        // TEX address variants
+        (Mainnet, Tex { .. }) => 4,
+        (Testnet | Regtest, Tex { .. }) => 5,
     }
 }
 

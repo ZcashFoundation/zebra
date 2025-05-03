@@ -2209,6 +2209,18 @@ async fn rpc_validateaddress() {
         None,
     );
 
+    // t1 address: valid
+    let validate_address = get_block_template_rpc
+        .validate_address("t1fMAAnYrpwt1HQ8ZqxeFqVSSi6PQjwTLUm".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "t1 address should be valid on Mainnet"
+    );
+
+    // t3 address: valid
     let validate_address = get_block_template_rpc
         .validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
         .await
@@ -2219,6 +2231,7 @@ async fn rpc_validateaddress() {
         "Mainnet founder address should be valid on Mainnet"
     );
 
+    // t2 address: invalid
     let validate_address = get_block_template_rpc
         .validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
         .await
@@ -2228,6 +2241,32 @@ async fn rpc_validateaddress() {
         validate_address,
         validate_address::Response::invalid(),
         "Testnet founder address should be invalid on Mainnet"
+    );
+
+    // tex address: valid
+    let validate_address = get_block_template_rpc
+        .validate_address("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "ZIP-230 sample address should be valid on Mainnet"
+    );
+
+    // sprout address: invalid
+    let validate_address = get_block_template_rpc
+        .validate_address(
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya"
+                .to_string(),
+        )
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert_eq!(
+        validate_address,
+        validate_address::Response::invalid(),
+        "Sapling address should be invalid on Mainnet"
     );
 }
 
@@ -2254,6 +2293,18 @@ async fn rpc_z_validateaddress() {
         None,
     );
 
+    // t1 address: valid
+    let z_validate_address = get_block_template_rpc
+        .z_validate_address("t1fMAAnYrpwt1HQ8ZqxeFqVSSi6PQjwTLUm".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "t1 address should be valid on Mainnet"
+    );
+
+    // t3 address: valid
     let z_validate_address = get_block_template_rpc
         .z_validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
         .await
@@ -2264,6 +2315,7 @@ async fn rpc_z_validateaddress() {
         "Mainnet founder address should be valid on Mainnet"
     );
 
+    // t2 address: invalid
     let z_validate_address = get_block_template_rpc
         .z_validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
         .await
@@ -2273,6 +2325,54 @@ async fn rpc_z_validateaddress() {
         z_validate_address,
         z_validate_address::Response::invalid(),
         "Testnet founder address should be invalid on Mainnet"
+    );
+
+    // tex address: valid
+    let z_validate_address = get_block_template_rpc
+        .z_validate_address("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte".to_string())
+        .await
+        .expect("we should have a z_validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "ZIP-230 sample address should be valid on Mainnet"
+    );
+
+    // sprout address: invalid
+    let z_validate_address = get_block_template_rpc
+        .z_validate_address("zcWsmqT4X2V4jgxbgiCzyrAfRT1vi1F4sn7M5Pkh66izzw8Uk7LBGAH3DtcSMJeUb2pi3W4SQF8LMKkU2cUuVP68yAGcomL".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert_eq!(
+        z_validate_address,
+        z_validate_address::Response::invalid(),
+        "Sprout address should be invalid on Mainnet"
+    );
+
+    // sapling address: valid
+    let z_validate_address = get_block_template_rpc
+        .z_validate_address(
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya"
+                .to_string(),
+        )
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Sapling address should be valid on Mainnet"
+    );
+
+    // unified address: valid
+    let z_validate_address = get_block_template_rpc
+        .z_validate_address("u1c4ndwzy9hx70zjdtq4qt4x3c7zm0fnh85g9thsc8sunjcpk905w898pdvw82gdpj2p0mggs9tm23u6mzwk3xn4q25fq4czglssz5l6rlj268wfamxn7z4pvmgxwfl55xf0ua2u03afw66579fplkh8mvx2tp6t8er3zvvvtvf8e43mjv7n32st3zpvamfpvmxdrnzesakax8jrq3l3e".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Unified address should be valid on Mainnet"
     );
 }
 
