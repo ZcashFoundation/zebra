@@ -170,7 +170,7 @@ where
     // Use separate verifier so shared batch tasks aren't killed when the test ends (#2390)
     let mut verifier = Fallback::new(
         Batch::new(
-            Verifier::new(OrchardVanilla::get_verifying_key()),
+            Verifier::new(V::get_verifying_key()),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -194,7 +194,7 @@ where
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_vanilla() {
     verify_generated_halo2_proofs::<OrchardVanilla>(
-        &zebra_test::vectors::ORCHARD_SHIELDED_DATA_VANILLA,
+        &zebra_test::vectors::ORCHARD_VANILLA_SHIELDED_DATA,
     )
     .await
 }
@@ -202,7 +202,7 @@ async fn verify_generated_halo2_proofs_vanilla() {
 #[cfg(feature = "tx-v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_zsa() {
-    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA)
+    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA)
         .await
 }
 
@@ -259,7 +259,7 @@ async fn correctly_err_on_invalid_halo2_proofs<V: OrchardVerifier>(
     // Use separate verifier so shared batch tasks aren't killed when the test ends (#2390)
     let mut verifier = Fallback::new(
         Batch::new(
-            Verifier::new(OrchardVanilla::get_verifying_key()),
+            Verifier::new(V::get_verifying_key()),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -285,7 +285,7 @@ async fn correctly_err_on_invalid_halo2_proofs<V: OrchardVerifier>(
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
     correctly_err_on_invalid_halo2_proofs::<OrchardVanilla>(
-        &zebra_test::vectors::ORCHARD_SHIELDED_DATA_VANILLA,
+        &zebra_test::vectors::ORCHARD_VANILLA_SHIELDED_DATA,
     )
     .await
 }
@@ -294,7 +294,7 @@ async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_zsa() {
     correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(
-        &zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA,
+        &zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA,
     )
     .await
 }
