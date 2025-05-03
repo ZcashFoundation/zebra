@@ -111,7 +111,7 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
         test_type.lightwalletd_failure_messages();
 
     let mut lightwalletd = lightwalletd_dir
-        .spawn_lightwalletd_child(lightwalletd_state_path, arguments)?
+        .spawn_lightwalletd_child(lightwalletd_state_path, test_type, arguments)?
         .with_timeout(test_type.lightwalletd_timeout())
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
@@ -157,6 +157,8 @@ where
     /// as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the child process.
     ///
+    /// Uses `test_type` to determine logging behavior for the state directory.
+    ///
     /// By default, launch a working test instance with logging, and avoid port conflicts.
     ///
     /// # Panics
@@ -165,6 +167,7 @@ where
     fn spawn_lightwalletd_child(
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        test_type: TestType,
         extra_args: Arguments,
     ) -> Result<TestChild<Self>>;
 
@@ -184,6 +187,7 @@ where
     fn spawn_lightwalletd_child(
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        test_type: TestType,
         extra_args: Arguments,
     ) -> Result<TestChild<Self>> {
         let test_dir = self.as_ref().to_owned();
