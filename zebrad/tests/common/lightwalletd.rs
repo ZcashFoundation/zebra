@@ -208,23 +208,28 @@ where
         // the lightwalletd cache directory
         if let Some(lightwalletd_state_path) = lightwalletd_state_path.into() {
             tracing::info!(?lightwalletd_state_path, "using lightwalletd state path");
-            let lwd_cache_dir =
-                std::fs::read_dir(lightwalletd_state_path.join("db/main").as_path())
-                    .expect("unexpected failure reading lightwalletd cache dir");
-            let lwd_cache_dir_size = lwd_cache_dir.into_iter().fold(0, |acc, entry| {
-                acc + entry
-                    .map(|entry| entry.metadata().map(|meta| meta.len()).unwrap_or(0))
-                    .unwrap_or(0)
-            });
 
-            tracing::info!("{lwd_cache_dir_size} bytes in lightwalletd cache dir");
+            // Only log the directory size if it's expected to exist already.
+            // FullSyncFromGenesis creates this directory, so we skip logging for it.
+            if !matches!(test_type, TestType::FullSyncFromGenesis { .. }) {
+                let lwd_cache_dir =
+                    std::fs::read_dir(lightwalletd_state_path.join("db/main").as_path())
+                        .expect("unexpected failure reading lightwalletd cache dir");
+                let lwd_cache_dir_size = lwd_cache_dir.into_iter().fold(0, |acc, entry| {
+                    acc + entry
+                        .map(|entry| entry.metadata().map(|meta| meta.len()).unwrap_or(0))
+                        .unwrap_or(0)
+                });
 
-            let lwd_cache_dir =
-                std::fs::read_dir(lightwalletd_state_path.join("db/main").as_path())
-                    .expect("unexpected failure reading lightwalletd cache dir");
+                tracing::info!("{lwd_cache_dir_size} bytes in lightwalletd cache dir");
 
-            for entry in lwd_cache_dir {
-                tracing::info!("{entry:?} bytes in lightwalletd cache dir");
+                let lwd_cache_dir =
+                    std::fs::read_dir(lightwalletd_state_path.join("db/main").as_path())
+                        .expect("unexpected failure reading lightwalletd cache dir");
+
+                for entry in lwd_cache_dir {
+                    tracing::info!("{entry:?} bytes in lightwalletd cache dir");
+                }
             }
 
             args.set_parameter(
