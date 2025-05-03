@@ -1,37 +1,83 @@
 # This workflow is designed to test Zebra configuration files using Docker containers.
+# It acts as a centralized test suite for Docker configuration scenarios, running multiple
+# distinct tests against a provided Docker image using a matrix approach.
 # - Runs a specified Docker image with the provided test variables and network settings.
 # - Monitors and analyzes container logs for specific patterns to determine test success.
 # - Provides flexibility in testing various configurations and networks by dynamically adjusting input parameters.
-name: Test Zebra Config Files
+
+name: Test Zebra Configs in Docker
 
 on:
   workflow_call:
     inputs:
-      # Status and logging
-      test_id:
-        required: true
-        type: string
-        description: 'Unique identifier for the test'
-      grep_patterns:
-        required: true
-        type: string
-        description: 'Patterns to grep for in the logs'
-
-      # Test selection and parameters
       docker_image:
         required: true
         type: string
-        description: 'Docker image to test'
-      test_variables:
-        required: false
-        type: string
-        description: 'Environment variables used to select and configure the test'
+        description: "Docker image to test, including digest (e.g., gcr.io/example/zebrad@sha256:...)"
 
 jobs:
-  test-docker-config:
-    name: Test ${{ inputs.test_id }} in Docker
+  test-configurations:
+    # Use the matrix 'name' for the job name for clarity in UI
+    name: Test ${{ matrix.name }}
     timeout-minutes: 30
-    runs-on: ubuntu-latest-m
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Basic network configurations
+          - id: default-conf
+            name: Default config
+            env_vars: ""
+            grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
+
+          - id: testnet-conf
+            name: Testnet config
+            env_vars: "-e NETWORK=Testnet"
+            grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
+
+          # Only runs when using the CI image, because the CD image doesn't have the custom config file
+          # available in the tests/common/configs directory
+          - id: custom-conf
+            name: Custom config
+            env_vars: '-e ZEBRA_CONF_PATH="/home/zebra/zebrad/tests/common/configs/custom-conf.toml"'
+            grep_patterns: '-e "extra_coinbase_data:\\sSome\\(\\\"do you even shield\\?\\\"\\)"'
+
+          # RPC configuration tests
+          - id: rpc-conf
+            name: RPC config
+            env_vars: "-e ZEBRA_RPC_PORT=8232"
+            grep_patterns: '-e "Opened RPC endpoint at.*0.0.0.0:8232"'
+
+          - id: rpc-custom-conf
+            name: RPC with custom port
+            env_vars: "-e ZEBRA_RPC_PORT=28232 -e RPC_LISTEN_ADDR=127.0.0.1"
+            grep_patterns: '-e "Opened RPC endpoint at.*127.0.0.1:28232"'
+
+          # Custom directory tests
+          - id: rpc-cookie-conf
+            name: RPC with custom cookie dir
+            env_vars: "-e ZEBRA_RPC_PORT=8232 -e ENABLE_COOKIE_AUTH=true -e ZEBRA_COOKIE_DIR=/home/zebra/.config/cookie"
+            grep_patterns: '-e "RPC auth cookie written to disk"'
+
+          # Custom directory tests
+          - id: custom-dirs-conf
+            name: Custom cache and cookie directories
+            env_vars: "-e ZEBRA_CACHE_DIR=/tmp/zebra-cache"
+            grep_patterns: '-e "Opened Zebra state cache at /tmp/zebra-cache"'
+
+          # Feature-based configurations
+          - id: prometheus-feature
+            name: Prometheus metrics
+            env_vars: "-e FEATURES=prometheus -e METRICS_ENDPOINT_PORT=9999"
+            grep_patterns: '-e "0.0.0.0:9999"'
+
+          # Mining configuration
+          - id: mining-config
+            name: Mining configuration
+            env_vars: '-e MINER_ADDRESS="t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"'
+            grep_patterns: '-e "miner_address = \\\"t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v\\\""'
+
     steps:
       - uses: actions/checkout@v4.2.2
         with:
@@ -44,41 +90,40 @@ jobs:
 
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
-      - name: Run ${{ inputs.test_id }} test
+      - name: Run ${{ matrix.name }} test
+        # Only run if this isn't a skipped custom-conf test
+        if: ${{ matrix.id != 'custom-conf' || contains(inputs.docker_image, vars.CI_IMAGE_NAME) }}
         run: |
           docker pull ${{ inputs.docker_image }}
-          docker run ${{ inputs.test_variables }} --detach --name ${{ inputs.test_id }} -t ${{ inputs.docker_image }} zebrad start
+          docker run ${{ matrix.env_vars }} --detach --name ${{ matrix.id }} -t ${{ inputs.docker_image }} zebrad start
           # Use a subshell to handle the broken pipe error gracefully
           (
             trap "" PIPE;
             docker logs \
             --tail all \
             --follow \
-            ${{ inputs.test_id }} | \
+            ${{ matrix.id }} | \
             tee --output-error=exit /dev/stderr | \
             grep --max-count=1 --extended-regexp --color=always \
-            ${{ inputs.grep_patterns }}
-          ) || true
+            ${{ matrix.grep_patterns }}
+          )
           LOGS_EXIT_STATUS=$?
 
-          docker stop ${{ inputs.test_id }}
+          # Display grep status for debugging
+          echo "grep exit status: $LOGS_EXIT_STATUS"
 
-          EXIT_STATUS=$(docker wait ${{ inputs.test_id }} || echo "Error retrieving exit status");
+          docker stop ${{ matrix.id }}
+
+          EXIT_STATUS=$(docker wait ${{ matrix.id }} || echo "Error retrieving exit status");
           echo "docker exit status: $EXIT_STATUS";
 
-          # If grep found the pattern, exit with the Docker container exit status
-          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
-              # We can't diagnose or fix these errors, so we're just ignoring them for now.
-              # They don't actually impact the test because they happen after it succeeds.
-              # See ticket #7898 for details. 
-              if [ $EXIT_STATUS -eq 137 ] || [ $EXIT_STATUS -eq 139 ]; then
-                  echo "Warning: ignoring docker exit status $EXIT_STATUS";
-                  exit 0;
-              else
-                  exit $EXIT_STATUS;
-              fi
+          # If grep didn't find the pattern, fail immediately
+          if [ $LOGS_EXIT_STATUS -ne 0 ]; then
+              echo "ERROR: Failed to find the expected pattern in logs. Check grep_patterns.";
+              exit 1;
+          else
+            echo "SUCCESS: Found the expected pattern in logs.";
+            # Exit successfully if grep passed, even if docker stop resulted in SIGKILL (137 or 139)
+            # See ticket #7898 for details.
+            exit 0;
           fi
-
-          # Handle other potential errors here
-          echo "An error occurred while processing the logs.";
-          exit 1;
