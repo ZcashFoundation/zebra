@@ -1,3 +1,17 @@
+//! Simulates a full Zebra node’s block‐processing pipeline on a predefined Orchard/ZSA workflow.
+//!
+//! This integration test reads a sequence of serialized regtest blocks (including Orchard burns
+//! and ZSA issuance), feeds them through the node’s deserialization, consensus router, and state
+//! service exactly as if they arrived from the network, and verifies that each block is accepted
+//! (or fails at the injected point).
+//!
+//! In a future PR, we will add tracking and verification of issuance/burn state changes so that
+//! the test can also assert that on-chain asset state (total supply and finalization flags)
+//! matches the expected values computed in memory.
+//!
+//! In short, it demonstrates end-to-end handling of Orchard asset burns and ZSA issuance through
+//! consensus (with state verification to follow in the next PR).
+
 use std::sync::Arc;
 
 use color_eyre::eyre::Report;
