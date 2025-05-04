@@ -201,7 +201,7 @@ pub trait GetBlockTemplateRpc {
     #[method(name = "getpeerinfo")]
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>>;
 
-    /// Checks if a zcash address is valid.
+    /// Checks if a zcash transparent address of type P2PKH, P2SH or TEX is valid.
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)
@@ -214,7 +214,7 @@ pub trait GetBlockTemplateRpc {
     #[method(name = "validateaddress")]
     async fn validate_address(&self, address: String) -> Result<validate_address::Response>;
 
-    /// Checks if a zcash address is valid.
+    /// Checks if a zcash address of type P2PKH, P2SH, TEX, SAPLING or UNIFIED is valid.
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`z_validateaddress`](https://zcash.github.io/rpc/z_validateaddress.html)
