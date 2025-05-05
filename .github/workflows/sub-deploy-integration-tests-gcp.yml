@@ -283,7 +283,7 @@ jobs:
           --command=' \
           echo "Waiting for container to start and log network info..."; \
           CONTAINER_ID=""; \
-          CONTAINER_PREFIX="klt-l${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"; \
+          CONTAINER_PREFIX="klt-${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"; \
           for i in {1..30}; do CONTAINER_ID=$(sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc); if [ -n "${CONTAINER_ID}" ]; then break; fi; echo "Waiting for container ID starting with ${CONTAINER_PREFIX}... ($i/30)"; sleep 2; done; \
           if [ -z "${CONTAINER_ID}" ]; then echo "Container ID starting with ${CONTAINER_PREFIX} not found after waiting."; exit 1; fi; \
           echo "Found container ID: ${CONTAINER_ID}"; \
