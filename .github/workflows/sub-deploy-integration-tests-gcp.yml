@@ -227,19 +227,21 @@ jobs:
           GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
 
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
           --boot-disk-size=50GB \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk="${DISK_PARAMS}" \
-          --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
-          --container-tty \
-          --container-env="${CONTAINER_ENV}" \
           ${CONTAINER_MOUNT_DISKS} \
-          --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --container-stdin \
+          --container-tty \
+          --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
+          --container-env="${CONTAINER_ENV}" \
+          --subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
+          --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
+          --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
