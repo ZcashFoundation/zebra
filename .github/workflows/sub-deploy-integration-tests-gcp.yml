@@ -222,13 +222,17 @@ jobs:
 
           # Environment variables for the container
           CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+
+          # Trim whitespace from GAR_BASE as for some reason it's getting a trailing space
+          GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
+
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
           --boot-disk-size=50GB \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk="${DISK_PARAMS}" \
-          --container-image="${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
+          --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
           --container-tty \
           --container-env="${CONTAINER_ENV}" \
           ${CONTAINER_MOUNT_DISKS} \
@@ -240,10 +244,6 @@ jobs:
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-
-
-
-
 
       # Show debug logs if previous job failed
       - name: Show debug logs if previous job failed
