@@ -233,7 +233,9 @@ where
                 for entry_result in &lwd_cache_entries {
                     match entry_result {
                         Ok(entry) => tracing::info!("{entry:?} entry in lightwalletd cache dir"),
-                        Err(e) => tracing::warn!(?e, "error reading entry in lightwalletd cache dir"),
+                        Err(e) => {
+                            tracing::warn!(?e, "error reading entry in lightwalletd cache dir")
+                        }
                     }
                 }
             }
