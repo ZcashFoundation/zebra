@@ -261,42 +261,6 @@ jobs:
           sudo journalctl -b \
           '
 
-      # Show all the logs since the container launched,
-      # following until we see zebrad startup messages.
-      #
-      # This check limits the number of log lines, so tests running on the wrong network don't
-      # run until the job timeout. If Zebra does a complete recompile, there are a few hundred log
-      # lines before the startup logs. So that's what we use here.
-      #
-      # The log pipeline ignores the exit status of `docker logs`.
-      # It also ignores the expected 'broken pipe' error from `tee`,
-      # which happens when `grep` finds a matching output and moves on to the next job.
-      #
-      # Errors in the tests are caught by the final test status job.
-      - name: Check startup logs for ${{ inputs.test_id }}
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          echo "Waiting for container to start and log network info..."; \
-          CONTAINER_ID=""; \
-          CONTAINER_PREFIX="klt-${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"; \
-          for i in {1..30}; do CONTAINER_ID=$(sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc); if [ -n "${CONTAINER_ID}" ]; then break; fi; echo "Waiting for container ID starting with ${CONTAINER_PREFIX}... ($i/30)"; sleep 2; done; \
-          if [ -z "${CONTAINER_ID}" ]; then echo "Container ID starting with ${CONTAINER_PREFIX} not found after waiting."; exit 1; fi; \
-          echo "Found container ID: ${CONTAINER_ID}"; \
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${CONTAINER_ID} \
-          | head -700 \
-          | tee --output-error=exit-nopipe /dev/stderr \
-          | grep --max-count=1 --extended-regexp --color=always \
-          "Zcash network: ${{ inputs.network }}"; \
-          '
-
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
       # Also shows all the test logs.
@@ -315,11 +279,12 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          echo "Waiting for container ID..."; \
+          echo "Waiting for container to start..."; \
           CONTAINER_ID=""; \
-          for i in {1..30}; do CONTAINER_ID=$(sudo docker ps -q --no-trunc | head -n 1); if [ -n "${CONTAINER_ID}" ]; then break; fi; echo "Waiting for container ID... ($i/30)"; sleep 2; done; \
-          if [ -z "${CONTAINER_ID}" ]; then echo "Container ID not found after waiting."; exit 1; fi; \
-          echo "Found container ID: ${CONTAINER_ID}"; \
+          CONTAINER_PREFIX="klt-${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"; \
+          for i in {1..30}; do CONTAINER_ID=$(sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc); if [ -n "${CONTAINER_ID}" ]; then break; fi; echo "Waiting for container ID starting with ${CONTAINER_PREFIX}... ($i/30)"; sleep 2; done; \
+          if [ -z "${CONTAINER_ID}" ]; then echo "Container ID starting with ${CONTAINER_PREFIX} not found after waiting."; exit 1; fi; \
+          echo "Found test container ID: ${CONTAINER_ID}"; \
           echo "Streaming logs and waiting for test success message..."; \
           sudo docker logs \
           --tail all \
