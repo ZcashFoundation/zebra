@@ -3,6 +3,9 @@ updates:
   # Rust section
   - package-ecosystem: cargo
     directory: '/'
+    # Update only the lockfile. We shouldn't update Cargo.toml unless it's for
+    # a security issue, or if we need a new feature of the dependency.
+    versioning-strategy: lockfile-only
     # serde, clap, and other dependencies sometimes have multiple updates in a week
     schedule:
       interval: monthly
