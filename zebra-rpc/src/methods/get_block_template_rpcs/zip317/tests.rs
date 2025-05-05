@@ -38,6 +38,8 @@ fn excludes_tx_with_unselected_dependencies() {
             mempool_tx_deps,
             like_zcashd,
             extra_coinbase_data,
+            #[cfg(feature = "tx_v6")]
+            None,
         ),
         vec![],
         "should not select any transactions when dependencies are unavailable"
@@ -84,6 +86,8 @@ fn includes_tx_with_selected_dependencies() {
         mempool_tx_deps.clone(),
         like_zcashd,
         extra_coinbase_data,
+        #[cfg(feature = "tx_v6")]
+        None,
     );
 
     assert_eq!(
