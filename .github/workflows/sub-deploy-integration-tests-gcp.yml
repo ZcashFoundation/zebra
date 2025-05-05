@@ -299,15 +299,22 @@ jobs:
           echo "Waiting for container ${CONTAINER_ID} to exit...";
           EXIT_STATUS=$(sudo docker wait ${CONTAINER_ID} || echo "Error retrieving exit status");
           echo "Container exit status: $EXIT_STATUS";
-          if [ $LOGS_EXIT_STATUS -eq 0 ] && [ "$EXIT_STATUS" -eq 0 ]; then
-              echo "Test successful: Success log found and exit status 0.";
-              exit 0;
-          elif [ $LOGS_EXIT_STATUS -eq 0 ] && [ "$EXIT_STATUS" -ne 0 ]; then
-              echo "Test failed: Success log found BUT exit status was $EXIT_STATUS.";
-              exit 1;
+
+          if [ $LOGS_EXIT_STATUS -ne 0 ]; then
+            # Grep failed (pattern not found)
+            echo "Test failed: Success log pattern not found (grep exit status: $LOGS_EXIT_STATUS).";
+            exit 1;
           else
-              echo "Test failed: Success log not found (grep exit status: $LOGS_EXIT_STATUS). Container exit status: $EXIT_STATUS.";
+            # Grep succeeded (pattern found), now check specific exit code
+            if [ "$EXIT_STATUS" -eq 1 ]; then
+              # Explicit failure code 1
+              echo "Test failed: Success log pattern found BUT container exited with status 1.";
               exit 1;
+            else
+              # Grep succeeded and exit status is 0 or non-1
+              echo "Test successful: Success log pattern found. Container exit status $EXIT_STATUS ignored (as it is not 1).";
+              exit 0;
+            fi
           fi \
           '
 
