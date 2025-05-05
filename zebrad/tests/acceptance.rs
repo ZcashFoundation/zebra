@@ -1925,28 +1925,30 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
     //
     // If incompletely upgraded states get written to the CI cache,
     // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
-    if test_type.launches_lightwalletd() && !DATABASE_FORMAT_UPGRADE_IS_LONG {
-        tracing::info!(
-            ?test_type,
-            ?zebra_rpc_address,
-            "waiting for zebrad to open its RPC port..."
-        );
-        wait_for_state_version_upgrade(
-            &mut zebrad,
-            &state_version_message,
-            state_database_format_version_in_code(),
-            [format!(
-                "Opened RPC endpoint at {}",
-                zebra_rpc_address.expect("lightwalletd test must have RPC port")
-            )],
-        )?;
-    } else {
-        wait_for_state_version_upgrade(
-            &mut zebrad,
-            &state_version_message,
-            state_database_format_version_in_code(),
-            None,
-        )?;
+    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
+        if test_type.launches_lightwalletd() {
+            tracing::info!(
+                ?test_type,
+                ?zebra_rpc_address,
+                "waiting for zebrad to open its RPC port..."
+            );
+            wait_for_state_version_upgrade(
+                &mut zebrad,
+                &state_version_message,
+                state_database_format_version_in_code(),
+                [format!(
+                    "Opened RPC endpoint at {}",
+                    zebra_rpc_address.expect("lightwalletd test must have RPC port")
+                )],
+            )?;
+        } else {
+            wait_for_state_version_upgrade(
+                &mut zebrad,
+                &state_version_message,
+                state_database_format_version_in_code(),
+                None,
+            )?;
+        }
     }
 
     // Wait for zebrad to sync the genesis block before launching lightwalletd,
