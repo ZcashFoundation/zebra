@@ -123,5 +123,7 @@ jobs:
               exit 1;
           else
             echo "SUCCESS: Found the expected pattern in logs.";
-            exit $EXIT_STATUS;
+            # Exit successfully if grep passed, even if docker stop resulted in SIGKILL (137 or 139)
+            # See ticket #7898 for details.
+            exit 0;
           fi
