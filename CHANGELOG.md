@@ -17,6 +17,10 @@ TODO: a summary of the significant user-visible changes in the release
   prefixes. If you use tags starting with the `v` prefix, please update to
   images tagged `N.N.N`. For example, use `2.3.0` instead of `v2.3.0`. If you
   need a specific hash, each tag has a digest that you can use instead.
+- All functionality that used to be guarded by the `getblocktemplate-rpcs` Cargo
+  feature was moved out and the feature is no longer present in the codebase.
+  Note that all release builds following Zebra 1.3.0 had this feature enabled by
+  default.
 
 ### Added
 
