@@ -83,19 +83,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let current_path = env!("CARGO_MANIFEST_DIR");
 
     // Define the paths to the Zebra RPC methods
-    let paths = vec![
-        (
-            format!("{}/../zebra-rpc/src/methods.rs", current_path),
-            "Rpc",
-        ),
-        (
-            format!(
-                "{}/../zebra-rpc/src/methods/get_block_template_rpcs.rs",
-                current_path
-            ),
-            "GetBlockTemplateRpc",
-        ),
-    ];
+    let paths = vec![(
+        format!("{}/../zebra-rpc/src/methods.rs", current_path),
+        "Rpc",
+    )];
 
     // Create an indexmap to store the method names and configuration
     let mut methods = IndexMap::new();
