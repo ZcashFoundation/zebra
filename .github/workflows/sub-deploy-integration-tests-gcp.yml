@@ -354,12 +354,12 @@ jobs:
       # branch names to 12 characters.
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      # Passes ${{ env.GITHUB_REF_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
+      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
       - name: Format network name and branch name for disks
         run: |
           NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
-          LONG_GITHUB_REF="${{ env.GITHUB_REF_SLUG_URL }}"
+          LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
       # Install our SSH secret

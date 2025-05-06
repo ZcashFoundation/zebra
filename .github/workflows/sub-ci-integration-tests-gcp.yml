@@ -316,7 +316,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-full-sync
       test_description: Test lightwalletd full sync
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},TEST_LWD_FULL_SYNC=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},TEST_LWD_FULL_SYNC=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
