@@ -24,10 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 - Track misbehaving peer connections and ban them past a threshold ([#9201](https://github.com/ZcashFoundation/zebra/pull/9201))
 - Restore internal miner ([#9311](https://github.com/ZcashFoundation/zebra/pull/9311))
-- Add `reconsider_block` method ([#9260](https://github.com/ZcashFoundation/zebra/pull/9260))
+- Add `reconsider_block` method to non-finalized state ([#9260](https://github.com/ZcashFoundation/zebra/pull/9260))
 - Add NU7 constants ([#9256](https://github.com/ZcashFoundation/zebra/pull/9256))
 - Add `invalidate_block_method` and `invalidated_blocks` field to non-finalized state ([#9167](https://github.com/ZcashFoundation/zebra/pull/9167))
-- Add `Transaction::V6` variants only ([#9339](https://github.com/ZcashFoundation/zebra/pull/9339))
+- Add unused `Transaction::V6` variant ([#9339](https://github.com/ZcashFoundation/zebra/pull/9339))
 
 ### Changed
 
