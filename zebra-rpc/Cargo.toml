@@ -1,6 +1,6 @@
 [package]
 name = "zebra-rpc"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "A Zebra JSON Remote Procedure Call (JSON-RPC) interface"
 license = "MIT OR Apache-2.0"
@@ -90,16 +90,16 @@ zcash_address = { workspace = true }
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.45", features = [
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = [
     "json-conversion",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.45" }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.45" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.45", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.46" }
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.46" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46", features = [
     "rpc-client",
 ] }
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.45" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.45" }
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.46" }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46" }
 
 [build-dependencies]
 tonic-build = { workspace = true, optional = true }
@@ -112,17 +112,17 @@ proptest = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.45", features = [
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = [
     "proptest-impl",
 ] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.45", features = [
+zebra-consensus = { path = "../zebra-consensus", version = "1.0.0-beta.46", features = [
     "proptest-impl",
 ] }
-zebra-network = { path = "../zebra-network", version = "1.0.0-beta.45", features = [
+zebra-network = { path = "../zebra-network", version = "1.0.0-beta.46", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.45", features = [
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = [
     "proptest-impl",
 ] }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.45" }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46" }
