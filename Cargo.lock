@@ -6438,6 +6438,7 @@ dependencies = [
  "semver",
  "serde",
  "serde_json",
+ "serde_with",
  "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
