@@ -13,6 +13,10 @@ TODO: a summary of the significant user-visible changes in the release
 
 - The RPC endpoint is no longer enabled by default in Docker. To enable it,
   follow the docs [here](https://zebra.zfnd.org/user/docker.html#rpc).
+- We will no longer be publishing Docker images tagged with the `sha-` or `v`
+  prefixes. If you use tags starting with the `v` prefix, please update to
+  images tagged `N.N.N`. For example, use `2.3.0` instead of `v2.3.0`. If you
+  need a specific hash, each tag has a digest that you can use instead.
 
 ### Added
 
