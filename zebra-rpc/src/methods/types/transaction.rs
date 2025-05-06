@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
 use hex::ToHex;
 
 use zebra_chain::{
@@ -59,6 +60,14 @@ pub struct TransactionObject {
     /// The net value of Sapling Spends minus Outputs in zatoshis
     #[serde(rename = "valueBalanceZat", skip_serializing_if = "Option::is_none")]
     pub value_balance_zat: Option<i64>,
+
+    /// The size of the transaction in bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<i64>,
+
+    /// The time the transaction was included in a block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<i64>,
     // TODO: some fields not yet supported
 }
 
@@ -244,6 +253,8 @@ impl Default for TransactionObject {
             orchard: None,
             value_balance: None,
             value_balance_zat: None,
+            size: None,
+            time: None,
         }
     }
 }
@@ -256,6 +267,7 @@ impl TransactionObject {
         height: Option<block::Height>,
         confirmations: Option<u32>,
         network: &Network,
+        block_time: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
             hex: tx.clone().into(),
@@ -415,6 +427,8 @@ impl TransactionObject {
                     value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
                 })
             },
+            size: tx.as_bytes().len().try_into().ok(),
+            time: block_time.map(|bt| bt.timestamp()),
         }
     }
 }

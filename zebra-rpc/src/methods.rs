@@ -924,22 +924,25 @@ where
                 ),
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
-                    let transactions = block
-                        .transactions
-                        .iter()
-                        .map(|tx| {
-                            GetBlockTransaction::Object(TransactionObject::from_transaction(
-                                tx.clone(),
-                                Some(height),
-                                Some(
-                                    confirmations
-                                        .try_into()
-                                        .expect("should be less than max block height, i32::MAX"),
-                                ),
-                                &network,
-                            ))
-                        })
-                        .collect();
+                    let block_time = block.header.time;
+                    let transactions =
+                        block
+                            .transactions
+                            .iter()
+                            .map(|tx| {
+                                GetBlockTransaction::Object(Box::new(
+                                    TransactionObject::from_transaction(
+                                        tx.clone(),
+                                        Some(height),
+                                        Some(confirmations.try_into().expect(
+                                            "should be less than max block height, i32::MAX",
+                                        )),
+                                        &network,
+                                        Some(block_time),
+                                    ),
+                                ))
+                            })
+                            .collect();
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
@@ -1250,12 +1253,13 @@ where
             mempool::Response::Transactions(txns) => {
                 if let Some(tx) = txns.first() {
                     return Ok(if verbose {
-                        GetRawTransaction::Object(TransactionObject::from_transaction(
+                        GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
                             tx.transaction.clone(),
                             None,
                             None,
                             &self.network,
-                        ))
+                            None,
+                        )))
                     } else {
                         let hex = tx.transaction.clone().into();
                         GetRawTransaction::Raw(hex)
@@ -1274,12 +1278,15 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
-                GetRawTransaction::Object(TransactionObject::from_transaction(
+                GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
                     tx.tx.clone(),
                     Some(tx.height),
                     Some(tx.confirmations),
                     &self.network,
-                ))
+                    // TODO: Performance gain:
+                    // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
+                    Some(tx.block_time),
+                )))
             } else {
                 let hex = tx.tx.into();
                 GetRawTransaction::Raw(hex)
@@ -2243,7 +2250,7 @@ pub enum GetBlockTransaction {
     /// The transaction hash, hex-encoded.
     Hash(#[serde(with = "hex")] transaction::Hash),
     /// The block object.
-    Object(TransactionObject),
+    Object(Box<TransactionObject>),
 }
 
 /// Response to a `getblockheader` RPC request.
@@ -2395,12 +2402,12 @@ pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
     Raw(#[serde(with = "hex")] SerializedTransaction),
     /// The transaction object.
-    Object(TransactionObject),
+    Object(Box<TransactionObject>),
 }
 
 impl Default for GetRawTransaction {
     fn default() -> Self {
-        Self::Object(TransactionObject::default())
+        Self::Object(Box::default())
     }
 }
 
