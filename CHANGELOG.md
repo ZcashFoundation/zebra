@@ -32,7 +32,8 @@ TODO: a summary of the significant user-visible changes in the release
 - Downgrade verbose info message ([#9448](https://github.com/ZcashFoundation/zebra/pull/9448))
 - Use read-only db instance when running `tip-height` or `copy-state` commands ([#9359](https://github.com/ZcashFoundation/zebra/pull/9359))
 - Refactor format upgrades into trait ([#9263](https://github.com/ZcashFoundation/zebra/pull/9263))
-- Remove the `getblocktemplate-rpcs` Cargo feature ([#9401](https://github.com/ZcashFoundation/zebra/pull/9401))
+- Remove the `getblocktemplate-rpcs` Cargo feature ([#9401](https://github.com/ZcashFoundation/zebra/pull/9401) and [#9485](https://github.com/ZcashFoundation/zebra/pull/9485))
+- Improve cache dir and database startup panics ([#9441](https://github.com/ZcashFoundation/zebra/pull/9441)) 
 
 ### Fixed
 
