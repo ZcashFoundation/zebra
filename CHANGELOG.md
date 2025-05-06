@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 2.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.3.0) - 2025-05-06
 
-TODO: a summary of the significant user-visible changes in the release
-
 ### Breaking Changes
 
 - The RPC endpoint is no longer enabled by default in Docker. To enable it,
@@ -36,7 +34,7 @@ TODO: a summary of the significant user-visible changes in the release
 - Downgrade verbose info message ([#9448](https://github.com/ZcashFoundation/zebra/pull/9448))
 - Use read-only db instance when running `tip-height` or `copy-state` commands ([#9359](https://github.com/ZcashFoundation/zebra/pull/9359))
 - Refactor format upgrades into trait ([#9263](https://github.com/ZcashFoundation/zebra/pull/9263))
-- Remove the `getblocktemplate-rpcs` Cargo feature ([#9401](https://github.com/ZcashFoundation/zebra/pull/9401) and [#9485](https://github.com/ZcashFoundation/zebra/pull/9485))
+- Remove the `getblocktemplate-rpcs` Cargo feature ([#9401](https://github.com/ZcashFoundation/zebra/pull/9401))
 - Improve cache dir and database startup panics ([#9441](https://github.com/ZcashFoundation/zebra/pull/9441)) 
 
 ### Fixed
@@ -49,6 +47,7 @@ TODO: a summary of the significant user-visible changes in the release
 
 ### RPCs
 
+- Add `time` and `size` fields to `TransactionObject` ([#9458](https://github.com/ZcashFoundation/zebra/pull/9458)) 
 - Add inbound peers to `getpeerinfo` response ([#9214](https://github.com/ZcashFoundation/zebra/pull/9214))
 - Extend `getinfo` ([#9261](https://github.com/ZcashFoundation/zebra/pull/9261))
 - Add fields to `getblockchaininfo` RPC output ([#9215](https://github.com/ZcashFoundation/zebra/pull/9215))
