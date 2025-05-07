@@ -859,7 +859,9 @@ where
 
         let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
             / (zebra_chain::amount::COIN as f64);
-        let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone()).await?;
+        let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone(), true)
+            .await
+            .expect("should always be Ok when `should_use_default` is true");
 
         let response = GetInfo {
             version,
@@ -891,7 +893,7 @@ where
             tokio::join!(
                 state_call(UsageInfo),
                 state_call(TipPoolValues),
-                chain_tip_difficulty(network.clone(), self.state.clone())
+                chain_tip_difficulty(network.clone(), self.state.clone(), true)
             )
         };
 
@@ -912,9 +914,9 @@ where
                 Err(_) => ((Height::MIN, network.genesis_hash()), Default::default()),
             };
 
-            let difficulty = chain_tip_difficulty.unwrap_or_else(|_| {
-                (U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64
-            });
+            let difficulty = chain_tip_difficulty
+                .expect("should always be Ok when `should_use_default` is true");
+
             (size_on_disk, tip, value_balance, difficulty)
         };
 
@@ -1191,22 +1193,25 @@ where
                 ),
                 zebra_state::ReadResponse::BlockAndSize(block_and_size) => {
                     let (block, size) = block_and_size.ok_or_misc_error("Block not found")?;
-                    let transactions = block
-                        .transactions
-                        .iter()
-                        .map(|tx| {
-                            GetBlockTransaction::Object(TransactionObject::from_transaction(
-                                tx.clone(),
-                                Some(height),
-                                Some(
-                                    confirmations
-                                        .try_into()
-                                        .expect("should be less than max block height, i32::MAX"),
-                                ),
-                                &network,
-                            ))
-                        })
-                        .collect();
+                    let block_time = block.header.time;
+                    let transactions =
+                        block
+                            .transactions
+                            .iter()
+                            .map(|tx| {
+                                GetBlockTransaction::Object(Box::new(
+                                    TransactionObject::from_transaction(
+                                        tx.clone(),
+                                        Some(height),
+                                        Some(confirmations.try_into().expect(
+                                            "should be less than max block height, i32::MAX",
+                                        )),
+                                        &network,
+                                        Some(block_time),
+                                    ),
+                                ))
+                            })
+                            .collect();
                     (transactions, Some(size))
                 }
                 _ => unreachable!("unmatched response to a transaction_ids_for_block request"),
@@ -1517,12 +1522,13 @@ where
             mempool::Response::Transactions(txns) => {
                 if let Some(tx) = txns.first() {
                     return Ok(if verbose {
-                        GetRawTransaction::Object(TransactionObject::from_transaction(
+                        GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
                             tx.transaction.clone(),
                             None,
                             None,
                             &self.network,
-                        ))
+                            None,
+                        )))
                     } else {
                         let hex = tx.transaction.clone().into();
                         GetRawTransaction::Raw(hex)
@@ -1541,12 +1547,15 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
-                GetRawTransaction::Object(TransactionObject::from_transaction(
+                GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
                     tx.tx.clone(),
                     Some(tx.height),
                     Some(tx.confirmations),
                     &self.network,
-                ))
+                    // TODO: Performance gain:
+                    // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
+                    Some(tx.block_time),
+                )))
             } else {
                 let hex = tx.tx.into();
                 GetRawTransaction::Raw(hex)
@@ -2547,7 +2556,7 @@ where
     }
 
     async fn get_difficulty(&self) -> Result<f64> {
-        chain_tip_difficulty(self.network.clone(), self.state.clone()).await
+        chain_tip_difficulty(self.network.clone(), self.state.clone(), false).await
     }
 
     async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response> {
@@ -3306,7 +3315,7 @@ pub enum GetBlockTransaction {
     /// The transaction hash, hex-encoded.
     Hash(#[serde(with = "hex")] transaction::Hash),
     /// The block object.
-    Object(TransactionObject),
+    Object(Box<TransactionObject>),
 }
 
 /// Response to a `getblockheader` RPC request.
@@ -3458,12 +3467,12 @@ pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
     Raw(#[serde(with = "hex")] SerializedTransaction),
     /// The transaction object.
-    Object(TransactionObject),
+    Object(Box<TransactionObject>),
 }
 
 impl Default for GetRawTransaction {
     fn default() -> Self {
-        Self::Object(TransactionObject::default())
+        Self::Object(Box::default())
     }
 }
 
@@ -3768,7 +3777,11 @@ mod opthex {
 }
 
 /// Returns the proof-of-work difficulty as a multiple of the minimum difficulty.
-pub async fn chain_tip_difficulty<State>(network: Network, mut state: State) -> Result<f64>
+pub async fn chain_tip_difficulty<State>(
+    network: Network,
+    mut state: State,
+    should_use_default: bool,
+) -> Result<f64>
 where
     State: Service<
             zebra_state::ReadRequest,
@@ -3790,8 +3803,15 @@ where
     let response = state
         .ready()
         .and_then(|service| service.call(request))
-        .await
-        .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+        .await;
+
+    let response = match (should_use_default, response) {
+        (_, Ok(res)) => res,
+        (true, Err(_)) => {
+            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64)
+        }
+        (false, Err(error)) => return Err(ErrorObject::owned(0, error.to_string(), None::<()>)),
+    };
 
     let chain_info = match response {
         ReadResponse::ChainInfo(info) => info,
