@@ -134,10 +134,7 @@ jobs:
     runs-on: zfnd-runners
     needs: [ get-disk-name ]
     if: ${{ !cancelled() && !failure() }}
-    # This has been increased from 180 to 300 to allow the value pools format
-    # upgrade to run successfully. We can decrease it back after states are
-    # regenerated.
-    timeout-minutes: ${{ inputs.is_long_test && 7200 || 300 }}
+    timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
       cached_disk_name: ${{ needs.get-disk-name.outputs.cached_disk_name }}
       state_version: ${{ needs.get-disk-name.outputs.state_version }}

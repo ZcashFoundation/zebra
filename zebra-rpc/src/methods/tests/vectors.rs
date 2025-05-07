@@ -8,7 +8,7 @@ use tower::buffer::Buffer;
 use zebra_chain::{
     amount::Amount,
     block::Block,
-    block_data::BlockData,
+    block_info::BlockInfo,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
     parameters::Network::*,
@@ -89,12 +89,12 @@ async fn get_block_data(
     read_state: &ReadStateService,
     block: Arc<Block>,
     height: usize,
-    prev_block_data: Option<BlockData>,
+    prev_block_data: Option<BlockInfo>,
 ) -> (
     [u8; 32],
     [u8; 32],
     [u8; 32],
-    Option<BlockData>,
+    Option<BlockInfo>,
     Option<ValueBalance<NegativeAllowed>>,
 ) {
     let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
@@ -248,7 +248,7 @@ async fn rpc_getblock() {
     let trees = GetBlockTrees { sapling, orchard };
 
     // Make height calls with verbosity=1 and check response
-    let mut prev_block_data: Option<BlockData> = None;
+    let mut prev_block_data: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), Some(1u8))
@@ -277,7 +277,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -305,7 +305,7 @@ async fn rpc_getblock() {
     }
 
     // Make hash calls with verbosity=1 and check response
-    let mut prev_block_data: Option<BlockData> = None;
+    let mut prev_block_data: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(1u8))
@@ -334,7 +334,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -361,7 +361,7 @@ async fn rpc_getblock() {
     }
 
     // Make height calls with verbosity=2 and check response
-    let mut prev_block_data: Option<BlockData> = None;
+    let mut prev_block_data: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), Some(2u8))
@@ -406,10 +406,7 @@ async fn rpc_getblock() {
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(
-                size,
-                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
-            );
+            assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -468,7 +465,7 @@ async fn rpc_getblock() {
     }
 
     // Make hash calls with verbosity=2 and check response
-    let mut prev_block_data: Option<BlockData> = None;
+    let mut prev_block_data: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(2u8))
@@ -513,10 +510,7 @@ async fn rpc_getblock() {
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(
-                size,
-                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
-            );
+            assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -575,7 +569,7 @@ async fn rpc_getblock() {
     }
 
     // Make height calls with no verbosity (defaults to 1) and check response
-    let mut prev_block_data: Option<BlockData> = None;
+    let mut prev_block_data: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), None)
@@ -604,7 +598,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -631,7 +625,7 @@ async fn rpc_getblock() {
     }
 
     // Make hash calls with no verbosity (defaults to 1) and check response
-    let mut prev_block_data: Option<BlockData> = None;
+    let mut prev_block_data: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), None)
@@ -660,7 +654,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),

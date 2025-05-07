@@ -4,7 +4,7 @@ use crossbeam_channel::TryRecvError;
 use zebra_chain::{
     amount::NonNegative,
     block::Height,
-    block_data::BlockData,
+    block_info::BlockInfo,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
         Network,
@@ -66,8 +66,8 @@ impl DiskFormatUpgrade for AddBlockData {
                 tracing::info!(height = ?height, "adding block data for height");
             }
 
-            let block = db
-                .block(HashOrHeight::Height(height))
+            let (block, size) = db
+                .block_and_size(HashOrHeight::Height(height))
                 .expect("block data should be in the database");
 
             let mut utxos = HashMap::new();
@@ -112,7 +112,7 @@ impl DiskFormatUpgrade for AddBlockData {
                 )
                 .expect("value pool change should not overflow");
 
-            let block_data = BlockData::new(value_pool);
+            let block_data = BlockInfo::new(value_pool, size as u32);
 
             db.block_data_cf()
                 .new_batch_for_writing()

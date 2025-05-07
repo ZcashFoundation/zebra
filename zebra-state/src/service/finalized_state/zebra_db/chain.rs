@@ -17,7 +17,7 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, block_data::BlockData, history_tree::HistoryTree,
+    amount::NonNegative, block::Height, block_info::BlockInfo, history_tree::HistoryTree,
     transparent, value_balance::ValueBalance,
 };
 
@@ -71,7 +71,7 @@ pub const BLOCK_DATA: &str = "block_data";
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
-pub type BlockDataCf<'cf> = TypedColumnFamily<'cf, Height, BlockData>;
+pub type BlockDataCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
 
 impl ZebraDb {
     // Column family convenience methods
@@ -181,7 +181,7 @@ impl ZebraDb {
     }
 
     /// Returns the stored `BlockData` for the given block.
-    pub fn block_data(&self, hash_or_height: HashOrHeight) -> Option<BlockData> {
+    pub fn block_data(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
         let block_data_cf = self.block_data_cf();
@@ -252,6 +252,7 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
+        block_size: usize,
     ) -> Result<(), BoxError> {
         let new_value_pool = value_pool.add_chain_value_pool_change(
             finalized
@@ -263,10 +264,10 @@ impl DiskWriteBatch {
             .with_batch_for_writing(self)
             .zs_insert(&(), &new_value_pool);
 
-        let _ = db
-            .block_data_cf()
-            .with_batch_for_writing(self)
-            .zs_insert(&finalized.height, &BlockData::new(new_value_pool));
+        let _ = db.block_data_cf().with_batch_for_writing(self).zs_insert(
+            &finalized.height,
+            &BlockInfo::new(new_value_pool, block_size as u32),
+        );
 
         Ok(())
     }

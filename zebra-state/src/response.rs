@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, sync::Arc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
-    block_data::BlockData,
+    block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -156,7 +156,7 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::BlockData`] with
     /// the block data after the specified block.
-    BlockData(Option<BlockData>),
+    BlockData(Option<BlockInfo>),
 
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),

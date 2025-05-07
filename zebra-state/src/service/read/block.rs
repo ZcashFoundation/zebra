@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use zebra_chain::{
     block::{self, Block, Height},
-    block_data::BlockData,
+    block_info::BlockInfo,
     serialization::ZcashSerialize as _,
     transaction::{self, Transaction},
     transparent::{self, Utxo},
@@ -262,7 +262,7 @@ pub fn block_data<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
-) -> Option<BlockData>
+) -> Option<BlockInfo>
 where
     C: AsRef<Chain>,
 {

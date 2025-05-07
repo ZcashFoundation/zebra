@@ -14,13 +14,15 @@ use tracing::instrument;
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
-    block_data::BlockData,
+    block_info::BlockInfo,
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
     parameters::Network,
     primitives::Groth16Proof,
-    sapling, sprout,
+    sapling,
+    serialization::ZcashSerialize as _,
+    sprout,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{
         self,
@@ -226,7 +228,7 @@ pub struct ChainInner {
     /// chain value pool balances.
     pub(crate) chain_value_pools: ValueBalance<NonNegative>,
     /// The block data after the given block height.
-    pub(crate) block_data_by_height: BTreeMap<block::Height, BlockData>,
+    pub(crate) block_data_by_height: BTreeMap<block::Height, BlockInfo>,
 }
 
 impl Chain {
@@ -537,7 +539,7 @@ impl Chain {
 
     /// Returns the total pool balance after the block specified by
     /// [`HashOrHeight`], if it exists in the non-finalized [`Chain`].
-    pub fn block_data(&self, hash_or_height: HashOrHeight) -> Option<BlockData> {
+    pub fn block_data(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
         let height =
             hash_or_height.height_or_else(|hash| self.height_by_hash.get(&hash).cloned())?;
 
@@ -1629,7 +1631,8 @@ impl Chain {
         }
 
         // update the chain value pool balances
-        self.update_chain_tip_with(&(*chain_value_pool_change, height))?;
+        let size = block.zcash_serialized_size();
+        self.update_chain_tip_with(&(*chain_value_pool_change, height, size))?;
 
         Ok(())
     }
@@ -1821,7 +1824,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
         self.remove_history_tree(position, height);
 
         // revert the chain value pool balances, if needed
-        self.revert_chain_with(&(*chain_value_pool_change, height), position);
+        // note that size is 0 because it isn't need for reverting
+        self.revert_chain_with(&(*chain_value_pool_change, height, 0), position);
     }
 }
 
@@ -2202,11 +2206,11 @@ impl UpdateWith<(&Option<orchard::ShieldedData>, &SpendingTransactionId)> for Ch
     }
 }
 
-impl UpdateWith<(ValueBalance<NegativeAllowed>, Height)> for Chain {
+impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
     #[allow(clippy::unwrap_in_result)]
     fn update_chain_tip_with(
         &mut self,
-        (block_value_pool_change, height): &(ValueBalance<NegativeAllowed>, Height),
+        (block_value_pool_change, height, size): &(ValueBalance<NegativeAllowed>, Height, usize),
     ) -> Result<(), ValidateContextError> {
         match self
             .chain_value_pools
@@ -2215,7 +2219,7 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height)> for Chain {
             Ok(chain_value_pools) => {
                 self.chain_value_pools = chain_value_pools;
                 self.block_data_by_height
-                    .insert(*height, BlockData::new(chain_value_pools));
+                    .insert(*height, BlockInfo::new(chain_value_pools, *size as u32));
             }
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
                 value_balance_error,
@@ -2243,7 +2247,7 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height)> for Chain {
     /// change.
     fn revert_chain_with(
         &mut self,
-        (block_value_pool_change, height): &(ValueBalance<NegativeAllowed>, Height),
+        (block_value_pool_change, height, _size): &(ValueBalance<NegativeAllowed>, Height, usize),
         position: RevertPosition,
     ) {
         use std::ops::Neg;

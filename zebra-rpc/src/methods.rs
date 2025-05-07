@@ -999,6 +999,7 @@ where
                     .ok()?;
                 (value_pools - prev_value_pools).ok()
             });
+            let size = size.or(block_data.as_ref().map(|d| d.size() as usize));
 
             Ok(GetBlock::Object {
                 hash,
