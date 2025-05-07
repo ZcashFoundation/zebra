@@ -9,7 +9,6 @@ use orchard::{note::AssetBase, value::NoteValue};
 use zcash_primitives::transaction::components::orchard::{read_burn, write_burn};
 
 use crate::{
-    amount::Amount,
     orchard::ValueCommitment,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
@@ -104,7 +103,11 @@ impl From<&[(AssetBase, NoteValue)]> for NoBurn {
 
 impl From<NoBurn> for ValueCommitment {
     fn from(_burn: NoBurn) -> ValueCommitment {
-        ValueCommitment::new(pallas::Scalar::zero(), Amount::zero())
+        ValueCommitment::new(
+            pallas::Scalar::zero(),
+            NoteValue::from_raw(0).into(),
+            AssetBase::native(),
+        )
     }
 }
 
@@ -153,7 +156,7 @@ impl From<Burn> for ValueCommitment {
             .into_iter()
             .map(|BurnItem(asset, amount)| {
                 // The trapdoor for the burn which is public is always zero.
-                ValueCommitment::with_asset(pallas::Scalar::zero(), amount, &asset)
+                ValueCommitment::new(pallas::Scalar::zero(), amount.into(), asset)
             })
             .sum()
     }

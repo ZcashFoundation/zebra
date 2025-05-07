@@ -20,6 +20,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "tx-v6")]
+use orchard::{note::AssetBase, value::ValueSum};
+
 use super::{OrchardVanilla, ShieldedDataFlavor};
 
 /// A bundle of [`Action`] descriptions and signature data.
@@ -115,17 +118,28 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
     /// <https://zips.z.cash/protocol/protocol.pdf#orchardbalance>
     pub fn binding_verification_key(&self) -> reddsa::VerificationKeyBytes<Binding> {
         let cv: ValueCommitment = self.actions().map(|action| action.cv).sum();
-        let cv_balance = ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);
 
-        // For TX-V6 assign a proper value commitment to the burn
-        // otherwise use a zero value commitment
-        let burn_value_commitment = if cfg!(feature = "tx-v6") {
-            self.burn.clone().into()
-        } else {
-            ValueCommitment::new(pallas::Scalar::zero(), Amount::zero())
+        #[cfg(not(feature = "tx-v6"))]
+        let key = {
+            let cv_balance = ValueCommitment::new(pallas::Scalar::zero(), self.value_balance);
+            cv - cv_balance
         };
 
-        let key_bytes: [u8; 32] = (cv - cv_balance - burn_value_commitment).into();
+        #[cfg(feature = "tx-v6")]
+        let key = {
+            let cv_balance = ValueCommitment::new(
+                pallas::Scalar::zero(),
+                // TODO: Make the `ValueSum::from_raw` function public in the `orchard` crate
+                // and use `ValueSum::from_raw(self.value_balance.into())` instead of the
+                // next line
+                (ValueSum::default() + i64::from(self.value_balance)).unwrap(),
+                AssetBase::native(),
+            );
+            let burn_value_commitment = self.burn.clone().into();
+            cv - cv_balance - burn_value_commitment
+        };
+
+        let key_bytes: [u8; 32] = key.into();
 
         key_bytes.into()
     }
