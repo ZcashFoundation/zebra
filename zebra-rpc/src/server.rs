@@ -7,26 +7,28 @@
 //! See the full list of
 //! [Differences between JSON-RPC 1.0 and 2.0.](https://www.simple-is-better.org/rpc/#differences-between-1-0-and-2-0)
 
-use crate::config;
+use std::{fmt, panic};
+
+use cookie::Cookie;
+use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
+use tokio::task::JoinHandle;
+use tower::Service;
+use tracing::*;
+
+use zebra_chain::{
+    block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network,
+};
+use zebra_network::AddressBookPeers;
+use zebra_node_services::mempool;
+
 use crate::{
+    config,
     methods::{RpcImpl, RpcServer as _},
     server::{
         http_request_compatibility::HttpRequestMiddlewareLayer,
         rpc_call_compatibility::FixRpcResponseMiddleware,
     },
 };
-use cookie::Cookie;
-use jsonrpsee::server::middleware::rpc::RpcServiceBuilder;
-use jsonrpsee::server::{Server, ServerHandle};
-use std::{fmt, panic};
-use tokio::task::JoinHandle;
-use tower::Service;
-use tracing::*;
-use zebra_chain::{
-    block, chain_sync_status::ChainSyncStatus, chain_tip::ChainTip, parameters::Network,
-};
-use zebra_network::AddressBookPeers;
-use zebra_node_services::mempool;
 
 pub mod cookie;
 pub mod error;
