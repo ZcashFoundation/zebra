@@ -37,7 +37,10 @@ use zebra_chain::{
     work::difficulty::CompactDifficulty,
 };
 use zebra_consensus::Request;
-use zebra_network::{address_book_peers::MockAddressBookPeers, types::{MetaAddr, PeerServices}};
+use zebra_network::{
+    address_book_peers::MockAddressBookPeers,
+    types::{MetaAddr, PeerServices},
+};
 use zebra_node_services::{mempool, BoxError};
 use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
 use zebra_test::{
