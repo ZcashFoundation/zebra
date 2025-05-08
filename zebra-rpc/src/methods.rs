@@ -6,23 +6,6 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
-use crate::{
-    config,
-    methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
-    queue::Queue,
-    server::{
-        self,
-        error::{MapError, OkOrError},
-    },
-};
-use chrono::Utc;
-use futures::{future::OptionFuture, stream::FuturesOrdered, StreamExt, TryFutureExt};
-use hex::{FromHex, ToHex};
-use hex_data::HexData;
-use indexmap::IndexMap;
-use jsonrpsee::core::{async_trait, RpcResult as Result};
-use jsonrpsee_proc_macros::rpc;
-use jsonrpsee_types::{ErrorCode, ErrorObject};
 use std::{
     cmp,
     collections::{HashMap, HashSet},
@@ -31,28 +14,25 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+
+use chrono::Utc;
+use futures::{future::OptionFuture, stream::FuturesOrdered, StreamExt, TryFutureExt};
+use hex::{FromHex, ToHex};
+use hex_data::HexData;
+use indexmap::IndexMap;
+use jsonrpsee::core::{async_trait, RpcResult as Result};
+use jsonrpsee_proc_macros::rpc;
+use jsonrpsee_types::{ErrorCode, ErrorObject};
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
 };
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
-use types::{
-    get_block_template::{
-        self, constants::MEMPOOL_LONG_POLL_INTERVAL, proposal::proposal_block_from_template,
-        GetBlockTemplate, GetBlockTemplateHandler, ZCASHD_FUNDING_STREAM_ORDER,
-    },
-    get_blockchain_info, get_mining_info,
-    get_raw_mempool::{self, GetRawMempool},
-    long_poll::LongPollInput,
-    peer_info::PeerInfo,
-    submit_block,
-    subsidy::BlockSubsidy,
-    transaction::TransactionObject,
-    unified_address, validate_address, z_validate_address,
-};
+
 use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_primitives::consensus::Parameters;
+
 use zebra_chain::{
     amount::{self, Amount, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
@@ -80,6 +60,31 @@ use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+};
+
+use crate::{
+    config,
+    methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
+    queue::Queue,
+    server::{
+        self,
+        error::{MapError, OkOrError},
+    },
+};
+
+use types::{
+    get_block_template::{
+        self, constants::MEMPOOL_LONG_POLL_INTERVAL, proposal::proposal_block_from_template,
+        GetBlockTemplate, GetBlockTemplateHandler, ZCASHD_FUNDING_STREAM_ORDER,
+    },
+    get_blockchain_info, get_mining_info,
+    get_raw_mempool::{self, GetRawMempool},
+    long_poll::LongPollInput,
+    peer_info::PeerInfo,
+    submit_block,
+    subsidy::BlockSubsidy,
+    transaction::TransactionObject,
+    unified_address, validate_address, z_validate_address,
 };
 
 pub mod hex_data;
