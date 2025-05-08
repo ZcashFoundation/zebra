@@ -258,7 +258,7 @@ pub fn any_utxo(
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
 }
 
-/// Returns the [`BlockData`] with [`block::Hash`] or
+/// Returns the [`BlockInfo`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block_info<C>(
     chain: Option<C>,

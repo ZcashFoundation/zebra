@@ -136,9 +136,9 @@ async fn get_block_data(
             (height as u32).try_into().unwrap(),
         )))
         .await
-        .expect("should have block data for block hash")
+        .expect("should have block info for block hash")
     else {
-        panic!("unexpected response to BlockData request")
+        panic!("unexpected response to BlockInfo request")
     };
 
     let delta = block_info.as_ref().and_then(|d| {

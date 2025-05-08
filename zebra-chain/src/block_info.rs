@@ -11,7 +11,7 @@ pub struct BlockInfo {
 }
 
 impl BlockInfo {
-    /// Creates a new [`BlockData`] with the given value pools.
+    /// Creates a new [`BlockInfo`] with the given value pools.
     pub fn new(value_pools: ValueBalance<NonNegative>, size: u32) -> Self {
         BlockInfo { value_pools, size }
     }

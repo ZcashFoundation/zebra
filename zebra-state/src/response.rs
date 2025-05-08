@@ -165,8 +165,8 @@ pub enum ReadResponse {
         value_balance: ValueBalance<NonNegative>,
     },
 
-    /// Response to [`ReadRequest::BlockData`] with
-    /// the block data after the specified block.
+    /// Response to [`ReadRequest::BlockInfo`] with
+    /// the block info after the specified block.
     BlockInfo(Option<BlockInfo>),
 
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.

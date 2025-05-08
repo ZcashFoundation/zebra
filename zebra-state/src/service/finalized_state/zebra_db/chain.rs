@@ -71,7 +71,7 @@ pub const BLOCK_INFO: &str = "block_info";
 ///
 /// This constant should be used so the compiler can detect incorrectly typed accesses to the
 /// column family.
-pub type BlockDataCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
+pub type BlockInfoCf<'cf> = TypedColumnFamily<'cf, Height, BlockInfo>;
 
 impl ZebraDb {
     // Column family convenience methods
@@ -103,8 +103,8 @@ impl ZebraDb {
     }
 
     /// Returns a typed handle to the block data column family.
-    pub(crate) fn block_info_cf(&self) -> BlockDataCf {
-        BlockDataCf::new(&self.db, BLOCK_INFO)
+    pub(crate) fn block_info_cf(&self) -> BlockInfoCf {
+        BlockInfoCf::new(&self.db, BLOCK_INFO)
             .expect("column family was created when database was created")
     }
 
@@ -180,7 +180,7 @@ impl ZebraDb {
             .unwrap_or_else(ValueBalance::zero)
     }
 
-    /// Returns the stored `BlockData` for the given block.
+    /// Returns the stored `BlockInfo` for the given block.
     pub fn block_info(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 

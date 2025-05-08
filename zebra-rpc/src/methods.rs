@@ -906,7 +906,7 @@ where
                 transactions_request,
                 // Orchard trees
                 zebra_state::ReadRequest::OrchardTree(hash_or_height),
-                // Block data
+                // Block info
                 zebra_state::ReadRequest::BlockInfo(previous_block_hash.0.into()),
                 zebra_state::ReadRequest::BlockInfo(hash_or_height),
             ];
@@ -987,13 +987,13 @@ where
             let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
                 block_info_response.map_misc_error()?
             else {
-                unreachable!("unmatched response to a BlockData request");
+                unreachable!("unmatched response to a BlockInfo request");
             };
             let block_info_response = futs.next().await.expect("`futs` should not be empty");
             let zebra_state::ReadResponse::BlockInfo(block_info) =
                 block_info_response.map_misc_error()?
             else {
-                unreachable!("unmatched response to a BlockData request");
+                unreachable!("unmatched response to a BlockInfo request");
             };
 
             let delta = block_info.as_ref().and_then(|d| {

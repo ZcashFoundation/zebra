@@ -17,14 +17,14 @@ use crate::HashOrHeight;
 
 use super::DiskFormatUpgrade;
 
-/// Implements [`DiskFormatUpgrade`] for adding additionl block data to the
+/// Implements [`DiskFormatUpgrade`] for adding additionl block info to the
 /// database; namely, value pool for each block.
 pub struct AddBlockInfo {
     network: Network,
 }
 
 impl AddBlockInfo {
-    /// Creates a new [`BlockData`] upgrade for the given network.
+    /// Creates a new [`BlockInfo`] upgrade for the given network.
     pub fn new(network: Network) -> Self {
         Self { network }
     }
@@ -36,7 +36,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
     }
 
     fn description(&self) -> &'static str {
-        "add block data upgrade"
+        "add block info upgrade"
     }
 
     #[allow(clippy::unwrap_in_result)]
@@ -68,7 +68,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
 
             let (block, size) = db
                 .block_and_size(HashOrHeight::Height(height))
-                .expect("block data should be in the database");
+                .expect("block info should be in the database");
 
             let mut utxos = HashMap::new();
             for tx in &block.transactions {
@@ -118,7 +118,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
                 .new_batch_for_writing()
                 .zs_insert(&height, &block_info)
                 .write_batch()
-                .expect("writing block data should succeed");
+                .expect("writing block info should succeed");
         }
         Ok(())
     }

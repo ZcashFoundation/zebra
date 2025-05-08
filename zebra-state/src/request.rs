@@ -921,10 +921,10 @@ pub enum ReadRequest {
     /// with the pool values of the current best chain tip.
     TipPoolValues,
 
-    /// Looks up the block data after a block by hash or height in the current best chain.
+    /// Looks up the block info after a block by hash or height in the current best chain.
     ///
-    /// * [`ReadResponse::BlockData(Some(pool_values))`](ReadResponse::BlockData) if the block is in the best chain;
-    /// * [`ReadResponse::BlockData(None)`](ReadResponse::BlockData) otherwise.
+    /// * [`ReadResponse::BlockInfo(Some(pool_values))`](ReadResponse::BlockInfo) if the block is in the best chain;
+    /// * [`ReadResponse::BlockInfo(None)`](ReadResponse::BlockInfo) otherwise.
     BlockInfo(HashOrHeight),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
