@@ -798,8 +798,11 @@ where
         };
 
         // run the process queue
-        let rpc_tx_queue_task_handle =
-            tokio::spawn(runner.run(mempool, state, latest_chain_tip, network).in_current_span());
+        let rpc_tx_queue_task_handle = tokio::spawn(
+            runner
+                .run(mempool, state, latest_chain_tip, network)
+                .in_current_span(),
+        );
 
         (rpc_impl, rpc_tx_queue_task_handle)
     }
