@@ -3704,6 +3704,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rayon-par-bridge"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb6a14d8f65834aca6b0fe4cbbd7a27e639cd3efb1f2a32de9942368f1991de8"
+dependencies = [
+ "rayon",
+]
+
+[[package]]
 name = "reddsa"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6548,6 +6557,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "rayon",
+ "rayon-par-bridge",
  "regex",
  "rlimit",
  "rocksdb",

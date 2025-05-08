@@ -69,6 +69,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 rayon = { workspace = true }
+rayon-par-bridge = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }

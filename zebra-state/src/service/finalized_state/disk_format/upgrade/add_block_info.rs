@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 
 use crossbeam_channel::TryRecvError;
+use itertools::Itertools;
+use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use zebra_chain::{
     amount::NonNegative,
     block::Height,
@@ -46,29 +48,52 @@ impl DiskFormatUpgrade for AddBlockInfo {
         db: &crate::ZebraDb,
         cancel_receiver: &crossbeam_channel::Receiver<super::CancelFormatChange>,
     ) -> Result<(), super::CancelFormatChange> {
+        let chunks = (0..=initial_tip_height.0).chunks(rayon::current_num_threads());
+        let seq_iter = chunks
+            .into_iter()
+            .map(|height_span| {
+                let height_span = height_span.collect_vec();
+                let result_span = height_span
+                    .into_par_iter()
+                    .map(|h| {
+                        // Return early if the upgrade is cancelled.
+                        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                            return Err(super::CancelFormatChange);
+                        }
+
+                        let height = Height(h);
+
+                        // The upgrade might have been interrupted and some heights might
+                        // have already been filled. Skip those.
+                        if let Some(existing_block_info) = db.block_info_cf().zs_get(&height) {
+                            let value_pool = *existing_block_info.value_pools();
+                            return Ok((h, Some(value_pool), None, None));
+                        }
+
+                        let (block, size) = db
+                            .block_and_size(HashOrHeight::Height(height))
+                            .expect("block info should be in the database");
+                        Ok((h, None, Some(block), Some(size)))
+                    })
+                    .collect::<Vec<_>>();
+                result_span
+            })
+            .flatten();
+
         let mut value_pool = ValueBalance::<NonNegative>::default();
-        for h in 0..=initial_tip_height.0 {
-            // Return early if the upgrade is cancelled.
-            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return Err(super::CancelFormatChange);
-            }
 
+        for result in seq_iter {
+            let (h, prev_value_pool, block, size) = result?;
             let height = Height(h);
-
-            // The upgrade might have been interrupted and some heights might
-            // have already been filled. Skip those.
-            if let Some(existing_block_info) = db.block_info_cf().zs_get(&height) {
-                value_pool = *existing_block_info.value_pools();
+            tracing::info!(height = ?height, "adding block info for height");
+            if height.0 % 1000 == 0 {}
+            if let Some(prev_value_pool) = prev_value_pool {
+                value_pool = prev_value_pool;
                 continue;
             }
-
-            if height.0 % 1000 == 0 {
-                tracing::info!(height = ?height, "adding block info for height");
-            }
-
-            let (block, size) = db
-                .block_and_size(HashOrHeight::Height(height))
-                .expect("block info should be in the database");
+            let (Some(block), Some(size)) = (block, size) else {
+                unreachable!("either prev_value_pool or block and size should be Some");
+            };
 
             let mut utxos = HashMap::new();
             for tx in &block.transactions {
@@ -120,6 +145,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
                 .write_batch()
                 .expect("writing block info should succeed");
         }
+
         Ok(())
     }
 
