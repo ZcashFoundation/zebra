@@ -174,10 +174,12 @@ fn mempool_storage_crud_same_effects_mainnet() {
     assert!(storage.contains_transaction_exact(&unmined_tx_1.transaction.id.mined_id()));
 
     // Reject and remove mined tx
-    let removal_count = storage.reject_and_remove_same_effects(
-        &iter::once(unmined_tx_1.transaction.id.mined_id()).collect(),
-        vec![unmined_tx_1.transaction.transaction.clone()],
-    );
+    let removal_count = storage
+        .reject_and_remove_same_effects(
+            &iter::once(unmined_tx_1.transaction.id.mined_id()).collect(),
+            vec![unmined_tx_1.transaction.transaction.clone()],
+        )
+        .total_len();
 
     // Check that it is /not/ in the mempool as a verified transaction.
     assert_eq!(removal_count, 1);
@@ -215,10 +217,12 @@ fn mempool_storage_crud_same_effects_mainnet() {
     assert!(storage.contains_transaction_exact(&unmined_tx_2.transaction.id.mined_id()));
 
     // Reject and remove duplicate spend tx
-    let removal_count = storage.reject_and_remove_same_effects(
-        &HashSet::new(),
-        vec![unmined_tx_2.transaction.transaction.clone()],
-    );
+    let removal_count = storage
+        .reject_and_remove_same_effects(
+            &HashSet::new(),
+            vec![unmined_tx_2.transaction.transaction.clone()],
+        )
+        .total_len();
 
     // Check that it is /not/ in the mempool as a verified transaction.
     assert_eq!(removal_count, 1);
