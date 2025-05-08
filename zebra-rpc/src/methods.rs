@@ -746,8 +746,8 @@ where
     // - put some of the configs or services in their own struct?
     #[allow(clippy::too_many_arguments)]
     pub fn new<VersionString, UserAgentString>(
-        net: Network,
-        mining_conf: config::mining::Config,
+        network: Network,
+        mining_config: config::mining::Config,
         debug_force_finished_sync: bool,
         build_version: VersionString,
         user_agent: UserAgentString,
@@ -755,7 +755,7 @@ where
         state: State,
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
-        chain_tip: Tip,
+        latest_chain_tip: Tip,
         address_book: AddressBook,
         last_warn_error_log_rx: LoggedLastEvent,
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
@@ -775,8 +775,8 @@ where
         }
 
         let gbt = GetBlockTemplateHandler::new(
-            &net,
-            mining_conf.clone(),
+            &network,
+            mining_config.clone(),
             block_verifier_router,
             sync_status,
             mined_block_sender,
@@ -785,12 +785,12 @@ where
         let rpc_impl = RpcImpl {
             build_version,
             user_agent,
-            network: net.clone(),
+            network: network.clone(),
             debug_force_finished_sync,
-            debug_like_zcashd: mining_conf.debug_like_zcashd,
+            debug_like_zcashd: mining_config.debug_like_zcashd,
             mempool: mempool.clone(),
             state: state.clone(),
-            latest_chain_tip: chain_tip.clone(),
+            latest_chain_tip: latest_chain_tip.clone(),
             queue_sender,
             address_book,
             last_warn_error_log_rx,
@@ -799,7 +799,7 @@ where
 
         // run the process queue
         let rpc_tx_queue_task_handle =
-            tokio::spawn(runner.run(mempool, state, chain_tip, net).in_current_span());
+            tokio::spawn(runner.run(mempool, state, latest_chain_tip, network).in_current_span());
 
         (rpc_impl, rpc_tx_queue_task_handle)
     }
