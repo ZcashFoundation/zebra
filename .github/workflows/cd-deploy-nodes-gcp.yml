@@ -358,6 +358,19 @@ jobs:
           --region "${{ vars.GCP_REGION }}" \
           --size 1
 
+      # Configure stateful disk policy for release MIGs to ensure disk persistence.
+      # This policy tells the MIG to preserve the disk with the specified device-name
+      # when instances are recreated or deleted, and to reattach it.
+      - name: Configure stateful disk policy for release MIG
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          MIG_NAME="zebrad-${{ needs.versioning.outputs.major_version }}-${NETWORK}"
+          DEVICE_NAME_TO_PRESERVE="zebrad-cache-${NETWORK}"
+          echo "Applying stateful policy to MIG: ${MIG_NAME} for device: ${DEVICE_NAME_TO_PRESERVE}"
+          gcloud compute instance-groups managed set-stateful-policy "${MIG_NAME}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --stateful-disk "device-name=${DEVICE_NAME_TO_PRESERVE},auto-delete=never"
+
       # Rolls out update to existing group using the new instance template
       - name: Update managed instance group for ${{ matrix.network }}
         if: steps.does-group-exist.outcome == 'success'
