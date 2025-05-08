@@ -5,32 +5,19 @@
 //! cargo insta test --review --release -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
-use super::super::*;
-use crate::methods::{
-    hex_data::HexData,
-    tests::utils::fake_history_tree,
-    types::{
-        get_block_template::{self, GetBlockTemplateRequestMode},
-        get_mining_info,
-        long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
-        peer_info::PeerInfo,
-        submit_block,
-        subsidy::BlockSubsidy,
-        unified_address, validate_address, z_validate_address,
-    },
-    GetBlockHash,
-};
-use futures::FutureExt;
-use hex::FromHex;
-use insta::{dynamic_redaction, Settings};
-use jsonrpsee::core::RpcResult as Result;
 use std::{
     collections::BTreeMap,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     sync::Arc,
     time::Instant,
 };
+
+use futures::FutureExt;
+use hex::FromHex;
+use insta::{dynamic_redaction, Settings};
+use jsonrpsee::core::RpcResult as Result;
 use tower::{buffer::Buffer, util::BoxService, Service};
+
 use zebra_chain::{
     block::{Block, Hash},
     chain_sync_status::MockSyncStatus,
@@ -57,6 +44,23 @@ use zebra_test::{
     mock_service::{MockService, PanicAssertion},
     vectors::BLOCK_MAINNET_1_BYTES,
 };
+
+use crate::methods::{
+    hex_data::HexData,
+    tests::utils::fake_history_tree,
+    types::{
+        get_block_template::{self, GetBlockTemplateRequestMode},
+        get_mining_info,
+        long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
+        peer_info::PeerInfo,
+        submit_block,
+        subsidy::BlockSubsidy,
+        unified_address, validate_address, z_validate_address,
+    },
+    GetBlockHash,
+};
+
+use super::super::*;
 
 /// The first block height in the state that can never be stored in the database,
 /// due to optimisations in the disk format.
