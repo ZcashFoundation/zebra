@@ -1,15 +1,17 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crossbeam_channel::TryRecvError;
+use itertools::Itertools;
+use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use zebra_chain::{
     amount::NonNegative,
-    block::Height,
+    block::{Block, Height},
     block_info::BlockInfo,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
         Network,
     },
-    transparent::Utxo,
+    transparent::{OutPoint, Utxo},
     value_balance::ValueBalance,
 };
 
@@ -30,6 +32,18 @@ impl AddBlockInfo {
     }
 }
 
+/// The result of loading data to create a [`BlockInfo`]. If the info was
+/// already there we only need to ValueBalance to keep track of the totals.
+/// Otherwise we need the block, size and utxos to compute the BlockInfo.
+enum LoadResult {
+    HasInfo(ValueBalance<NonNegative>),
+    LoadedInfo {
+        block: Arc<Block>,
+        size: usize,
+        utxos: HashMap<OutPoint, Utxo>,
+    },
+}
+
 impl DiskFormatUpgrade for AddBlockInfo {
     fn version(&self) -> semver::Version {
         semver::Version::new(26, 1, 0)
@@ -46,51 +60,96 @@ impl DiskFormatUpgrade for AddBlockInfo {
         db: &crate::ZebraDb,
         cancel_receiver: &crossbeam_channel::Receiver<super::CancelFormatChange>,
     ) -> Result<(), super::CancelFormatChange> {
-        let mut value_pool = ValueBalance::<NonNegative>::default();
-        for h in 0..=initial_tip_height.0 {
-            // Return early if the upgrade is cancelled.
-            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
-                return Err(super::CancelFormatChange);
-            }
+        let chunk_size = rayon::current_num_threads();
+        tracing::debug!(chunk_size = ?chunk_size, "adding block info data");
 
-            let height = Height(h);
-
-            // The upgrade might have been interrupted and some heights might
-            // have already been filled. Skip those.
-            if let Some(existing_block_info) = db.block_info_cf().zs_get(&height) {
-                value_pool = *existing_block_info.value_pools();
-                continue;
-            }
-
-            if height.0 % 1000 == 0 {
-                tracing::info!(height = ?height, "adding block info for height");
-            }
-
-            let (block, size) = db
-                .block_and_size(HashOrHeight::Height(height))
-                .expect("block info should be in the database");
-
-            let mut utxos = HashMap::new();
-            for tx in &block.transactions {
-                for input in tx.inputs() {
-                    if let Some(outpoint) = input.outpoint() {
-                        let (tx, h, _) = db
-                            .transaction(outpoint.hash)
-                            .expect("transaction should be in the database");
-                        let output = tx
-                            .outputs()
-                            .get(outpoint.index as usize)
-                            .expect("output should exist");
-
-                        let utxo = Utxo {
-                            output: output.clone(),
-                            height: h,
-                            from_coinbase: tx.is_coinbase(),
-                        };
-                        utxos.insert(outpoint, utxo);
+        let chunks = (0..=initial_tip_height.0).chunks(chunk_size);
+        // Since transaction parsing is slow, we want to parallelize it.
+        // Get chunks of block heights and load them in parallel.
+        let seq_iter = chunks.into_iter().flat_map(|height_span| {
+            // I did not find a way to avoid creating a Vec, since without
+            // collecting we would require par_bridge() which does not preserve
+            // order later. But this is inexpensive.
+            let height_vec = height_span.collect_vec();
+            let result_vec = height_vec
+                .into_par_iter()
+                .map(|h| {
+                    // Return early if the upgrade is cancelled.
+                    if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                        return Err(super::CancelFormatChange);
                     }
-                }
+
+                    let height = Height(h);
+
+                    // The upgrade might have been interrupted and some heights might
+                    // have already been filled. Return a value indicating that
+                    // along with the loaded value pool.
+                    if let Some(existing_block_info) = db.block_info_cf().zs_get(&height) {
+                        let value_pool = *existing_block_info.value_pools();
+                        return Ok((h, LoadResult::HasInfo(value_pool)));
+                    }
+
+                    // Load the block. This is slow since transaction
+                    // parsing is slow.
+                    let (block, size) = db
+                        .block_and_size(HashOrHeight::Height(height))
+                        .expect("block info should be in the database");
+
+                    // Load the utxos for all the transactions inputs in the block.
+                    // This is required to compute the value pool change.
+                    // This is slow because transaction parsing is slow.
+                    let mut utxos = HashMap::new();
+                    for tx in &block.transactions {
+                        for input in tx.inputs() {
+                            if let Some(outpoint) = input.outpoint() {
+                                let (tx, h, _) = db
+                                    .transaction(outpoint.hash)
+                                    .expect("transaction should be in the database");
+                                let output = tx
+                                    .outputs()
+                                    .get(outpoint.index as usize)
+                                    .expect("output should exist");
+
+                                let utxo = Utxo {
+                                    output: output.clone(),
+                                    height: h,
+                                    from_coinbase: tx.is_coinbase(),
+                                };
+                                utxos.insert(outpoint, utxo);
+                            }
+                        }
+                    }
+
+                    Ok((h, LoadResult::LoadedInfo { block, size, utxos }))
+                })
+                .collect::<Vec<_>>();
+            // The collected Vec is in-order as required as guaranteed by Rayon.
+            // Note that since we use flat_map() above, the result iterator will
+            // iterate through individual results as expected.
+            result_vec
+        });
+
+        // Keep track of the current value pool as we iterate the blocks.
+        let mut value_pool = ValueBalance::<NonNegative>::default();
+
+        for result in seq_iter {
+            let (h, load_result) = result?;
+            let height = Height(h);
+            if height.0 % 1000 == 0 {
+                tracing::debug!(height = ?height, "adding block info for height");
             }
+            // Get the data loaded from the parallel iterator
+            let (block, size, utxos) = match load_result {
+                LoadResult::HasInfo(prev_value_pool) => {
+                    // BlockInfo already stored; we just need the its value pool
+                    // then skip the block
+                    value_pool = prev_value_pool;
+                    continue;
+                }
+                LoadResult::LoadedInfo { block, size, utxos } => (block, size, utxos),
+            };
+
+            // Get the deferred amount which is required to update the value pool.
             let expected_deferred_amount = if height > self.network.slow_start_interval() {
                 // See [ZIP-1015](https://zips.z.cash/zip-1015).
                 funding_stream_values(
@@ -104,6 +163,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
                 None
             };
 
+            // Add this block's value pool changes to the total value pool.
             value_pool = value_pool
                 .add_chain_value_pool_change(
                     block
@@ -112,14 +172,15 @@ impl DiskFormatUpgrade for AddBlockInfo {
                 )
                 .expect("value pool change should not overflow");
 
+            // Create and store the BlockInfo for this block.
             let block_info = BlockInfo::new(value_pool, size as u32);
-
             db.block_info_cf()
                 .new_batch_for_writing()
                 .zs_insert(&height, &block_info)
                 .write_batch()
                 .expect("writing block info should succeed");
         }
+
         Ok(())
     }
 

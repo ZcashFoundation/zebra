@@ -1195,7 +1195,7 @@ impl ReadRequest {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
-            ReadRequest::BlockInfo(_) => "pool_values",
+            ReadRequest::BlockInfo(_) => "block_info",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
             ReadRequest::BlockAndSize(_) => "block_and_size",

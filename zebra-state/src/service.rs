@@ -1261,7 +1261,7 @@ impl Service<ReadRequest> for ReadStateService {
 
                         // The work is done in the future.
                         // TODO: Do this in the Drop impl with the variant name?
-                        timer.finish(module_path!(), line!(), "ReadRequest::PoolValues");
+                        timer.finish(module_path!(), line!(), "ReadRequest::BlockInfo");
 
                         Ok(ReadResponse::BlockInfo(value_balance))
                     })
