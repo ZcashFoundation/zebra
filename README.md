@@ -80,6 +80,11 @@ sudo pacman -S rust clang protobuf
 
 Note that the package `clang` includes `libclang` as well as the C++ compiler.
 
+Recently the GCC version on Arch has broken a build script in the `rocksdb` dependency. A workaround is:
+```sh
+export CXXFLAGS="$CXXFLAGS -include cstdint"
+```
+
 </details>
 
 Once you have the dependencies in place, you can build and install Zebra with:
