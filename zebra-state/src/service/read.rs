@@ -29,7 +29,7 @@ pub use address::{
     utxo::{address_utxos, AddressUtxos},
 };
 pub use block::{
-    any_utxo, block, block_and_size, block_data, block_header, mined_transaction,
+    any_utxo, block, block_and_size, block_header, block_info, mined_transaction,
     transaction_hashes_for_block, unspent_utxo,
 };
 

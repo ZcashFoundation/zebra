@@ -1244,14 +1244,14 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by getblock
-            ReadRequest::BlockData(hash_or_height) => {
+            ReadRequest::BlockInfo(hash_or_height) => {
                 let state = self.clone();
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
                         let value_balance = state.non_finalized_state_receiver.with_watch_data(
                             |non_finalized_state| {
-                                read::block_data(
+                                read::block_info(
                                     non_finalized_state.best_chain(),
                                     &state.db,
                                     hash_or_height,
@@ -1263,7 +1263,7 @@ impl Service<ReadRequest> for ReadStateService {
                         // TODO: Do this in the Drop impl with the variant name?
                         timer.finish(module_path!(), line!(), "ReadRequest::PoolValues");
 
-                        Ok(ReadResponse::BlockData(value_balance))
+                        Ok(ReadResponse::BlockInfo(value_balance))
                     })
                 })
                 .wait_for_panics()

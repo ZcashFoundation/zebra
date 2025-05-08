@@ -597,11 +597,6 @@ impl DiskWriteBatch {
 
         // Commit block, transaction, and note commitment tree data.
         self.prepare_block_header_and_transaction_data_batch(db, finalized)?;
-        // Get the block size to store with the BlockInfo. This is a bit wasteful
-        // since the block header and txs were serialized inside the function
-        // in the line above, and we could get the size if we modified the database
-        // code to return the size of data written; but serialization should be cheap.
-        let size = finalized.block.zcash_serialized_size();
 
         // The consensus rules are silent on shielded transactions in the genesis block,
         // because there aren't any in the mainnet or testnet genesis blocks.
@@ -635,16 +630,14 @@ impl DiskWriteBatch {
                 &out_loc_by_outpoint,
                 address_balances,
             )?;
-
-            // Commit UTXOs and value pools
-            self.prepare_chain_value_pools_batch(
-                zebra_db,
-                finalized,
-                spent_utxos_by_outpoint,
-                value_pool,
-                size,
-            )?;
         }
+        // Commit UTXOs and value pools
+        self.prepare_chain_value_pools_batch(
+            zebra_db,
+            finalized,
+            spent_utxos_by_outpoint,
+            value_pool,
+        )?;
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(&finalized.block, finalized.hash, finalized.height);

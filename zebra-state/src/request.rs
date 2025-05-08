@@ -925,7 +925,7 @@ pub enum ReadRequest {
     ///
     /// * [`ReadResponse::BlockData(Some(pool_values))`](ReadResponse::BlockData) if the block is in the best chain;
     /// * [`ReadResponse::BlockData(None)`](ReadResponse::BlockData) otherwise.
-    BlockData(HashOrHeight),
+    BlockInfo(HashOrHeight),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
@@ -1195,7 +1195,7 @@ impl ReadRequest {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
-            ReadRequest::BlockData(_) => "pool_values",
+            ReadRequest::BlockInfo(_) => "pool_values",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
             ReadRequest::BlockAndSize(_) => "block_and_size",

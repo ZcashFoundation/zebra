@@ -905,8 +905,8 @@ where
                 // Orchard trees
                 zebra_state::ReadRequest::OrchardTree(hash_or_height),
                 // Block data
-                zebra_state::ReadRequest::BlockData(previous_block_hash.0.into()),
-                zebra_state::ReadRequest::BlockData(hash_or_height),
+                zebra_state::ReadRequest::BlockInfo(previous_block_hash.0.into()),
+                zebra_state::ReadRequest::BlockInfo(hash_or_height),
             ];
 
             let mut futs = FuturesOrdered::new();
@@ -978,28 +978,28 @@ where
 
             let trees = GetBlockTrees { sapling, orchard };
 
-            let block_data_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::BlockData(prev_block_data) =
-                block_data_response.map_misc_error()?
+            let block_info_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
+                block_info_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to a BlockData request");
             };
-            let block_data_response = futs.next().await.expect("`futs` should not be empty");
-            let zebra_state::ReadResponse::BlockData(block_data) =
-                block_data_response.map_misc_error()?
+            let block_info_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::BlockInfo(block_info) =
+                block_info_response.map_misc_error()?
             else {
                 unreachable!("unmatched response to a BlockData request");
             };
 
-            let delta = block_data.as_ref().and_then(|d| {
+            let delta = block_info.as_ref().and_then(|d| {
                 let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
-                let prev_value_pools = prev_block_data
+                let prev_value_pools = prev_block_info
                     .map(|d| d.value_pools().constrain::<NegativeAllowed>())
                     .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
                     .ok()?;
                 (value_pools - prev_value_pools).ok()
             });
-            let size = size.or(block_data.as_ref().map(|d| d.size() as usize));
+            let size = size.or(block_info.as_ref().map(|d| d.size() as usize));
 
             Ok(GetBlock::Object {
                 hash,
@@ -1014,10 +1014,10 @@ where
                 difficulty: Some(difficulty),
                 tx,
                 trees,
-                chain_supply: block_data
+                chain_supply: block_info
                     .as_ref()
                     .map(|d| types::Balance::chain_supply(*d.value_pools())),
-                value_pools: block_data
+                value_pools: block_info
                     .map(|d| types::Balance::value_pools(*d.value_pools(), delta)),
                 size: size.map(|size| size as i64),
                 block_commitments: Some(block_commitments),

@@ -156,7 +156,7 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::BlockData`] with
     /// the block data after the specified block.
-    BlockData(Option<BlockInfo>),
+    BlockInfo(Option<BlockInfo>),
 
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
@@ -348,7 +348,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
-            | ReadResponse::BlockData(_)
+            | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)

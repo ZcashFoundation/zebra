@@ -19,18 +19,18 @@ use super::DiskFormatUpgrade;
 
 /// Implements [`DiskFormatUpgrade`] for adding additionl block data to the
 /// database; namely, value pool for each block.
-pub struct AddBlockData {
+pub struct AddBlockInfo {
     network: Network,
 }
 
-impl AddBlockData {
+impl AddBlockInfo {
     /// Creates a new [`BlockData`] upgrade for the given network.
     pub fn new(network: Network) -> Self {
         Self { network }
     }
 }
 
-impl DiskFormatUpgrade for AddBlockData {
+impl DiskFormatUpgrade for AddBlockInfo {
     fn version(&self) -> semver::Version {
         semver::Version::new(26, 1, 0)
     }
@@ -57,13 +57,13 @@ impl DiskFormatUpgrade for AddBlockData {
 
             // The upgrade might have been interrupted and some heights might
             // have already been filled. Skip those.
-            if let Some(existing_block_data) = db.block_data_cf().zs_get(&height) {
-                value_pool = *existing_block_data.value_pools();
+            if let Some(existing_block_info) = db.block_info_cf().zs_get(&height) {
+                value_pool = *existing_block_info.value_pools();
                 continue;
             }
 
             if height.0 % 1000 == 0 {
-                tracing::info!(height = ?height, "adding block data for height");
+                tracing::info!(height = ?height, "adding block info for height");
             }
 
             let (block, size) = db
@@ -112,11 +112,11 @@ impl DiskFormatUpgrade for AddBlockData {
                 )
                 .expect("value pool change should not overflow");
 
-            let block_data = BlockInfo::new(value_pool, size as u32);
+            let block_info = BlockInfo::new(value_pool, size as u32);
 
-            db.block_data_cf()
+            db.block_info_cf()
                 .new_batch_for_writing()
-                .zs_insert(&height, &block_data)
+                .zs_insert(&height, &block_info)
                 .write_batch()
                 .expect("writing block data should succeed");
         }
@@ -139,24 +139,20 @@ impl DiskFormatUpgrade for AddBlockData {
             return Ok(Ok(()));
         };
 
-        // Check any outputs in the last 1000 blocks. We use MIN + 1 (i.e. 1)
-        // instead of MIN (i.e. 0) as the fallback due to an exception in
-        // DiskWriteBatch::prepare_block_batch() where we don't store the block
-        // data for height 0.
-        let start_height =
-            (tip_height - 1_000).unwrap_or((Height::MIN + 1).expect("cannot overflow"));
+        // Check any outputs in the last 1000 blocks.
+        let start_height = (tip_height - 1_000).unwrap_or(Height::MIN);
 
         if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(super::CancelFormatChange);
         }
 
         for height in start_height.0..=tip_height.0 {
-            if let Some(block_data) = db.block_data_cf().zs_get(&Height(height)) {
-                if block_data == Default::default() {
-                    return Ok(Err(format!("zero block data for height: {}", height)));
+            if let Some(block_info) = db.block_info_cf().zs_get(&Height(height)) {
+                if block_info == Default::default() {
+                    return Ok(Err(format!("zero block info for height: {}", height)));
                 }
             } else {
-                return Ok(Err(format!("missing block data for height: {}", height)));
+                return Ok(Err(format!("missing block info for height: {}", height)));
             }
         }
 

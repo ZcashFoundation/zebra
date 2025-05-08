@@ -258,7 +258,7 @@ pub fn any_utxo(
 
 /// Returns the [`BlockData`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
-pub fn block_data<C>(
+pub fn block_info<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash_or_height: HashOrHeight,
@@ -273,6 +273,6 @@ where
     // but `db` stores blocks on disk, with a memory cache.)
     chain
         .as_ref()
-        .and_then(|chain| chain.as_ref().block_data(hash_or_height))
-        .or_else(|| db.block_data(hash_or_height))
+        .and_then(|chain| chain.as_ref().block_info(hash_or_height))
+        .or_else(|| db.block_info(hash_or_height))
 }

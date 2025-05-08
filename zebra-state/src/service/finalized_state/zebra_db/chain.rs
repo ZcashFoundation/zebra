@@ -18,7 +18,7 @@ use std::{
 
 use zebra_chain::{
     amount::NonNegative, block::Height, block_info::BlockInfo, history_tree::HistoryTree,
-    transparent, value_balance::ValueBalance,
+    serialization::ZcashSerialize as _, transparent, value_balance::ValueBalance,
 };
 
 use crate::{
@@ -62,10 +62,10 @@ pub const CHAIN_VALUE_POOLS: &str = "tip_chain_value_pool";
 /// column family.
 pub type ChainValuePoolsCf<'cf> = TypedColumnFamily<'cf, (), ValueBalance<NonNegative>>;
 
-/// The name of the block data column family.
+/// The name of the block info column family.
 ///
 /// This constant should be used so the compiler can detect typos.
-pub const BLOCK_DATA: &str = "block_data";
+pub const BLOCK_INFO: &str = "block_info";
 
 /// The type for reading value pools from the database.
 ///
@@ -103,8 +103,8 @@ impl ZebraDb {
     }
 
     /// Returns a typed handle to the block data column family.
-    pub(crate) fn block_data_cf(&self) -> BlockDataCf {
-        BlockDataCf::new(&self.db, BLOCK_DATA)
+    pub(crate) fn block_info_cf(&self) -> BlockDataCf {
+        BlockDataCf::new(&self.db, BLOCK_INFO)
             .expect("column family was created when database was created")
     }
 
@@ -181,12 +181,12 @@ impl ZebraDb {
     }
 
     /// Returns the stored `BlockData` for the given block.
-    pub fn block_data(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
+    pub fn block_info(&self, hash_or_height: HashOrHeight) -> Option<BlockInfo> {
         let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
 
-        let block_data_cf = self.block_data_cf();
+        let block_info_cf = self.block_info_cf();
 
-        block_data_cf.zs_get(&height)
+        block_info_cf.zs_get(&height)
     }
 }
 
@@ -252,7 +252,6 @@ impl DiskWriteBatch {
         finalized: &FinalizedBlock,
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
-        block_size: usize,
     ) -> Result<(), BoxError> {
         let new_value_pool = value_pool.add_chain_value_pool_change(
             finalized
@@ -264,7 +263,13 @@ impl DiskWriteBatch {
             .with_batch_for_writing(self)
             .zs_insert(&(), &new_value_pool);
 
-        let _ = db.block_data_cf().with_batch_for_writing(self).zs_insert(
+        // Get the block size to store with the BlockInfo. This is a bit wasteful
+        // since the block header and txs were serialized previously when writing
+        // them to the DB, and we could get the size if we modified the database
+        // code to return the size of data written; but serialization should be cheap.
+        let block_size = finalized.block.zcash_serialized_size();
+
+        let _ = db.block_info_cf().with_batch_for_writing(self).zs_insert(
             &finalized.height,
             &BlockInfo::new(new_value_pool, block_size as u32),
         );
