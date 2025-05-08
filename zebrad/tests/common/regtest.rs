@@ -99,6 +99,7 @@ async fn submit_blocks(network: Network, rpc_address: SocketAddr) -> Result<()> 
 pub trait MiningRpcMethods {
     async fn block_from_template(&self, nu5_activation_height: Height) -> Result<(Block, Height)>;
     async fn submit_block(&self, block: Block) -> Result<()>;
+    #[allow(dead_code)]
     async fn submit_block_from_template(&self) -> Result<(Block, Height)>;
     async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError>;
 }
@@ -140,6 +141,7 @@ impl MiningRpcMethods for RpcRequestClient {
         }
     }
 
+    #[allow(dead_code)]
     async fn submit_block_from_template(&self) -> Result<(Block, Height)> {
         let (block, height) = self
             .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))

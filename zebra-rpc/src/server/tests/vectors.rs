@@ -39,6 +39,7 @@ async fn rpc_server_spawn() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut block_verifier_router: MockService<_, _, _, BoxError> =
         MockService::build().for_unit_tests();
 
@@ -52,6 +53,7 @@ async fn rpc_server_spawn() {
         "RPC server test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
@@ -65,6 +67,7 @@ async fn rpc_server_spawn() {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+    read_state.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 }
 
@@ -101,6 +104,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut block_verifier_router: MockService<_, _, _, BoxError> =
         MockService::build().for_unit_tests();
 
@@ -114,6 +118,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
         "RPC server test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
@@ -129,6 +134,7 @@ async fn rpc_spawn_unallocated_port(do_shutdown: bool) {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+    read_state.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 
     if do_shutdown {
@@ -159,6 +165,7 @@ async fn rpc_server_spawn_port_conflict() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut block_verifier_router: MockService<_, _, _, BoxError> =
         MockService::build().for_unit_tests();
 
@@ -172,6 +179,7 @@ async fn rpc_server_spawn_port_conflict() {
         "RPC server 1 test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
@@ -193,6 +201,7 @@ async fn rpc_server_spawn_port_conflict() {
         "RPC server 2 conflict test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
         Buffer::new(block_verifier_router.clone(), 1),
         MockSyncStatus::default(),
         MockAddressBookPeers::default(),
@@ -207,5 +216,6 @@ async fn rpc_server_spawn_port_conflict() {
 
     mempool.expect_no_requests().await;
     state.expect_no_requests().await;
+    read_state.expect_no_requests().await;
     block_verifier_router.expect_no_requests().await;
 }

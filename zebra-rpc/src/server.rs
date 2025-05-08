@@ -99,6 +99,7 @@ impl RpcServer {
         UserAgentString,
         Mempool,
         State,
+        ReadState,
         Tip,
         BlockVerifierRouter,
         SyncStatus,
@@ -110,6 +111,7 @@ impl RpcServer {
         user_agent: UserAgentString,
         mempool: Mempool,
         state: State,
+        read_state: ReadState,
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         address_book: AddressBook,
@@ -131,6 +133,15 @@ impl RpcServer {
             + 'static,
         Mempool::Future: Send,
         State: Service<
+                zebra_state::Request,
+                Response = zebra_state::Response,
+                Error = zebra_state::BoxError,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+        State::Future: Send,
+        ReadState: Service<
                 zebra_state::ReadRequest,
                 Response = zebra_state::ReadResponse,
                 Error = zebra_state::BoxError,
@@ -138,7 +149,7 @@ impl RpcServer {
             + Send
             + Sync
             + 'static,
-        State::Future: Send,
+        ReadState::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
         BlockVerifierRouter: Service<
                 zebra_consensus::Request,
@@ -161,7 +172,7 @@ impl RpcServer {
             &network,
             mining_config.clone(),
             mempool.clone(),
-            state.clone(),
+            read_state.clone(),
             latest_chain_tip.clone(),
             block_verifier_router,
             sync_status,
@@ -178,6 +189,7 @@ impl RpcServer {
             mining_config.debug_like_zcashd,
             mempool,
             state,
+            read_state,
             latest_chain_tip,
             address_book,
             last_event,
