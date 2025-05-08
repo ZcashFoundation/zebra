@@ -3,27 +3,39 @@
 use std::sync::Arc;
 
 use futures::FutureExt;
-use get_block_template::GetBlockTemplateRequestMode;
 use tower::buffer::Buffer;
 
-use types::long_poll::LONG_POLL_ID_LENGTH;
 use zebra_chain::{
-    amount::Amount,
-    block::Block,
+    amount::{Amount, NonNegative},
+    block::{Block, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
     parameters::Network::*,
-    serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transaction::UnminedTxId,
+    serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
+    transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
 };
-use zebra_network::address_book_peers::MockAddressBookPeers;
+use zebra_consensus::MAX_BLOCK_SIGOPS;
+use zebra_network::{address_book_peers::MockAddressBookPeers, types::PeerServices};
 use zebra_node_services::BoxError;
-
-use zebra_state::{GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadStateService};
+use zebra_state::{
+    GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadRequest, ReadResponse,
+    ReadStateService,
+};
 use zebra_test::mock_service::MockService;
 
+use crate::methods::{
+    get_block_template::constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
+    hex_data::HexData,
+    tests::utils::fake_history_tree,
+};
+
 use super::super::*;
+
+use config::mining;
+use get_block_template::GetBlockTemplateRequestMode;
+use types::long_poll::LONG_POLL_ID_LENGTH;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getinfo() {
@@ -1398,9 +1410,6 @@ async fn rpc_getaddressutxos_response() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -1455,9 +1464,6 @@ async fn rpc_getblockcount() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockcount_empty_state() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
     let _init_guard = zebra_test::init();
 
     // Get a mempool handle
@@ -1507,9 +1513,6 @@ async fn rpc_getblockcount_empty_state() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getpeerinfo() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::{address_book_peers::MockAddressBookPeers, types::PeerServices};
-
     let _init_guard = zebra_test::init();
     let network = Mainnet;
 
@@ -1621,9 +1624,6 @@ async fn rpc_getpeerinfo() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getblockhash() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -1688,9 +1688,6 @@ async fn rpc_getblockhash() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getmininginfo() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -1727,9 +1724,6 @@ async fn rpc_getmininginfo() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getnetworksolps() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -1805,23 +1799,6 @@ async fn rpc_getblocktemplate() {
 }
 
 async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
-    use crate::methods::{
-        get_block_template::constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
-        hex_data::HexData,
-        tests::utils::fake_history_tree,
-    };
-    use zebra_chain::{
-        amount::NonNegative,
-        block::{Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
-        chain_sync_status::MockSyncStatus,
-        serialization::DateTime32,
-        transaction::{zip317, VerifiedUnminedTx},
-        work::difficulty::{CompactDifficulty, ExpandedDifficulty, U256},
-    };
-    use zebra_consensus::MAX_BLOCK_SIGOPS;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-    use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
-
     let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -2127,11 +2104,6 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_submitblock_errors() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
-    use crate::methods::hex_data::HexData;
-
     let _init_guard = zebra_test::init();
 
     // Create a continuous chain of mainnet blocks from genesis
@@ -2199,9 +2171,6 @@ async fn rpc_submitblock_errors() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_validateaddress() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
     let _init_guard = zebra_test::init();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -2245,9 +2214,6 @@ async fn rpc_validateaddress() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_z_validateaddress() {
-    use zebra_chain::chain_sync_status::MockSyncStatus;
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-
     let _init_guard = zebra_test::init();
 
     // Init RPC
@@ -2292,17 +2258,6 @@ async fn rpc_z_validateaddress() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn rpc_getdifficulty() {
-    use crate::{config::mining::Config, methods::tests::utils::fake_history_tree};
-    use zebra_chain::{
-        block::Hash,
-        chain_sync_status::MockSyncStatus,
-        chain_tip::mock::MockChainTip,
-        serialization::DateTime32,
-        work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
-    };
-    use zebra_network::address_book_peers::MockAddressBookPeers;
-    use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse};
-
     let _init_guard = zebra_test::init();
 
     let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -2311,7 +2266,7 @@ async fn rpc_getdifficulty() {
     mock_sync_status.set_is_close_to_tip(true);
 
     #[allow(clippy::unnecessary_struct_initialization)]
-    let mining_conf = Config {
+    let mining_conf = mining::Config {
         miner_address: None,
         extra_coinbase_data: None,
         debug_like_zcashd: true,
