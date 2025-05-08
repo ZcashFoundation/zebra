@@ -444,13 +444,13 @@ async fn rpc_getblock() {
             );
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
-                if let GetBlockTransaction::Object(TransactionObject {
-                    hex,
-                    height,
-                    confirmations,
-                    ..
-                }) = actual_tx
-                {
+                if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
+                    let TransactionObject {
+                        hex,
+                        height,
+                        confirmations,
+                        ..
+                    } = &**boxed_transaction_object; // Dereference the Box
                     assert_eq!(hex, &(*expected_tx).clone().into());
                     assert_eq!(height, &Some(i.try_into().expect("valid u32")));
                     assert_eq!(
@@ -548,13 +548,13 @@ async fn rpc_getblock() {
             );
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
-                if let GetBlockTransaction::Object(TransactionObject {
-                    hex,
-                    height,
-                    confirmations,
-                    ..
-                }) = actual_tx
-                {
+                if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
+                    let TransactionObject {
+                        hex,
+                        height,
+                        confirmations,
+                        ..
+                    } = &**boxed_transaction_object; // Dereference the Box
                     assert_eq!(hex, &(*expected_tx).clone().into());
                     assert_eq!(height, &Some(i.try_into().expect("valid u32")));
                     assert_eq!(
@@ -1068,15 +1068,18 @@ async fn rpc_getrawtransaction() {
 
             let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(txid));
 
-            let GetRawTransaction::Object(TransactionObject {
+            let transaction_object = match response
+                .expect("We should have a GetRawTransaction struct")
+            {
+                GetRawTransaction::Object(transaction_object) => transaction_object,
+                GetRawTransaction::Raw(_) => panic!("Expected GetRawTransaction::Object, got Raw"),
+            };
+            let TransactionObject {
                 hex,
                 height,
                 confirmations,
                 ..
-            }) = response.expect("We should have a GetRawTransaction struct")
-            else {
-                unreachable!("Should return a Raw enum")
-            };
+            } = *transaction_object;
 
             let height = height.expect("state requests should have height");
             let confirmations = confirmations.expect("state requests should have confirmations");

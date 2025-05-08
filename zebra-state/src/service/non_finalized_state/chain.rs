@@ -8,6 +8,7 @@ use std::{
     sync::Arc,
 };
 
+use chrono::{DateTime, Utc};
 use mset::MultiSet;
 use tracing::instrument;
 
@@ -433,11 +434,12 @@ impl Chain {
     pub fn transaction(
         &self,
         hash: transaction::Hash,
-    ) -> Option<(&Arc<Transaction>, block::Height)> {
+    ) -> Option<(&Arc<Transaction>, block::Height, DateTime<Utc>)> {
         self.tx_loc_by_hash.get(&hash).map(|tx_loc| {
             (
                 &self.blocks[&tx_loc.height].block.transactions[tx_loc.index.as_usize()],
                 tx_loc.height,
+                self.blocks[&tx_loc.height].block.header.time,
             )
         })
     }

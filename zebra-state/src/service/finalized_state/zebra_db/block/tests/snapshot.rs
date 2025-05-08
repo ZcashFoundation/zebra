@@ -343,7 +343,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
                 // using transaction location queries.
 
                 // Check that the transaction indexes are consistent.
-                let (direct_transaction, direct_transaction_height) = state
+                let (direct_transaction, direct_transaction_height, _) = state
                     .transaction(transaction_hash)
                     .expect("transactions in blocks must also be available directly");
                 let stored_transaction_hash = state

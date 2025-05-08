@@ -1251,7 +1251,7 @@ where
     }
 
     async fn get_difficulty(&self) -> Result<f64> {
-        chain_tip_difficulty(self.network.clone(), self.state.clone()).await
+        chain_tip_difficulty(self.network.clone(), self.state.clone(), false).await
     }
 
     async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response> {

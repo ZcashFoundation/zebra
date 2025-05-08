@@ -74,7 +74,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
             for tx in &block.transactions {
                 for input in tx.inputs() {
                     if let Some(outpoint) = input.outpoint() {
-                        let (tx, h) = db
+                        let (tx, h, _) = db
                             .transaction(outpoint.hash)
                             .expect("transaction should be in the database");
                         let output = tx

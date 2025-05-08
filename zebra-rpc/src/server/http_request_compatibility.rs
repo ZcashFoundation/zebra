@@ -301,7 +301,7 @@ struct JsonRpcResponse {
     jsonrpc: Option<String>,
     id: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<serde_json::Value>,
+    result: Option<Box<serde_json::value::RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<serde_json::Value>,
 }
@@ -311,12 +311,16 @@ impl JsonRpcResponse {
         match version {
             JsonRpcVersion::Bitcoind => {
                 self.jsonrpc = None;
-                self.result = self.result.or(Some(serde_json::Value::Null));
+                self.result = self
+                    .result
+                    .or_else(|| serde_json::value::to_raw_value(&()).ok());
                 self.error = self.error.or(Some(serde_json::Value::Null));
             }
             JsonRpcVersion::Lightwalletd => {
                 self.jsonrpc = Some("1.0".into());
-                self.result = self.result.or(Some(serde_json::Value::Null));
+                self.result = self
+                    .result
+                    .or_else(|| serde_json::value::to_raw_value(&()).ok());
                 self.error = self.error.or(Some(serde_json::Value::Null));
             }
             JsonRpcVersion::TwoPointZero => {
@@ -325,7 +329,9 @@ impl JsonRpcResponse {
                 // we map the result explicitly to `Null` when there is no error.
                 assert_eq!(self.jsonrpc.as_deref(), Some("2.0"));
                 if self.error.is_none() {
-                    self.result = self.result.or(Some(serde_json::Value::Null));
+                    self.result = self
+                        .result
+                        .or_else(|| serde_json::value::to_raw_value(&()).ok());
                 } else {
                     assert!(self.result.is_none());
                 }
