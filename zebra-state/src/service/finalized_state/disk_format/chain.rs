@@ -101,9 +101,9 @@ impl IntoDisk for BlockInfo {
     fn as_bytes(&self) -> Self::Bytes {
         self.value_pools()
             .as_bytes()
-            .to_vec()
-            .into_iter()
-            .chain(self.size().to_le_bytes().to_vec())
+            .iter()
+            .copied()
+            .chain(self.size().to_le_bytes().iter().copied())
             .collect()
     }
 }
