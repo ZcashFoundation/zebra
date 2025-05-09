@@ -48,7 +48,7 @@ pub const DATABASE_FORMAT_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60)
 ///
 /// If this is set to `true`, but the state upgrades finish before zebrad is synced,
 /// some tests will hang.
-pub const DATABASE_FORMAT_UPGRADE_IS_LONG: bool = false;
+pub const DATABASE_FORMAT_UPGRADE_IS_LONG: bool = true;
 
 /// Type alias for a boxed state service.
 pub type BoxStateService =

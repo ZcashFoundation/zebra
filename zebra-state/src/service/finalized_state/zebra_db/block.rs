@@ -638,15 +638,14 @@ impl DiskWriteBatch {
                 &out_loc_by_outpoint,
                 address_balances,
             )?;
-
-            // Commit UTXOs and value pools
-            self.prepare_chain_value_pools_batch(
-                zebra_db,
-                finalized,
-                spent_utxos_by_outpoint,
-                value_pool,
-            )?;
         }
+        // Commit UTXOs and value pools
+        self.prepare_chain_value_pools_batch(
+            zebra_db,
+            finalized,
+            spent_utxos_by_outpoint,
+            value_pool,
+        )?;
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(&finalized.block, finalized.hash, finalized.height);
