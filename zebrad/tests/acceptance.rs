@@ -170,7 +170,20 @@ use zebra_chain::{
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
+use zebra_rpc::{
+    methods::{
+        types::{
+            get_block_template::{
+                self, fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+                proposal::proposal_block_from_template, GetBlockTemplate,
+                GetBlockTemplateRequestMode,
+            },
+            submit_block::{self, SubmitBlockChannel},
+        },
+        RpcImpl, RpcServer,
+    },
+    server::OPENED_RPC_ENDPOINT_MSG,
+};
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 
 #[cfg(not(target_os = "windows"))]
@@ -2263,7 +2276,7 @@ fn zebra_rpc_conflict() -> Result<()> {
     // But they will have different Zcash listeners (auto port) and states (ephemeral)
     let dir2 = testdir()?.with_config(&mut config)?;
 
-    check_config_conflict(dir1, regex1.as_str(), dir2, "Unable to start RPC server")?;
+    check_config_conflict(dir1, regex1.as_str(), dir2, "Address already in use")?;
 
     Ok(())
 }
@@ -3250,21 +3263,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
     use zebra_node_services::mempool;
-    use zebra_rpc::methods::{
-        get_block_template_rpcs::{
-            get_block_template::{
-                fetch_state_tip_and_local_time, generate_coinbase_and_roots,
-                proposal_block_from_template, GetBlockTemplate, GetBlockTemplateRequestMode,
-            },
-            types::{
-                get_block_template,
-                submit_block::{self, SubmitBlockChannel},
-            },
-        },
-        hex_data::HexData,
-        GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
-    };
+    use zebra_rpc::methods::hex_data::HexData;
     use zebra_test::mock_service::MockService;
+
     let _init_guard = zebra_test::init();
 
     tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
@@ -3302,12 +3303,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network);
 
-    let (
-        block_verifier_router,
-        _transaction_verifier,
-        _parameter_download_task_handle,
-        _max_checkpoint_height,
-    ) = zebra_consensus::router::init_test(
+    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
@@ -3330,15 +3326,21 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let submitblock_channel = SubmitBlockChannel::new();
 
-    let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
-        &network,
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+
+    let (rpc, _) = RpcImpl::new(
+        network,
         mining_config,
+        false,
+        "0.0.1",
+        "Zebra tests",
         mempool.clone(),
         read_state.clone(),
-        latest_chain_tip,
         block_verifier_router,
         mock_sync_status,
+        latest_chain_tip,
         MockAddressBookPeers::default(),
+        rx,
         Some(submitblock_channel.sender()),
     );
 
@@ -3354,27 +3356,28 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             });
     };
 
-    let block_template_fut = get_block_template_rpc_impl.get_block_template(None);
+    let block_template_fut = rpc.get_block_template(None);
     let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
     let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
     let get_block_template::Response::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
-        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        panic!(
+            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
+        )
     };
 
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
     // Check that the block template is a valid block proposal
-    let get_block_template::Response::ProposalMode(block_proposal_result) =
-        get_block_template_rpc_impl
-            .get_block_template(Some(get_block_template::JsonParameters {
-                mode: GetBlockTemplateRequestMode::Proposal,
-                data: Some(hex_proposal_block),
-                ..Default::default()
-            }))
-            .await?
+    let get_block_template::Response::ProposalMode(block_proposal_result) = rpc
+        .get_block_template(Some(get_block_template::JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(hex_proposal_block),
+            ..Default::default()
+        }))
+        .await?
     else {
         panic!(
             "this getblocktemplate call should return the `ProposalMode` variant of the response"
@@ -3387,7 +3390,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Submit the same block
-    let submit_block_response = get_block_template_rpc_impl
+    let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;
 
@@ -3430,13 +3433,15 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
 
     // Gets the next block template
-    let block_template_fut = get_block_template_rpc_impl.get_block_template(None);
+    let block_template_fut = rpc.get_block_template(None);
     let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
     let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
     let get_block_template::Response::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
-        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        panic!(
+            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
+        )
     };
 
     let valid_original_block_template = block_template.clone();
@@ -3475,7 +3480,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
     // Submit the invalid block with an excessive coinbase output value
-    let submit_block_response = get_block_template_rpc_impl
+    let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;
 
@@ -3518,7 +3523,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
     // Submit the invalid block with an excessive coinbase input value
-    let submit_block_response = get_block_template_rpc_impl
+    let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;
 
@@ -3533,7 +3538,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     // Check that the original block template can be submitted successfully
     let proposal_block =
         proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
-    let submit_block_response = get_block_template_rpc_impl
+    let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;
 

@@ -6,13 +6,16 @@
 //! > when computing `size_target`, since there is no consensus requirement for this to be
 //! > exactly the same between implementations.
 
-use std::collections::{HashMap, HashSet};
-
+#[cfg(test)]
+use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
+use crate::methods::{
+    get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
+};
 use rand::{
     distributions::{Distribution, WeightedIndex},
     prelude::thread_rng,
 };
-
+use std::collections::{HashMap, HashSet};
 use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
@@ -22,13 +25,6 @@ use zebra_chain::{
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
-
-use crate::methods::get_block_template_rpcs::{
-    get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
-};
-
-#[cfg(test)]
-use super::get_block_template::InBlockTxDependenciesDepth;
 
 #[cfg(test)]
 mod tests;

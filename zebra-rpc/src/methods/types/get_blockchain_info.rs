@@ -4,6 +4,7 @@ use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     value_balance::ValueBalance,
 };
+use zec::Zec;
 
 use super::*;
 
