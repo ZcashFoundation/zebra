@@ -1,13 +1,13 @@
 //! Transaction-related types.
 
-use super::zec::Zec;
+use std::sync::Arc;
+
 use chrono::{DateTime, Utc};
 use hex::ToHex;
-use std::sync::Arc;
+
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
-    block,
-    block::merkle::AUTH_DIGEST_PLACEHOLDER,
+    block::{self, merkle::AUTH_DIGEST_PLACEHOLDER},
     parameters::Network,
     sapling::NotSmallOrderValueCommitment,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
@@ -16,6 +16,8 @@ use zebra_chain::{
 use zebra_consensus::groth16::Description;
 use zebra_script::CachedFfiTransaction;
 use zebra_state::IntoDisk;
+
+use super::zec::Zec;
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
