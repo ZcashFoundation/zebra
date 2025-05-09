@@ -3,8 +3,7 @@
 //! For usage please refer to the program help: `block-template-to-proposal --help`
 
 use structopt::StructOpt;
-
-use zebra_rpc::methods::get_block_template_rpcs::get_block_template::proposal::TimeSource;
+use zebra_rpc::methods::types::get_block_template::TimeSource;
 
 /// block-template-to-proposal arguments
 #[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
