@@ -20,7 +20,7 @@ use crate::HashOrHeight;
 use super::DiskFormatUpgrade;
 
 /// Implements [`DiskFormatUpgrade`] for adding additionl block info to the
-/// database; namely, value pool for each block.
+/// database.
 pub struct AddBlockInfo {
     network: Network,
 }

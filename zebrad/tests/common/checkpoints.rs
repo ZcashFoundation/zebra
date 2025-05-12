@@ -28,7 +28,10 @@ use zebra_test::{
 };
 
 use crate::common::{
-    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
+    cached_state::{
+        wait_for_state_version_message, wait_for_state_version_upgrade,
+        DATABASE_FORMAT_UPGRADE_IS_LONG,
+    },
     launch::spawn_zebrad_for_rpc,
     sync::{CHECKPOINT_VERIFIER_REGEX, SYNC_FINISHED_REGEX},
     test_type::TestType::*,
@@ -95,12 +98,17 @@ pub async fn run(network: Network) -> Result<()> {
         //
         // TODO: combine this check with the CHECKPOINT_VERIFIER_REGEX and RPC endpoint checks.
         // This is tricky because we need to get the last checkpoint log.
-        wait_for_state_version_upgrade(
-            &mut zebrad,
-            &state_version_message,
-            state_database_format_version_in_code(),
-            None,
-        )?;
+        // TODO: if the upgrade *is* long, we do nothing. This might not work
+        // in future database upgrades, but works for the current one (26.1.0)
+        // where this `if` was introduced.
+        if !DATABASE_FORMAT_UPGRADE_IS_LONG {
+            wait_for_state_version_upgrade(
+                &mut zebrad,
+                &state_version_message,
+                state_database_format_version_in_code(),
+                None,
+            )?;
+        }
     }
 
     let zebra_rpc_address = zebra_rpc_address.expect("zebra_checkpoints test must have RPC port");
