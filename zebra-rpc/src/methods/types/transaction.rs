@@ -1,6 +1,7 @@
 //! Transaction-related types.
 
 use super::zec::Zec;
+use crate::methods::arrayhex;
 use chrono::{DateTime, Utc};
 use hex::ToHex;
 use std::sync::Arc;
@@ -141,7 +142,7 @@ impl TransactionTemplate<NegativeOrZero> {
 
 /// A Transaction object as returned by `getrawtransaction` and `getblock` RPC
 /// requests.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TransactionObject {
     /// The raw transaction, encoded as hex bytes.
     #[serde(with = "hex")]
@@ -194,7 +195,7 @@ pub struct TransactionObject {
 }
 
 /// The transparent input of a transaction.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Input {
     /// A coinbase input.
@@ -228,7 +229,7 @@ pub enum Input {
 }
 
 /// The transparent output of a transaction.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Output {
     /// The value in ZEC.
     value: f64,
@@ -243,7 +244,7 @@ pub struct Output {
 }
 
 /// The scriptPubKey of a transaction output.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptPubKey {
     /// the asm.
     // #9330: The `asm` field is not currently populated.
@@ -262,7 +263,7 @@ pub struct ScriptPubKey {
 }
 
 /// The scriptSig of a transaction input.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptSig {
     /// The asm.
     // #9330: The `asm` field is not currently populated.
@@ -273,7 +274,7 @@ pub struct ScriptSig {
 }
 
 /// A Sapling spend of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
@@ -296,7 +297,7 @@ pub struct ShieldedSpend {
 }
 
 /// A Sapling output of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
@@ -308,7 +309,7 @@ pub struct ShieldedOutput {
     #[serde(rename = "ephemeralKey", with = "hex")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext", with = "hex")]
+    #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "outCiphertext", with = "hex")]
@@ -319,7 +320,7 @@ pub struct ShieldedOutput {
 }
 
 /// Object with Orchard-specific information.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Orchard {
     /// Array of Orchard actions.
     actions: Vec<OrchardAction>,
@@ -332,7 +333,7 @@ pub struct Orchard {
 }
 
 /// The Orchard action of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OrchardAction {
     /// A value commitment to the net value of the input note minus the output note.
     #[serde(with = "hex")]
@@ -350,7 +351,7 @@ pub struct OrchardAction {
     #[serde(rename = "ephemeralKey", with = "hex")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext", with = "hex")]
+    #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "spendAuthSig", with = "hex")]

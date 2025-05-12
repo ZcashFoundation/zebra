@@ -3,7 +3,7 @@
 use std::{fmt, io};
 
 use bitvec::prelude::*;
-use hex::ToHex;
+use hex::{FromHex, FromHexError, ToHex};
 use jubjub::ExtendedPoint;
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
@@ -387,6 +387,23 @@ impl ToHex for &NotSmallOrderValueCommitment {
     }
 }
 
+impl FromHex for NotSmallOrderValueCommitment {
+    type Error = FromHexError;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        // Parse hex string to 32 bytes
+        let mut bytes = <[u8; 32]>::from_hex(hex)?;
+        // Convert from big-endian (display) to little-endian (internal)
+        bytes.reverse();
+
+        // Try to construct ValueCommitment from raw bytes
+        let vc = ValueCommitment::try_from(bytes).map_err(|_| FromHexError::InvalidStringLength)?;
+
+        // Check small order and wrap
+        vc.try_into().map_err(|_| FromHexError::InvalidStringLength)
+    }
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -543,5 +560,23 @@ mod tests {
         let doubled_g = ValueCommitment(g_point.to_extended().double().into());
 
         assert_eq!(sum, doubled_g);
+    }
+
+    #[test]
+    fn not_small_order_value_commitment_hex_roundtrip() {
+        use hex::{FromHex, ToHex};
+
+        let _init_guard = zebra_test::init();
+
+        let identity_commitment = ValueCommitment(jubjub::AffinePoint::identity());
+        let not_small = NotSmallOrderValueCommitment::try_from(identity_commitment)
+            .expect("identity point is not of small order");
+
+        let hex_str = (&not_small).encode_hex::<String>();
+
+        let decoded = NotSmallOrderValueCommitment::from_hex(&hex_str)
+            .expect("should decode from hex correctly");
+
+        assert_eq!(not_small, decoded);
     }
 }
