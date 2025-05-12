@@ -563,20 +563,35 @@ mod tests {
     }
 
     #[test]
-    fn not_small_order_value_commitment_hex_roundtrip() {
+    fn value_commitment_hex_roundtrip() {
         use hex::{FromHex, ToHex};
 
         let _init_guard = zebra_test::init();
 
-        let identity_commitment = ValueCommitment(jubjub::AffinePoint::identity());
-        let not_small = NotSmallOrderValueCommitment::try_from(identity_commitment)
-            .expect("identity point is not of small order");
+        let g_point = jubjub::AffinePoint::from_raw_unchecked(
+            jubjub::Fq::from_raw([
+                0xe4b3_d35d_f1a7_adfe,
+                0xcaf5_5d1b_29bf_81af,
+                0x8b0f_03dd_d60a_8187,
+                0x62ed_cbb8_bf37_87c8,
+            ]),
+            jubjub::Fq::from_raw([
+                0x0000_0000_0000_000b,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+                0x0000_0000_0000_0000,
+            ]),
+        );
 
-        let hex_str = (&not_small).encode_hex::<String>();
+        let value_commitment = ValueCommitment(g_point);
+        let original = NotSmallOrderValueCommitment::try_from(value_commitment)
+            .expect("constructed point must not be small order");
+
+        let hex_str = (&original).encode_hex::<String>();
 
         let decoded = NotSmallOrderValueCommitment::from_hex(&hex_str)
-            .expect("should decode from hex correctly");
+            .expect("hex string should decode successfully");
 
-        assert_eq!(not_small, decoded);
+        assert_eq!(original, decoded);
     }
 }
