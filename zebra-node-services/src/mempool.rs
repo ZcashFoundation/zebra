@@ -13,9 +13,14 @@ use zebra_chain::{
 use crate::BoxError;
 
 mod gossip;
+mod mempool_change;
 mod transaction_dependencies;
 
-pub use self::{gossip::Gossip, transaction_dependencies::TransactionDependencies};
+pub use self::{
+    gossip::Gossip,
+    mempool_change::{MempoolChange, MempoolChangeKind},
+    transaction_dependencies::TransactionDependencies,
+};
 
 /// A mempool service request.
 ///

@@ -3,18 +3,16 @@
 //! This module is just a function [`gossip_mempool_transaction_id`] that waits for mempool
 //! insertion events received in a channel and broadcasts the transactions to peers.
 
-use std::collections::HashSet;
-
 use tokio::sync::broadcast::{
     self,
     error::{RecvError, TryRecvError},
 };
 use tower::{timeout::Timeout, Service, ServiceExt};
 
-use zebra_chain::transaction::UnminedTxId;
 use zebra_network::MAX_TX_INV_IN_SENT_MESSAGE;
 
 use zebra_network as zn;
+use zebra_node_services::mempool::MempoolChange;
 
 use crate::{
     components::sync::{PEER_GOSSIP_DELAY, TIPS_RESPONSE_TIMEOUT},
@@ -28,7 +26,7 @@ pub const MAX_CHANGES_BEFORE_SEND: usize = 10;
 ///
 /// Broadcasts any new [`UnminedTxId`]s that get stored in the mempool to multiple ready peers.
 pub async fn gossip_mempool_transaction_id<ZN>(
-    mut receiver: broadcast::Receiver<HashSet<UnminedTxId>>,
+    mut receiver: broadcast::Receiver<MempoolChange>,
     broadcast_network: ZN,
 ) -> Result<(), BoxError>
 where
@@ -54,7 +52,13 @@ where
         // and this task also combines the changes that are in the channel before sending
         let mut txs = loop {
             match receiver.recv().await {
-                Ok(txs) => break txs,
+                Ok(mempool_change) if mempool_change.is_added() => {
+                    break mempool_change.into_tx_ids()
+                }
+                Ok(_) => {
+                    // ignore other changes, we only want to gossip added transactions
+                    continue;
+                }
                 Err(RecvError::Lagged(skip_count)) => info!(
                     ?skip_count,
                     "dropped transactions before gossiping due to heavy mempool or network load"
@@ -66,9 +70,18 @@ where
         // also combine transaction IDs that arrived shortly after this one,
         // but limit the number of changes and the number of transaction IDs
         // (the network layer handles the actual limits, this just makes sure the loop terminates)
+        //
+        // TODO: If some amount of time passes (300ms?) before reaching MAX_CHANGES_BEFORE_SEND or
+        //       max_tx_inv_in_message, flush messages anyway.
         while combined_changes <= MAX_CHANGES_BEFORE_SEND && txs.len() < max_tx_inv_in_message {
             match receiver.try_recv() {
-                Ok(extra_txs) => txs.extend(extra_txs.iter()),
+                Ok(mempool_change) if mempool_change.is_added() => {
+                    txs.extend(mempool_change.into_tx_ids().into_iter())
+                }
+                Ok(_) => {
+                    // ignore other changes, we only want to gossip added transactions
+                    continue;
+                }
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Lagged(skip_count)) => info!(
                     ?skip_count,

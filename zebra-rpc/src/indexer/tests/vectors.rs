@@ -61,9 +61,10 @@ async fn start_server_and_get_client() -> Result<(
         .for_unit_tests();
 
     let (mock_chain_tip_change, mock_chain_tip_change_sender) = MockChainTip::new();
+    let (_tx, rx) = tokio::sync::broadcast::channel(1);
 
     let (server_task, listen_addr) =
-        indexer::server::init(listen_addr, mock_read_service, mock_chain_tip_change)
+        indexer::server::init(listen_addr, mock_read_service, mock_chain_tip_change, rx)
             .await
             .map_err(|err| eyre!(err))?;
 
