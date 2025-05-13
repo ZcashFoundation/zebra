@@ -269,7 +269,6 @@ pub struct ScriptSig {
     // #9330: The `asm` field is not currently populated.
     asm: String,
     /// The hex.
-    #[serde(with = "hex")]
     hex: Script,
 }
 
