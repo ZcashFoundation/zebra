@@ -22,9 +22,10 @@ use crate::{
 /// The maximum number of channel messages we will combine into a single peer broadcast.
 pub const MAX_CHANGES_BEFORE_SEND: usize = 10;
 
-/// Runs continuously, gossiping new [`UnminedTxId`] to peers.
+/// Runs continuously, gossiping new [`UnminedTxId`][0] to peers.
 ///
-/// Broadcasts any new [`UnminedTxId`]s that get stored in the mempool to multiple ready peers.
+/// Broadcasts any new [`UnminedTxId`][0]s that get stored in the mempool to multiple ready peers.
+/// [0]: zebra_chain::transaction::UnminedTxId
 pub async fn gossip_mempool_transaction_id<ZN>(
     mut receiver: broadcast::Receiver<MempoolChange>,
     broadcast_network: ZN,

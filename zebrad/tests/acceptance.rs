@@ -192,11 +192,9 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
+    net::random_known_port,
     prelude::*,
 };
-
-#[cfg(not(target_os = "windows"))]
-use zebra_test::net::random_known_port;
 
 mod common;
 
