@@ -8,6 +8,8 @@ pub mod config;
 pub mod methods;
 pub mod queue;
 pub mod server;
+
+#[cfg(feature = "indexer-rpcs")]
 pub mod sync;
 
 #[cfg(feature = "indexer-rpcs")]

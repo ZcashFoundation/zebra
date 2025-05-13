@@ -80,6 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             state_config,
             &network,
             args.zebra_rpc_listen_addr,
+            args.zebra_indexer_rpc_listen_addr,
         )
         .await?
         .map_err(|err| eyre!(err))?;
@@ -140,10 +141,15 @@ pub struct Args {
     #[structopt(long)]
     pub sapling_keys_to_scan: Vec<SaplingKey>,
 
-    /// The listen address of Zebra's RPC server used by the syncer to check for chain tip changes
-    /// and get blocks in Zebra's non-finalized state.
+    /// The listen address of Zebra's RPC server used by the syncer to check for
+    /// chain tip changes and get blocks in Zebra's non-finalized state.
     #[structopt(long)]
     pub zebra_rpc_listen_addr: SocketAddr,
+
+    /// The listen address of Zebra's indexer gRPC server used by the syncer to
+    /// listen for chain tip or mempool changes.
+    #[structopt(long)]
+    pub zebra_indexer_rpc_listen_addr: SocketAddr,
 
     /// IP address and port for the gRPC server.
     #[structopt(long)]

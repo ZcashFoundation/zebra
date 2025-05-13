@@ -83,7 +83,7 @@ zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = [
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = ["shielded-scan"] }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46", features = ["shielded-scan"] }
 zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.13" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.46" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.46", features = ["indexer-rpcs"] }
 
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
 
@@ -109,7 +109,7 @@ serde_json = { workspace = true }
 jsonrpc = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 
-zebrad = { path = "../zebrad", version = "2.3.0" }
+zebrad = { path = "../zebrad", version = "2.3.0", features = ["indexer-rpcs"]}
 
 [dev-dependencies]
 insta = { workspace = true, features = ["ron", "redactions"] }
