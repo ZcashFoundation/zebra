@@ -213,6 +213,7 @@ pub enum Input {
         /// The vout index.
         vout: u32,
         /// The script.
+        #[serde(rename = "scriptSig")]
         script_sig: ScriptSig,
         /// The script sequence number.
         sequence: u32,
