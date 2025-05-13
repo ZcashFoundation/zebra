@@ -219,8 +219,8 @@ pub enum Input {
         /// The value of the output being spent in ZEC.
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<f64>,
-        /// The value of the output being spent, in zats.
-        #[serde(rename = "valueZat", skip_serializing_if = "Option::is_none")]
+        /// The value of the output being spent, in zats, named to match zcashd.
+        #[serde(rename = "valueSat", skip_serializing_if = "Option::is_none")]
         value_zat: Option<i64>,
         /// The address of the output being spent.
         #[serde(skip_serializing_if = "Option::is_none")]
