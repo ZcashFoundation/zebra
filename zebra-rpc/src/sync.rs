@@ -26,12 +26,7 @@ use crate::{
     server,
 };
 
-/// How long to wait between calls to `getbestblockheightandhash` when it:
-/// - Returns an error, or
-/// - Returns the block hash of a block that the read state already contains,
-///   (so that there's nothing for the syncer to do except wait for the next chain tip change).
-///
-/// See the [`TrustedChainSync::wait_for_chain_tip_change()`] method documentation for more information.
+/// How long to wait between calls to `getbestblockheightandhash` when it returns an error.
 const POLL_DELAY: Duration = Duration::from_millis(200);
 
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.

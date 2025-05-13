@@ -85,8 +85,7 @@ where
                 let tx = response_sender.clone();
 
                 tokio::spawn(async move {
-                    let mut tx_ids = change.tx_ids().iter();
-                    while let Some(tx_id) = tx_ids.next() {
+                    for tx_id in change.tx_ids() {
                         tracing::debug!("Mempool change: {:?}", change);
 
                         let _ = tx

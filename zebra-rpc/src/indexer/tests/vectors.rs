@@ -34,6 +34,7 @@ async fn test_chain_tip_change(
     let request = tonic::Request::new(Empty {});
     let mut response = client.chain_tip_change(request).await?.into_inner();
     mock_chain_tip_sender.send_best_tip_height(Height::MIN);
+    mock_chain_tip_sender.send_best_tip_hash(zebra_chain::block::Hash([0; 32]));
 
     // Wait for RPC server to send a message
     tokio::time::sleep(Duration::from_millis(500)).await;

@@ -401,7 +401,7 @@ impl Mempool {
     ) -> HashSet<UnminedTxId> {
         send_to_peers_ids
             .iter()
-            .filter(|id| !expired_transactions.contains(&id))
+            .filter(|id| !expired_transactions.contains(id))
             .copied()
             .collect()
     }
@@ -707,7 +707,7 @@ impl Service<Request> for Mempool {
                         "removed expired transactions from the mempool",
                     );
 
-                    invalidated_ids.extend(expired_transactions.into_iter());
+                    invalidated_ids.extend(expired_transactions);
                 }
             }
 
