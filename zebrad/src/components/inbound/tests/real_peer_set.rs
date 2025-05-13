@@ -21,7 +21,7 @@ use zebra_network::{
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
-use zebra_rpc::methods::get_block_template_rpcs::types::submit_block::SubmitBlockChannel;
+use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -184,10 +184,10 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         assert_eq!(missing_error.inner_debug(), expected.inner_debug());
     } else {
         unreachable!(
-                "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+            "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
              actual result: {:?}",
-                response
-            )
+            response
+        )
     };
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
@@ -303,10 +303,10 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
             }
         } else {
             unreachable!(
-                        "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
                  actual result: {:?}",
-                        response
-                    )
+                response
+            )
         };
     }
 
@@ -420,10 +420,10 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
             }
         } else {
             unreachable!(
-                        "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
                  actual result: {:?}",
-                        response
-                    )
+                response
+            )
         };
 
         // The peer set only does routing for single-transaction requests.
@@ -798,6 +798,7 @@ mod submitblock_test {
     use std::sync::{Arc, Mutex};
     use tracing::{Instrument, Level};
     use tracing_subscriber::fmt;
+    use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
 
     use super::*;
 

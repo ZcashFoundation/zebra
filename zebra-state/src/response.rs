@@ -2,6 +2,8 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
@@ -119,15 +121,24 @@ pub struct MinedTx {
     /// The number of confirmations for this transaction
     /// (1 + depth of block the transaction was found in)
     pub confirmations: u32,
+
+    /// The time of the block where the transaction was mined.
+    pub block_time: DateTime<Utc>,
 }
 
 impl MinedTx {
     /// Creates a new [`MinedTx`]
-    pub fn new(tx: Arc<Transaction>, height: block::Height, confirmations: u32) -> Self {
+    pub fn new(
+        tx: Arc<Transaction>,
+        height: block::Height,
+        confirmations: u32,
+        block_time: DateTime<Utc>,
+    ) -> Self {
         Self {
             tx,
             height,
             confirmations,
+            block_time,
         }
     }
 }

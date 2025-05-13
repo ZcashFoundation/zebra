@@ -1,6 +1,6 @@
 [package]
 name = "zebra-script"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Zebra script verification wrapping zcashd's zcash_script library"
 license = "MIT OR Apache-2.0"
@@ -16,11 +16,11 @@ categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
 [dependencies]
 zcash_script = { workspace = true }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.45" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46" }
 
 thiserror = { workspace = true }
 
 [dev-dependencies]
 hex = { workspace = true }
 lazy_static = { workspace = true }
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.45" }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46" }

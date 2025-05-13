@@ -15,6 +15,7 @@ use std::{
     sync::Arc,
 };
 
+use chrono::{DateTime, Utc};
 use itertools::Itertools;
 
 use zebra_chain::{
@@ -278,14 +279,21 @@ impl ZebraDb {
     /// Returns the [`Transaction`] with [`transaction::Hash`], and its [`Height`],
     /// if a transaction with that hash exists in the finalized chain.
     #[allow(clippy::unwrap_in_result)]
-    pub fn transaction(&self, hash: transaction::Hash) -> Option<(Arc<Transaction>, Height)> {
+    pub fn transaction(
+        &self,
+        hash: transaction::Hash,
+    ) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)> {
         let tx_by_loc = self.db.cf_handle("tx_by_loc").unwrap();
 
         let transaction_location = self.transaction_location(hash)?;
 
+        let block_time = self
+            .block_header(transaction_location.height.into())
+            .map(|header| header.time);
+
         self.db
             .zs_get(&tx_by_loc, &transaction_location)
-            .map(|tx| (tx, transaction_location.height))
+            .and_then(|tx| block_time.map(|time| (tx, transaction_location.height, time)))
     }
 
     /// Returns an iterator of all [`Transaction`]s for a provided block height in finalized state.

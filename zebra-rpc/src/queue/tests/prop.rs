@@ -294,7 +294,7 @@ proptest! {
             let send_task = tokio::spawn(Runner::check_state(read_state.clone(), transactions_hash_set));
 
             let expected_request = ReadRequest::Transaction(transaction.hash());
-            let response = ReadResponse::Transaction(Some(zebra_state::MinedTx::new(Arc::new(transaction), Height(1), 1)));
+            let response = ReadResponse::Transaction(Some(zebra_state::MinedTx::new(Arc::new(transaction), Height(1), 1, block.header.time)));
 
             read_state
                 .expect_request(expected_request)

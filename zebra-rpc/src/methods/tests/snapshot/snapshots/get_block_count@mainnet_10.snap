@@ -1,5 +1,0 @@
----
-source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
-expression: block_count
----
-1687104

@@ -73,12 +73,10 @@ pub struct GetTreestate {
     time: u32,
 
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sapling: Option<Treestate<Vec<u8>>>,
+    sapling: Treestate<Vec<u8>>,
 
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    orchard: Option<Treestate<Vec<u8>>>,
+    orchard: Treestate<Vec<u8>>,
 }
 
 impl GetTreestate {
@@ -90,12 +88,16 @@ impl GetTreestate {
         sapling: Option<Vec<u8>>,
         orchard: Option<Vec<u8>>,
     ) -> Self {
-        let sapling = sapling.map(|tree| Treestate {
-            commitments: Commitments { final_state: tree },
-        });
-        let orchard = orchard.map(|tree| Treestate {
-            commitments: Commitments { final_state: tree },
-        });
+        let sapling = Treestate {
+            commitments: Commitments {
+                final_state: sapling,
+            },
+        };
+        let orchard = Treestate {
+            commitments: Commitments {
+                final_state: orchard,
+            },
+        };
 
         Self {
             hash,
@@ -112,10 +114,8 @@ impl GetTreestate {
             self.hash,
             self.height,
             self.time,
-            self.sapling
-                .map(|treestate| treestate.commitments.final_state),
-            self.orchard
-                .map(|treestate| treestate.commitments.final_state),
+            self.sapling.commitments.final_state,
+            self.orchard.commitments.final_state,
         )
     }
 }
@@ -154,28 +154,38 @@ impl<Tree: AsRef<[u8]>> Treestate<Tree> {
     }
 }
 
+impl Default for Treestate<Vec<u8>> {
+    fn default() -> Self {
+        Self {
+            commitments: Commitments { final_state: None },
+        }
+    }
+}
+
 /// A wrapper that contains either an Orchard or Sapling note commitment tree.
 ///
 /// Note that in the original [`z_gettreestate`][1] RPC, [`Commitments`] also
 /// contains the field `finalRoot`. Zebra does *not* use this field.
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+#[serde_with::serde_as]
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct Commitments<Tree: AsRef<[u8]>> {
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.
-    #[serde(with = "hex")]
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "finalState")]
-    final_state: Tree,
+    final_state: Option<Tree>,
 }
 
 impl<Tree: AsRef<[u8]>> Commitments<Tree> {
-    /// Returns a new instance of ['Commitments'].
-    pub fn new(final_state: Tree) -> Self {
+    /// Returns a new instance of ['Commitments'] with optional `final_state`.
+    pub fn new(final_state: Option<Tree>) -> Self {
         Commitments { final_state }
     }
 
-    /// Returns a reference to the final_state.
-    pub fn inner(&self) -> &Tree {
+    /// Returns a reference to the optional `final_state`.
+    pub fn inner(&self) -> &Option<Tree> {
         &self.final_state
     }
 }

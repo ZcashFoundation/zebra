@@ -53,7 +53,9 @@ expression: block
       "vShieldedSpend": [],
       "vShieldedOutput": [],
       "valueBalance": 0.0,
-      "valueBalanceZat": 0
+      "valueBalanceZat": 0,
+      "size": 129,
+      "time": 1477671596
     }
   ],
   "time": 1477671596,

@@ -1,8 +1,9 @@
 //! Parameter types for the `getblocktemplate` RPC.
 
-use crate::methods::{get_block_template_rpcs::types::long_poll::LongPollId, hex_data::HexData};
+use crate::methods::{hex_data::HexData, types::long_poll::LongPollId};
 
-/// Defines whether the RPC method should generate a block template or attempt to validate a block proposal.
+/// Defines whether the RPC method should generate a block template or attempt to validate a block
+/// proposal.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum GetBlockTemplateRequestMode {

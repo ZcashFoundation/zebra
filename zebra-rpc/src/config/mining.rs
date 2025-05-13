@@ -28,6 +28,7 @@ pub struct Config {
     /// Should Zebra's block templates try to imitate `zcashd`?
     ///
     /// This developer-only config is not supported for general use.
+    /// TODO: remove this option as part of zcashd deprecation
     pub debug_like_zcashd: bool,
 
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.

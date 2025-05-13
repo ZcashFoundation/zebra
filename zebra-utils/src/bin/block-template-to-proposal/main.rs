@@ -14,9 +14,9 @@ use zebra_chain::{
     parameters::NetworkUpgrade,
     serialization::{DateTime32, ZcashSerialize},
 };
-use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::proposal_block_from_template,
-    types::{get_block_template::GetBlockTemplate, long_poll::LONG_POLL_ID_LENGTH},
+use zebra_rpc::methods::types::{
+    get_block_template::{proposal::proposal_block_from_template, GetBlockTemplate},
+    long_poll::LONG_POLL_ID_LENGTH,
 };
 use zebra_utils::init_tracing;
 
