@@ -61,7 +61,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
         cancel_receiver: &crossbeam_channel::Receiver<super::CancelFormatChange>,
     ) -> Result<(), super::CancelFormatChange> {
         let chunk_size = rayon::current_num_threads();
-        tracing::debug!(chunk_size = ?chunk_size, "adding block info data");
+        tracing::info!(chunk_size = ?chunk_size, "adding block info data");
 
         let chunks = (0..=initial_tip_height.0).chunks(chunk_size);
         // Since transaction parsing is slow, we want to parallelize it.
@@ -136,7 +136,7 @@ impl DiskFormatUpgrade for AddBlockInfo {
             let (h, load_result) = result?;
             let height = Height(h);
             if height.0 % 1000 == 0 {
-                tracing::debug!(height = ?height, "adding block info for height");
+                tracing::info!(height = ?height, "adding block info for height");
             }
             // Get the data loaded from the parallel iterator
             let (block, size, utxos) = match load_result {

@@ -48,7 +48,11 @@ pub const DATABASE_FORMAT_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60)
 ///
 /// If this is set to `true`, but the state upgrades finish before zebrad is synced,
 /// some tests will hang.
-pub const DATABASE_FORMAT_UPGRADE_IS_LONG: bool = true;
+pub const DATABASE_FORMAT_UPGRADE_IS_LONG: bool = false;
+
+/// Is the current state version upgrade slower than the RPC spawn time?
+/// See where this constant is used for more context.
+pub const DATABASE_FORMAT_UPGRADE_IS_SLOWER_THAN_RPC_SPAWN: bool = true;
 
 /// Type alias for a boxed state service.
 pub type BoxStateService =
