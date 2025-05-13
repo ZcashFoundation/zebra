@@ -385,7 +385,7 @@ impl Default for TransactionObject {
 impl TransactionObject {
     /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
     #[allow(clippy::unwrap_in_result)]
-    pub(crate) fn from_transaction(
+    pub fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
         confirmations: Option<u32>,
