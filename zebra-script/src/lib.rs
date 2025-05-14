@@ -24,14 +24,8 @@ use zebra_chain::{
 pub enum Error {
     /// script verification failed
     ScriptInvalid,
-    /// could not deserialize tx
-    #[non_exhaustive]
-    TxDeserialize,
     /// input index out of bounds
     TxIndex,
-    /// tx has an invalid size
-    #[non_exhaustive]
-    TxSizeMismatch,
     /// tx is a coinbase transaction and should not be verified
     TxCoinbase,
     /// unknown error from zcash_script: {0}
@@ -140,20 +134,20 @@ impl CachedFfiTransaction {
                 our_hash_type |= HashType::ANYONECANPAY;
             }
             Some(
-                SigHasher::new(&self.transaction, branch_id, &self.all_previous_outputs)
+                SigHasher::new(&self.transaction, nu, &self.all_previous_outputs)
                     .sighash(our_hash_type, Some((input_index, script_code_vec)))
                     .0,
             )
         };
-        zcash_script::CxxRustComparisonInterpreter::verify_callback(
+        let interpreter = zcash_script::cxx_rust_comparison_interpreter(
             &calculate_sighash,
             lock_time,
             is_final,
-            script_pub_key,
-            signature_script,
             flags,
-        )
-        .map_err(Error::from)
+        );
+        interpreter
+            .verify_callback(script_pub_key, signature_script, flags)
+            .map_err(Error::from)
     }
 
     /// Returns the number of transparent signature operations in the
@@ -161,6 +155,16 @@ impl CachedFfiTransaction {
     #[allow(clippy::unwrap_in_result)]
     pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
         let mut count: u64 = 0;
+
+        // Create a dummy interpreter since these inputs are not used to count
+        // the sigops
+        let interpreter = zcash_script::cxx_rust_comparison_interpreter(
+            &|_, _| None,
+            0,
+            true,
+            zcash_script::VerificationFlags::P2SH
+                | zcash_script::VerificationFlags::CHECKLOCKTIMEVERIFY,
+        );
 
         for input in self.transaction.inputs() {
             count += match input {
@@ -170,7 +174,8 @@ impl CachedFfiTransaction {
                     sequence: _,
                 } => {
                     let script = unlock_script.as_raw_bytes();
-                    zcash_script::CxxRustComparisonInterpreter::legacy_sigop_count_script(script)
+                    interpreter
+                        .legacy_sigop_count_script(script)
                         .map_err(Error::from)?
                 }
                 transparent::Input::Coinbase { .. } => 0,
@@ -179,7 +184,8 @@ impl CachedFfiTransaction {
 
         for output in self.transaction.outputs() {
             let script = output.lock_script.as_raw_bytes();
-            let ret = zcash_script::CxxRustComparisonInterpreter::legacy_sigop_count_script(script)
+            let ret = interpreter
+                .legacy_sigop_count_script(script)
                 .map_err(Error::from)?;
             count += ret as u64;
         }

@@ -151,10 +151,7 @@ vergen = { version = "8.3.2", default-features = false }
 wagyu-zcash-parameters = "0.2.0"
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.2.0"
-
-[patch.crates-io]
-zcash_script = { git = 'https://github.com/ZcashFoundation/zcash_script.git', rev = "61f3ef3e74209ad4bd642f098c44cc3ad54ed6c3" }
+zcash_script = "0.3.0"
 
 [workspace.metadata.release]
 
@@ -225,3 +222,5 @@ panic = "abort"
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
 
+[patch.crates-io]
+zcash_script = { path = "/home/conrado/zfnd/zcash_script" }
