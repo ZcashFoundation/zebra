@@ -113,13 +113,32 @@ RUN --mount=type=bind,source=zebrad,target=zebrad \
     --mount=type=cache,target=/usr/local/cargo/git/db \
     --mount=type=cache,target=/usr/local/cargo/registry/ \
 
-COPY --link ./ ${HOME}
-
-RUN cargo test --locked --release --workspace --no-run \
+RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
+    --mount=type=bind,source=tower-fallback,target=tower-fallback \
+    --mount=type=bind,source=zebra-chain,target=zebra-chain \
+    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
+    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
+    --mount=type=bind,source=zebra-network,target=zebra-network \
+    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
+    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
+    --mount=type=bind,source=zebra-scan,target=zebra-scan \
+    --mount=type=bind,source=zebra-script,target=zebra-script \
+    --mount=type=bind,source=zebra-state,target=zebra-state \
+    --mount=type=bind,source=zebra-test,target=zebra-test \
+    --mount=type=bind,source=zebra-utils,target=zebra-utils \
+    --mount=type=bind,source=zebrad,target=zebrad \
+    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
+    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
+    --mount=type=cache,target=${CARGO_TARGET_DIR} \
+    --mount=type=cache,target=${CARGO_HOME} \
+    cargo test --locked --release --workspace --no-run \
+    -Z checksum-freshness \
     --features "${FEATURES} zebra-checkpoints" && \
     # Step 2: Copy final binaries needed at runtime
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin
+
+COPY --link ./ ${HOME}
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:latest /usr/local/bin/lightwalletd /usr/local/bin/
@@ -166,7 +185,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
+    cargo build --locked --release -Z checksum-freshness --features "${FEATURES}" --package zebrad --bin zebrad && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
