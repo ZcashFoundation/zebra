@@ -3,17 +3,21 @@
 // These tests call functions which can take unit arguments if some features aren't enabled.
 #![allow(clippy::unit_arg)]
 
-use super::super::*;
-use config::rpc::Config;
 use std::net::{Ipv4Addr, SocketAddrV4};
+
 use tokio::sync::watch;
 use tower::buffer::Buffer;
+
 use zebra_chain::{
     chain_sync_status::MockSyncStatus, chain_tip::NoChainTip, parameters::Network::*,
 };
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::BoxError;
 use zebra_test::mock_service::MockService;
+
+use super::super::*;
+
+use config::rpc::Config;
 
 /// Test that the JSON-RPC server spawns.
 #[tokio::test]

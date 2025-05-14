@@ -4,6 +4,8 @@
 //!
 //! For usage please refer to the program help: `block-template-to-proposal --help`
 
+mod args;
+
 use std::io::Read;
 
 use color_eyre::eyre::Result;
@@ -19,8 +21,6 @@ use zebra_rpc::methods::types::{
     long_poll::LONG_POLL_ID_LENGTH,
 };
 use zebra_utils::init_tracing;
-
-mod args;
 
 /// The minimum number of characters in a valid `getblocktemplate JSON response.
 ///
