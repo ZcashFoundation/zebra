@@ -52,13 +52,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       # Create instance template from container image
       - name: Create instance template
@@ -73,7 +73,7 @@ jobs:
           --container-image electriccoinco/zcashd \
           --container-env ZCASHD_NETWORK="${{ inputs.network }}" \
           --machine-type ${{ vars.GCP_SMALL_MACHINE }} \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          --subnet=${{ vars.GCP_SUBNETWORK }} \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --labels=app=zcashd,environment=prod,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }} \

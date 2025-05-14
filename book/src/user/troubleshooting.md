@@ -4,8 +4,6 @@
 
 There are a few bugs in Zebra that we're still working on fixing:
 
-- [The `getpeerinfo` RPC shows current and recent outbound connections](https://github.com/ZcashFoundation/zebra/issues/7893), rather than current inbound and outbound connections.
-
 - [Progress bar estimates can become extremely large](https://github.com/console-rs/indicatif/issues/556). We're waiting on a fix in the progress bar library.
 
 - Zebra currently gossips and connects to [private IP addresses](https://en.wikipedia.org/wiki/IP_address#Private_addresses), we want to [disable private IPs but provide a config (#3117)](https://github.com/ZcashFoundation/zebra/issues/3117) in an upcoming release

@@ -100,6 +100,7 @@ use std::{
     marker::PhantomData,
     net::IpAddr,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::Instant,
 };
@@ -111,6 +112,7 @@ use futures::{
     stream::FuturesUnordered,
     task::noop_waker,
 };
+use indexmap::IndexMap;
 use itertools::Itertools;
 use num_integer::div_ceil;
 use tokio::{
@@ -182,6 +184,9 @@ where
 
     /// A channel that asks the peer crawler task to connect to more peers.
     demand_signal: mpsc::Sender<MorePeers>,
+
+    /// A watch channel receiver with a copy of banned IP addresses.
+    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
 
     // Peer Tracking: Ready Peers
     //
@@ -276,21 +281,23 @@ where
     /// - `discover`: handles peer connects and disconnects;
     /// - `demand_signal`: requests more peers when all peers are busy (unready);
     /// - `handle_rx`: receives background task handles,
-    ///                monitors them to make sure they're still running,
-    ///                and shuts down all the tasks as soon as one task exits;
+    ///   monitors them to make sure they're still running,
+    ///   and shuts down all the tasks as soon as one task exits;
     /// - `inv_stream`: receives inventory changes from peers,
-    ///                 allowing the peer set to direct inventory requests;
+    ///   allowing the peer set to direct inventory requests;
+    /// - `bans_receiver`: receives a map of banned IP addresses that should be dropped;
     /// - `address_book`: when peer set is busy, it logs address book diagnostics.
     /// - `minimum_peer_version`: endpoint to see the minimum peer protocol version in real time.
     /// - `max_conns_per_ip`: configured maximum number of peers that can be in the
-    ///                       peer set per IP, defaults to the config value or to
-    ///                       [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
+    ///   peer set per IP, defaults to the config value or to
+    ///   [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`].
     pub fn new(
         config: &Config,
         discover: D,
         demand_signal: mpsc::Sender<MorePeers>,
         handle_rx: tokio::sync::oneshot::Receiver<Vec<JoinHandle<Result<(), BoxError>>>>,
         inv_stream: broadcast::Receiver<InventoryChange>,
+        bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
         address_metrics: watch::Receiver<AddressMetrics>,
         minimum_peer_version: MinimumPeerVersion<C>,
         max_conns_per_ip: Option<usize>,
@@ -299,6 +306,8 @@ where
             // New peers
             discover,
             demand_signal,
+            // Banned peers
+            bans_receiver,
 
             // Ready peers
             ready_services: HashMap::new(),
@@ -475,6 +484,12 @@ where
                 Some(Ok((key, svc))) => {
                     trace!(?key, "service became ready");
 
+                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                        warn!(?key, "service is banned, dropping service");
+                        std::mem::drop(svc);
+                        continue;
+                    }
+
                     self.push_ready(true, key, svc);
 
                     // Return Ok if at least one peer became ready.
@@ -544,7 +559,15 @@ where
 
             match peer_readiness {
                 // Still ready, add it back to the list.
-                Ok(()) => self.push_ready(false, key, svc),
+                Ok(()) => {
+                    if self.bans_receiver.borrow().contains_key(&key.ip()) {
+                        debug!(?key, "service ip is banned, dropping service");
+                        std::mem::drop(svc);
+                        continue;
+                    }
+
+                    self.push_ready(false, key, svc)
+                }
 
                 // Ready -> Errored
                 Err(error) => {

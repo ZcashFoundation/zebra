@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: transactions
+---
+{
+  "Err": {
+    "code": -32602,
+    "message": "start Height(2) must be less than or equal to end Height(1)"
+  }
+}

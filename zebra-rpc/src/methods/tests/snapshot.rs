@@ -5,34 +5,65 @@
 //! cargo insta test --review --release -p zebra-rpc --lib -- test_rpc_response_data
 //! ```
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::BTreeMap,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+    time::Instant,
+};
 
 use futures::FutureExt;
-use insta::dynamic_redaction;
+use hex::FromHex;
+use insta::{dynamic_redaction, Settings};
 use jsonrpsee::core::RpcResult as Result;
-use tower::buffer::Buffer;
+use tower::{buffer::Buffer, util::BoxService, Service};
 
 use zebra_chain::{
-    block::Block,
+    block::{Block, Hash},
+    chain_sync_status::MockSyncStatus,
     chain_tip::mock::MockChainTip,
     orchard,
     parameters::{
         subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
-        Network::Mainnet,
+        Network::{self, Mainnet},
+        NetworkUpgrade,
     },
     sapling,
-    serialization::ZcashDeserializeInto,
+    serialization::{DateTime32, ZcashDeserializeInto},
     subtree::NoteCommitmentSubtreeData,
+    transaction::Transaction,
+    transparent,
+    work::difficulty::CompactDifficulty,
 };
-use zebra_node_services::BoxError;
-use zebra_state::{ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
-use zebra_test::mock_service::MockService;
+use zebra_consensus::Request;
+use zebra_network::{
+    address_book_peers::MockAddressBookPeers,
+    types::{MetaAddr, PeerServices},
+};
+use zebra_node_services::{mempool, BoxError};
+use zebra_state::{GetBlockTemplateChainInfo, ReadRequest, ReadResponse, MAX_ON_DISK_HEIGHT};
+use zebra_test::{
+    mock_service::{MockService, PanicAssertion},
+    vectors::BLOCK_MAINNET_1_BYTES,
+};
+
+use crate::methods::{
+    hex_data::HexData,
+    tests::utils::fake_history_tree,
+    types::{
+        get_block_template::{self, GetBlockTemplateRequestMode},
+        get_mining_info,
+        long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
+        peer_info::PeerInfo,
+        submit_block,
+        subsidy::BlockSubsidy,
+        unified_address, validate_address, z_validate_address,
+    },
+    GetBlockHash,
+};
 
 use super::super::*;
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-mod get_block_template_rpcs;
 
 /// The first block height in the state that can never be stored in the database,
 /// due to optimisations in the disk format.
@@ -78,7 +109,7 @@ async fn test_z_get_treestate() {
     let _init_guard = zebra_test::init();
     const SAPLING_ACTIVATION_HEIGHT: u32 = 2;
 
-    let testnet = Parameters::build()
+    let custom_testnet = Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
             sapling: Some(SAPLING_ACTIVATION_HEIGHT),
             // We need to set the NU5 activation height higher than the height of the last block for
@@ -98,24 +129,29 @@ async fn test_z_get_treestate() {
 
     // Initiate the snapshots of the RPC responses.
     let mut settings = insta::Settings::clone_current();
-    settings.set_snapshot_suffix(network_string(&testnet).to_string());
+    settings.set_snapshot_suffix(network_string(&custom_testnet).to_string());
 
-    let blocks: Vec<_> = testnet
+    let blocks: Vec<_> = custom_testnet
         .blockchain_iter()
         .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
-    let (_, state, tip, _) = zebra_state::populated_state(blocks.clone(), &testnet).await;
-
+    let (_, state, tip, _) = zebra_state::populated_state(blocks.clone(), &custom_testnet).await;
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
-        "",
-        "",
-        testnet,
+        custom_testnet,
+        Default::default(),
         false,
-        true,
+        "0.0.1",
+        "RPC test",
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         state,
+        Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
+        MockSyncStatus::default(),
         tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
     );
 
     // Request the treestate by a hash.
@@ -176,39 +212,50 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> =
         MockService::build().for_unit_tests();
+
     // Create a populated state service
-    #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-    let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::populated_state(blocks.clone(), network).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), network).await;
 
     // Start snapshots of RPC responses.
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_suffix(format!("{}_{}", network_string(network), blocks.len() - 1));
 
-    // Test getblocktemplate-rpcs snapshots
-    #[cfg(feature = "getblocktemplate-rpcs")]
-    get_block_template_rpcs::test_responses(
+    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        network,
+        state.clone(),
+    )
+    .await;
+
+    test_mining_rpcs(
         network,
         mempool.clone(),
-        state,
         read_state.clone(),
+        block_verifier_router.clone(),
         settings.clone(),
     )
     .await;
 
-    // Init RPC
-    let (rpc, _rpc_tx_queue_task_handle) = RpcImpl::new(
-        "RPC test",
-        "/Zebra:RPC test/",
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+
+    let (rpc, _) = RpcImpl::new(
         network.clone(),
+        Default::default(),
         false,
-        true,
+        "0.0.1",
+        "RPC test",
         Buffer::new(mempool.clone(), 1),
         read_state,
-        latest_chain_tip,
+        block_verifier_router,
+        MockSyncStatus::default(),
+        tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
     );
 
-    // We only want a snapshot of the `getblocksubsidy` and `getblockchaininfo` methods for the non-default Testnet (with an NU6 activation height).
+    // We only want a snapshot of the `getblocksubsidy` and `getblockchaininfo` methods for the
+    // non-default Testnet (with an NU6 activation height).
     if network.is_a_test_network() && !network.is_default_testnet() {
         let get_blockchain_info = rpc
             .get_blockchain_info()
@@ -220,7 +267,10 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     }
 
     // `getinfo`
-    let get_info = rpc.get_info().expect("We should have a GetInfo struct");
+    let get_info = rpc
+        .get_info()
+        .await
+        .expect("We should have a GetInfo struct");
     snapshot_rpc_getinfo(get_info, &settings);
 
     // `getblockchaininfo`
@@ -378,7 +428,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // - as we have the mempool mocked we need to expect a request and wait for a response,
     // which will be an empty mempool in this case.
     // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
-    #[cfg(feature = "getblocktemplate-rpcs")]
     let mempool_req = mempool
         .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
         .map(|responder| {
@@ -389,19 +438,14 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             });
         });
 
-    #[cfg(not(feature = "getblocktemplate-rpcs"))]
-    let mempool_req = mempool
-        .expect_request_that(|request| matches!(request, mempool::Request::TransactionIds))
-        .map(|responder| {
-            responder.respond(mempool::Response::TransactionIds(
-                std::collections::HashSet::new(),
-            ));
-        });
-
     // make the api call
-    let get_raw_mempool = rpc.get_raw_mempool();
+    let get_raw_mempool = rpc.get_raw_mempool(None);
     let (response, _) = futures::join!(get_raw_mempool, mempool_req);
-    let get_raw_mempool = response.expect("We should have a GetRawTransaction struct");
+    let GetRawMempool::TxIds(get_raw_mempool) =
+        response.expect("We should have a GetRawTransaction struct")
+    else {
+        panic!("should return TxIds for non verbose");
+    };
 
     snapshot_rpc_getrawmempool(get_raw_mempool, &settings);
 
@@ -464,8 +508,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 1,
-            end: 10,
+            start: Some(1),
+            end: Some(10),
         })
         .await
         .expect("We should have a vector of strings");
@@ -474,8 +518,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 2,
-            end: 2,
+            start: Some(2),
+            end: Some(2),
         })
         .await
         .expect("We should have a vector of strings");
@@ -484,20 +528,31 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: 3,
-            end: EXCESSIVE_BLOCK_HEIGHT,
+            start: Some(3),
+            end: Some(EXCESSIVE_BLOCK_HEIGHT),
         })
-        .await;
-    snapshot_rpc_getaddresstxids_invalid("excessive_end", get_address_tx_ids, &settings);
+        .await
+        .expect("We should have a vector of strings");
+    snapshot_rpc_getaddresstxids_valid("excessive_end", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
         .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
-            start: EXCESSIVE_BLOCK_HEIGHT,
-            end: EXCESSIVE_BLOCK_HEIGHT + 1,
+            start: Some(EXCESSIVE_BLOCK_HEIGHT),
+            end: Some(EXCESSIVE_BLOCK_HEIGHT + 1),
+        })
+        .await
+        .expect("We should have a vector of strings");
+    snapshot_rpc_getaddresstxids_valid("excessive_start", get_address_tx_ids, &settings);
+
+    let get_address_tx_ids = rpc
+        .get_address_tx_ids(GetAddressTxIdsRequest {
+            addresses: addresses.clone(),
+            start: Some(2),
+            end: Some(1),
         })
         .await;
-    snapshot_rpc_getaddresstxids_invalid("excessive_start", get_address_tx_ids, &settings);
+    snapshot_rpc_getaddresstxids_invalid("end_greater_start", get_address_tx_ids, &settings);
 
     // `getaddressutxos`
     let get_address_utxos = rpc
@@ -515,17 +570,22 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     let (latest_chain_tip, _) = MockChainTip::new();
     let mut state = MockService::build().for_unit_tests();
-    let mempool = MockService::build().for_unit_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
-        "RPC test",
-        "/Zebra:RPC test/",
         network.clone(),
+        Default::default(),
         false,
-        true,
-        mempool,
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
         state.clone(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
         latest_chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
     );
 
     // Test the response format from `z_getsubtreesbyindex` for Sapling.
@@ -591,9 +651,12 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
                 // assert that the subversion value is user agent
-                assert_eq!(value.as_str().unwrap(), format!("/Zebra:RPC test/"));
+                assert_eq!(value.as_str().unwrap(), format!("RPC test"));
                 // replace with:
                 "[SubVersion]"
+            }),
+            ".errorstimestamp" => dynamic_redaction(|_value, _path| {
+                "[LastErrorTimestamp]"
             }),
         })
     });
@@ -612,6 +675,12 @@ fn snapshot_rpc_getblockchaininfo(
                 assert!(u32::try_from(value.as_u64().unwrap()).unwrap() < Height::MAX_AS_U32);
                 // replace with:
                 "[Height]"
+            }),
+            ".verificationprogress" => dynamic_redaction(|value, _path| {
+                // assert that the value looks like a valid verification progress here
+                assert!(value.as_f64().unwrap() <= 1.0);
+                // replace with:
+                "[f64]"
             }),
         })
     });
@@ -714,9 +783,587 @@ fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::S
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
 }
 
+/// Snapshot `getblockcount` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_count", block_count));
+}
+
+/// Snapshot valid `getblockhash` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockhash_valid(block_hash: GetBlockHash, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_block_hash_valid", block_hash));
+}
+
+/// Snapshot invalid `getblockhash` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblockhash_invalid(
+    variant: &'static str,
+    block_hash: Result<GetBlockHash>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_block_hash_invalid_{variant}"), block_hash)
+    });
+}
+
+/// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblocktemplate(
+    variant: &'static str,
+    block_template: get_block_template::Response,
+    coinbase_tx: Option<Transaction>,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_block_template_{variant}"), block_template)
+    });
+
+    if let Some(coinbase_tx) = coinbase_tx {
+        settings.bind(|| {
+            insta::assert_ron_snapshot!(
+                format!("get_block_template_{variant}.coinbase_tx"),
+                coinbase_tx
+            )
+        });
+    };
+}
+
+/// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_submit_block_invalid(
+    submit_block_response: submit_block::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!("snapshot_rpc_submit_block_invalid", submit_block_response)
+    });
+}
+
+/// Snapshot `getmininginfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getmininginfo(
+    get_mining_info: get_mining_info::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
+}
+
+/// Snapshot `getblocksubsidy` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getblocksubsidy(
+    variant: &'static str,
+    get_block_subsidy: BlockSubsidy,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_block_subsidy_{variant}"), get_block_subsidy)
+    });
+}
+
+/// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_peer_info", get_peer_info));
+}
+
+/// Snapshot `getnetworksolps` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_network_sol_ps", get_network_sol_ps));
+}
+
+/// Snapshot `validateaddress` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_validateaddress(
+    variant: &'static str,
+    validate_address: validate_address::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("validate_address_{variant}"), validate_address)
+    });
+}
+
+/// Snapshot `z_validateaddress` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_z_validateaddress(
+    variant: &'static str,
+    z_validate_address: z_validate_address::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("z_validate_address_{variant}"), z_validate_address)
+    });
+}
+
+/// Snapshot valid `getdifficulty` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getdifficulty_valid(
+    variant: &'static str,
+    difficulty: f64,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("get_difficulty_valid_{variant}"), difficulty)
+    });
+}
+
+/// Snapshot `snapshot_rpc_z_listunifiedreceivers` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_z_listunifiedreceivers(
+    variant: &'static str,
+    response: unified_address::Response,
+    settings: &insta::Settings,
+) {
+    settings.bind(|| {
+        insta::assert_json_snapshot!(format!("z_list_unified_receivers_{variant}"), response)
+    });
+}
+
 /// Utility function to convert a `Network` to a lowercase string.
 fn network_string(network: &Network) -> String {
     let mut net_suffix = network.to_string();
     net_suffix.make_ascii_lowercase();
     net_suffix
+}
+
+pub async fn test_mining_rpcs<ReadState>(
+    network: &Network,
+    mempool: MockService<
+        mempool::Request,
+        mempool::Response,
+        PanicAssertion,
+        zebra_node_services::BoxError,
+    >,
+    read_state: ReadState,
+    block_verifier_router: Buffer<BoxService<Request, Hash, RouterError>, Request>,
+    settings: Settings,
+) where
+    ReadState: Service<
+            zebra_state::ReadRequest,
+            Response = zebra_state::ReadResponse,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
+{
+    let mut mock_sync_status = MockSyncStatus::default();
+    mock_sync_status.set_is_close_to_tip(true);
+
+    #[allow(clippy::unnecessary_struct_initialization)]
+    let mining_conf = crate::config::mining::Config {
+        miner_address: Some(transparent::Address::from_script_hash(
+            network.kind(),
+            [0xad; 20],
+        )),
+        extra_coinbase_data: None,
+        debug_like_zcashd: true,
+        // TODO: Use default field values when optional features are enabled in tests #8183
+        internal_miner: true,
+    };
+
+    // nu5 block height
+    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(network).unwrap();
+    // nu5 block hash
+    let fake_tip_hash =
+        Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
+
+    //  nu5 block time + 1
+    let fake_min_time = DateTime32::from(1654008606);
+    // nu5 block time + 12
+    let fake_cur_time = DateTime32::from(1654008617);
+    // nu5 block time + 123
+    let fake_max_time = DateTime32::from(1654008728);
+
+    // Use a valid fractional difficulty for snapshots
+    let pow_limit = network.target_difficulty_limit();
+    let fake_difficulty = pow_limit * 2 / 3;
+    let fake_difficulty = CompactDifficulty::from(fake_difficulty);
+
+    let (mock_tip, mock_tip_sender) = MockChainTip::new();
+    mock_tip_sender.send_best_tip_height(fake_tip_height);
+    mock_tip_sender.send_best_tip_hash(fake_tip_hash);
+    mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
+
+    let mock_address_book = MockAddressBookPeers::new(vec![MetaAddr::new_connected(
+        SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            network.default_port(),
+        )
+        .into(),
+        &PeerServices::NODE_NETWORK,
+        false,
+    )
+    .into_new_meta_addr(Instant::now(), DateTime32::now())]);
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+
+    let (rpc, _) = RpcImpl::new(
+        network.clone(),
+        mining_conf.clone(),
+        false,
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        read_state,
+        block_verifier_router.clone(),
+        mock_sync_status.clone(),
+        mock_tip.clone(),
+        mock_address_book,
+        rx.clone(),
+        None,
+    );
+
+    if network.is_a_test_network() && !network.is_default_testnet() {
+        let fake_future_nu6_block_height =
+            NetworkUpgrade::Nu6.activation_height(network).unwrap().0 + 100_000;
+        let get_block_subsidy = rpc
+            .get_block_subsidy(Some(fake_future_nu6_block_height))
+            .await
+            .expect("We should have a success response");
+        snapshot_rpc_getblocksubsidy("future_nu6_height", get_block_subsidy, &settings);
+        // We only want a snapshot of the `getblocksubsidy` method for the non-default Testnet (with an NU6 activation height).
+        return;
+    }
+
+    // `getblockcount`
+    let get_block_count = rpc.get_block_count().expect("We should have a number");
+    snapshot_rpc_getblockcount(get_block_count, &settings);
+
+    // `getblockhash`
+    const BLOCK_HEIGHT10: i32 = 10;
+
+    let get_block_hash = rpc
+        .get_block_hash(BLOCK_HEIGHT10)
+        .await
+        .expect("We should have a GetBlockHash struct");
+    snapshot_rpc_getblockhash_valid(get_block_hash, &settings);
+
+    let get_block_hash = rpc
+        .get_block_hash(
+            EXCESSIVE_BLOCK_HEIGHT
+                .try_into()
+                .expect("constant fits in i32"),
+        )
+        .await;
+    snapshot_rpc_getblockhash_invalid("excessive_height", get_block_hash, &settings);
+
+    // `getmininginfo`
+    let get_mining_info = rpc
+        .get_mining_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getmininginfo(get_mining_info, &settings);
+
+    // `getblocksubsidy`
+    let fake_future_block_height = fake_tip_height.0 + 100_000;
+    let get_block_subsidy = rpc
+        .get_block_subsidy(Some(fake_future_block_height))
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getblocksubsidy("future_height", get_block_subsidy, &settings);
+
+    let get_block_subsidy = rpc
+        .get_block_subsidy(None)
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getblocksubsidy("tip_height", get_block_subsidy, &settings);
+
+    let get_block_subsidy = rpc
+        .get_block_subsidy(Some(EXCESSIVE_BLOCK_HEIGHT))
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+
+    // `getpeerinfo`
+    let get_peer_info = rpc
+        .get_peer_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getpeerinfo(get_peer_info, &settings);
+
+    // `getnetworksolps` (and `getnetworkhashps`)
+    //
+    // TODO: add tests for excessive num_blocks and height (#6688)
+    //       add the same tests for get_network_hash_ps
+    let get_network_sol_ps = rpc
+        .get_network_sol_ps(None, None)
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getnetworksolps(get_network_sol_ps, &settings);
+
+    // `getblocktemplate` - the following snapshots use a mock read_state
+
+    // get a new empty state
+    let read_state = MockService::build().for_unit_tests();
+
+    let make_mock_read_state_request_handler = || {
+        let mut read_state = read_state.clone();
+
+        async move {
+            read_state
+                .expect_request_that(|req| matches!(req, ReadRequest::ChainInfo))
+                .await
+                .respond(ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                    expected_difficulty: fake_difficulty,
+                    tip_height: fake_tip_height,
+                    tip_hash: fake_tip_hash,
+                    cur_time: fake_cur_time,
+                    min_time: fake_min_time,
+                    max_time: fake_max_time,
+                    chain_history_root: fake_history_tree(network).hash(),
+                }));
+        }
+    };
+
+    let make_mock_mempool_request_handler = || {
+        let mut mempool = mempool.clone();
+
+        async move {
+            mempool
+                .expect_request(mempool::Request::FullTransactions)
+                .await
+                .respond(mempool::Response::FullTransactions {
+                    transactions: vec![],
+                    transaction_dependencies: Default::default(),
+                    // tip hash needs to match chain info for long poll requests
+                    last_seen_tip_hash: fake_tip_hash,
+                });
+        }
+    };
+
+    // send tip hash and time needed for getblocktemplate rpc
+    mock_tip_sender.send_best_tip_hash(fake_tip_hash);
+
+    let (rpc_mock_state, _) = RpcImpl::new(
+        network.clone(),
+        mining_conf.clone(),
+        false,
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        read_state.clone(),
+        block_verifier_router,
+        mock_sync_status.clone(),
+        mock_tip.clone(),
+        MockAddressBookPeers::default(),
+        rx.clone(),
+        None,
+    );
+
+    // Basic variant (default mode and no extra features)
+
+    // Fake the ChainInfo and FullTransaction responses
+    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+    let mock_mempool_request_handler = make_mock_mempool_request_handler();
+
+    let get_block_template_fut = rpc_mock_state.get_block_template(None);
+
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        mock_mempool_request_handler,
+        mock_read_state_request_handler,
+    );
+
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!(
+            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
+        )
+    };
+
+    let coinbase_tx: Transaction = get_block_template
+        .coinbase_txn
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .expect("coinbase bytes are valid");
+
+    snapshot_rpc_getblocktemplate(
+        "basic",
+        (*get_block_template).into(),
+        Some(coinbase_tx),
+        &settings,
+    );
+
+    // long polling feature with submit old field
+
+    let long_poll_id: LongPollId = "0"
+        .repeat(LONG_POLL_ID_LENGTH)
+        .parse()
+        .expect("unexpected invalid LongPollId");
+
+    // Fake the ChainInfo and FullTransaction responses
+    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+    let mock_mempool_request_handler = make_mock_mempool_request_handler();
+
+    let get_block_template_fut = rpc_mock_state.get_block_template(
+        get_block_template::JsonParameters {
+            long_poll_id: long_poll_id.into(),
+            ..Default::default()
+        }
+        .into(),
+    );
+
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        mock_mempool_request_handler,
+        mock_read_state_request_handler,
+    );
+
+    let get_block_template::Response::TemplateMode(get_block_template) =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call")
+    else {
+        panic!(
+            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
+        )
+    };
+
+    let coinbase_tx: Transaction = get_block_template
+        .coinbase_txn
+        .data
+        .as_ref()
+        .zcash_deserialize_into()
+        .expect("coinbase bytes are valid");
+
+    snapshot_rpc_getblocktemplate(
+        "long_poll",
+        (*get_block_template).into(),
+        Some(coinbase_tx),
+        &settings,
+    );
+
+    // `getblocktemplate` proposal mode variant
+
+    let get_block_template =
+        rpc_mock_state.get_block_template(Some(get_block_template::JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(HexData("".into())),
+            ..Default::default()
+        }));
+
+    let get_block_template = get_block_template
+        .await
+        .expect("unexpected error in getblocktemplate RPC call");
+
+    snapshot_rpc_getblocktemplate("invalid-proposal", get_block_template, None, &settings);
+
+    // the following snapshots use a mock read_state and block_verifier_router
+
+    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
+    let (rpc_mock_state_verifier, _) = RpcImpl::new(
+        network.clone(),
+        mining_conf,
+        false,
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool, 1),
+        read_state.clone(),
+        mock_block_verifier_router.clone(),
+        mock_sync_status,
+        mock_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    let get_block_template_fut =
+        rpc_mock_state_verifier.get_block_template(Some(get_block_template::JsonParameters {
+            mode: GetBlockTemplateRequestMode::Proposal,
+            data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
+            ..Default::default()
+        }));
+
+    let mock_block_verifier_router_request_handler = async move {
+        mock_block_verifier_router
+            .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
+            .await
+            .respond(Hash::from([0; 32]));
+    };
+
+    let (get_block_template, ..) = tokio::join!(
+        get_block_template_fut,
+        mock_block_verifier_router_request_handler,
+    );
+
+    let get_block_template =
+        get_block_template.expect("unexpected error in getblocktemplate RPC call");
+
+    snapshot_rpc_getblocktemplate("proposal", get_block_template, None, &settings);
+
+    // These RPC snapshots use the populated state
+
+    // `submitblock`
+
+    let submit_block = rpc
+        .submit_block(HexData("".into()), None)
+        .await
+        .expect("unexpected error in submitblock RPC call");
+
+    snapshot_rpc_submit_block_invalid(submit_block, &settings);
+
+    // `validateaddress`
+    let founder_address = if network.is_mainnet() {
+        "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR"
+    } else {
+        "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi"
+    };
+
+    let validate_address = rpc
+        .validate_address(founder_address.to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+    snapshot_rpc_validateaddress("basic", validate_address, &settings);
+
+    let validate_address = rpc
+        .validate_address("".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+    snapshot_rpc_validateaddress("invalid", validate_address, &settings);
+
+    // `z_validateaddress`
+    let founder_address = if network.is_mainnet() {
+        "t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR"
+    } else {
+        "t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi"
+    };
+
+    let z_validate_address = rpc
+        .z_validate_address(founder_address.to_string())
+        .await
+        .expect("We should have a z_validate_address::Response");
+    snapshot_rpc_z_validateaddress("basic", z_validate_address, &settings);
+
+    let z_validate_address = rpc
+        .z_validate_address("".to_string())
+        .await
+        .expect("We should have a z_validate_address::Response");
+    snapshot_rpc_z_validateaddress("invalid", z_validate_address, &settings);
+
+    // `getdifficulty`
+    // This RPC snapshot uses both the mock and populated states
+
+    // Fake the ChainInfo response using the mock state
+    let mock_read_state_request_handler = make_mock_read_state_request_handler();
+
+    let get_difficulty_fut = rpc_mock_state.get_difficulty();
+
+    let (get_difficulty, ..) = tokio::join!(get_difficulty_fut, mock_read_state_request_handler,);
+
+    let mock_get_difficulty = get_difficulty.expect("unexpected error in getdifficulty RPC call");
+
+    snapshot_rpc_getdifficulty_valid("mock", mock_get_difficulty, &settings);
+
+    // `z_listunifiedreceivers`
+
+    let ua1 = String::from(
+        "u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf",
+    );
+    let z_list_unified_receivers = rpc
+        .z_list_unified_receivers(ua1)
+        .await
+        .expect("unexpected error in z_list_unified_receivers RPC call");
+
+    snapshot_rpc_z_listunifiedreceivers("ua1", z_list_unified_receivers, &settings);
+
+    let ua2 = String::from(
+        "u1uf4qsmh037x2jp6k042h9d2w22wfp39y9cqdf8kcg0gqnkma2gf4g80nucnfeyde8ev7a6kf0029gnwqsgadvaye9740gzzpmr67nfkjjvzef7rkwqunqga4u4jges4tgptcju5ysd0",
+    );
+    let z_list_unified_receivers = rpc
+        .z_list_unified_receivers(ua2)
+        .await
+        .expect("unexpected error in z_list_unified_receivers RPC call");
+
+    snapshot_rpc_z_listunifiedreceivers("ua2", z_list_unified_receivers, &settings);
 }

@@ -1,6 +1,6 @@
 [package]
 name = "zebra-test"
-version = "1.0.0-beta.44"
+version = "1.0.0-beta.46"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Test harnesses and test vectors for Zebra"
 license = "MIT OR Apache-2.0"
@@ -15,33 +15,33 @@ keywords = ["zebra", "zcash"]
 categories = ["command-line-utilities", "cryptography::cryptocurrencies"]
 
 [dependencies]
-hex = "0.4.3"
-indexmap = "2.7.0"
-lazy_static = "1.4.0"
-insta = "1.41.1"
-itertools = "0.13.0"
-proptest = "1.4.0"
-once_cell = "1.20.2"
-rand = "0.8.5"
-regex = "1.11.0"
+hex = { workspace = true }
+indexmap = { workspace = true }
+lazy_static = { workspace = true }
+insta = { workspace = true }
+itertools = { workspace = true }
+proptest = { workspace = true }
+once_cell = { workspace = true }
+rand = { workspace = true }
+regex = { workspace = true }
 
-tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
-tower = { version = "0.4.13", features = ["util"] }
-futures = "0.3.31"
+tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
+tower = { workspace = true, features = ["util"] }
+futures = { workspace = true }
 
-color-eyre = "0.6.3"
+color-eyre = { workspace = true }
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.8.0", features = ["rustc_1_55"] }
+tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
-humantime = "2.1.0"
-owo-colors = "4.1.0"
-spandoc = "0.2.2"
-thiserror = "2.0.6"
+humantime = { workspace = true }
+owo-colors = { workspace = true }
+spandoc = { workspace = true }
+thiserror = { workspace = true }
 
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-tracing-error = "0.2.1"
-tracing = "0.1.41"
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-error = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
-tempfile = "3.14.0"
+tempfile = { workspace = true }

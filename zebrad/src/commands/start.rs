@@ -73,21 +73,10 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
-use std::sync::Arc;
-
-use abscissa_core::{config, Command, FrameworkError};
-use color_eyre::eyre::{eyre, Report};
-use futures::FutureExt;
-use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
-use tracing_futures::Instrument;
-
-use zebra_chain::block::genesis::regtest_genesis_block;
-use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
-use zebra_rpc::server::RpcServer;
-
+#[cfg(feature = "internal-miner")]
+use crate::components;
 use crate::{
-    application::{build_version, user_agent},
+    application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
         inbound::{self, InboundSetupData, MAX_INBOUND_RESPONSE_TIME},
         mempool::{self, Mempool},
@@ -97,6 +86,19 @@ use crate::{
     },
     config::ZebradConfig,
     prelude::*,
+};
+use abscissa_core::{config, Command, FrameworkError};
+use color_eyre::eyre::{eyre, Report};
+use futures::FutureExt;
+use std::sync::Arc;
+use tokio::{pin, select, sync::oneshot};
+use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tracing_futures::Instrument;
+use zebra_chain::block::genesis::regtest_genesis_block;
+use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
+use zebra_rpc::{
+    methods::{types::submit_block::SubmitBlockChannel, RpcImpl},
+    server::RpcServer,
 };
 
 /// Start the application (default command)
@@ -170,7 +172,7 @@ impl StartCmd {
                 setup_rx,
             ));
 
-        let (peer_set, address_book) = zebra_network::init(
+        let (peer_set, address_book, misbehavior_sender) = zebra_network::init(
             config.network.clone(),
             inbound,
             latest_chain_tip.clone(),
@@ -197,6 +199,7 @@ impl StartCmd {
             block_verifier_router.clone(),
             state.clone(),
             latest_chain_tip.clone(),
+            misbehavior_sender.clone(),
         );
 
         info!("initializing mempool");
@@ -208,6 +211,7 @@ impl StartCmd {
             sync_status.clone(),
             latest_chain_tip.clone(),
             chain_tip_change.clone(),
+            misbehavior_sender.clone(),
         );
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new()
@@ -227,6 +231,7 @@ impl StartCmd {
             mempool: mempool.clone(),
             state: state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
+            misbehavior_sender,
         };
         setup_tx
             .send(setup_data)
@@ -234,40 +239,33 @@ impl StartCmd {
         // And give it time to clear its queue
         tokio::task::yield_now().await;
 
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        if config.mining != zebra_rpc::config::mining::Config::default() {
-            warn!(
-                "Unused mining section in config,\
-                 compile with 'getblocktemplate-rpcs' feature to use mining RPCs"
-            );
-        }
+        // Create a channel to send mined blocks to the gossip task
+        let submit_block_channel = SubmitBlockChannel::new();
 
         // Launch RPC server
-        let (rpc_task_handle, mut rpc_tx_queue_task_handle) =
-            if let Some(listen_addr) = config.rpc.listen_addr {
-                info!("spawning RPC server");
-                info!("Trying to open RPC endpoint at {}...", listen_addr,);
-                let rpc_task_handle = RpcServer::spawn(
-                    config.rpc.clone(),
-                    config.mining.clone(),
-                    build_version(),
-                    user_agent(),
-                    mempool.clone(),
-                    read_only_state_service.clone(),
-                    block_verifier_router.clone(),
-                    sync_status.clone(),
-                    address_book.clone(),
-                    latest_chain_tip.clone(),
-                    config.network.network.clone(),
-                );
-                rpc_task_handle.await.unwrap()
-            } else {
-                warn!("configure an listen_addr to start the RPC server");
-                (
-                    tokio::spawn(std::future::pending().in_current_span()),
-                    tokio::spawn(std::future::pending().in_current_span()),
-                )
-            };
+        let (rpc_impl, mut rpc_tx_queue_handle) = RpcImpl::new(
+            config.network.network.clone(),
+            config.mining.clone(),
+            config.rpc.debug_force_finished_sync,
+            build_version(),
+            user_agent(),
+            mempool.clone(),
+            read_only_state_service.clone(),
+            block_verifier_router.clone(),
+            sync_status.clone(),
+            latest_chain_tip.clone(),
+            address_book.clone(),
+            LAST_WARN_ERROR_LOG_SENDER.subscribe(),
+            Some(submit_block_channel.sender()),
+        );
+
+        let rpc_task_handle = if config.rpc.listen_addr.is_some() {
+            RpcServer::start(rpc_impl.clone(), config.rpc.clone())
+                .await
+                .expect("server should start")
+        } else {
+            tokio::spawn(std::future::pending().in_current_span())
+        };
 
         // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
         //       any related unit tests sometimes crash with memory errors
@@ -301,6 +299,7 @@ impl StartCmd {
                 sync_status.clone(),
                 chain_tip_change.clone(),
                 peer_set.clone(),
+                Some(submit_block_channel.receiver()),
             )
             .in_current_span(),
         );
@@ -382,18 +381,7 @@ impl StartCmd {
         #[cfg(feature = "internal-miner")]
         let miner_task_handle = if config.mining.is_internal_miner_enabled() {
             info!("spawning Zcash miner");
-            let rpc = zebra_rpc::methods::get_block_template_rpcs::GetBlockTemplateRpcImpl::new(
-                &config.network.network,
-                config.mining.clone(),
-                mempool,
-                read_only_state_service,
-                latest_chain_tip,
-                block_verifier_router,
-                sync_status,
-                address_book,
-            );
-
-            crate::components::miner::spawn_init(&config.network.network, &config.mining, rpc)
+            components::miner::spawn_init(&config.network.network, &config.mining, rpc_impl)
         } else {
             tokio::spawn(std::future::pending().in_current_span())
         };
@@ -442,7 +430,7 @@ impl StartCmd {
                     Ok(())
                 }
 
-                rpc_tx_queue_result = &mut rpc_tx_queue_task_handle => {
+                rpc_tx_queue_result = &mut rpc_tx_queue_handle => {
                     rpc_tx_queue_result
                         .expect("unexpected panic in the rpc transaction queue task");
                     info!("rpc transaction queue task exited");
@@ -532,7 +520,7 @@ impl StartCmd {
 
         // ongoing tasks
         rpc_task_handle.abort();
-        rpc_tx_queue_task_handle.abort();
+        rpc_tx_queue_handle.abort();
         syncer_task_handle.abort();
         block_gossip_task_handle.abort();
         mempool_crawler_task_handle.abort();
@@ -546,7 +534,9 @@ impl StartCmd {
         state_checkpoint_verify_handle.abort();
         old_databases_task_handle.abort();
 
-        info!("exiting Zebra: all tasks have been asked to stop, waiting for remaining tasks to finish");
+        info!(
+            "exiting Zebra: all tasks have been asked to stop, waiting for remaining tasks to finish"
+        );
 
         exit_status
     }

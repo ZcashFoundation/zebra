@@ -67,7 +67,7 @@ impl ParameterCheckpoint for Network {
         let (checkpoints_for_network, should_fallback_to_genesis_hash_as_checkpoint) = match self {
             Network::Mainnet => (MAINNET_CHECKPOINTS, false),
             Network::Testnet(params) if params.is_default_testnet() => (TESTNET_CHECKPOINTS, false),
-            Network::Testnet(_params) => (TESTNET_CHECKPOINTS, true),
+            Network::Testnet(_params) => ("", true),
         };
 
         // Check that the list starts with the correct genesis block and parses checkpoint list.

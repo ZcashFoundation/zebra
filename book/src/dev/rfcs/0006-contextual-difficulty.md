@@ -753,10 +753,10 @@ would be a security issue.
 # Future possibilities
 [future-possibilities]: #future-possibilities
 
-## Re-using the relevant chain API in other contextual checks
+## Reusing the relevant chain API in other contextual checks
 [relevant-chain-api-reuse]: #relevant-chain-api-reuse
 
-The relevant chain iterator can be re-used to implement other contextual
+The relevant chain iterator can be reused to implement other contextual
 validation checks.
 
 For example, responding to peer requests for block locators, which means

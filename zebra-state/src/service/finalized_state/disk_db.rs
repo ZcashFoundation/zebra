@@ -22,7 +22,7 @@ use std::{
 use itertools::Itertools;
 use rlimit::increase_nofile_limit;
 
-use rocksdb::{ColumnFamilyDescriptor, Options, ReadOptions};
+use rocksdb::{ColumnFamilyDescriptor, ErrorKind, Options, ReadOptions};
 use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
@@ -570,6 +570,27 @@ impl DiskDb {
         );
     }
 
+    /// Returns the estimated total disk space usage of the database.
+    pub fn size(&self) -> u64 {
+        let db: &Arc<DB> = &self.db;
+        let db_options = DiskDb::options();
+        let mut total_size_on_disk = 0;
+        for cf_descriptor in DiskDb::construct_column_families(&db_options, db.path(), &[]).iter() {
+            let cf_name = &cf_descriptor.name();
+            let cf_handle = db
+                .cf_handle(cf_name)
+                .expect("Column family handle must exist");
+
+            total_size_on_disk += db
+                .property_int_value_cf(cf_handle, "rocksdb.total-sst-files-size")
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+        }
+
+        total_size_on_disk
+    }
+
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
@@ -812,6 +833,11 @@ impl DiskDb {
     /// Opens or creates the database at a path based on the kind, major version and network,
     /// with the supplied column families, preserving any existing column families,
     /// and returns a shared low-level database wrapper.
+    ///
+    /// # Panics
+    ///
+    /// - If the cache directory does not exist and can't be created.
+    /// - If the database cannot be opened for whatever reason.
     pub fn new(
         config: &Config,
         db_kind: impl AsRef<str>,
@@ -820,6 +846,11 @@ impl DiskDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> DiskDb {
+        // If the database is ephemeral, we don't need to check the cache directory.
+        if !config.ephemeral {
+            DiskDb::validate_cache_dir(&config.cache_dir);
+        }
+
         let db_kind = db_kind.as_ref();
         let path = config.db_path(db_kind, format_version_in_code.major, network);
 
@@ -880,11 +911,15 @@ impl DiskDb {
                 db
             }
 
-            // TODO: provide a different hint if the disk is full, see #1623
+            Err(e) if matches!(e.kind(), ErrorKind::Busy | ErrorKind::IOError) => panic!(
+                "Database likely already open {path:?} \
+                         Hint: Check if another zebrad process is running."
+            ),
+
             Err(e) => panic!(
-                "Opening database {path:?} failed: {e:?}. \
-                 Hint: Check if another zebrad process is running. \
-                 Try changing the state cache_dir in the Zebra config.",
+                "Opening database {path:?} failed. \
+                        Hint: Try changing the state cache_dir in the Zebra config. \
+                        Error: {e}",
             ),
         }
     }
@@ -963,6 +998,11 @@ impl DiskDb {
             let db_kind = db_kind.as_ref();
 
             let old_path = config.db_path(db_kind, major_db_ver - 1, network);
+            // Exit early if the path doesn't exist or there's an error checking it.
+            if !fs::exists(&old_path).unwrap_or(false) {
+                return;
+            }
+
             let new_path = config.db_path(db_kind, major_db_ver, network);
 
             let old_path = match fs::canonicalize(&old_path) {
@@ -1202,7 +1242,7 @@ impl DiskDb {
             );
         } else {
             #[cfg(not(test))]
-            info!(
+            debug!(
                 ?current_limit,
                 min_limit = ?DiskDb::MIN_OPEN_FILE_LIMIT,
                 ideal_limit = ?DiskDb::IDEAL_OPEN_FILE_LIMIT,
@@ -1487,6 +1527,24 @@ impl DiskDb {
                 self.zs_is_empty(&default_cf),
                 "Zebra should not store data in the 'default' column family"
             );
+        }
+    }
+
+    // Validates a cache directory and creates it if it doesn't exist.
+    // If the directory cannot be created, it panics with a specific error message.
+    fn validate_cache_dir(cache_dir: &std::path::PathBuf) {
+        if let Err(e) = fs::create_dir_all(cache_dir) {
+            match e.kind() {
+                std::io::ErrorKind::PermissionDenied => panic!(
+                    "Permission denied creating {cache_dir:?}. \
+                     Hint: check if cache directory exist and has write permissions."
+                ),
+                std::io::ErrorKind::StorageFull => panic!(
+                    "No space left on device creating {cache_dir:?}. \
+                     Hint: check if the disk is full."
+                ),
+                _ => panic!("Could not create cache dir {:?}: {}", cache_dir, e),
+            }
         }
     }
 }

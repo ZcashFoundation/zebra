@@ -16,8 +16,8 @@ on:
       - main
   # pull_request event is required only for autolabeler
   pull_request:
-    # Only following types are handled by the action, but one can default to all as well
-    #types: [opened, reopened, synchronize]
+    # Only following types are handled by the action
+    types: [opened, reopened, synchronize]
   # pull_request_target event is required for autolabeler to support PRs from forks
   pull_request_target:
     #types: [opened, reopened, synchronize]
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Drafts your next Release notes
-      - uses: release-drafter/release-drafter@v6
+      - uses: release-drafter/release-drafter@v6.1.0
         with:
           config-name: release-drafter.yml
           commitish: main

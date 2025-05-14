@@ -8,9 +8,7 @@
 # 3. 'test-fake-activation-heights': Runs state tests with fake activation heights, isolating its build products.
 # 4. 'test-empty-sync': Tests Zebra's ability to sync and checkpoint from an empty state.
 # 5. 'test-lightwalletd-integration': Validates integration with 'lightwalletd' starting from an empty state.
-# 6. 'test-configuration-file': Assesses the default Docker configuration for Zebra.
-# 7. 'test-configuration-file-testnet': Checks the Docker image reconfiguration for the Testnet.
-# 8. 'test-zebra-conf-path': Tests Zebra using a custom Docker configuration.
+# 6. 'test-docker-configurations': Runs a matrix of configuration tests to validate various Docker configurations.
 name: Docker Unit Tests
 
 on:
@@ -20,7 +18,7 @@ on:
         type: string
       network:
         type: string
-        default: 'Mainnet'
+        default: "Mainnet"
       no_cache:
         type: boolean
         default: false
@@ -32,14 +30,7 @@ env:
   COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
 
-#! IMPORTANT
-#!
-#! The job names in `ci-unit-tests-docker.yml`, `ci-unit-tests-docker.patch.yml` and
-#! `ci-unit-tests-docker.patch-external.yml` must be kept in sync.
 jobs:
-  # Run all the zebra tests, including tests that are ignored by default.
-  #
-  # - We activate the gRPC feature to avoid recompiling `zebrad`, but we don't actually run any gRPC tests.
   test-all:
     name: Test all
     timeout-minutes: 180
@@ -52,25 +43,24 @@ jobs:
         with:
           short-length: 7
 
-      # Run unit, basic acceptance tests, and ignored tests, only showing command output if the test fails.
+      # Run unit, basic acceptance tests, and ignored tests, only showing
+      # command output if the test fails.
       #
-      # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
-      #
-      - name: Run zebrad tests
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+      # If some tests hang, add "-- --nocapture" for just that test, or for all
+      # the tests.
+      - name: Run all tests
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e NETWORK -e RUN_ALL_TESTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-
-      # Run unit, basic acceptance tests, and ignored tests with experimental features.
-      #
-      - name: Run zebrad tests with experimental features
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e NETWORK -e RUN_ALL_EXPERIMENTAL_TESTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e RUN_ALL_TESTS=1 \
+          -e FEATURES="journald prometheus filter-reload" \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Run state tests with fake activation heights.
   #
@@ -98,7 +88,15 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e NETWORK -e TEST_FAKE_ACTIVATION_HEIGHTS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e TEST_FAKE_ACTIVATION_HEIGHTS=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
   test-empty-sync:
@@ -118,7 +116,15 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e NETWORK -e TEST_ZEBRA_EMPTY_SYNC=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e TEST_ZEBRA_EMPTY_SYNC=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   test-lightwalletd-integration:
@@ -138,42 +144,20 @@ jobs:
           NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty -e NETWORK -e ZEBRA_TEST_LIGHTWALLETD=1 -e TEST_LWD_INTEGRATION=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e ZEBRA_TEST_LIGHTWALLETD=1 \
+          -e TEST_LWD_INTEGRATION=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
-  # Test that Zebra works using the default config with the latest Zebra version.
-  test-configuration-file:
-    name: Test CI default Docker config file
+  # Run a matrix of configuration tests against the Docker image
+  test-docker-configurations:
+    name: Test Zebra Docker configurations
     uses: ./.github/workflows/sub-test-zebra-config.yml
     with:
-      test_id: 'default-conf'
       docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
-      test_variables: '-e NETWORK'
-      network: 'Mainnet'
-
-  # Test reconfiguring the the docker image for tesnet.
-  test-configuration-file-testnet:
-    name: Test CI testnet Docker config file
-    # Make sure Zebra can sync the genesis block on testnet
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      test_id: 'testnet-conf'
-      docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*Genesis" -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
-      # TODO: improve the entrypoint to avoid using `ENTRYPOINT_FEATURES=""`
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="/etc/zebrad/zebrad.toml" -e ENTRYPOINT_FEATURES=""'
-      network: 'Testnet'
-
-  # Test that Zebra works using $ZEBRA_CONF_PATH config
-  test-zebra-conf-path:
-    name: Test CI custom Docker config file
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      test_id: 'custom-conf'
-      docker_image: ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-      grep_patterns: '-e "loaded zebrad config.*config_path.*=.*v1.0.0-rc.2.toml"'
-      test_variables: '-e NETWORK -e ZEBRA_CONF_PATH="zebrad/tests/common/configs/v1.0.0-rc.2.toml"'
-      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
 
   failure-issue:
     name: Open or update issues for main branch failures
@@ -181,7 +165,14 @@ jobs:
     #
     # This list is for reliable tests that are run on the `main` branch.
     # Testnet jobs are not in this list, because we expect testnet to fail occasionally.
-    needs: [ test-all, test-fake-activation-heights, test-empty-sync, test-lightwalletd-integration, test-configuration-file, test-zebra-conf-path ]
+    needs:
+      [
+        test-all,
+        test-fake-activation-heights,
+        test-empty-sync,
+        test-lightwalletd-integration,
+        test-docker-configurations,
+      ]
     # Only open tickets for failed scheduled jobs, manual workflow runs, or `main` branch merges.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     # TODO: if a job times out, we want to create a ticket. Does failure() do that? Or do we need cancelled()?
@@ -202,7 +193,14 @@ jobs:
     if: contains(github.event.pull_request.labels.*.name, 'A-release')
     runs-on: ubuntu-latest
     steps:
-    - name: Run check_no_git_refs_in_cargo_lock
-      run: |
-        docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-        docker run --tty -e NETWORK -e RUN_CHECK_NO_GIT_REFS=1 ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+      - name: Run check_no_git_refs_in_cargo_lock
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e RUN_CHECK_NO_GIT_REFS=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}

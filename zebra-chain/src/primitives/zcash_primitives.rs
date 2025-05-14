@@ -8,7 +8,7 @@ use zcash_protocol::value::BalanceError;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::{ConsensusBranchId, Network},
+    parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -23,14 +23,14 @@ struct TransparentAuth<'a> {
     all_prev_outputs: &'a [transparent::Output],
 }
 
-impl zp_tx::components::transparent::Authorization for TransparentAuth<'_> {
+impl zcash_transparent::bundle::Authorization for TransparentAuth<'_> {
     type ScriptSig = zcash_primitives::legacy::Script;
 }
 
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
-impl zp_tx::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
-    fn input_amounts(&self) -> Vec<zp_tx::components::amount::NonNegativeAmount> {
+impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
+    fn input_amounts(&self) -> Vec<zcash_protocol::value::Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
@@ -61,22 +61,17 @@ struct MapTransparent<'a> {
 }
 
 impl<'a>
-    zp_tx::components::transparent::MapAuth<
-        zp_tx::components::transparent::Authorized,
-        TransparentAuth<'a>,
-    > for MapTransparent<'a>
+    zcash_transparent::bundle::MapAuth<zcash_transparent::bundle::Authorized, TransparentAuth<'a>>
+    for MapTransparent<'a>
 {
     fn map_script_sig(
         &self,
-        s: <zp_tx::components::transparent::Authorized as zp_tx::components::transparent::Authorization>::ScriptSig,
-    ) -> <TransparentAuth as zp_tx::components::transparent::Authorization>::ScriptSig {
+        s: <zcash_transparent::bundle::Authorized as zcash_transparent::bundle::Authorization>::ScriptSig,
+    ) -> <TransparentAuth as zcash_transparent::bundle::Authorization>::ScriptSig {
         s
     }
 
-    fn map_authorization(
-        &self,
-        _: zp_tx::components::transparent::Authorized,
-    ) -> TransparentAuth<'a> {
+    fn map_authorization(&self, _: zcash_transparent::bundle::Authorized) -> TransparentAuth<'a> {
         // TODO: This map should consume self, so we can move self.auth
         self.auth.clone()
     }
@@ -150,50 +145,8 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
 
 // End of (mostly) copied code
 
-impl TryFrom<&Transaction> for zp_tx::Transaction {
-    type Error = io::Error;
-
-    /// Convert a Zebra transaction into a librustzcash one.
-    ///
-    /// # Panics
-    ///
-    /// If the transaction is not V5. (Currently there is no need for this
-    /// conversion for other versions.)
-    #[allow(clippy::unwrap_in_result)]
-    fn try_from(trans: &Transaction) -> Result<Self, Self::Error> {
-        let network_upgrade = match trans {
-            Transaction::V5 {
-                network_upgrade, ..
-            } => network_upgrade,
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => panic!("Zebra only uses librustzcash for V5 transactions"),
-        };
-
-        convert_tx_to_librustzcash(
-            trans,
-            network_upgrade.branch_id().expect("V5 txs have branch IDs"),
-        )
-    }
-}
-
-pub(crate) fn convert_tx_to_librustzcash(
-    trans: &Transaction,
-    branch_id: ConsensusBranchId,
-) -> Result<zp_tx::Transaction, io::Error> {
-    let serialized_tx = trans.zcash_serialize_to_vec()?;
-    let branch_id: u32 = branch_id.into();
-    // We've already parsed this transaction, so its network upgrade must be valid.
-    let branch_id: zcash_primitives::consensus::BranchId = branch_id
-        .try_into()
-        .expect("zcash_primitives and Zebra have the same branch ids");
-    let alt_tx = zp_tx::Transaction::read(&serialized_tx[..], branch_id)?;
-    Ok(alt_tx)
-}
-
 /// Convert a Zebra transparent::Output into a librustzcash one.
-impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
+impl TryFrom<&transparent::Output> for zcash_transparent::bundle::TxOut {
     type Error = io::Error;
 
     #[allow(clippy::unwrap_in_result)]
@@ -202,12 +155,12 @@ impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
             .zcash_serialize_to_vec()
             .expect("zcash_primitives and Zebra transparent output formats must be compatible");
 
-        zp_tx::components::TxOut::read(&mut serialized_output_bytes.as_slice())
+        zcash_transparent::bundle::TxOut::read(&mut serialized_output_bytes.as_slice())
     }
 }
 
 /// Convert a Zebra transparent::Output into a librustzcash one.
-impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
+impl TryFrom<transparent::Output> for zcash_transparent::bundle::TxOut {
     type Error = io::Error;
 
     // The borrow is actually needed to use TryFrom<&transparent::Output>
@@ -218,11 +171,11 @@ impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
 }
 
 /// Convert a Zebra non-negative Amount into a librustzcash one.
-impl TryFrom<Amount<NonNegative>> for zp_tx::components::amount::NonNegativeAmount {
+impl TryFrom<Amount<NonNegative>> for zcash_protocol::value::Zatoshis {
     type Error = BalanceError;
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
-        zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64(amount.into())
+        zcash_protocol::value::Zatoshis::from_nonnegative_i64(amount.into())
     }
 }
 
@@ -251,31 +204,59 @@ pub(crate) struct PrecomputedTxData<'a> {
 }
 
 impl<'a> PrecomputedTxData<'a> {
-    /// Compute data used for sighash or txid computation.
+    /// Computes the data used for sighash or txid computation.
     ///
     /// # Inputs
     ///
-    /// - `tx`: the relevant transaction
-    /// - `branch_id`: the branch ID of the transaction
-    /// - `all_previous_outputs` the transparent Output matching each
-    ///   transparent input in the transaction.
+    /// - `tx`: the relevant transaction.
+    /// - `nu`: the network upgrade to which the transaction belongs.
+    /// - `all_previous_outputs`: the transparent Output matching each transparent input in `tx`.
+    ///
+    /// # Panics
+    ///
+    /// - If `tx` can't be converted to its `librustzcash` equivalent.
+    /// - If `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
+    ///   equivalent.
+    ///
+    /// # Consensus
+    ///
+    /// > [NU5 only, pre-NU6] All transactions MUST use the NU5 consensus branch ID `0xF919A198` as
+    /// > defined in [ZIP-252].
+    ///
+    /// > [NU6 only] All transactions MUST use the NU6 consensus branch ID `0xC8E71055` as defined
+    /// > in  [ZIP-253].
+    ///
+    /// # Notes
+    ///
+    /// The check that ensures compliance with the two consensus rules stated above takes place in
+    /// the [`Transaction::to_librustzcash`] method. If the check fails, the tx can't be converted
+    /// to its `librustzcash` equivalent, which leads to a panic. The check relies on the passed
+    /// `nu` parameter, which uniquely represents a consensus branch id and can, therefore, be used
+    /// as an equivalent to a consensus branch id. The desired `nu` is set either by the script or
+    /// tx verifier in `zebra-consensus`.
+    ///
+    /// [ZIP-252]: <https://zips.z.cash/zip-0252>
+    /// [ZIP-253]: <https://zips.z.cash/zip-0253>
     pub(crate) fn new(
         tx: &'a Transaction,
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         all_previous_outputs: &'a [transparent::Output],
     ) -> PrecomputedTxData<'a> {
-        let alt_tx = convert_tx_to_librustzcash(tx, branch_id)
-            .expect("zcash_primitives and Zebra transaction formats must be compatible");
-        let txid_parts = alt_tx.deref().digest(zp_tx::txid::TxIdDigester);
+        let tx = tx
+            .to_librustzcash(nu)
+            .expect("`zcash_primitives` and Zebra tx formats must be compatible");
+
+        let txid_parts = tx.deref().digest(zp_tx::txid::TxIdDigester);
 
         let f_transparent = MapTransparent {
             auth: TransparentAuth {
                 all_prev_outputs: all_previous_outputs,
             },
         };
-        let tx_data: zp_tx::TransactionData<PrecomputedAuth> = alt_tx
-            .into_data()
-            .map_authorization(f_transparent, IdentityMap, IdentityMap);
+
+        let tx_data: zp_tx::TransactionData<PrecomputedAuth> =
+            tx.into_data()
+                .map_authorization(f_transparent, IdentityMap, IdentityMap);
 
         PrecomputedTxData {
             tx_data,
@@ -293,8 +274,8 @@ impl<'a> PrecomputedTxData<'a> {
 ///   signature hash is being computed.
 /// - `hash_type`: the type of hash (SIGHASH) being used.
 /// - `input_index_script_code`: a tuple with the index of the transparent Input
-///    for which we are producing a sighash and the respective script code being
-///    validated, or None if it's a shielded input.
+///   for which we are producing a sighash and the respective script code being
+///   validated, or None if it's a shielded input.
 pub(crate) fn sighash(
     precomputed_tx_data: &PrecomputedTxData,
     hash_type: HashType,
@@ -307,16 +288,18 @@ pub(crate) fn sighash(
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
             unlock_script = zcash_primitives::legacy::Script(script_code);
-            zp_tx::sighash::SignableInput::Transparent {
-                hash_type: hash_type.bits() as _,
-                index: input_index,
-                script_code: &unlock_script,
-                script_pubkey: &lock_script,
-                value: output
-                    .value
-                    .try_into()
-                    .expect("amount was previously validated"),
-            }
+            zp_tx::sighash::SignableInput::Transparent(
+                zcash_transparent::sighash::SignableInput::from_parts(
+                    hash_type.try_into().expect("hash type should be ALL"),
+                    input_index,
+                    &unlock_script,
+                    &lock_script,
+                    output
+                        .value
+                        .try_into()
+                        .expect("amount was previously validated"),
+                ),
+            )
         }
         None => zp_tx::sighash::SignableInput::Shielded,
     };
@@ -331,26 +314,24 @@ pub(crate) fn sighash(
     )
 }
 
-/// Compute the authorizing data commitment of this transaction as specified
-/// in [ZIP-244].
+/// Compute the authorizing data commitment of this transaction as specified in [ZIP-244].
 ///
 /// # Panics
 ///
 /// If passed a pre-v5 transaction.
 ///
 /// [ZIP-244]: https://zips.z.cash/zip-0244
-pub(crate) fn auth_digest(trans: &Transaction) -> AuthDigest {
-    let alt_tx: zp_tx::Transaction = trans
-        .try_into()
-        .expect("zcash_primitives and Zebra transaction formats must be compatible");
+pub(crate) fn auth_digest(tx: &Transaction) -> AuthDigest {
+    let nu = tx.network_upgrade().expect("V5 tx has a network upgrade");
 
-    let digest_bytes: [u8; 32] = alt_tx
-        .auth_commitment()
-        .as_ref()
-        .try_into()
-        .expect("digest has the correct size");
-
-    AuthDigest(digest_bytes)
+    AuthDigest(
+        tx.to_librustzcash(nu)
+            .expect("V5 tx is convertible to its `zcash_params` equivalent")
+            .auth_commitment()
+            .as_ref()
+            .try_into()
+            .expect("digest has the correct size"),
+    )
 }
 
 /// Return the destination address from a transparent output.
@@ -360,17 +341,17 @@ pub(crate) fn transparent_output_address(
     output: &transparent::Output,
     network: &Network,
 ) -> Option<transparent::Address> {
-    let tx_out = zp_tx::components::TxOut::try_from(output)
+    let tx_out = zcash_transparent::bundle::TxOut::try_from(output)
         .expect("zcash_primitives and Zebra transparent output formats must be compatible");
 
     let alt_addr = tx_out.recipient_address();
 
     match alt_addr {
         Some(zcash_primitives::legacy::TransparentAddress::PublicKeyHash(pub_key_hash)) => Some(
-            transparent::Address::from_pub_key_hash(network.kind(), pub_key_hash),
+            transparent::Address::from_pub_key_hash(network.t_addr_kind(), pub_key_hash),
         ),
         Some(zcash_primitives::legacy::TransparentAddress::ScriptHash(script_hash)) => Some(
-            transparent::Address::from_script_hash(network.kind(), script_hash),
+            transparent::Address::from_script_hash(network.t_addr_kind(), script_hash),
         ),
         None => None,
     }

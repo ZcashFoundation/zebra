@@ -6,6 +6,9 @@ use std::{
 };
 
 use abscissa_core::{Component, FrameworkError, Shutdown};
+
+use tokio::sync::watch;
+use tracing::{field::Visit, Level};
 use tracing_appender::non_blocking::{NonBlocking, NonBlockingBuilder, WorkerGuard};
 use tracing_error::ErrorLayer;
 use tracing_subscriber::{
@@ -13,7 +16,7 @@ use tracing_subscriber::{
     layer::SubscriberExt,
     reload::Handle,
     util::SubscriberInitExt,
-    EnvFilter,
+    EnvFilter, Layer,
 };
 use zebra_chain::parameters::Network;
 
@@ -184,7 +187,13 @@ impl Tracing {
             #[cfg(not(feature = "filter-reload"))]
             let filter_handle = None;
 
-            let subscriber = logger.finish().with(ErrorLayer::default());
+            let warn_error_layer = LastWarnErrorLayer {
+                last_warn_error_sender: crate::application::LAST_WARN_ERROR_LOG_SENDER.clone(),
+            };
+            let subscriber = logger
+                .finish()
+                .with(warn_error_layer)
+                .with(ErrorLayer::default());
 
             (subscriber, filter_handle)
         };
@@ -424,5 +433,49 @@ impl Drop for Tracing {
     fn drop(&mut self) {
         #[cfg(feature = "progress-bar")]
         howudoin::disable();
+    }
+}
+
+// Visitor to extract only the "message" field from a log event.
+struct MessageVisitor {
+    message: Option<String>,
+}
+
+impl Visit for MessageVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "message" {
+            self.message = Some(format!("{:?}", value));
+        }
+    }
+}
+
+// Layer to store the last WARN or ERROR log event.
+#[derive(Debug, Clone)]
+struct LastWarnErrorLayer {
+    last_warn_error_sender: watch::Sender<Option<(String, Level, chrono::DateTime<chrono::Utc>)>>,
+}
+
+impl<S> Layer<S> for LastWarnErrorLayer
+where
+    S: tracing::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let level = *event.metadata().level();
+        let timestamp = chrono::Utc::now();
+
+        if level == Level::WARN || level == Level::ERROR {
+            let mut visitor = MessageVisitor { message: None };
+            event.record(&mut visitor);
+
+            if let Some(message) = visitor.message {
+                let _ = self
+                    .last_warn_error_sender
+                    .send(Some((message, level, timestamp)));
+            }
+        }
     }
 }

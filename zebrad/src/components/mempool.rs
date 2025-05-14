@@ -27,7 +27,7 @@ use std::{
 };
 
 use futures::{future::FutureExt, stream::Stream};
-use tokio::sync::{broadcast, oneshot};
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service};
 
 use zebra_chain::{
@@ -37,7 +37,7 @@ use zebra_chain::{
     transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
-use zebra_network as zn;
+use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
@@ -71,7 +71,8 @@ pub use storage::{
 pub use self::tests::UnboxMempoolError;
 
 use downloads::{
-    Downloads as TxDownloads, TRANSACTION_DOWNLOAD_TIMEOUT, TRANSACTION_VERIFY_TIMEOUT,
+    Downloads as TxDownloads, TransactionDownloadVerifyError, TRANSACTION_DOWNLOAD_TIMEOUT,
+    TRANSACTION_VERIFY_TIMEOUT,
 };
 
 type Outbound = Buffer<BoxService<zn::Request, zn::Response, zn::BoxError>, zn::Request>;
@@ -239,6 +240,9 @@ pub struct Mempool {
     /// Used to broadcast transaction ids to peers.
     transaction_sender: broadcast::Sender<HashSet<UnminedTxId>>,
 
+    /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
+    misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+
     // Diagnostics
     //
     /// Queued transactions pending download or verification transmitter.
@@ -263,6 +267,7 @@ pub struct Mempool {
 }
 
 impl Mempool {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         config: &Config,
         outbound: Outbound,
@@ -271,6 +276,7 @@ impl Mempool {
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
+        misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
     ) -> (Self, broadcast::Receiver<HashSet<UnminedTxId>>) {
         let (transaction_sender, transaction_receiver) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
@@ -286,6 +292,7 @@ impl Mempool {
             state,
             tx_verifier,
             transaction_sender,
+            misbehavior_sender,
             #[cfg(feature = "progress-bar")]
             queued_count_bar: None,
             #[cfg(feature = "progress-bar")]
@@ -595,7 +602,8 @@ impl Service<Request> for Mempool {
                         // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
-                            let insert_result = storage.insert(tx.clone(), spent_mempool_outpoints);
+                            let insert_result =
+                                storage.insert(tx, spent_mempool_outpoints, best_tip_height);
 
                             tracing::trace!(
                                 ?insert_result,
@@ -621,6 +629,19 @@ impl Service<Request> for Mempool {
                         }
                     }
                     Ok(Err((tx_id, error))) => {
+                        if let TransactionDownloadVerifyError::Invalid {
+                            error,
+                            advertiser_addr: Some(advertiser_addr),
+                        } = &error
+                        {
+                            if error.mempool_misbehavior_score() != 0 {
+                                let _ = self.misbehavior_sender.try_send((
+                                    *advertiser_addr,
+                                    error.mempool_misbehavior_score(),
+                                ));
+                            }
+                        };
+
                         tracing::debug!(?tx_id, ?error, "mempool transaction failed to verify");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
@@ -696,10 +717,7 @@ impl Service<Request> for Mempool {
             ActiveState::Enabled {
                 storage,
                 tx_downloads,
-                #[cfg(feature = "getblocktemplate-rpcs")]
                 last_seen_tip_hash,
-                #[cfg(not(feature = "getblocktemplate-rpcs"))]
-                    last_seen_tip_hash: _,
             } => match req {
                 // Queries
                 Request::TransactionIds => {
@@ -770,7 +788,6 @@ impl Service<Request> for Mempool {
                     response_fut.boxed()
                 }
 
-                #[cfg(feature = "getblocktemplate-rpcs")]
                 Request::FullTransactions => {
                     trace!(?req, "got mempool request");
 
@@ -857,7 +874,6 @@ impl Service<Request> for Mempool {
                         .boxed()
                     }
 
-                    #[cfg(feature = "getblocktemplate-rpcs")]
                     Request::FullTransactions => {
                         return async move {
                             Err("mempool is not active: wait for Zebra to sync to the tip".into())
@@ -873,8 +889,7 @@ impl Service<Request> for Mempool {
                     Request::Queue(gossiped_txs) => Response::Queued(
                         // Special case; we can signal the error inside the response,
                         // because the inbound service ignores inner errors.
-                        iter::repeat(MempoolError::Disabled)
-                            .take(gossiped_txs.len())
+                        iter::repeat_n(MempoolError::Disabled, gossiped_txs.len())
                             .map(BoxError::from)
                             .map(Err)
                             .collect(),

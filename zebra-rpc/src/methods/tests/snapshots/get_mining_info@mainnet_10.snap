@@ -1,0 +1,12 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: get_mining_info
+---
+{
+  "blocks": 1687104,
+  "currentblocksize": 1617,
+  "networksolps": 2,
+  "networkhashps": 2,
+  "chain": "main",
+  "testnet": false
+}

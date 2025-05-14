@@ -15,7 +15,7 @@ use hex::{FromHex, ToHex};
 use proptest_derive::Arbitrary;
 
 /// A list of network upgrades in the order that they must be activated.
-pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
+const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 10] = [
     Genesis,
     BeforeOverwinter,
     Overwinter,
@@ -25,6 +25,7 @@ pub const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
     Canopy,
     Nu5,
     Nu6,
+    Nu7,
 ];
 
 /// A Zcash network upgrade.
@@ -61,6 +62,21 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the NU6 upgrade.
     #[serde(rename = "NU6")]
     Nu6,
+    /// The Zcash protocol after the NU7 upgrade.
+    #[serde(rename = "NU7")]
+    Nu7,
+}
+
+impl TryFrom<u32> for NetworkUpgrade {
+    type Error = crate::Error;
+
+    fn try_from(branch_id: u32) -> Result<Self, Self::Error> {
+        CONSENSUS_BRANCH_IDS
+            .iter()
+            .find(|id| id.1 == ConsensusBranchId(branch_id))
+            .map(|nu| nu.0)
+            .ok_or(Self::Error::InvalidConsensusBranchId)
+    }
 }
 
 impl fmt::Display for NetworkUpgrade {
@@ -104,6 +120,7 @@ const FAKE_MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(30), Canopy),
     (block::Height(35), Nu5),
     (block::Height(40), Nu6),
+    (block::Height(45), Nu7),
 ];
 
 /// Testnet network upgrade activation heights.
@@ -204,6 +221,15 @@ impl fmt::Display for ConsensusBranchId {
     }
 }
 
+impl TryFrom<ConsensusBranchId> for zcash_primitives::consensus::BranchId {
+    type Error = crate::Error;
+
+    fn try_from(id: ConsensusBranchId) -> Result<Self, Self::Error> {
+        zcash_primitives::consensus::BranchId::try_from(u32::from(id))
+            .map_err(|_| Self::Error::InvalidConsensusBranchId)
+    }
+}
+
 /// Network Upgrade Consensus Branch Ids.
 ///
 /// Branch ids are the same for mainnet and testnet. If there is a testnet
@@ -222,6 +248,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
+    (Nu7, ConsensusBranchId(0x77190ad8)),
 ];
 
 /// The target block spacing before Blossom.
@@ -327,19 +354,14 @@ impl NetworkUpgrade {
             .expect("every height has a current network upgrade")
     }
 
-    /// Returns the next expected network upgrade after this network upgrade
+    /// Returns the next expected network upgrade after this network upgrade.
     pub fn next_upgrade(self) -> Option<Self> {
-        match self {
-            Genesis => Some(BeforeOverwinter),
-            BeforeOverwinter => Some(Overwinter),
-            Overwinter => Some(Sapling),
-            Sapling => Some(Blossom),
-            Blossom => Some(Heartwood),
-            Heartwood => Some(Canopy),
-            Canopy => Some(Nu5),
-            Nu5 => Some(Nu6),
-            Nu6 => None,
-        }
+        Self::iter().skip_while(|&nu| self != nu).nth(1)
+    }
+
+    /// Returns the previous network upgrade before this network upgrade.
+    pub fn previous_upgrade(self) -> Option<Self> {
+        Self::iter().rev().skip_while(|&nu| self != nu).nth(1)
     }
 
     /// Returns the next network upgrade for `network` and `height`.
@@ -415,7 +437,9 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy | Nu5 | Nu6 => POST_BLOSSOM_POW_TARGET_SPACING.into(),
+            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu7 => {
+                POST_BLOSSOM_POW_TARGET_SPACING.into()
+            }
         };
 
         Duration::seconds(spacing_seconds)
@@ -518,12 +542,9 @@ impl NetworkUpgrade {
         NetworkUpgrade::current(network, height).averaging_window_timespan()
     }
 
-    /// Returns the NetworkUpgrade given an u32 as ConsensusBranchId
-    pub fn from_branch_id(branch_id: u32) -> Option<NetworkUpgrade> {
-        CONSENSUS_BRANCH_IDS
-            .iter()
-            .find(|id| id.1 == ConsensusBranchId(branch_id))
-            .map(|nu| nu.0)
+    /// Returns an iterator over [`NetworkUpgrade`] variants.
+    pub fn iter() -> impl DoubleEndedIterator<Item = NetworkUpgrade> {
+        NETWORK_UPGRADES_IN_ORDER.into_iter()
     }
 }
 
@@ -537,6 +558,7 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
+            // zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
         }
     }
 }

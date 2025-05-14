@@ -14,8 +14,11 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     block::{self, Block, Height},
+    serialization::ZcashSerialize as _,
     transaction::{self, Transaction},
     transparent::{self, Utxo},
 };
@@ -51,6 +54,31 @@ where
         .or_else(|| db.block(hash_or_height))
 }
 
+/// Returns the [`Block`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn block_and_size<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<(Arc<Block>, usize)>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().block(hash_or_height))
+        .map(|contextual| {
+            let size = contextual.block.zcash_serialize_to_vec().unwrap().len();
+            (contextual.block.clone(), size)
+        })
+        .or_else(|| db.block_and_size(hash_or_height))
+}
+
 /// Returns the [`block::Header`] with [`block::Hash`] or
 /// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
 pub fn block_header<C>(
@@ -79,7 +107,7 @@ fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<(Arc<Transaction>, Height)>
+) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)>
 where
     C: AsRef<Chain>,
 {
@@ -93,7 +121,7 @@ where
             chain
                 .as_ref()
                 .transaction(hash)
-                .map(|(tx, height)| (tx.clone(), height))
+                .map(|(tx, height, time)| (tx.clone(), height, time))
         })
         .or_else(|| db.transaction(hash))
 }
@@ -114,10 +142,10 @@ where
     // can only add overlapping blocks, and hashes are unique.
     let chain = chain.as_ref();
 
-    let (tx, height) = transaction(chain, db, hash)?;
+    let (tx, height, time) = transaction(chain, db, hash)?;
     let confirmations = 1 + tip_height(chain, db)?.0 - height.0;
 
-    Some(MinedTx::new(tx, height, confirmations))
+    Some(MinedTx::new(tx, height, confirmations, time))
 }
 
 /// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,

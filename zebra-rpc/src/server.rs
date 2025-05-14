@@ -10,8 +10,7 @@
 use std::{fmt, panic};
 
 use cookie::Cookie;
-use jsonrpsee::server::middleware::rpc::RpcServiceBuilder;
-use jsonrpsee::server::{Server, ServerHandle};
+use jsonrpsee::server::{middleware::rpc::RpcServiceBuilder, Server, ServerHandle};
 use tokio::task::JoinHandle;
 use tower::Service;
 use tracing::*;
@@ -23,16 +22,13 @@ use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 
 use crate::{
-    config::Config,
+    config,
     methods::{RpcImpl, RpcServer as _},
     server::{
         http_request_compatibility::HttpRequestMiddlewareLayer,
         rpc_call_compatibility::FixRpcResponseMiddleware,
     },
 };
-
-#[cfg(feature = "getblocktemplate-rpcs")]
-use crate::methods::{GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer};
 
 pub mod cookie;
 pub mod error;
@@ -46,7 +42,7 @@ mod tests;
 #[derive(Clone)]
 pub struct RpcServer {
     /// The RPC config.
-    config: Config,
+    config: config::rpc::Config,
 
     /// The configured network.
     network: Network,
@@ -79,47 +75,26 @@ pub const OPENED_RPC_ENDPOINT_MSG: &str = "Opened RPC endpoint at ";
 type ServerTask = JoinHandle<Result<(), tower::BoxError>>;
 
 impl RpcServer {
-    /// Start a new RPC server endpoint using the supplied configs and services.
+    /// Starts the RPC server.
     ///
     /// `build_version` and `user_agent` are version strings for the application,
     /// which are used in RPC responses.
     ///
     /// Returns [`JoinHandle`]s for the RPC server and `sendrawtransaction` queue tasks,
     /// and a [`RpcServer`] handle, which can be used to shut down the RPC server task.
+    ///
+    /// # Panics
+    ///
+    /// - If [`Config::listen_addr`](config::rpc::Config::listen_addr) is `None`.
     //
     // TODO:
-    // - put some of the configs or services in their own struct?
     // - replace VersionString with semver::Version, and update the tests to provide valid versions
     #[allow(clippy::too_many_arguments)]
-    pub async fn spawn<
-        VersionString,
-        UserAgentString,
-        Mempool,
-        State,
-        Tip,
-        BlockVerifierRouter,
-        SyncStatus,
-        AddressBook,
-    >(
-        config: Config,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        mining_config: crate::config::mining::Config,
-        build_version: VersionString,
-        user_agent: UserAgentString,
-        mempool: Mempool,
-        state: State,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        block_verifier_router: BlockVerifierRouter,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        sync_status: SyncStatus,
-        #[cfg_attr(not(feature = "getblocktemplate-rpcs"), allow(unused_variables))]
-        address_book: AddressBook,
-        latest_chain_tip: Tip,
-        network: Network,
-    ) -> Result<(ServerTask, JoinHandle<()>), tower::BoxError>
+    pub async fn start<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+        rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+        conf: config::rpc::Config,
+    ) -> Result<ServerTask, tower::BoxError>
     where
-        VersionString: ToString + Clone + Send + 'static,
-        UserAgentString: ToString + Clone + Send + 'static,
         Mempool: tower::Service<
                 mempool::Request,
                 Response = mempool::Response,
@@ -139,6 +114,7 @@ impl RpcServer {
             + 'static,
         State::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
+        AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
         BlockVerifierRouter: Service<
                 zebra_consensus::Request,
                 Response = block::Hash,
@@ -149,43 +125,14 @@ impl RpcServer {
             + 'static,
         <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
         SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
-        AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     {
-        let listen_addr = config
+        let listen_addr = conf
             .listen_addr
             .expect("caller should make sure listen_addr is set");
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        // Initialize the getblocktemplate rpc method handler
-        let get_block_template_rpc_impl = GetBlockTemplateRpcImpl::new(
-            &network,
-            mining_config.clone(),
-            mempool.clone(),
-            state.clone(),
-            latest_chain_tip.clone(),
-            block_verifier_router,
-            sync_status,
-            address_book,
-        );
-
-        // Initialize the rpc methods with the zebra version
-        let (rpc_impl, rpc_tx_queue_task_handle) = RpcImpl::new(
-            build_version.clone(),
-            user_agent,
-            network.clone(),
-            config.debug_force_finished_sync,
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            mining_config.debug_like_zcashd,
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            true,
-            mempool,
-            state,
-            latest_chain_tip,
-        );
-
-        let http_middleware_layer = if config.enable_cookie_auth {
+        let http_middleware_layer = if conf.enable_cookie_auth {
             let cookie = Cookie::default();
-            cookie::write_to_disk(&cookie, &config.cookie_dir)
+            cookie::write_to_disk(&cookie, &conf.cookie_dir)
                 .expect("Zebra must be able to write the auth cookie to the disk");
             HttpRequestMiddlewareLayer::new(Some(cookie))
         } else {
@@ -198,32 +145,19 @@ impl RpcServer {
             .rpc_logger(1024)
             .layer_fn(FixRpcResponseMiddleware::new);
 
-        let server_instance = Server::builder()
+        let server = Server::builder()
             .http_only()
             .set_http_middleware(http_middleware)
             .set_rpc_middleware(rpc_middleware)
             .build(listen_addr)
-            .await
-            .expect("Unable to start RPC server");
-        let addr = server_instance
-            .local_addr()
-            .expect("Unable to get local address");
-        info!("{OPENED_RPC_ENDPOINT_MSG}{}", addr);
+            .await?;
 
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        let mut rpc_module = rpc_impl.into_rpc();
-        #[cfg(not(feature = "getblocktemplate-rpcs"))]
-        let rpc_module = rpc_impl.into_rpc();
-        #[cfg(feature = "getblocktemplate-rpcs")]
-        rpc_module
-            .merge(get_block_template_rpc_impl.into_rpc())
-            .unwrap();
+        info!("{OPENED_RPC_ENDPOINT_MSG}{}", server.local_addr()?);
 
-        let server_task: JoinHandle<Result<(), tower::BoxError>> = tokio::spawn(async move {
-            server_instance.start(rpc_module).stopped().await;
+        Ok(tokio::spawn(async move {
+            server.start(rpc.into_rpc()).stopped().await;
             Ok(())
-        });
-        Ok((server_task, rpc_tx_queue_task_handle))
+        }))
     }
 
     /// Shut down this RPC server, blocking the current thread.
@@ -249,7 +183,7 @@ impl RpcServer {
     /// Shuts down this RPC server using its `close_handle`.
     ///
     /// See `shutdown_blocking()` for details.
-    fn shutdown_blocking_inner(close_handle: ServerHandle, config: Config) {
+    fn shutdown_blocking_inner(close_handle: ServerHandle, config: config::rpc::Config) {
         // The server is a blocking task, so it can't run inside a tokio thread.
         // See the note at wait_on_server.
         let span = Span::current();

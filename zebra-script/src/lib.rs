@@ -13,7 +13,7 @@ use thiserror::Error;
 use zcash_script::ZcashScript;
 
 use zebra_chain::{
-    parameters::ConsensusBranchId,
+    parameters::NetworkUpgrade,
     transaction::{HashType, SigHasher, Transaction},
     transparent,
 };
@@ -23,16 +23,18 @@ use zebra_chain::{
 #[non_exhaustive]
 pub enum Error {
     /// script verification failed
-    #[non_exhaustive]
     ScriptInvalid,
+    /// could not deserialize tx
+    #[non_exhaustive]
+    TxDeserialize,
     /// input index out of bounds
-    #[non_exhaustive]
     TxIndex,
-    /// tx is a coinbase transaction and should not be verified
+    /// tx has an invalid size
     #[non_exhaustive]
+    TxSizeMismatch,
+    /// tx is a coinbase transaction and should not be verified
     TxCoinbase,
     /// unknown error from zcash_script: {0}
-    #[non_exhaustive]
     Unknown(zcash_script::Error),
 }
 
@@ -98,11 +100,10 @@ impl CachedFfiTransaction {
         &self.all_previous_outputs
     }
 
-    /// Verify if the script in the input at `input_index` of a transaction correctly
-    /// spends the matching [`transparent::Output`] it refers to, with the [`ConsensusBranchId`]
-    /// of the block containing the transaction.
+    /// Verify if the script in the input at `input_index` of a transaction correctly spends the
+    /// matching [`transparent::Output`] it refers to.
     #[allow(clippy::unwrap_in_result)]
-    pub fn is_valid(&self, branch_id: ConsensusBranchId, input_index: usize) -> Result<(), Error> {
+    pub fn is_valid(&self, nu: NetworkUpgrade, input_index: usize) -> Result<(), Error> {
         let previous_output = self
             .all_previous_outputs
             .get(input_index)
@@ -191,7 +192,7 @@ mod tests {
     use hex::FromHex;
     use std::sync::Arc;
     use zebra_chain::{
-        parameters::{ConsensusBranchId, NetworkUpgrade::*},
+        parameters::NetworkUpgrade,
         serialization::{ZcashDeserialize, ZcashDeserializeInto},
         transaction::Transaction,
         transparent::{self, Output},
@@ -206,7 +207,7 @@ mod tests {
     }
 
     fn verify_valid_script(
-        branch_id: ConsensusBranchId,
+        nu: NetworkUpgrade,
         tx: &[u8],
         amount: u64,
         pubkey: &[u8],
@@ -221,7 +222,7 @@ mod tests {
 
         let previous_output = vec![output];
         let verifier = super::CachedFfiTransaction::new(transaction, previous_output);
-        verifier.is_valid(branch_id, input_index)?;
+        verifier.is_valid(nu, input_index)?;
 
         Ok(())
     }
@@ -231,7 +232,7 @@ mod tests {
         let _init_guard = zebra_test::init();
 
         verify_valid_script(
-            Blossom.branch_id().unwrap(),
+            NetworkUpgrade::Blossom,
             &SCRIPT_TX,
             212 * u64::pow(10, 8),
             &SCRIPT_PUBKEY,
@@ -264,12 +265,10 @@ mod tests {
             lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()[..]),
         };
         let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
-
         let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
-        verifier.is_valid(branch_id, input_index).unwrap_err();
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index)
+            .expect_err("verification should fail");
 
         Ok(())
     }
@@ -290,13 +289,9 @@ mod tests {
         let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
 
         let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
 
-        verifier.is_valid(branch_id, input_index)?;
-
-        verifier.is_valid(branch_id, input_index)?;
+        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
+        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
 
         Ok(())
     }
@@ -317,13 +312,11 @@ mod tests {
         let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
 
         let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
 
-        verifier.is_valid(branch_id, input_index)?;
-
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
+        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
 
         Ok(())
     }
@@ -344,13 +337,11 @@ mod tests {
         let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
 
         let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
 
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
-
-        verifier.is_valid(branch_id, input_index)?;
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
+        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
 
         Ok(())
     }
@@ -371,13 +362,14 @@ mod tests {
         let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
 
         let input_index = 0;
-        let branch_id = Blossom
-            .branch_id()
-            .expect("Blossom has a ConsensusBranchId");
 
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
 
-        verifier.is_valid(branch_id, input_index + 1).unwrap_err();
+        verifier
+            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .expect_err("verification should fail");
 
         Ok(())
     }
@@ -391,12 +383,15 @@ mod tests {
         let serialized_output = "4065675c0000000017a914c117756dcbe144a12a7c33a77cfa81aa5aeeb38187";
         let tx = Transaction::zcash_deserialize(&hex::decode(serialized_tx).unwrap().to_vec()[..])
             .unwrap();
+
         let previous_output =
             Output::zcash_deserialize(&hex::decode(serialized_output).unwrap().to_vec()[..])
                 .unwrap();
 
         let verifier = super::CachedFfiTransaction::new(Arc::new(tx), vec![previous_output]);
-        verifier.is_valid(Nu5.branch_id().unwrap(), 0)?;
+
+        verifier.is_valid(NetworkUpgrade::Nu5, 0)?;
+
         Ok(())
     }
 }

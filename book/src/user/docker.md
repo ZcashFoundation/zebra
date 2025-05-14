@@ -1,54 +1,67 @@
 # Zebra with Docker
 
-The easiest way to run Zebra is using [Docker](https://docs.docker.com/get-docker/).
+The foundation maintains a Docker infrastructure for deploying and testing Zebra.
 
-We've embraced Docker in Zebra for most of the solution lifecycle, from development environments to CI (in our pipelines), and deployment to end users.
+## Quick Start
 
-> [!TIP]
-> We recommend using `docker compose` sub-command over the plain `docker` CLI, especially for more advanced use-cases like running CI locally, as it provides a more convenient and powerful way to manage multi-container Docker applications. See [CI/CD Local Testing](#cicd-local-testing) for more information, and other compose files available in the [docker](https://github.com/ZcashFoundation/zebra/tree/main/docker) folder.
+To get Zebra quickly up and running, you can use an off-the-rack image from
+[Docker Hub](https://hub.docker.com/r/zfnd/zebra/tags):
 
-## Quick usage
+```shell
+docker run --name zebra zfnd/zebra
+```
 
-You can deploy Zebra for daily use with the images available in [Docker Hub](https://hub.docker.com/r/zfnd/zebra) or build it locally for testing.
+If you want to preserve Zebra's state, you can create a Docker volume:
 
-### Ready to use image
+```shell
+docker volume create zebrad-cache
+```
 
-Using `docker compose`:
+And mount it before you start the container:
+
+```shell
+docker run \
+  --mount source=zebrad-cache,target=/home/zebra/.cache/zebra \
+  --name zebra \
+  zfnd/zebra
+```
+
+You can also use `docker compose`, which we recommend. First get the repo:
+
+```shell
+git clone --depth 1 --branch v2.3.0 https://github.com/ZcashFoundation/zebra.git
+cd zebra
+```
+
+Then run:
 
 ```shell
 docker compose -f docker/docker-compose.yml up
 ```
 
-With plain `docker` CLI:
+## Custom Images
+
+If you want to use your own images with, for example, some opt-in compilation
+features enabled, add the desired features to the `FEATURES` variable in the
+`docker/.env` file and build the image:
 
 ```shell
-docker volume create zebrad-cache
-
-docker run -d --platform linux/amd64 \
-  --restart unless-stopped \
-  --env-file .env \
-  --mount type=volume,source=zebrad-cache,target=/var/cache/zebrad-cache \
-  -p 8233:8233 \
-  --memory 16G \
-  --cpus 4 \
-  zfnd/zebra
-```
-
-### Build it locally
-
-```shell
-git clone --depth 1 --branch v2.1.1 https://github.com/ZcashFoundation/zebra.git
-docker build --file docker/Dockerfile --target runtime --tag zebra:local .
-docker run --detach zebra:local
+docker build \
+  --file docker/Dockerfile \
+  --env-file docker/.env \
+  --target runtime \
+  --tag zebra:local \
+  .
 ```
 
 ### Alternatives
 
-See [Building Zebra](https://github.com/ZcashFoundation/zebra#building-zebra) for more information.
+See [Building Zebra](https://github.com/ZcashFoundation/zebra#manual-build) for more information.
 
-## Advanced usage
 
-You're able to specify various parameters when building or launching the Docker image, which are meant to be used by developers and CI pipelines. For example, specifying the Network where Zebra will run (Mainnet, Testnet, etc), or enabling features like metrics with Prometheus.
+### Building with Custom Features
+
+Zebra supports various features that can be enabled during build time using the `FEATURES` build argument:
 
 For example, if we'd like to enable metrics on the image, we'd build it using the following `build-arg`:
 
@@ -56,127 +69,110 @@ For example, if we'd like to enable metrics on the image, we'd build it using th
 > To fully use and display the metrics, you'll need to run a Prometheus and Grafana server, and configure it to scrape and visualize the metrics endpoint. This is explained in more detailed in the [Metrics](https://zebra.zfnd.org/user/metrics.html#zebra-metrics) section of the User Guide.
 
 ```shell
-docker build -f ./docker/Dockerfile --target runtime --build-arg FEATURES='default-release-binaries prometheus' --tag local/zebra.mining:latest .
+# Build with specific features
+docker build -f ./docker/Dockerfile --target runtime \
+    --build-arg FEATURES="default-release-binaries prometheus" \
+    --tag zebra:metrics .
 ```
 
-To increase the log output we can optionally add these `build-arg`s:
+All available Cargo features are listed at
+<https://docs.rs/zebrad/latest/zebrad/index.html#zebra-feature-flags>.
 
-```shell
---build-arg RUST_BACKTRACE=full --build-arg RUST_LOG=debug --build-arg COLORBT_SHOW_HIDDEN=1
-```
+## Configuring Zebra
 
-And after our image has been built, we can run it on `Mainnet` with the following command, which will expose the metrics endpoint on port `9999` and force the logs to be colored:
+To configure Zebra using Docker, you have a few options, processed in this order:
 
-```shell
-docker run --env LOG_COLOR="true" -p 9999:9999 local/zebra.mining
-```
+1. **Provide a specific config file path:** Set the `ZEBRA_CONF_PATH` environment variable to point to your config file within the container.
+2. **Use the default config file:** By default, the `docker-compose.yml` file mounts `./default-zebra-config.toml` to `/home/zebra/.config/zebrad.toml` using the `configs:` mapping. Zebra will use this file if `ZEBRA_CONF_PATH` is not set. To use environment variables instead, you must **comment out** the `configs:` mapping in `docker/docker-compose.yml`.
+3. **Generate config from environment variables:** If neither of the above methods provides a config file (i.e., `ZEBRA_CONF_PATH` is unset *and* the `configs:` mapping in `docker-compose.yml` is commented out), the container's entrypoint script will *automatically generate* a default configuration file at `/home/zebra/.config/zebrad.toml`. This generated file uses specific environment variables (like `NETWORK`, `ZEBRA_RPC_PORT`, `ENABLE_COOKIE_AUTH`, `MINER_ADDRESS`, etc.) to define the settings. Using the `docker/.env` file is the primary way to set these variables for this auto-generation mode.
 
-Based on our actual `entrypoint.sh` script, the following configuration file will be generated (on the fly, at startup) and used by Zebra:
+You can see if your config works as intended by looking at Zebra's logs.
 
-```toml
-[network]
-network = "Mainnet"
-listen_addr = "0.0.0.0"
-[state]
-cache_dir = "/var/cache/zebrad-cache"
-[metrics]
-endpoint_addr = "127.0.0.1:9999"
-```
+Note that if you provide a configuration file using methods 1 or 2, environment variables from `docker/.env` will **not** override the settings within that file. The environment variables are primarily used for the auto-generation scenario (method 3).
+
+### RPC
+
+Zebra's RPC server is disabled by default. To enable it, you need to define the RPC settings in Zebra's configuration. You can achieve this using one of the configuration methods described above:
+
+* **Using a config file (methods 1 or 2):** Add or uncomment the `[rpc]` section in your `zebrad.toml` file (like the one provided in `docker/default-zebra-config.toml`). Ensure you set the `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
+* **Using environment variables (method 3):** Set the `ZEBRA_RPC_PORT` environment variable (e.g., in `docker/.env`). This tells the entrypoint script to include an enabled `[rpc]` section listening on `0.0.0.0:<ZEBRA_RPC_PORT>` in the auto-generated configuration file.
+
+**Cookie Authentication:**
+
+By default, Zebra uses cookie-based authentication for RPC requests (`enable_cookie_auth = true`). When enabled, Zebra generates a unique, random cookie file required for client authentication.
+
+* **Cookie Location:** The entrypoint script configures Zebra to store this file at `/home/zebra/.cache/zebra/.cookie` inside the container.
+* **Viewing the Cookie:** If the container is running and RPC is enabled with authentication, you can view the cookie content using:
+
+    ```bash
+    docker exec <container_name> cat /home/zebra/.cache/zebra/.cookie
+    ```
+
+    (Replace `<container_name>` with your container's name, typically `zebra` if using the default `docker-compose.yml`). Your RPC client will need this value.
+* **Disabling Authentication:** If you need to disable cookie authentication (e.g., for compatibility with tools like `lightwalletd`):
+  * If using a **config file** (methods 1 or 2), set `enable_cookie_auth = false` within the `[rpc]` section:
+
+    ```toml
+    [rpc]
+    # listen_addr = ...
+    enable_cookie_auth = false
+    ```
+
+  * If using **environment variables** for auto-generation (method 3), set `ENABLE_COOKIE_AUTH=false` in your `docker/.env` file.
+
+Remember that Zebra only generates the cookie file if the RPC server is enabled *and* `enable_cookie_auth` is set to `true` (or omitted, as `true` is the default).
+
+## Examples
+
+To make the initial setup of Zebra with other services easier, we provide some
+example files for `docker compose`. The following subsections will walk you
+through those examples.
 
 ### Running Zebra with Lightwalletd
 
-To run Zebra with Lightwalletd, we recommend using the provided `docker compose` files for Zebra and Lightwalletd, which will start both services and connect them together, while exposing ports, mounting volumes, and setting environment variables.
+The following command will run Zebra with Lightwalletd:
 
 ```shell
-docker compose -f docker/docker-compose.yml -f docker/docker-compose.lwd.yml up
+docker compose -f docker/docker-compose.lwd.yml up
 ```
 
-### CI/CD Local Testing
+Note that Docker will run Zebra with the RPC server enabled and the cookie
+authentication mechanism disabled since Lightwalletd doesn't support it. Instead
+of configuring Zebra via the recommended config file or `docker/.env` file, we
+configured the RPC server by setting environment variables directly in the
+`docker/docker-compose.lwd.yml` file. This takes advantage of the entrypoint
+script's auto-generation feature (method 3 described above).
 
-To run CI tests locally, which mimics the testing done in our CI pipelines on GitHub Actions, use the `docker-compose.test.yml` file. This setup allows for a consistent testing environment both locally and in CI.
+### Running Zebra with Prometheus and Grafana
 
-#### Running Tests Locally
+The following commands will run Zebra with Prometheus and Grafana:
 
-1. **Setting Environment Variables**:
-   - Modify the `test.env` file to set the desired test configurations.
-   - For running all tests, set `RUN_ALL_TESTS=1` in `test.env`.
+```shell
+docker compose -f docker/docker-compose.grafana.yml build --no-cache
+docker compose -f docker/docker-compose.grafana.yml up
+```
 
-2. **Starting the Test Environment**:
-   - Use Docker Compose to start the testing environment:
+In this example, we build a local Zebra image with the `prometheus` Cargo
+compilation feature. Note that we enable this feature by specifying its name in
+the build arguments. Having this Cargo feature specified at build time makes
+`cargo` compile Zebra with the metrics support for Prometheus enabled. Note that
+we also specify this feature as an environment variable at run time. Having this
+feature specified at run time makes Docker's entrypoint script configure Zebra
+to open a scraping endpoint on `localhost:9999` for Prometheus.
 
-     ```shell
-     docker-compose -f docker/docker-compose.test.yml up
-     ```
+Once all services are up, the Grafana web UI should be available at
+`localhost:3000`, the Prometheus web UI should be at `localhost:9090`, and
+Zebra's scraping page should be at `localhost:9999`. The default login and
+password for Grafana are both `admin`. To make Grafana use Prometheus, you need
+to add Prometheus as a data source with the URL `http://localhost:9090` in
+Grafana's UI. You can then import various Grafana dashboards from the `grafana`
+directory in the Zebra repo.
 
-   - This will start the Docker container and run the tests based on `test.env` settings.
+### Running CI Tests Locally
 
-3. **Viewing Test Output**:
-   - The test results and logs will be displayed in the terminal.
+To run CI tests locally, first set the variables in the `test.env` file to
+configure the tests, then run:
 
-4. **Stopping the Environment**:
-   - Once testing is complete, stop the environment using:
-
-     ```shell
-     docker-compose -f docker/docker-compose.test.yml down
-     ```
-
-This approach ensures you can run the same tests locally that are run in CI, providing a robust way to validate changes before pushing to the repository.
-
-### Build and Run Time Configuration
-
-#### Build Time Arguments
-
-#### Configuration
-
-- `FEATURES`: Specifies the features to build `zebrad` with. Example: `"default-release-binaries getblocktemplate-rpcs"`
-- `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
-
-#### Logging
-
-- `RUST_LOG`: Sets the trace log level. Example: `"debug"`
-- `RUST_BACKTRACE`: Enables or disables backtraces. Example: `"full"`
-- `RUST_LIB_BACKTRACE`: Enables or disables library backtraces. Example: `1`
-- `COLORBT_SHOW_HIDDEN`: Enables or disables showing hidden backtraces. Example: `1`
-
-#### Tests
-
-- `TEST_FEATURES`: Specifies the features for tests. Example: `"lightwalletd-grpc-tests zebra-checkpoints"`
-- `ZEBRA_SKIP_IPV6_TESTS`: Skips IPv6 tests. Example: `1`
-- `ENTRYPOINT_FEATURES`: Overrides the specific features used to run tests in `entrypoint.sh`. Example: `"default-release-binaries lightwalletd-grpc-tests"`
-
-#### CI/CD
-
-- `SHORT_SHA`: Represents the short SHA of the commit. Example: `"a1b2c3d"`
-
-#### Run Time Variables
-
-- `NETWORK`: Specifies the network type. Example: `"Mainnet"`
-
-#### Zebra Configuration
-
-- `ZEBRA_CHECKPOINT_SYNC`: Enables or disables checkpoint sync. Example: `true`
-- `ZEBRA_LISTEN_ADDR`: Address for Zebra to listen on. Example: `"0.0.0.0"`
-- `ZEBRA_CACHED_STATE_DIR`: Directory for cached state. Example: `"/var/cache/zebrad-cache"`
-
-#### Mining Configuration
-
-- `RPC_LISTEN_ADDR`: Address for RPC to listen on. Example: `"0.0.0.0"`
-- `RPC_PORT`: Port for RPC. Example: `8232`
-- `MINER_ADDRESS`: Address for the miner. Example: `"t1XhG6pT9xRqRQn3BHP7heUou1RuYrbcrCc"`
-
-#### Other Configuration
-
-- `METRICS_ENDPOINT_ADDR`: Address for metrics endpoint. Example: `"0.0.0.0"`
-- `METRICS_ENDPOINT_PORT`: Port for metrics endpoint. Example: `9999`
-- `LOG_FILE`: Path to the log file. Example: `"/path/to/log/file.log"`
-- `LOG_COLOR`: Enables or disables log color. Example: `false`
-- `TRACING_ENDPOINT_ADDR`: Address for tracing endpoint. Example: `"0.0.0.0"`
-- `TRACING_ENDPOINT_PORT`: Port for tracing endpoint. Example: `3000`
-
-Specific tests are defined in `docker/test.env` file and can be enabled by setting the corresponding environment variable to `1`.
-
-## Registries
-
-The images built by the Zebra team are all publicly hosted. Old image versions meant to be used by our [CI pipeline](https://github.com/ZcashFoundation/zebra/blob/main/.github/workflows/ci-integration-tests-gcp.yml) (`zebrad-test`, `lightwalletd`) might be deleted on a scheduled basis.
-
-We use [Docker Hub](https://hub.docker.com/r/zfnd/zebra) for end-user images and [Google Artifact Registry](https://console.cloud.google.com/artifacts/docker/zfnd-dev-zebra/us/zebra) to build external tools and test images.
+```shell
+docker-compose -f docker/docker-compose.test.yml up
+```

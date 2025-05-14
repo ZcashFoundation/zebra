@@ -86,7 +86,7 @@ type QueuedBlockList = Vec<QueuedBlock>;
 ///
 /// This value is a tradeoff between:
 /// - rejecting bad blocks: if we queue more blocks, we need fewer network
-///                         retries, but use a bit more CPU when verifying,
+///   retries, but use a bit more CPU when verifying,
 /// - avoiding a memory DoS: if we queue fewer blocks, we use less memory.
 ///
 /// Memory usage is controlled by the sync service, because it controls block
@@ -1037,6 +1037,21 @@ impl VerifyCheckpointError {
             _ => false,
         }
     }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        // TODO: Adjust these values based on zcashd (#9258).
+        match self {
+            VerifyCheckpointError::VerifyBlock(verify_block_error) => {
+                verify_block_error.misbehavior_score()
+            }
+            VerifyCheckpointError::SubsidyError(_)
+            | VerifyCheckpointError::CoinbaseHeight { .. }
+            | VerifyCheckpointError::DuplicateTransaction
+            | VerifyCheckpointError::AmountError(_) => 100,
+            _other => 0,
+        }
+    }
 }
 
 /// The CheckpointVerifier service implementation.
@@ -1149,7 +1164,6 @@ where
                 let tip = match state_service
                     .oneshot(zs::Request::Tip)
                     .await
-                    .map_err(Into::into)
                     .map_err(VerifyCheckpointError::Tip)?
                 {
                     zs::Response::Tip(tip) => tip,

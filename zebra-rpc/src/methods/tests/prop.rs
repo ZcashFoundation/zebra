@@ -1,35 +1,45 @@
 //! Randomised property tests for RPC methods.
 
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
-
-use futures::{join, FutureExt, TryFutureExt};
-use hex::{FromHex, ToHex};
-use jsonrpsee_types::{ErrorCode, ErrorObject};
-use proptest::{collection::vec, prelude::*};
-use thiserror::Error;
-use tokio::sync::oneshot;
-use tower::buffer::Buffer;
-
-use zebra_chain::{
-    amount::{Amount, NonNegative},
-    block::{self, Block, Height},
-    chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
-    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
-    transparent,
-    value_balance::ValueBalance,
+use crate::methods::{
+    self,
+    types::{
+        get_blockchain_info,
+        get_raw_mempool::{GetRawMempool, MempoolObject},
+    },
 };
-use zebra_node_services::mempool;
-use zebra_state::{BoxError, HashOrHeight};
-
-use zebra_test::mock_service::MockService;
-
-use crate::methods::{self, types::ValuePoolBalance};
 
 use super::super::{
     AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
 };
+use futures::{join, FutureExt, TryFutureExt};
+use hex::{FromHex, ToHex};
+use jsonrpsee_types::{ErrorCode, ErrorObject};
+use proptest::{collection::vec, prelude::*};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    sync::Arc,
+};
+use thiserror::Error;
+use tokio::sync::oneshot;
+use tower::buffer::Buffer;
+use zebra_chain::{
+    amount::{Amount, NonNegative},
+    block::{self, Block, Height},
+    chain_sync_status::MockSyncStatus,
+    chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
+    history_tree::HistoryTree,
+    parameters::{ConsensusBranchId, Network, NetworkUpgrade},
+    serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
+    transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
+    transparent,
+    value_balance::ValueBalance,
+};
+use zebra_consensus::ParameterCheckpoint;
+use zebra_network::address_book_peers::MockAddressBookPeers;
+use zebra_node_services::mempool;
+use zebra_state::{BoxError, GetBlockTemplateChainInfo};
+use zebra_test::mock_service::MockService;
 
 proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
@@ -49,7 +59,7 @@ proptest! {
 
             let transaction_hex = hex::encode(&transaction_bytes);
 
-            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex).await });
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex, None).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.into()]);
@@ -93,7 +103,7 @@ proptest! {
 
             let _rpc = rpc.clone();
             let _transaction_hex = transaction_hex.clone();
-            let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex).await });
+            let send_task = tokio::spawn(async move { _rpc.send_raw_transaction(_transaction_hex, None).await });
 
             let unmined_transaction = UnminedTx::from(transaction);
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
@@ -109,7 +119,7 @@ proptest! {
 
             check_err_code(result, ErrorCode::ServerError(-1))?;
 
-            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex.clone()).await });
+            let send_task = tokio::spawn(async move { rpc.send_raw_transaction(transaction_hex.clone(), None).await });
 
             let expected_request = mempool::Request::Queue(vec![unmined_transaction.clone().into()]);
 
@@ -147,7 +157,7 @@ proptest! {
             let rsp = mempool::Response::Queued(vec![Err(DummyError.into())]);
             let mempool_query = mempool.expect_request(req).map_ok(|r| r.respond(rsp));
 
-            let (rpc_rsp, _) = tokio::join!(rpc.send_raw_transaction(tx), mempool_query);
+            let (rpc_rsp, _) = tokio::join!(rpc.send_raw_transaction(tx, None), mempool_query);
 
             check_err_code(rpc_rsp, ErrorCode::ServerError(-1))?;
 
@@ -175,7 +185,7 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let send_task = rpc.send_raw_transaction(non_hex_string);
+            let send_task = rpc.send_raw_transaction(non_hex_string, None);
 
             // Check that there are no further requests.
             mempool.expect_no_requests().await?;
@@ -206,7 +216,7 @@ proptest! {
         prop_assume!(Transaction::zcash_deserialize(&*random_bytes).is_err());
 
         runtime.block_on(async move {
-            let send_task = rpc.send_raw_transaction(hex::encode(random_bytes));
+            let send_task = rpc.send_raw_transaction(hex::encode(random_bytes), None);
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
@@ -226,7 +236,8 @@ proptest! {
     /// returns those IDs as hexadecimal strings.
     #[test]
     fn mempool_transactions_are_sent_to_caller(transactions in any::<Vec<VerifiedUnminedTx>>(),
-                                               network in any::<Network>()) {
+                                               network in any::<Network>(),
+                                               verbose in any::<Option<bool>>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
         let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
@@ -235,28 +246,7 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            #[cfg(not(feature = "getblocktemplate-rpcs"))]
-            let (expected_response, mempool_query) = {
-                let transaction_ids: HashSet<_> = transactions
-                    .iter()
-                    .map(|tx| tx.transaction.id)
-                    .collect();
-
-                let mut expected_response: Vec<String> = transaction_ids
-                    .iter()
-                    .map(|id| id.mined_id().encode_hex())
-                    .collect();
-                expected_response.sort();
-
-                let mempool_query = mempool
-                    .expect_request(mempool::Request::TransactionIds)
-                    .map_ok(|r|r.respond(mempool::Response::TransactionIds(transaction_ids)));
-
-                (expected_response, mempool_query)
-            };
-
             // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
-            #[cfg(feature = "getblocktemplate-rpcs")]
             let (expected_response, mempool_query) = {
                 let mut expected_response = transactions.clone();
 
@@ -276,18 +266,38 @@ proptest! {
                     .map(|tx| tx.transaction.id.mined_id().encode_hex::<String>())
                     .collect::<Vec<_>>();
 
+                let transaction_dependencies = Default::default();
+                let expected_response = if verbose.unwrap_or(false) {
+                    let map = transactions
+                        .iter()
+                        .map(|unmined_tx| {
+                            (
+                                unmined_tx.transaction.id.mined_id().encode_hex(),
+                                MempoolObject::from_verified_unmined_tx(
+                                    unmined_tx,
+                                    &transactions,
+                                    &transaction_dependencies,
+                                ),
+                            )
+                        })
+                        .collect::<HashMap<_, _>>();
+                    GetRawMempool::Verbose(map)
+                } else {
+                    GetRawMempool::TxIds(expected_response)
+                };
+
                 let mempool_query = mempool
                     .expect_request(mempool::Request::FullTransactions)
                     .map_ok(|r| r.respond(mempool::Response::FullTransactions {
                         transactions,
-                        transaction_dependencies: Default::default(),
+                        transaction_dependencies,
                         last_seen_tip_hash: [0; 32].into(),
                     }));
 
                 (expected_response, mempool_query)
             };
 
-            let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(), mempool_query);
+            let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(verbose), mempool_query);
 
             prop_assert_eq!(rpc_rsp?, expected_response);
 
@@ -355,10 +365,12 @@ proptest! {
     fn get_blockchain_info_response_without_a_chain_tip(network in any::<Network>()) {
         let (runtime, _init_guard) = zebra_test::init_async();
         let _guard = runtime.enter();
-        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network, NoChainTip);
+        let (mut mempool, mut state, rpc, mempool_tx_queue) = mock_services(network.clone(), NoChainTip);
 
         // CORRECTNESS: Nothing in this test depends on real time, so we can speed it up.
         tokio::time::pause();
+
+        let genesis_hash = network.genesis_hash();
 
         runtime.block_on(async move {
             let response_fut = rpc.get_blockchain_info();
@@ -366,20 +378,38 @@ proptest! {
                 let mut state = state.clone();
                 async move {
                     state
+                        .expect_request(zebra_state::ReadRequest::UsageInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::UsageInfo(0));
+
+                    state
                         .expect_request(zebra_state::ReadRequest::TipPoolValues)
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
                         .respond(Err(BoxError::from("no chain tip available yet")));
 
-                    state.expect_request(zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(block::Height(0)))).await.expect("no chain tip available yet").respond(Err(BoxError::from("no chain tip available yet")));
+                    state
+                        .expect_request(zebra_state::ReadRequest::ChainInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                            tip_hash: genesis_hash,
+                            tip_height: Height::MIN,
+                            chain_history_root: HistoryTree::default().hash(),
+                            expected_difficulty: Default::default(),
+                            cur_time: DateTime32::now(),
+                            min_time: DateTime32::now(),
+                            max_time: DateTime32::now()
+                        }));
                 }
             };
 
             let (response, _) = tokio::join!(response_fut, mock_state_handler);
 
             prop_assert_eq!(
-                response.err().unwrap().message().to_string(),
-                "no chain tip available yet".to_string()
+                response.unwrap().best_block_hash,
+                genesis_hash
             );
 
             mempool.expect_no_requests().await?;
@@ -409,7 +439,7 @@ proptest! {
         // get arbitrary chain tip data
         let block_height = block.coinbase_height().unwrap();
         let block_hash = block.hash();
-        let block_time = block.header.time;
+        let expected_size_on_disk = 1_000;
 
         // check no requests were made during this test
         runtime.block_on(async move {
@@ -417,6 +447,12 @@ proptest! {
             let mock_state_handler = {
                 let mut state = state.clone();
                 async move {
+                    state
+                        .expect_request(zebra_state::ReadRequest::UsageInfo)
+                        .await
+                        .expect("getblockchaininfo should call mock state service with correct request")
+                        .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
                     state
                         .expect_request(zebra_state::ReadRequest::TipPoolValues)
                         .await
@@ -428,24 +464,18 @@ proptest! {
                         });
 
                     state
-                        .expect_request(zebra_state::ReadRequest::BlockHeader(block_hash.into()))
+                        .expect_request(zebra_state::ReadRequest::ChainInfo)
                         .await
                         .expect("getblockchaininfo should call mock state service with correct request")
-                        .respond(zebra_state::ReadResponse::BlockHeader {
-                            header: Arc::new(block::Header {
-                                time: block_time,
-                                version: Default::default(),
-                                previous_block_hash: Default::default(),
-                                merkle_root: Default::default(),
-                                commitment_bytes: Default::default(),
-                                difficulty_threshold: Default::default(),
-                                nonce: Default::default(),
-                                solution: Default::default()
-                            }),
-                            hash: block::Hash::from([0; 32]),
-                            height: Height::MIN,
-                            next_block_hash: None,
-                        });
+                        .respond(zebra_state::ReadResponse::ChainInfo(GetBlockTemplateChainInfo {
+                            tip_hash: block_hash,
+                            tip_height: block_height,
+                            chain_history_root: HistoryTree::default().hash(),
+                            expected_difficulty: Default::default(),
+                            cur_time: DateTime32::now(),
+                            min_time: DateTime32::now(),
+                            max_time: DateTime32::now()
+                        }));
                 }
             };
 
@@ -457,6 +487,7 @@ proptest! {
                     prop_assert_eq!(info.chain, network.bip70_network_name());
                     prop_assert_eq!(info.blocks, block_height);
                     prop_assert_eq!(info.best_block_hash, block_hash);
+                    prop_assert_eq!(info.size_on_disk, expected_size_on_disk);
                     prop_assert!(info.estimated_height < Height::MAX);
 
                     prop_assert_eq!(
@@ -480,8 +511,8 @@ proptest! {
                         prop_assert_eq!(u.1.status, status);
                     }
                 }
-                Err(_) => {
-                    unreachable!("Test should never error with the data we are feeding it")
+                Err(err) => {
+                    unreachable!("Test should never error with the data we are feeding it: {err}")
                 }
             };
 
@@ -512,53 +543,37 @@ proptest! {
                 block
             },
             Network::Testnet(_) => {
-                let block_bytes = &zebra_test::vectors::BLOCK_MAINNET_GENESIS_BYTES;
+                let block_bytes = &zebra_test::vectors::BLOCK_TESTNET_GENESIS_BYTES;
                 let block: Arc<Block> = block_bytes.zcash_deserialize_into().expect("block is valid");
                 block
             },
         };
 
         // Genesis block fields
-        let block_time = genesis_block.header.time;
-        let block_version = genesis_block.header.version;
-        let block_prev_block_hash = genesis_block.header.previous_block_hash;
-        let block_merkle_root = genesis_block.header.merkle_root;
-        let block_commitment_bytes = genesis_block.header.commitment_bytes;
-        let block_difficulty_threshold = genesis_block.header.difficulty_threshold;
-        let block_nonce = genesis_block.header.nonce;
-        let block_solution = genesis_block.header.solution;
-        let block_hash = genesis_block.header.hash();
+        let expected_size_on_disk = 1_000;
 
         runtime.block_on(async move {
             let response_fut = rpc.get_blockchain_info();
             let mock_state_handler = {
                 let mut state = state.clone();
                 async move {
-                    state.expect_request(zebra_state::ReadRequest::TipPoolValues)
+                state
+                    .expect_request(zebra_state::ReadRequest::UsageInfo)
+                    .await
+                    .expect("getblockchaininfo should call mock state service with correct request")
+                    .respond(zebra_state::ReadResponse::UsageInfo(expected_size_on_disk));
+
+                state.expect_request(zebra_state::ReadRequest::TipPoolValues)
                     .await
                     .expect("getblockchaininfo should call mock state service with correct request")
                     .respond(Err(BoxError::from("tip values not available")));
 
-
-                    state
-                    .expect_request(zebra_state::ReadRequest::BlockHeader(HashOrHeight::Height(Height::MIN)))
+                state
+                    .expect_request(zebra_state::ReadRequest::ChainInfo)
                     .await
                     .expect("getblockchaininfo should call mock state service with correct request")
-                    .respond(zebra_state::ReadResponse::BlockHeader {
-                        header: Arc::new(block::Header {
-                            time: block_time,
-                            version: block_version,
-                            previous_block_hash: block_prev_block_hash,
-                            merkle_root: block_merkle_root,
-                            commitment_bytes: block_commitment_bytes,
-                            difficulty_threshold: block_difficulty_threshold,
-                            nonce: block_nonce,
-                            solution: block_solution
-                        }),
-                        hash: block_hash,
-                        height: Height::MIN,
-                        next_block_hash: None,
-                    });
+                    .respond(Err(BoxError::from("chain info not available")));
+
                 }
             };
 
@@ -569,7 +584,7 @@ proptest! {
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
-            prop_assert_eq!(response.value_pools, ValuePoolBalance::from_value_balance(ValueBalance::zero()));
+            prop_assert_eq!(response.value_pools, get_blockchain_info::Balance::value_pools(ValueBalance::zero()));
 
             let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
             let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");
@@ -711,7 +726,7 @@ proptest! {
             let tx_hex = hex::encode(&tx_bytes);
             let send_task = {
                 let rpc = rpc.clone();
-                tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex).await })
+                tokio::task::spawn(async move { rpc.send_raw_transaction(tx_hex, None).await })
             };
             let tx_unmined = UnminedTx::from(tx);
             let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
@@ -790,7 +805,7 @@ proptest! {
                 // send a transaction
                 let tx_bytes = tx.zcash_serialize_to_vec()?;
                 let tx_hex = hex::encode(&tx_bytes);
-                let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex).await });
+                let send_task = tokio::task::spawn(async move { rpc_clone.send_raw_transaction(tx_hex, None).await });
 
                 let tx_unmined = UnminedTx::from(tx.clone());
                 let expected_request = mempool::Request::Queue(vec![tx_unmined.clone().into()]);
@@ -933,6 +948,13 @@ fn mock_services<Tip>(
             zebra_state::ReadRequest,
         >,
         Tip,
+        MockAddressBookPeers,
+        zebra_test::mock_service::MockService<
+            zebra_consensus::Request,
+            block::Hash,
+            zebra_test::mock_service::PropTestAssertion,
+        >,
+        MockSyncStatus,
     >,
     tokio::task::JoinHandle<()>,
 )
@@ -941,16 +963,23 @@ where
 {
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
+    let block_verifier_router = MockService::build().for_prop_tests();
 
+    let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, mempool_tx_queue) = RpcImpl::new(
-        "RPC test",
-        "RPC test",
         network,
-        false,
-        true,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
         mempool.clone(),
         Buffer::new(state.clone(), 1),
+        block_verifier_router,
+        MockSyncStatus::default(),
         chain_tip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
     );
 
     (mempool, state, rpc, mempool_tx_queue)

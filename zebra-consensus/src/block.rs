@@ -79,7 +79,6 @@ pub enum VerifyBlockError {
     // TODO: make this into a concrete type, and add it to is_duplicate_request() (#2908)
     Commit(#[source] BoxError),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     #[error("unable to validate block proposal: failed semantic verification (proof of work is not checked for proposals): {0}")]
     // TODO: make this into a concrete type (see #5732)
     ValidateProposal(#[source] BoxError),
@@ -98,6 +97,17 @@ impl VerifyBlockError {
         match self {
             VerifyBlockError::Block { source, .. } => source.is_duplicate_request(),
             _ => false,
+        }
+    }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        // TODO: Adjust these values based on zcashd (#9258).
+        use VerifyBlockError::*;
+        match self {
+            Block { source } => source.misbehavior_score(),
+            Equihash { .. } => 100,
+            _other => 0,
         }
     }
 }
@@ -332,8 +342,7 @@ where
                 deferred_balance: Some(expected_deferred_amount),
             };
 
-            // Return early for proposal requests when getblocktemplate-rpcs feature is enabled
-            #[cfg(feature = "getblocktemplate-rpcs")]
+            // Return early for proposal requests.
             if request.is_proposal() {
                 return match state_service
                     .ready()

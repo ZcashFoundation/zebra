@@ -21,12 +21,12 @@ Zebra's GitHub workflows automatically generate checkpoints after every `main` b
 These checkpoints can be copied into the `main-checkpoints.txt` and `test-checkpoints.txt` files.
 
 To find the latest checkpoints on the `main` branch:
-1. Find the [latest completed `CI Docker` workflow run on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-integration-tests-gcp.yml?query=branch%3Amain).
+1. Find the [latest completed `Run Tests` workflow run on `main`](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml?query=branch%3Amain).
    Due to GitHub UI issues, some runs will show as waiting, cancelled, or failed,
    but the checkpoints have still been generated.
-2. Go to the `Result of checkpoints-mainnet` step in the
-   `Run checkpoints-mainnet` job, in the `Generate checkpoints mainnet` job
-3. Scroll down until you see the list of checkpoints, it should start around line 200
+2. From the list on the left, go to the `Integration tests` and find the `Run checkpoints-mainnet test`, then click in the
+   `Result of checkpoints-mainnet` step.
+3. Scroll down until you see the list of checkpoints.
 4. Add those checkpoints to the end of `zebra-consensus/src/checkpoint/main-checkpoints.txt`
 5. Repeat steps 2 to 4 for `Generate checkpoints testnet`
 6. Open a pull request at https://github.com/ZcashFoundation/zebra/pulls

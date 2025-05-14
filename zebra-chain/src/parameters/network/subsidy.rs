@@ -54,7 +54,7 @@ pub(crate) const FIRST_HALVING_TESTNET: Height = Height(1_116_000);
 const FIRST_HALVING_REGTEST: Height = Height(287);
 
 /// The funding stream receiver categories.
-#[derive(Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FundingStreamReceiver {
     /// The Electric Coin Company (Bootstrap Foundation) funding stream.
     #[serde(rename = "ECC")]
@@ -77,8 +77,8 @@ impl FundingStreamReceiver {
     /// [ZIP-1014]: https://zips.z.cash/zip-1014#abstract
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
     /// [ZIP-1015]: https://zips.z.cash/zip-1015
-    pub fn info(&self, is_nu6: bool) -> (&'static str, &'static str) {
-        if is_nu6 {
+    pub fn info(&self, is_post_nu6: bool) -> (&'static str, &'static str) {
+        if is_post_nu6 {
             (
                 match self {
                     FundingStreamReceiver::Ecc => "Electric Coin Company",

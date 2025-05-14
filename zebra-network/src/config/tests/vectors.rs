@@ -1,6 +1,7 @@
 //! Fixed test vectors for zebra-network configuration.
 
 use static_assertions::const_assert;
+use zebra_chain::parameters::testnet;
 
 use crate::{
     constants::{INBOUND_PEER_LIMIT_MULTIPLIER, OUTBOUND_PEER_LIMIT_MULTIPLIER},
@@ -45,4 +46,22 @@ fn ensure_peer_connection_limits_consistent() {
             >= 50,
         "default config should allow more inbound connections, to avoid connection exhaustion",
     );
+}
+
+#[test]
+fn testnet_params_serialization_roundtrip() {
+    let _init_guard = zebra_test::init();
+
+    let config = Config {
+        network: testnet::Parameters::build()
+            .with_disable_pow(true)
+            .to_network(),
+        initial_testnet_peers: [].into(),
+        ..Config::default()
+    };
+
+    let serialized = toml::to_string(&config).unwrap();
+    let deserialized: Config = toml::from_str(&serialized).unwrap();
+
+    assert_eq!(config, deserialized);
 }

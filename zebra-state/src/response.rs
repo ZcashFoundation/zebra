@@ -2,9 +2,11 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
+    block::{self, Block, ChainHistoryMmrRootHash},
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -13,7 +15,6 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
-#[cfg(feature = "getblocktemplate-rpcs")]
 use zebra_chain::work::difficulty::CompactDifficulty;
 
 // Allow *only* these unused imports, so that rustdoc link resolution
@@ -50,6 +51,9 @@ pub enum Response {
 
     /// Response to [`Request::Block`] with the specified block.
     Block(Option<Arc<Block>>),
+
+    /// Response to [`Request::BlockAndSize`] with the specified block and size.
+    BlockAndSize(Option<(Arc<Block>, usize)>),
 
     /// The response to a `BlockHeader` request.
     BlockHeader {
@@ -88,7 +92,6 @@ pub enum Response {
     /// Response to [`Request::KnownBlock`].
     KnownBlock(Option<KnownBlock>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`Request::CheckBlockProposalValidity`]
     ValidBlockProposal,
 }
@@ -118,15 +121,24 @@ pub struct MinedTx {
     /// The number of confirmations for this transaction
     /// (1 + depth of block the transaction was found in)
     pub confirmations: u32,
+
+    /// The time of the block where the transaction was mined.
+    pub block_time: DateTime<Utc>,
 }
 
 impl MinedTx {
     /// Creates a new [`MinedTx`]
-    pub fn new(tx: Arc<Transaction>, height: block::Height, confirmations: u32) -> Self {
+    pub fn new(
+        tx: Arc<Transaction>,
+        height: block::Height,
+        confirmations: u32,
+        block_time: DateTime<Utc>,
+    ) -> Self {
         Self {
             tx,
             height,
             confirmations,
+            block_time,
         }
     }
 }
@@ -135,6 +147,9 @@ impl MinedTx {
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
 pub enum ReadResponse {
+    /// Response to [`ReadRequest::UsageInfo`] with the current best chain tip.
+    UsageInfo(u64),
+
     /// Response to [`ReadRequest::Tip`] with the current best chain tip.
     Tip(Option<(block::Height, block::Hash)>),
 
@@ -154,6 +169,10 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::Block`] with the specified block.
     Block(Option<Arc<Block>>),
+
+    /// Response to [`ReadRequest::BlockAndSize`] with the specified block and
+    /// serialized size.
+    BlockAndSize(Option<(Arc<Block>, usize)>),
 
     /// The response to a `BlockHeader` request.
     BlockHeader {
@@ -241,26 +260,21 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::BestChainBlockHash`] with the specified block hash.
     BlockHash(Option<block::Hash>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::ChainInfo`] with the state
     /// information needed by the `getblocktemplate` RPC method.
     ChainInfo(GetBlockTemplateChainInfo),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::SolutionRate`]
     SolutionRate(Option<u128>),
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::CheckBlockProposalValidity`]
     ValidBlockProposal,
 
-    #[cfg(feature = "getblocktemplate-rpcs")]
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
-#[cfg(feature = "getblocktemplate-rpcs")]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GetBlockTemplateChainInfo {
     // Data fetched directly from the state tip.
@@ -274,9 +288,9 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     pub tip_height: block::Height,
 
-    /// The history tree of the current best chain.
+    /// The FlyClient chain history root as of the end of the chain tip block.
     /// Depends on the `tip_hash`.
-    pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    pub chain_history_root: Option<ChainHistoryMmrRootHash>,
 
     // Data derived from the state tip and recent blocks, and the current local clock.
     //
@@ -311,6 +325,7 @@ impl TryFrom<ReadResponse> for Response {
             ReadResponse::BlockHash(hash) => Ok(Response::BlockHash(hash)),
 
             ReadResponse::Block(block) => Ok(Response::Block(block)),
+            ReadResponse::BlockAndSize(block) => Ok(Response::BlockAndSize(block)),
             ReadResponse::BlockHeader {
                 header,
                 hash,
@@ -337,7 +352,8 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::ValidBestChainTipNullifiersAndAnchors => Ok(Response::ValidBestChainTipNullifiersAndAnchors),
 
-            ReadResponse::TipPoolValues { .. }
+            ReadResponse::UsageInfo(_)
+            | ReadResponse::TipPoolValues { .. }
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
@@ -345,18 +361,17 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardSubtrees(_)
             | ReadResponse::AddressBalance(_)
             | ReadResponse::AddressesTransactionIds(_)
-            | ReadResponse::AddressUtxos(_) => {
+            | ReadResponse::AddressUtxos(_)
+            | ReadResponse::ChainInfo(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
             #[cfg(feature = "indexer")]
             ReadResponse::TransactionId(_) => Err("there is no corresponding Response for this ReadResponse"),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
             ReadResponse::ValidBlockProposal => Ok(Response::ValidBlockProposal),
 
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            ReadResponse::ChainInfo(_) | ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
+            ReadResponse::SolutionRate(_) | ReadResponse::TipBlockSize(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
         }

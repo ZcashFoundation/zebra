@@ -38,12 +38,12 @@ on:
       zebra_state_dir:
         required: false
         type: string
-        default: '/var/cache/zebrad-cache'
+        default: '/home/zebra/.cache/zebra'
         description: 'Zebra cached state directory and input image prefix to search in GCP'
       lwd_state_dir:
         required: false
         type: string
-        default: '/var/cache/lwd-cache'
+        default: '/home/zebra/.cache/lwd'
         description: 'Lightwalletd cached state directory and input image prefix to search in GCP'
       disk_prefix:
         required: false
@@ -85,6 +85,11 @@ on:
         description: 'Application name, used to work out when a job is an update job'
 
 env:
+  RUST_LOG: ${{ vars.RUST_LOG }}
+  RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
+  RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
+  COLORBT_SHOW_HIDDEN: ${{ vars.COLORBT_SHOW_HIDDEN }}
+  CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
   # How many previous log lines we show at the start of each new log job.
   # Increase this number if some log lines are skipped between jobs
   #
@@ -95,7 +100,6 @@ env:
   # How many blocks to wait before creating an updated cached state image.
   # 1 day is approximately 1152 blocks.
   CACHED_STATE_UPDATE_LIMIT: 576
-
 jobs:
   # Find a cached state disk for ${{ inputs.test_id }}, matching all of:
   # - disk cached state prefix -> zebrad-cache or lwd-cache
@@ -172,13 +176,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       # Create a Compute Engine virtual machine and attach a cached state disk using the
       # $CACHED_DISK_NAME env as the source image to populate the disk cached state
@@ -250,7 +254,7 @@ jobs:
       # `ci-unit-tests-docker.yml` to be able to run this tests.
       #
       # Although we're mounting the disk root to both directories, Zebra and Lightwalletd, tests
-      # will only respect the values from $ZEBRA_CACHED_STATE_DIR and $LIGHTWALLETD_DATA_DIR,
+      # will only respect the values from $ZEBRA_CACHE_DIR and $LWD_CACHE_DIR,
       # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
       # are only used to match those variables paths.
       - name: Launch ${{ inputs.test_id }} test
@@ -279,6 +283,11 @@ jobs:
           --tty \
           --detach \
           ${{ inputs.test_variables }} \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
           ${MOUNT_FLAGS} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
           '
@@ -405,12 +414,12 @@ jobs:
       # branch names to 12 characters.
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      # Passes ${{ env.GITHUB_REF_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
+      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
       - name: Format network name and branch name for disks
         run: |
           NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
-          LONG_GITHUB_REF="${{ env.GITHUB_REF_SLUG_URL }}"
+          LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
       # Install our SSH secret
@@ -429,13 +438,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       # Sets the $UPDATE_SUFFIX env var to "-u" if updating a previous cached state,
       # and the empty string otherwise.
@@ -695,13 +704,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.7
+        uses: google-github-actions/auth@v2.1.8
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.2
+        uses: google-github-actions/setup-gcloud@v2.1.4
 
       # Deletes the instances that has been recently deployed in the actual commit after all
       # previous jobs have run, no matter the outcome of the job.

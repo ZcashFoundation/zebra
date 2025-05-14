@@ -21,6 +21,7 @@ use zebra_network::{
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
+use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -183,10 +184,10 @@ async fn inbound_block_empty_state_notfound() -> Result<(), crate::BoxError> {
         assert_eq!(missing_error.inner_debug(), expected.inner_debug());
     } else {
         unreachable!(
-                "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+            "peer::Connection should map missing `BlocksByHash` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
              actual result: {:?}",
-                response
-            )
+            response
+        )
     };
 
     let block_gossip_result = block_gossip_task_handle.now_or_never();
@@ -302,10 +303,10 @@ async fn inbound_tx_empty_state_notfound() -> Result<(), crate::BoxError> {
             }
         } else {
             unreachable!(
-                        "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
                  actual result: {:?}",
-                        response
-                    )
+                response
+            )
         };
     }
 
@@ -338,7 +339,8 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
     // We respond with an unrelated transaction, so the peer gives up on the request.
     let unrelated_response: Transaction =
         zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
-    let unrelated_response = Response::Transactions(vec![Available(unrelated_response.into())]);
+    let unrelated_response =
+        Response::Transactions(vec![Available((unrelated_response.into(), None))]);
 
     let (
         // real services
@@ -418,10 +420,10 @@ async fn outbound_tx_unrelated_response_notfound() -> Result<(), crate::BoxError
             }
         } else {
             unreachable!(
-                        "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
+                "peer::Connection should map missing `TransactionsById` responses as `Err(SharedPeerError(NotFoundResponse(_)))`, \
                  actual result: {:?}",
-                        response
-                    )
+                response
+            )
         };
 
         // The peer set only does routing for single-transaction requests.
@@ -485,8 +487,8 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
     let repeated_tx: Transaction = zebra_test::vectors::DUMMY_TX1.zcash_deserialize_into()?;
     let repeated_tx: UnminedTx = repeated_tx.into();
     let repeated_response = Response::Transactions(vec![
-        Available(repeated_tx.clone()),
-        Available(repeated_tx.clone()),
+        Available((repeated_tx.clone(), None)),
+        Available((repeated_tx.clone(), None)),
     ]);
 
     let (
@@ -521,6 +523,7 @@ async fn outbound_tx_partial_response_notfound() -> Result<(), crate::BoxError> 
         let available: Vec<UnminedTx> = tx_response
             .iter()
             .filter_map(InventoryResponse::available)
+            .map(|(tx, _)| tx)
             .collect();
         let missing: Vec<UnminedTxId> = tx_response
             .iter()
@@ -656,7 +659,7 @@ async fn setup(
 
         ..NetworkConfig::default()
     };
-    let (mut peer_set, address_book) = zebra_network::init(
+    let (mut peer_set, address_book, _) = zebra_network::init(
         network_config,
         inbound_service.clone(),
         latest_chain_tip.clone(),
@@ -692,6 +695,7 @@ async fn setup(
         .service(BoxService::new(mock_tx_verifier.clone()));
 
     // Mempool
+    let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
     let (mut mempool_service, transaction_receiver) = Mempool::new(
         &mempool_config,
@@ -701,6 +705,7 @@ async fn setup(
         sync_status.clone(),
         latest_chain_tip.clone(),
         chain_tip_change.clone(),
+        misbehavior_tx,
     );
 
     // Enable the mempool
@@ -713,6 +718,7 @@ async fn setup(
         .service(mempool_service);
 
     // Initialize the inbound service
+    let (misbehavior_sender, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let setup_data = InboundSetupData {
         address_book,
         block_download_peer_set: peer_set.clone(),
@@ -720,15 +726,19 @@ async fn setup(
         mempool: mempool_service.clone(),
         state: state_service.clone(),
         latest_chain_tip,
+        misbehavior_sender,
     };
     let r = setup_tx.send(setup_data);
     // We can't expect or unwrap because the returned Result does not implement Debug
     assert!(r.is_ok(), "unexpected setup channel send failure");
 
+    let submitblock_channel = SubmitBlockChannel::new();
+
     let block_gossip_task_handle = tokio::spawn(sync::gossip_best_tip_block_hashes(
         sync_status.clone(),
         chain_tip_change,
         peer_set.clone(),
+        Some(submitblock_channel.receiver()),
     ));
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
@@ -781,4 +791,116 @@ async fn setup(
         // real open socket addresses
         listen_addr,
     )
+}
+
+mod submitblock_test {
+    use std::io;
+    use std::sync::{Arc, Mutex};
+    use tracing::{Instrument, Level};
+    use tracing_subscriber::fmt;
+    use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
+
+    use super::*;
+
+    use crate::components::sync::PEER_GOSSIP_DELAY;
+
+    // Custom in-memory writer to capture logs
+    struct TestWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl io::Write for TestWriter {
+        #[allow(clippy::unwrap_in_result)]
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut logs = self.0.lock().unwrap();
+            logs.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn submitblock_channel() -> Result<(), crate::BoxError> {
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        let log_sink = logs.clone();
+
+        // Set up a tracing subscriber with a custom writer
+        let subscriber = fmt()
+            .with_max_level(Level::INFO)
+            .with_writer(move || TestWriter(log_sink.clone())) // Write logs to an in-memory buffer
+            .finish();
+
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let (sync_status, _recent_syncs) = SyncStatus::new();
+
+        // State
+        let state_config = StateConfig::ephemeral();
+        let (_state_service, _read_only_state_service, latest_chain_tip, chain_tip_change) =
+            zebra_state::init(state_config, &Network::Mainnet, Height::MAX, 0);
+
+        let config_listen_addr = "127.0.0.1:0".parse().unwrap();
+
+        // Network
+        let network_config = NetworkConfig {
+            network: Network::Mainnet,
+            listen_addr: config_listen_addr,
+
+            // Stop Zebra making outbound connections
+            initial_mainnet_peers: IndexSet::new(),
+            initial_testnet_peers: IndexSet::new(),
+            cache_dir: CacheDir::disabled(),
+
+            ..NetworkConfig::default()
+        };
+
+        // Inbound
+        let (_setup_tx, setup_rx) = oneshot::channel();
+        let inbound_service = Inbound::new(MAX_INBOUND_CONCURRENCY, setup_rx);
+        let inbound_service = ServiceBuilder::new()
+            .load_shed()
+            .buffer(10)
+            .service(BoxService::new(inbound_service));
+
+        let (peer_set, _address_book, _misbehavior_tx) = zebra_network::init(
+            network_config,
+            inbound_service.clone(),
+            latest_chain_tip.clone(),
+            "Zebra user agent".to_string(),
+        )
+        .await;
+
+        // Start the block gossip task with a SubmitBlockChannel
+        let submitblock_channel = SubmitBlockChannel::new();
+        let gossip_task_handle = tokio::spawn(
+            sync::gossip_best_tip_block_hashes(
+                sync_status.clone(),
+                chain_tip_change,
+                peer_set.clone(),
+                Some(submitblock_channel.receiver()),
+            )
+            .in_current_span(),
+        );
+
+        // Send a block top the channel
+        submitblock_channel
+            .sender()
+            .send((block::Hash([1; 32]), block::Height(1)))
+            .unwrap();
+
+        // Wait for the block gossip task to process the block
+        tokio::time::sleep(PEER_GOSSIP_DELAY).await;
+
+        // Check that the block was processed as a mnined block by the gossip task
+        let captured_logs = logs.lock().unwrap();
+        let log_output = String::from_utf8(captured_logs.clone()).unwrap();
+
+        assert!(log_output.contains("initializing block gossip task"));
+        assert!(log_output.contains("sending mined block broadcast"));
+
+        std::mem::drop(gossip_task_handle);
+
+        Ok(())
+    }
 }

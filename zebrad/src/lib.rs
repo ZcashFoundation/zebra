@@ -61,10 +61,6 @@
 //! features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options)
 //! are available at compile time:
 //!
-//! ### JSON-RPC
-//!
-//! * `getblocktemplate-rpcs`: Mining pool RPC support, enabled by default in production builds.
-//!
 //! ### Metrics
 //!
 //! * configuring a `tracing.progress_bar`: shows key metrics in the terminal using progress bars,

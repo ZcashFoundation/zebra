@@ -36,10 +36,10 @@ and the [`flamegraph`][flamegraph] runtime config option.
 
 Compile Zebra with `--features sentry` to monitor it using [Sentry][sentry] in production.
 
-[tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.Config.html
-[filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.Config.html#structfield.filter
-[flamegraph]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.Config.html#structfield.flamegraph
+[tracing_section]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html
+[filter]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.filter
+[flamegraph]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.flamegraph
 [flamegraphs]: http://www.brendangregg.com/flamegraphs.html
 [systemd_journald]: https://www.freedesktop.org/software/systemd/man/systemd-journald.service.html
-[use_journald]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.Config.html#structfield.use_journald
+[use_journald]: https://docs.rs/zebrad/latest/zebrad/components/tracing/struct.InnerConfig.html#structfield.use_journald
 [sentry]: https://sentry.io/welcome/

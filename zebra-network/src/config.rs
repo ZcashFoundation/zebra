@@ -4,6 +4,7 @@ use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     net::{IpAddr, SocketAddr},
+    sync::Arc,
     time::Duration,
 };
 
@@ -51,7 +52,7 @@ const MAX_SINGLE_SEED_PEER_DNS_RETRIES: usize = 0;
 
 /// Configuration for networking code.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[serde(deny_unknown_fields, default, into = "DConfig")]
 pub struct Config {
     /// The address on which this node should listen for connections.
     ///
@@ -580,60 +581,116 @@ impl Default for Config {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DTestnetParameters {
+    network_name: Option<String>,
+    network_magic: Option<[u8; 4]>,
+    slow_start_interval: Option<u32>,
+    target_difficulty_limit: Option<String>,
+    disable_pow: Option<bool>,
+    genesis_hash: Option<String>,
+    activation_heights: Option<ConfiguredActivationHeights>,
+    pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    pre_blossom_halving_interval: Option<u32>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+struct DConfig {
+    listen_addr: String,
+    external_addr: Option<String>,
+    network: NetworkKind,
+    testnet_parameters: Option<DTestnetParameters>,
+    initial_mainnet_peers: IndexSet<String>,
+    initial_testnet_peers: IndexSet<String>,
+    cache_dir: CacheDir,
+    peerset_initial_target_size: usize,
+    #[serde(alias = "new_peer_interval", with = "humantime_serde")]
+    crawl_new_peer_interval: Duration,
+    max_connections_per_ip: Option<usize>,
+}
+
+impl Default for DConfig {
+    fn default() -> Self {
+        let config = Config::default();
+        Self {
+            listen_addr: "0.0.0.0".to_string(),
+            external_addr: None,
+            network: Default::default(),
+            testnet_parameters: None,
+            initial_mainnet_peers: config.initial_mainnet_peers,
+            initial_testnet_peers: config.initial_testnet_peers,
+            cache_dir: config.cache_dir,
+            peerset_initial_target_size: config.peerset_initial_target_size,
+            crawl_new_peer_interval: config.crawl_new_peer_interval,
+            max_connections_per_ip: Some(config.max_connections_per_ip),
+        }
+    }
+}
+
+impl From<Arc<testnet::Parameters>> for DTestnetParameters {
+    fn from(params: Arc<testnet::Parameters>) -> Self {
+        Self {
+            network_name: Some(params.network_name().to_string()),
+            network_magic: Some(params.network_magic().0),
+            slow_start_interval: Some(params.slow_start_interval().0),
+            target_difficulty_limit: Some(params.target_difficulty_limit().to_string()),
+            disable_pow: Some(params.disable_pow()),
+            genesis_hash: Some(params.genesis_hash().to_string()),
+            activation_heights: Some(params.activation_heights().into()),
+            pre_nu6_funding_streams: Some(params.pre_nu6_funding_streams().into()),
+            post_nu6_funding_streams: Some(params.post_nu6_funding_streams().into()),
+            pre_blossom_halving_interval: Some(
+                params
+                    .pre_blossom_halving_interval()
+                    .try_into()
+                    .expect("should convert"),
+            ),
+        }
+    }
+}
+
+impl From<Config> for DConfig {
+    fn from(
+        Config {
+            listen_addr,
+            external_addr,
+            network,
+            initial_mainnet_peers,
+            initial_testnet_peers,
+            cache_dir,
+            peerset_initial_target_size,
+            crawl_new_peer_interval,
+            max_connections_per_ip,
+        }: Config,
+    ) -> Self {
+        let testnet_parameters = network
+            .parameters()
+            .filter(|params| !params.is_default_testnet() && !params.is_regtest())
+            .map(Into::into);
+
+        DConfig {
+            listen_addr: listen_addr.to_string(),
+            external_addr: external_addr.map(|addr| addr.to_string()),
+            network: network.into(),
+            testnet_parameters,
+            initial_mainnet_peers,
+            initial_testnet_peers,
+            cache_dir,
+            peerset_initial_target_size,
+            crawl_new_peer_interval,
+            max_connections_per_ip: Some(max_connections_per_ip),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for Config {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct DTestnetParameters {
-            network_name: Option<String>,
-            network_magic: Option<[u8; 4]>,
-            slow_start_interval: Option<u32>,
-            target_difficulty_limit: Option<String>,
-            disable_pow: Option<bool>,
-            genesis_hash: Option<String>,
-            activation_heights: Option<ConfiguredActivationHeights>,
-            pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
-            post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
-            pre_blossom_halving_interval: Option<u32>,
-        }
-
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields, default)]
-        struct DConfig {
-            listen_addr: String,
-            external_addr: Option<String>,
-            network: NetworkKind,
-            testnet_parameters: Option<DTestnetParameters>,
-            initial_mainnet_peers: IndexSet<String>,
-            initial_testnet_peers: IndexSet<String>,
-            cache_dir: CacheDir,
-            peerset_initial_target_size: usize,
-            #[serde(alias = "new_peer_interval", with = "humantime_serde")]
-            crawl_new_peer_interval: Duration,
-            max_connections_per_ip: Option<usize>,
-        }
-
-        impl Default for DConfig {
-            fn default() -> Self {
-                let config = Config::default();
-                Self {
-                    listen_addr: "0.0.0.0".to_string(),
-                    external_addr: None,
-                    network: Default::default(),
-                    testnet_parameters: None,
-                    initial_mainnet_peers: config.initial_mainnet_peers,
-                    initial_testnet_peers: config.initial_testnet_peers,
-                    cache_dir: config.cache_dir,
-                    peerset_initial_target_size: config.peerset_initial_target_size,
-                    crawl_new_peer_interval: config.crawl_new_peer_interval,
-                    max_connections_per_ip: Some(config.max_connections_per_ip),
-                }
-            }
-        }
-
         let DConfig {
             listen_addr,
             external_addr,
@@ -668,12 +725,11 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let (nu5_activation_height, nu6_activation_height) = testnet_parameters
+                let configured_activation_heights = testnet_parameters
                     .and_then(|params| params.activation_heights)
-                    .map(|ConfiguredActivationHeights { nu5, nu6, .. }| (nu5, nu6))
                     .unwrap_or_default();
 
-                Network::new_regtest(nu5_activation_height, nu6_activation_height)
+                Network::new_regtest(configured_activation_heights)
             }
             (
                 NetworkKind::Testnet,

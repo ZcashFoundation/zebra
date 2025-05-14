@@ -1,6 +1,6 @@
 [package]
 name = "zebra-scan"
-version = "0.1.0-alpha.13"
+version = "0.1.0-alpha.15"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Shielded transaction scanner for the Zcash blockchain"
 license = "MIT OR Apache-2.0"
@@ -60,71 +60,72 @@ results-reader = [
 
 [dependencies]
 
-color-eyre = "0.6.3"
-indexmap = { version = "2.7.0", features = ["serde"] }
-itertools = "0.13.0"
-semver = "1.0.23"
-serde = { version = "1.0.215", features = ["serde_derive"] }
-tokio = { version = "1.42.0", features = ["time"] }
-tower = "0.4.13"
-tracing = "0.1.41"
-futures = "0.3.31"
+color-eyre = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
+itertools = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true, features = ["serde_derive"] }
+tokio = { workspace = true, features = ["time"] }
+tower = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
 
 # ECC dependencies.
 zcash_client_backend.workspace = true
 zcash_keys = { workspace = true, features = ["sapling"] }
 zcash_primitives.workspace = true
+zcash_protocol.workspace = true
 zcash_address.workspace = true
 sapling-crypto.workspace = true
+zip32 = { workspace = true, features = ["std"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.44", features = ["shielded-scan"] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.44", features = ["shielded-scan"] }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.44", features = ["shielded-scan"] }
-zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.11" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.44" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["shielded-scan"] }
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = ["shielded-scan"] }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46", features = ["shielded-scan"] }
+zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.13" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.46" }
 
-chrono = { version = "0.4.39", default-features = false, features = ["clock", "std", "serde"] }
+chrono = { workspace = true, features = ["clock", "std", "serde"] }
 
 # test feature proptest-impl
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.5.0", optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
 
-bls12_381 = { version = "0.8.0", optional = true }
-ff = { version = "0.13.0", optional = true }
-group = { version = "0.13.0", optional = true }
-jubjub = { version = "0.10.0", optional = true }
-rand = { version = "0.8.5", optional = true }
-zcash_note_encryption = { version = "0.4.0", optional = true }
+bls12_381 = { workspace = true, optional = true }
+ff = { workspace = true, optional = true }
+group = { workspace = true, optional = true }
+jubjub = { workspace = true, optional = true }
+rand = { workspace = true, optional = true }
+zcash_note_encryption = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.44", optional = true }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46", optional = true }
 
 # zebra-scanner binary dependencies
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-structopt = "0.3.26"
-lazy_static = "1.4.0"
-serde_json = "1.0.133"
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+structopt = { workspace = true }
+lazy_static = { workspace = true }
+serde_json = { workspace = true }
 
-jsonrpc = { version = "0.18.0", optional = true }
-hex = { version = "0.4.3", optional = true }
+jsonrpc = { workspace = true, optional = true }
+hex = { workspace = true, optional = true }
 
-zebrad = { path = "../zebrad", version = "2.1.1" }
+zebrad = { path = "../zebrad", version = "2.3.0" }
 
 [dev-dependencies]
-insta = { version = "1.41.1", features = ["ron", "redactions"] }
-tokio = { version = "1.42.0", features = ["test-util"] }
+insta = { workspace = true, features = ["ron", "redactions"] }
+tokio = { workspace = true, features = ["test-util"] }
 
-proptest = "1.4.0"
-proptest-derive = "0.5.0"
-bls12_381 = "0.8.0"
-ff = "0.13.0"
-group = "0.13.0"
-jubjub = "0.10.0"
-rand = "0.8.5"
-tempfile = "3.14.0"
-zcash_note_encryption = "0.4.0"
-toml = "0.8.19"
-tonic = "0.12.3"
+proptest = { workspace = true }
+proptest-derive = { workspace = true }
+bls12_381 = { workspace = true }
+ff = { workspace = true }
+group = { workspace = true }
+jubjub = { workspace = true }
+rand = { workspace = true }
+tempfile = { workspace = true }
+zcash_note_encryption = { workspace = true }
+toml = { workspace = true }
+tonic = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.44", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.44" }
-
+zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46" }

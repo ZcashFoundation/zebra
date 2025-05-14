@@ -1,6 +1,6 @@
 [package]
 name = "zebra-state"
-version = "1.0.0-beta.44"
+version = "1.0.0-beta.46"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "State contextual verification and storage code for Zebra"
 license = "MIT OR Apache-2.0"
@@ -20,11 +20,6 @@ categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
 
 progress-bar = [
     "howudoin",
-]
-
-# Mining RPC support
-getblocktemplate-rpcs = [
-    "zebra-chain/getblocktemplate-rpcs",
 ]
 
 # Indexes spending transaction ids by spent outpoints and revealed nullifiers
@@ -48,69 +43,71 @@ elasticsearch = [
     "zebra-chain/elasticsearch",
 ]
 
-[dependencies]
-bincode = "1.3.3"
-chrono = { version = "0.4.39", default-features = false, features = ["clock", "std"] }
-dirs = "5.0.1"
-futures = "0.3.31"
-hex = "0.4.3"
-hex-literal = "0.4.1"
-humantime-serde = "1.1.1"
-human_bytes = { version = "0.4.3", default-features = false }
-indexmap = "2.7.0"
-itertools = "0.13.0"
-lazy_static = "1.4.0"
-metrics = "0.24.1"
-mset = "0.1.1"
-regex = "1.11.0"
-rlimit = "0.10.2"
-rocksdb = { version = "0.22.0", default-features = false, features = ["lz4"] }
-semver = "1.0.23"
-crossbeam-channel = "0.5.13"
-serde = { version = "1.0.215", features = ["serde_derive"] }
-tempfile = "3.14.0"
-thiserror = "2.0.6"
+tx_v6 = ["zebra-chain/tx_v6"]
 
-rayon = "1.10.0"
-tokio = { version = "1.42.0", features = ["rt-multi-thread", "sync", "tracing"] }
-tower = { version = "0.4.13", features = ["buffer", "util"] }
-tracing = "0.1.41"
+[dependencies]
+bincode = { workspace = true }
+chrono = { workspace = true, features = ["clock", "std"] }
+dirs = { workspace = true }
+futures = { workspace = true }
+hex = { workspace = true }
+hex-literal = { workspace = true }
+humantime-serde = { workspace = true }
+human_bytes = { workspace = true }
+indexmap = { workspace = true }
+itertools = { workspace = true }
+lazy_static = { workspace = true }
+metrics = { workspace = true }
+mset = { workspace = true }
+regex = { workspace = true }
+rlimit = { workspace = true }
+rocksdb = { workspace = true, features = ["lz4"] }
+semver = { workspace = true }
+crossbeam-channel = { workspace = true }
+serde = { workspace = true, features = ["serde_derive"] }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+
+rayon = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
+tower = { workspace = true, features = ["buffer", "util"] }
+tracing = { workspace = true }
 
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
-elasticsearch = { version = "8.16.0-alpha.1", default-features = false, features = ["rustls-tls"], optional = true }
-serde_json = { version = "1.0.133", package = "serde_json", optional = true }
+elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }
+serde_json = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.44", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["async-error"] }
 
 # prod feature progress-bar
-howudoin = { version = "0.1.2", optional = true }
+howudoin = { workspace = true, optional = true }
 
 # test feature proptest-impl
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.44", optional = true }
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.5.0", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46", optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
 
 [dev-dependencies]
-color-eyre = "0.6.3"
+color-eyre = { workspace = true }
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.8.0", features = ["rustc_1_55"] }
+tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
-once_cell = "1.20.2"
-spandoc = "0.2.2"
+once_cell = { workspace = true }
+spandoc = { workspace = true }
 
-hex = { version = "0.4.3", features = ["serde"] }
-insta = { version = "1.41.1", features = ["ron", "redactions"] }
+hex = { workspace = true, features = ["serde"] }
+insta = { workspace = true, features = ["ron", "redactions"] }
 
-proptest = "1.4.0"
-proptest-derive = "0.5.0"
-rand = "0.8.5"
+proptest = { workspace = true }
+proptest-derive = { workspace = true }
+rand = { workspace = true }
 
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
-jubjub = "0.10.0"
+jubjub = { workspace = true }
 
-tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
+tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.44", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.44" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }

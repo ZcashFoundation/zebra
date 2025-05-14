@@ -340,6 +340,8 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 ///
 /// This version of Zebra draws the current network protocol version from
 /// [ZIP-253](https://zips.z.cash/zip-0253).
+// TODO: Update this constant to the correct value after NU7 activation,
+// pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_140);
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
 
 /// The default RTT estimate for peer responses.
@@ -383,6 +385,13 @@ pub const MAX_OVERLOAD_DROP_PROBABILITY: f32 = 0.5;
 /// The minimum interval between logging peer set status updates.
 pub const MIN_PEER_SET_LOG_INTERVAL: Duration = Duration::from_secs(60);
 
+/// The maximum number of peer misbehavior incidents before a peer is
+/// disconnected and banned.
+pub const MAX_PEER_MISBEHAVIOR_SCORE: u32 = 100;
+
+/// The maximum number of banned IP addresses to be stored in-memory at any time.
+pub const MAX_BANNED_IPS: usize = 20_000;
+
 lazy_static! {
     /// The minimum network protocol version accepted by this crate for each network,
     /// represented as a network upgrade.
@@ -403,7 +412,7 @@ lazy_static! {
 
         hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu6));
         hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu6));
-        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(None, None), Nu6));
+        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(Default::default()), Nu6));
 
         hash_map
     };

@@ -5,9 +5,9 @@
 //! [tower-balance]: https://github.com/tower-rs/tower/tree/master/tower/src/balance
 
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     convert::Infallible,
-    net::SocketAddr,
+    net::{IpAddr, SocketAddr},
     pin::Pin,
     sync::Arc,
     time::Duration,
@@ -19,10 +19,11 @@ use futures::{
     stream::{FuturesUnordered, StreamExt},
     Future, TryFutureExt,
 };
+use indexmap::IndexMap;
 use rand::seq::SliceRandom;
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::broadcast,
+    sync::{broadcast, mpsc, watch},
     time::{sleep, Instant},
 };
 use tokio_stream::wrappers::IntervalStream;
@@ -34,7 +35,7 @@ use tracing_futures::Instrument;
 use zebra_chain::{chain_tip::ChainTip, diagnostic::task::WaitForPanics};
 
 use crate::{
-    address_book_updater::AddressBookUpdater,
+    address_book_updater::{AddressBookUpdater, MIN_CHANNEL_SIZE},
     constants,
     meta_addr::{MetaAddr, MetaAddrChange},
     peer::{
@@ -101,6 +102,7 @@ pub async fn init<S, C>(
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
     Arc<std::sync::Mutex<AddressBook>>,
+    mpsc::Sender<(PeerSocketAddr, u32)>,
 )
 where
     S: Service<Request, Response = Response, Error = BoxError> + Clone + Send + Sync + 'static,
@@ -109,8 +111,58 @@ where
 {
     let (tcp_listener, listen_addr) = open_listener(&config.clone()).await;
 
-    let (address_book, address_book_updater, address_metrics, address_book_updater_guard) =
-        AddressBookUpdater::spawn(&config, listen_addr);
+    let (
+        address_book,
+        bans_receiver,
+        address_book_updater,
+        address_metrics,
+        address_book_updater_guard,
+    ) = AddressBookUpdater::spawn(&config, listen_addr);
+
+    let (misbehavior_tx, mut misbehavior_rx) = mpsc::channel(
+        // Leave enough room for a misbehaviour update on every peer connection
+        // before the channel is drained.
+        config
+            .peerset_total_connection_limit()
+            .max(MIN_CHANNEL_SIZE),
+    );
+
+    let misbehaviour_updater = address_book_updater.clone();
+    tokio::spawn(
+        async move {
+            let mut misbehaviors: HashMap<PeerSocketAddr, u32> = HashMap::new();
+            // Batch misbehaviour updates so peers can't keep the address book mutex locked
+            // by repeatedly sending invalid blocks or transactions.
+            let mut flush_timer =
+                IntervalStream::new(tokio::time::interval(Duration::from_secs(30)));
+
+            loop {
+                tokio::select! {
+                    msg = misbehavior_rx.recv() => match msg {
+                        Some((peer_addr, score_increment)) => *misbehaviors
+                            .entry(peer_addr)
+                            .or_default()
+                            += score_increment,
+                        None => break,
+                    },
+
+                    _ = flush_timer.next() => {
+                        for (addr, score_increment) in misbehaviors.drain() {
+                            let _ = misbehaviour_updater
+                                .send(MetaAddrChange::UpdateMisbehavior {
+                                    addr,
+                                    score_increment
+                                })
+                                .await;
+                        }
+                    },
+                };
+            }
+
+            tracing::warn!("exiting misbehavior update batch task");
+        }
+        .in_current_span(),
+    );
 
     // Create a broadcast channel for peer inventory advertisements.
     // If it reaches capacity, this channel drops older inventory advertisements.
@@ -173,6 +225,7 @@ where
         demand_tx.clone(),
         handle_rx,
         inv_receiver,
+        bans_receiver.clone(),
         address_metrics,
         MinimumPeerVersion::new(latest_chain_tip, &config.network),
         None,
@@ -188,6 +241,7 @@ where
         constants::MIN_INBOUND_PEER_CONNECTION_INTERVAL,
         listen_handshaker,
         peerset_tx.clone(),
+        bans_receiver,
     );
     let listen_guard = tokio::spawn(listen_fut.in_current_span());
 
@@ -258,7 +312,7 @@ where
         ])
         .unwrap();
 
-    (peer_set, address_book)
+    (peer_set, address_book, misbehavior_tx)
 }
 
 /// Use the provided `outbound_connector` to connect to the configured DNS seeder and
@@ -550,6 +604,7 @@ async fn accept_inbound_connections<S>(
     min_inbound_peer_connection_interval: Duration,
     handshaker: S,
     peerset_tx: futures::channel::mpsc::Sender<DiscoveredPeer>,
+    bans_receiver: watch::Receiver<Arc<IndexMap<IpAddr, std::time::Instant>>>,
 ) -> Result<(), BoxError>
 where
     S: Service<peer::HandshakeRequest<TcpStream>, Response = peer::Client, Error = BoxError>
@@ -585,6 +640,12 @@ where
 
         if let Ok((tcp_stream, addr)) = inbound_result {
             let addr: PeerSocketAddr = addr.into();
+
+            if bans_receiver.borrow().clone().contains_key(&addr.ip()) {
+                debug!(?addr, "banned inbound connection attempt");
+                std::mem::drop(tcp_stream);
+                continue;
+            }
 
             if active_inbound_connections.update_count()
                 >= config.peerset_inbound_connection_limit()

@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.44"
+version = "1.0.0-beta.46"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Core Zcash data structures"
 license = "MIT OR Apache-2.0"
@@ -29,20 +29,13 @@ async-error = [
     "tokio",
 ]
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-]
-
 # Experimental shielded scanning support
 shielded-scan = [
     "zcash_client_backend"
 ]
 
 # Experimental internal miner support
-# TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
-#       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L38-L43
-#       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-internal-miner = []
+internal-miner = ["equihash/solver"]
 
 # Experimental elasticsearch support
 elasticsearch = []
@@ -60,115 +53,115 @@ proptest-impl = [
 
 bench = ["zebra-test"]
 
+tx_v6 = []
+
 [dependencies]
 
 # Cryptography
-bitvec = "1.0.1"
-bitflags = "2.5.0"
-bitflags-serde-legacy = "0.1.1"
-blake2b_simd = "1.0.2"
-blake2s_simd = "1.0.2"
-bridgetree = "0.6.0"
-bs58 = { version = "0.5.1", features = ["check"] }
-byteorder = "1.5.0"
+bitvec = { workspace = true }
+bitflags = { workspace = true }
+bitflags-serde-legacy = { workspace = true }
+blake2b_simd = { workspace = true }
+blake2s_simd = { workspace = true }
+bs58 = { workspace = true, features = ["check"] }
+byteorder = { workspace = true }
 
-# TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
-#       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L73-L85
-#       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-equihash = "0.2.0"
+equihash = { workspace = true }
 
-group = "0.13.0"
+group = { workspace = true }
 incrementalmerkletree.workspace = true
-jubjub = "0.10.0"
-lazy_static = "1.4.0"
-tempfile = "3.14.0"
-dirs = "5.0.1"
-num-integer = "0.1.46"
-primitive-types = "0.12.2"
-rand_core = "0.6.4"
-ripemd = "0.1.3"
+jubjub = { workspace = true }
+lazy_static = { workspace = true }
+tempfile = { workspace = true }
+dirs = { workspace = true }
+num-integer = { workspace = true }
+primitive-types = { workspace = true }
+rand_core = { workspace = true }
+ripemd = { workspace = true }
 # Matches version used by hdwallet
-secp256k1 = { version = "0.27.0", features = ["serde"] }
-sha2 = { version = "0.10.7", features = ["compress"] }
-uint = "0.10.0"
-x25519-dalek = { version = "2.0.1", features = ["serde"] }
+secp256k1 = { workspace = true, features = ["serde"] }
+sha2 = { workspace = true, features = ["compress"] }
+uint = { workspace = true }
+x25519-dalek = { workspace = true, features = ["serde"] }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3.0" }
 orchard.workspace = true
 zcash_encoding.workspace = true
 zcash_history.workspace = true
-zcash_note_encryption = "0.4.0"
+zcash_note_encryption = { workspace = true }
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
+zcash_transparent.workspace = true
+sinsemilla = { version = "0.1.0" }
 
 # Time
-chrono = { version = "0.4.39", default-features = false, features = ["clock", "std", "serde"] }
-humantime = "2.1.0"
+chrono = { workspace = true, features = ["clock", "std", "serde"] }
+humantime = { workspace = true }
 
 # Error Handling & Formatting
-static_assertions = "1.1.0"
-thiserror = "2.0.6"
-tracing = "0.1.41"
+static_assertions = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
 
 # Serialization
-hex = { version = "0.4.3", features = ["serde"] }
-serde = { version = "1.0.215", features = ["serde_derive", "rc"] }
-serde_with = "3.11.0"
-serde-big-array = "0.5.1"
+hex = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["serde_derive", "rc"] }
+serde_with = { workspace = true }
+serde-big-array = { workspace = true }
 
 # Processing
-futures = "0.3.31"
-itertools = "0.13.0"
-rayon = "1.10.0"
+futures = { workspace = true }
+itertools = { workspace = true }
+rayon = { workspace = true }
 
 # ZF deps
-ed25519-zebra = "4.0.3"
-redjubjub = "0.7.0"
-reddsa = "0.5.1"
+ed25519-zebra = { workspace = true }
+redjubjub = { workspace = true }
+reddsa = { workspace = true }
 
 # Production feature json-conversion
-serde_json = { version = "1.0.133", optional = true }
+serde_json = { workspace = true, optional = true }
 
 # Production feature async-error and testing feature proptest-impl
-tokio = { version = "1.42.0", optional = true }
+tokio = { workspace = true, optional = true }
 
 # Experimental feature shielded-scan
 zcash_client_backend = { workspace = true, optional = true }
 
 # Optional testing dependencies
-proptest = { version = "1.4.0", optional = true }
-proptest-derive = { version = "0.5.0", optional = true }
+proptest = { workspace = true, optional = true }
+proptest-derive = { workspace = true, optional = true }
 
-rand = { version = "0.8.5", optional = true }
-rand_chacha = { version = "0.3.1", optional = true }
+rand = { workspace = true, optional = true }
+rand_chacha = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.44", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46", optional = true }
 
 [dev-dependencies]
 # Benchmarks
-criterion = { version = "0.5.1", features = ["html_reports"] }
+criterion = { workspace = true, features = ["html_reports"] }
 
 # Error Handling & Formatting
-color-eyre = "0.6.3"
+color-eyre = { workspace = true }
 # This is a transitive dependency via color-eyre.
 # Enable a feature that makes tinyvec compile much faster.
-tinyvec = { version = "1.8.0", features = ["rustc_1_55"] }
-spandoc = "0.2.2"
-tracing = "0.1.41"
+tinyvec = { workspace = true, features = ["rustc_1_55"] }
+spandoc = { workspace = true }
+tracing = { workspace = true }
 
 # Make the optional testing dependencies required
-proptest = "1.4.0"
-proptest-derive = "0.5.0"
+proptest = { workspace = true }
+proptest-derive = { workspace = true }
 
-rand = "0.8.5"
-rand_chacha = "0.3.1"
+rand = { workspace = true }
+rand_chacha = { workspace = true }
 
-tokio = { version = "1.42.0", features = ["full", "tracing", "test-util"] }
+tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.44" }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }
 
 [[bench]]
 name = "block"

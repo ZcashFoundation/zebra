@@ -163,11 +163,11 @@ pub struct MetaAddr {
     ///
     /// The exact meaning depends on `last_connection_state`:
     ///   - `Responded`: the services advertised by this peer, the last time we
-    ///      performed a handshake with it
+    ///     performed a handshake with it
     ///   - `NeverAttempted`: the unverified services advertised by another peer,
-    ///      then gossiped by the peer that sent us this address
+    ///     then gossiped by the peer that sent us this address
     ///   - `Failed` or `AttemptPending`: unverified services via another peer,
-    ///      or services advertised in a previous handshake
+    ///     or services advertised in a previous handshake
     ///
     /// ## Security
     ///
@@ -199,11 +199,19 @@ pub struct MetaAddr {
     /// See the [`MetaAddr::last_failure`] method for details.
     last_failure: Option<Instant>,
 
+    /// The misbehavior score for this peer.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(value = 0))]
+    misbehavior_score: u32,
+
     /// The outcome of our most recent communication attempt with this peer.
     //
     // TODO: move the time and services fields into PeerAddrState?
     //       then some fields could be required in some states
     pub(crate) last_connection_state: PeerAddrState,
+
+    /// Whether this peer address was added to the address book
+    /// when the peer made an inbound connection.
+    is_inbound: bool,
 }
 
 /// A change to an existing `MetaAddr`.
@@ -260,6 +268,7 @@ pub enum MetaAddrChange {
         )]
         addr: PeerSocketAddr,
         services: PeerServices,
+        is_inbound: bool,
     },
 
     /// Updates an existing `MetaAddr` when a peer responds with a message.
@@ -279,6 +288,14 @@ pub enum MetaAddrChange {
         )]
         addr: PeerSocketAddr,
         services: Option<PeerServices>,
+    },
+
+    /// Updates an existing `MetaAddr` when a peer misbehaves such as by advertising
+    /// semantically invalid blocks or transactions.
+    #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
+    UpdateMisbehavior {
+        addr: PeerSocketAddr,
+        score_increment: u32,
     },
 }
 
@@ -306,6 +323,8 @@ impl MetaAddr {
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
+            misbehavior_score: 0,
+            is_inbound: false,
         }
     }
 
@@ -338,10 +357,15 @@ impl MetaAddr {
     /// - malicious peers could interfere with other peers' [`AddressBook`](crate::AddressBook)
     ///   state, or
     /// - Zebra could advertise unreachable addresses to its own peers.
-    pub fn new_connected(addr: PeerSocketAddr, services: &PeerServices) -> MetaAddrChange {
+    pub fn new_connected(
+        addr: PeerSocketAddr,
+        services: &PeerServices,
+        is_inbound: bool,
+    ) -> MetaAddrChange {
         UpdateConnected {
             addr: canonical_peer_addr(*addr),
             services: *services,
+            is_inbound,
         }
     }
 
@@ -419,6 +443,11 @@ impl MetaAddr {
     /// incorrect due to clock skew, or buggy or malicious peers.
     pub fn last_seen(&self) -> Option<DateTime32> {
         self.last_response.or(self.untrusted_last_seen)
+    }
+
+    /// Returns whether the address is from an inbound peer connection
+    pub fn is_inbound(&self) -> bool {
+        self.is_inbound
     }
 
     /// Returns the unverified "last seen time" gossiped by the remote peer that
@@ -623,12 +652,22 @@ impl MetaAddr {
         }
     }
 
+    /// Returns a score of misbehavior encountered in a peer at this address.
+    pub fn misbehavior(&self) -> u32 {
+        self.misbehavior_score
+    }
+
     /// Return a sanitized version of this `MetaAddr`, for sending to a remote peer.
     ///
     /// Returns `None` if this `MetaAddr` should not be sent to remote peers.
     #[allow(clippy::unwrap_in_result)]
     pub fn sanitize(&self, network: &Network) -> Option<MetaAddr> {
         if !self.last_known_info_is_valid_for_outbound(network) {
+            return None;
+        }
+
+        // Avoid responding to GetAddr requests with addresses of misbehaving peers.
+        if self.misbehavior_score != 0 || self.is_inbound {
             return None;
         }
 
@@ -655,6 +694,8 @@ impl MetaAddr {
             last_attempt: None,
             last_failure: None,
             last_connection_state: NeverAttemptedGossiped,
+            misbehavior_score: 0,
+            is_inbound: false,
         })
     }
 }
@@ -679,7 +720,8 @@ impl MetaAddrChange {
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr,
+            | UpdateFailed { addr, .. }
+            | UpdateMisbehavior { addr, .. } => *addr,
         }
     }
 
@@ -695,7 +737,8 @@ impl MetaAddrChange {
             | UpdateAttempt { addr }
             | UpdateConnected { addr, .. }
             | UpdateResponded { addr, .. }
-            | UpdateFailed { addr, .. } => *addr = new_addr,
+            | UpdateFailed { addr, .. }
+            | UpdateMisbehavior { addr, .. } => *addr = new_addr,
         }
     }
 
@@ -713,6 +756,7 @@ impl MetaAddrChange {
             UpdateConnected { services, .. } => Some(*services),
             UpdateResponded { .. } => None,
             UpdateFailed { services, .. } => *services,
+            UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -729,7 +773,8 @@ impl MetaAddrChange {
             UpdateAttempt { .. }
             | UpdateConnected { .. }
             | UpdateResponded { .. }
-            | UpdateFailed { .. } => None,
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -760,7 +805,10 @@ impl MetaAddrChange {
             // peer address. So the attempt time is a lower bound for the actual
             // handshake time.
             UpdateAttempt { .. } => Some(now),
-            UpdateConnected { .. } | UpdateResponded { .. } | UpdateFailed { .. } => None,
+            UpdateConnected { .. }
+            | UpdateResponded { .. }
+            | UpdateFailed { .. }
+            | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -774,7 +822,7 @@ impl MetaAddrChange {
             // - the peer will appear to be live for longer, delaying future
             //   reconnection attempts.
             UpdateConnected { .. } | UpdateResponded { .. } => Some(now),
-            UpdateFailed { .. } => None,
+            UpdateFailed { .. } | UpdateMisbehavior { .. } => None,
         }
     }
 
@@ -792,7 +840,7 @@ impl MetaAddrChange {
             //   states for longer, and
             // - the peer will appear to be used for longer, delaying future
             //   reconnection attempts.
-            UpdateFailed { .. } => Some(now),
+            UpdateFailed { .. } | UpdateMisbehavior { .. } => Some(now),
         }
     }
 
@@ -804,7 +852,7 @@ impl MetaAddrChange {
             // local listeners get sanitized, so the state doesn't matter here
             NewLocal { .. } => NeverAttemptedGossiped,
             UpdateAttempt { .. } => AttemptPending,
-            UpdateConnected { .. } | UpdateResponded { .. } => Responded,
+            UpdateConnected { .. } | UpdateResponded { .. } | UpdateMisbehavior { .. } => Responded,
             UpdateFailed { .. } => Failed,
         }
     }
@@ -819,6 +867,27 @@ impl MetaAddrChange {
             last_attempt: self.last_attempt(instant_now),
             last_failure: self.last_failure(instant_now),
             last_connection_state: self.peer_addr_state(),
+            misbehavior_score: self.misbehavior_score(),
+            is_inbound: self.is_inbound(),
+        }
+    }
+
+    /// Returns the misbehavior score increment for the current change.
+    pub fn misbehavior_score(&self) -> u32 {
+        match self {
+            MetaAddrChange::UpdateMisbehavior {
+                score_increment, ..
+            } => *score_increment,
+            _ => 0,
+        }
+    }
+
+    /// Returns whether this change was created for a new inbound connection.
+    pub fn is_inbound(&self) -> bool {
+        if let MetaAddrChange::UpdateConnected { is_inbound, .. } = self {
+            *is_inbound
+        } else {
+            false
         }
     }
 
@@ -841,6 +910,8 @@ impl MetaAddrChange {
             last_attempt: None,
             last_failure: None,
             last_connection_state: self.peer_addr_state(),
+            misbehavior_score: self.misbehavior_score(),
+            is_inbound: self.is_inbound(),
         }
     }
 
@@ -902,10 +973,11 @@ impl MetaAddrChange {
 
         let previous_has_been_attempted = !previous.last_connection_state.is_never_attempted();
         let change_to_never_attempted = self.peer_addr_state().is_never_attempted();
+        let is_misbehavior_update = self.misbehavior_score() != 0;
 
         // Invalid changes
 
-        if change_to_never_attempted && previous_has_been_attempted {
+        if change_to_never_attempted && previous_has_been_attempted && !is_misbehavior_update {
             // Existing entry has been attempted, change is NeverAttempted
             // - ignore the change
             //
@@ -916,7 +988,7 @@ impl MetaAddrChange {
             return None;
         }
 
-        if change_is_out_of_order && !change_is_concurrent {
+        if change_is_out_of_order && !change_is_concurrent && !is_misbehavior_update {
             // Change is significantly out of order: ignore it.
             //
             // # Security
@@ -926,7 +998,7 @@ impl MetaAddrChange {
             return None;
         }
 
-        if change_is_concurrent && !connection_has_more_progress {
+        if change_is_concurrent && !connection_has_more_progress && !is_misbehavior_update {
             // Change is close together in time, and it would revert the connection to an earlier
             // state.
             //
@@ -992,6 +1064,8 @@ impl MetaAddrChange {
                 last_attempt: None,
                 last_failure: None,
                 last_connection_state: self.peer_addr_state(),
+                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
+                is_inbound: previous.is_inbound || self.is_inbound(),
             })
         } else {
             // Existing entry and change are both Attempt, Responded, Failed,
@@ -1014,6 +1088,8 @@ impl MetaAddrChange {
                 last_failure: self.last_failure(instant_now).or(previous.last_failure),
                 // Replace the state with the updated state.
                 last_connection_state: self.peer_addr_state(),
+                misbehavior_score: previous.misbehavior_score + self.misbehavior_score(),
+                is_inbound: previous.is_inbound || self.is_inbound(),
             })
         }
     }

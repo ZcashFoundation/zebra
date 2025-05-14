@@ -1,0 +1,45 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+expression: block_template
+---
+{
+  "capabilities": [
+    "proposal"
+  ],
+  "version": 4,
+  "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
+  "blockcommitmentshash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792",
+  "lightclientroothash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792",
+  "finalsaplingroothash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792",
+  "defaultroots": {
+    "merkleroot": "e919e7a3325b82b571b3658408118c14f2688ea254f9cb54d354a8ff17bd5b81",
+    "chainhistoryroot": "03bc75f00c307a05aed2023819e18c2672cbe15fbd3200944997def141967387",
+    "authdataroot": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "blockcommitmentshash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792"
+  },
+  "transactions": [],
+  "coinbasetxn": {
+    "data": "0400008085202f89010000000000000000000000000000000000000000000000000000000000000000ffffffff0503f51c1c00ffffffff0480b2e60e0000000017a914adadadadadadadadadadadadadadadadadadadad87286bee000000000017a9140c0bcca02f3cba01a5d7423ac3903d40586399eb8738c94d010000000017a9144e3f0d9a33a2721604cbae2de8d9171e21f8fbe48740787d010000000017a91471e1df05024288a00802de81e08c437859586c878700000000f51c1c000000000000000000000000",
+    "hash": "e919e7a3325b82b571b3658408118c14f2688ea254f9cb54d354a8ff17bd5b81",
+    "authdigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "depends": [],
+    "fee": 0,
+    "sigops": 0,
+    "required": true
+  },
+  "longpollid": "00018424203eab7f731654008728000000000000000000",
+  "target": "0555540000000000000000000000000000000000000000000000000000000000",
+  "mintime": 1654008606,
+  "mutable": [
+    "time",
+    "transactions",
+    "prevblock"
+  ],
+  "noncerange": "00000000ffffffff",
+  "sigoplimit": 20000,
+  "sizelimit": 2000000,
+  "curtime": 1654008617,
+  "bits": "20055554",
+  "height": 1842421,
+  "maxtime": 1654008728
+}

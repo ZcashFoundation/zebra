@@ -28,6 +28,7 @@ pub struct Config {
     /// Should Zebra's block templates try to imitate `zcashd`?
     ///
     /// This developer-only config is not supported for general use.
+    /// TODO: remove this option as part of zcashd deprecation
     pub debug_like_zcashd: bool,
 
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
@@ -36,9 +37,7 @@ pub struct Config {
     /// for a valid Proof of Work.
     ///
     /// The internal miner is off by default.
-    // TODO: Restore equihash solver and recommend that Mainnet miners should use a mining pool with
-    //       GPUs or ASICs designed for efficient mining.
-    #[cfg(feature = "internal-miner")]
+    #[serde(default)]
     pub internal_miner: bool,
 }
 
@@ -50,24 +49,12 @@ impl Default for Config {
             // TODO: do we want to default to v5 transactions and Zebra coinbase data?
             extra_coinbase_data: None,
             debug_like_zcashd: true,
-            // TODO: Internal miner config code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
-            // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L61-L66
-            // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-            #[cfg(feature = "internal-miner")]
             internal_miner: false,
         }
     }
 }
 
 impl Config {
-    /// Return true if `getblocktemplate-rpcs` rust feature is not turned on, false otherwise.
-    ///
-    /// This is used to ignore the mining section of the configuration if the feature is not
-    /// enabled, allowing us to log a warning when the config found is different from the default.
-    pub fn skip_getblocktemplate(&self) -> bool {
-        !cfg!(feature = "getblocktemplate-rpcs")
-    }
-
     /// Is the internal miner enabled using at least one thread?
     #[cfg(feature = "internal-miner")]
     pub fn is_internal_miner_enabled(&self) -> bool {

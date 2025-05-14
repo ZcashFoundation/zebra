@@ -15,7 +15,7 @@ jobs:
   # We don't patch the testnet job, because testnet isn't required to merge (it's too unstable)
   get-disk-name:
     name: Get disk name / Get Mainnet cached disk
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+    if: ${{ (github.event_name != 'release' && !(github.event.pull_request.head.repo.fork)) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     runs-on: ubuntu-latest
     steps:
       - run: 'echo "Skipping job on fork"'
@@ -23,32 +23,6 @@ jobs:
   build:
     name: Build CD Docker / Build images
     # Only run on PRs from external repositories, skipping ZF branches and tags.
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "Skipping job on fork"'
-
-  test-configuration-file:
-    name: Test CD default Docker config file / Test default-conf in Docker
-    # This dependency allows all these jobs to depend on a single condition, making it easier to
-    # change.
-    needs: build
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "Skipping job on fork"'
-
-  test-configuration-file-testnet:
-    name: Test CD testnet Docker config file / Test testnet-conf in Docker
-    needs: build
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "Skipping job on fork"'
-
-  test-zebra-conf-path:
-    name: Test CD custom Docker config file / Test custom-conf in Docker
-    needs: build
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
     steps:

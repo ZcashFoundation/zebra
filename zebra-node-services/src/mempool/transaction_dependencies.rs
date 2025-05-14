@@ -11,6 +11,13 @@ pub struct TransactionDependencies {
     /// a mempool transaction. Used during block template construction
     /// to exclude transactions from block templates unless all of the
     /// transactions they depend on have been included.
+    ///
+    /// # Note
+    ///
+    /// Dependencies that have been mined into blocks are not removed here until those blocks have
+    /// been committed to the best chain. Dependencies that have been committed onto side chains, or
+    /// which are in the verification pipeline but have not yet been committed to the best chain,
+    /// are not removed here unless and until they arrive in the best chain, and the mempool is polled.
     dependencies: HashMap<transaction::Hash, HashSet<transaction::Hash>>,
 
     /// Lists of transaction ids in the mempool that spend UTXOs created

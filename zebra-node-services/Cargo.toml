@@ -1,6 +1,6 @@
 [package]
 name = "zebra-node-services"
-version = "1.0.0-beta.44"
+version = "1.0.0-beta.46"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The interfaces of some Zebra node services"
 license = "MIT OR Apache-2.0"
@@ -19,11 +19,6 @@ default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
-# Mining RPC support
-getblocktemplate-rpcs = [
-    "zebra-chain/getblocktemplate-rpcs",
-]
-
 # Tool and test features
 
 rpc-client = [
@@ -37,23 +32,23 @@ rpc-client = [
 shielded-scan = []
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.44" }
+zebra-chain = { path = "../zebra-chain" , version = "1.0.0-beta.46" }
 
 # Optional dependencies
 
 # Tool and test feature rpc-client
-color-eyre = { version = "0.6.3", optional = true }
-jsonrpsee-types = { version = "0.24.7", optional = true }
+color-eyre = { workspace = true, optional = true }
+jsonrpsee-types = { workspace = true, optional = true }
 # Security: avoid default dependency on openssl
-reqwest = { version = "0.12.9", default-features = false, features = ["rustls-tls"], optional = true }
-serde = { version = "1.0.215", optional = true }
-serde_json = { version = "1.0.133", optional = true }
-tokio = { version = "1.42.0", features = ["time", "sync"] }
+reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["time", "sync"] }
 
 [dev-dependencies]
 
-color-eyre = "0.6.3"
-reqwest = { version = "0.12.9", default-features = false, features = ["rustls-tls"] }
-serde = "1.0.215"
-serde_json = "1.0.133"
-jsonrpsee-types = "0.24.7"
+color-eyre = { workspace = true }
+reqwest = { workspace = true, features = ["rustls-tls"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+jsonrpsee-types = { workspace = true }

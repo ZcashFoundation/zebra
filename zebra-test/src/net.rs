@@ -58,7 +58,7 @@ pub fn zebra_skip_ipv6_tests() -> bool {
 /// to - it has a small risk of port conflicts.
 ///
 /// Use this function when you need to use the same random port multiple
-/// times. For example: setting up both ends of a connection, or re-using
+/// times. For example: setting up both ends of a connection, or reusing
 /// the same port multiple times.
 pub fn random_known_port() -> u16 {
     use rand::Rng;
@@ -99,7 +99,7 @@ pub fn random_known_port() -> u16 {
 /// between this fn call and binding the tcp listener.
 ///
 /// Use this function when you need to use the same random port multiple
-/// times. For example: setting up both ends of a connection, or re-using
+/// times. For example: setting up both ends of a connection, or reusing
 /// the same port multiple times.
 ///
 /// ## Panics

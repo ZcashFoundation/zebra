@@ -1,7 +1,13 @@
 //! The timestamp collector collects liveness information from peers.
 
-use std::{cmp::max, net::SocketAddr, sync::Arc};
+use std::{
+    cmp::max,
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    time::Instant,
+};
 
+use indexmap::IndexMap;
 use thiserror::Error;
 use tokio::{
     sync::{mpsc, watch},
@@ -43,6 +49,7 @@ impl AddressBookUpdater {
         local_listener: SocketAddr,
     ) -> (
         Arc<std::sync::Mutex<AddressBook>>,
+        watch::Receiver<Arc<IndexMap<IpAddr, Instant>>>,
         mpsc::Sender<MetaAddrChange>,
         watch::Receiver<AddressMetrics>,
         JoinHandle<Result<(), BoxError>>,
@@ -74,6 +81,13 @@ impl AddressBookUpdater {
         };
 
         let worker_address_book = address_book.clone();
+        let (bans_sender, bans_receiver) = tokio::sync::watch::channel(
+            worker_address_book
+                .lock()
+                .expect("mutex should be unpoisoned")
+                .bans(),
+        );
+
         let worker = move || {
             info!("starting the address book updater");
 
@@ -84,10 +98,23 @@ impl AddressBookUpdater {
                 //
                 // Briefly hold the address book threaded mutex, to update the
                 // state for a single address.
-                worker_address_book
+                let updated = worker_address_book
                     .lock()
                     .expect("mutex should be unpoisoned")
                     .update(event);
+
+                // `UpdateMisbehavior` events should only be passed to `update()` here,
+                // so that this channel is always updated when new addresses are banned.
+                if updated.is_none() {
+                    let bans = worker_address_book
+                        .lock()
+                        .expect("mutex should be unpoisoned")
+                        .bans();
+
+                    if bans.contains_key(&event.addr().ip()) {
+                        let _ = bans_sender.send(bans);
+                    }
+                }
 
                 #[cfg(feature = "progress-bar")]
                 if matches!(howudoin::cancelled(), Some(true)) {
@@ -136,6 +163,7 @@ impl AddressBookUpdater {
 
         (
             address_book,
+            bans_receiver,
             worker_tx,
             address_metrics,
             address_book_updater_task_handle,

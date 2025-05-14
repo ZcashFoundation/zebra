@@ -1,7 +1,6 @@
 //! Fixed test vectors for the network consensus parameters.
 
-use zcash_primitives::consensus::{self as zp_consensus, Parameters};
-use zcash_protocol::consensus::NetworkConstants as _;
+use zcash_protocol::consensus::{self as zp_consensus, NetworkConstants as _, Parameters};
 
 use crate::{
     block::Height,
@@ -15,13 +14,12 @@ use crate::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
             ConfiguredFundingStreams, MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
         },
-        Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, NETWORK_UPGRADES_IN_ORDER,
-        TESTNET_ACTIVATION_HEIGHTS,
+        Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS,
     },
 };
 
 /// Checks that every method in the `Parameters` impl for `zebra_chain::Network` has the same output
-/// as the Parameters impl for `zcash_primitives::consensus::Network` on Mainnet and the default Testnet.
+/// as the Parameters impl for `zcash_protocol::consensus::NetworkType` on Mainnet and the default Testnet.
 #[test]
 fn check_parameters_impl() {
     let zp_network_upgrades = [
@@ -109,7 +107,7 @@ fn activates_network_upgrades_correctly() {
     let expected_activation_height = 1;
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            nu6: Some(expected_activation_height),
+            nu7: Some(expected_activation_height),
             ..Default::default()
         })
         .to_network();
@@ -124,7 +122,7 @@ fn activates_network_upgrades_correctly() {
         "activation height for all networks after Genesis and BeforeOverwinter should match NU5 activation height"
     );
 
-    for nu in NETWORK_UPGRADES_IN_ORDER.into_iter().skip(1) {
+    for nu in NetworkUpgrade::iter().skip(1) {
         let activation_height = nu
             .activation_height(&network)
             .expect("must return an activation height");
@@ -147,7 +145,7 @@ fn activates_network_upgrades_correctly() {
         (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
         (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
         (
-            Network::new_regtest(None, None),
+            Network::new_regtest(Default::default()),
             expected_default_regtest_activation_heights,
         ),
     ] {
@@ -198,7 +196,7 @@ fn check_configured_network_name() {
         "Mainnet should be displayed as 'Mainnet'"
     );
     assert_eq!(
-        Network::new_regtest(None, None).to_string(),
+        Network::new_regtest(Default::default()).to_string(),
         "Regtest",
         "Regtest should be displayed as 'Regtest'"
     );
@@ -286,8 +284,8 @@ fn check_full_activation_list() {
         })
         .to_network();
 
-    // We expect the first 8 network upgrades to be included, up to NU5
-    let expected_network_upgrades = &NETWORK_UPGRADES_IN_ORDER[..8];
+    // We expect the first 8 network upgrades to be included, up to and including NU5
+    let expected_network_upgrades = NetworkUpgrade::iter().take(8);
     let full_activation_list_network_upgrades: Vec<_> = network
         .full_activation_list()
         .into_iter()
@@ -296,7 +294,7 @@ fn check_full_activation_list() {
 
     for expected_network_upgrade in expected_network_upgrades {
         assert!(
-            full_activation_list_network_upgrades.contains(expected_network_upgrade),
+            full_activation_list_network_upgrades.contains(&expected_network_upgrade),
             "full activation list should contain expected network upgrade"
         );
     }

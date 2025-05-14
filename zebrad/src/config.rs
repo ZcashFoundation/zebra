@@ -49,9 +49,8 @@ pub struct ZebradConfig {
     pub mempool: crate::components::mempool::Config,
 
     /// RPC configuration
-    pub rpc: zebra_rpc::config::Config,
+    pub rpc: zebra_rpc::config::rpc::Config,
 
-    #[serde(skip_serializing_if = "zebra_rpc::config::mining::Config::skip_getblocktemplate")]
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,
 }

@@ -14,6 +14,7 @@ use abscissa_core::{
 };
 use semver::{BuildMetadata, Version};
 
+use tokio::sync::watch;
 use zebra_network::constants::PORT_IN_USE_ERROR;
 use zebra_state::{
     constants::LOCK_FILE_ERROR, state_database_format_version_in_code,
@@ -35,6 +36,11 @@ fn fatal_error(app_name: String, err: &dyn std::error::Error) -> ! {
 
 /// Application state
 pub static APPLICATION: AppCell<ZebradApp> = AppCell::new();
+
+lazy_static::lazy_static! {
+    /// The last log event that occurred in the application.
+    pub static ref LAST_WARN_ERROR_LOG_SENDER: watch::Sender<Option<(String, tracing::Level, chrono::DateTime<chrono::Utc>)>> = watch::Sender::new(None);
+}
 
 /// Returns the `zebrad` version for this build, in SemVer 2.0 format.
 ///

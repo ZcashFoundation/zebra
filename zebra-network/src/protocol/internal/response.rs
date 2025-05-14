@@ -7,7 +7,7 @@ use zebra_chain::{
     transaction::{UnminedTx, UnminedTxId},
 };
 
-use crate::{meta_addr::MetaAddr, protocol::internal::InventoryResponse};
+use crate::{meta_addr::MetaAddr, protocol::internal::InventoryResponse, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
@@ -67,14 +67,14 @@ pub enum Response {
     /// `zcashd` sometimes sends no response, and sometimes sends `notfound`.
     //
     // TODO: make this into a HashMap<block::Hash, InventoryResponse<Arc<Block>, ()>> - a unique list (#2244)
-    Blocks(Vec<InventoryResponse<Arc<Block>, block::Hash>>),
+    Blocks(Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>>),
 
     /// A list of found unmined transactions, and missing unmined transaction IDs.
     ///
     /// Each list contains zero or more entries.
     //
     // TODO: make this into a HashMap<UnminedTxId, InventoryResponse<UnminedTx, ()>> - a unique list (#2244)
-    Transactions(Vec<InventoryResponse<UnminedTx, UnminedTxId>>),
+    Transactions(Vec<InventoryResponse<(UnminedTx, Option<PeerSocketAddr>), UnminedTxId>>),
 }
 
 impl fmt::Display for Response {
@@ -94,7 +94,7 @@ impl fmt::Display for Response {
             // Display heights for single-block responses (which Zebra requests and expects)
             Response::Blocks(blocks) if blocks.len() == 1 => {
                 match blocks.first().expect("len is 1") {
-                    Available(block) => format!(
+                    Available((block, _)) => format!(
                         "Block {{ height: {}, hash: {} }}",
                         block
                             .coinbase_height()

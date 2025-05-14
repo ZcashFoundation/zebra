@@ -52,9 +52,6 @@ skip-tree = [
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
-    # wait for primitive-types to upgrade
-    { name = "proc-macro-crate", version = "=0.1.5" },
-
     # wait for `color-eyre` to upgrade
     { name = "owo-colors", version = "=3.5.0" },
 
@@ -64,19 +61,9 @@ skip-tree = [
     # wait for abscissa_core to upgrade
     {name = "tracing-log", version = "=0.1.4" },
 
-    # wait for tokio-test -> tokio-stream to upgrade
-    { name = "tokio-util", version = "=0.6.10" },
-
     # wait for console-subscriber and tower to update hdrhistogram.
     # also wait for ron to update insta, and wait for tonic update.
     { name = "base64", version = "=0.13.1" },
-
-    # wait for elasticsearch to update base64, darling, rustc_version, serde_with
-    { name = "elasticsearch", version = "=8.5.0-alpha.1" },
-
-    # wait for reqwest to update base64
-    { name = "base64", version = "=0.21.7" },
-    { name = "sync_wrapper", version = "0.1.2" },
 
     # wait for abscissa_core to update toml
     { name = "toml", version = "=0.5.11" },
@@ -91,9 +78,6 @@ skip-tree = [
     # wait for halo2_gadgets and primitive-types to update uint
     { name = "uint", version = "=0.9.5" },
 
-    # wait for dirs-sys to update windows-sys
-    { name = "windows-sys", version = "=0.48.0" },
-
     # wait for zebra to update tower
     { name = "tower", version = "=0.4.13" },
     { name = "hashbrown", version = "=0.14.5" },
@@ -102,17 +86,24 @@ skip-tree = [
     { name = "thiserror", version = "=1.0.69" },
     { name = "thiserror-impl", version = "=1.0.69" },
 
-    # Remove after release candicate period is over and the ECC crates are not patched anymore
-    { name = "equihash", version = "=0.2.0" },
-    { name = "f4jumble", version = "=0.1.0" },
-    { name = "incrementalmerkletree", version = "=0.6.0" },
-    { name = "zcash_address", version = "=0.4.0" },
-    { name = "zcash_keys", version = "=0.3.0" },
-    { name = "zcash_primitives", version = "=0.16.0" },
-    { name = "zcash_protocol", version = "=0.2.0" },
+    # wait for all librustzcash crates to update sha2, secp256k1, and ripemd
+    { name = "sha2", version = "=0.10.8" },
+    { name = "ripemd", version = "=0.1.3" },
 
-    # wait for bip32 to update, and zcash_primitives to update bip32
-    { name = "secp256k1", version = "=0.27.0" }
+    # wait for zcash_script to update itertools
+    { name = "itertools", version = "=0.13.0" },
+
+    # wait for abscissa_core to update synstructure
+    { name = "synstructure", version = "=0.12.6" },
+
+    # wait until zcash_client_backend update rustix
+    { name = "rustix", version = "=0.38.44" },
+
+    # wait for reqwest to update windows-registry
+    { name = "windows-strings", version = "=0.3.1" },
+
+    # wait for sentry to update windows-core
+    { name = "windows-core", version = "=0.52.0" }
 ]
 
 # This section is considered when running `cargo deny check sources`.

@@ -8,12 +8,13 @@ use std::pin::Pin;
 
 use futures::{future, FutureExt};
 use http_body_util::BodyExt;
-use hyper::{body::Bytes, header};
+use hyper::header;
 use jsonrpsee::{
     core::BoxError,
     server::{HttpBody, HttpRequest, HttpResponse},
 };
 use jsonrpsee_types::ErrorObject;
+use serde::{Deserialize, Serialize};
 use tower::Service;
 
 use super::cookie::Cookie;
@@ -65,7 +66,7 @@ impl<S> HttpRequestMiddleware<S> {
 
     /// Check if the request is authenticated.
     pub fn check_credentials(&self, headers: &header::HeaderMap) -> bool {
-        self.cookie.as_ref().map_or(true, |internal_cookie| {
+        self.cookie.as_ref().is_none_or(|internal_cookie| {
             headers
                 .get(header::AUTHORIZATION)
                 .and_then(|auth_header| auth_header.to_str().ok())
@@ -118,24 +119,55 @@ impl<S> HttpRequestMiddleware<S> {
         }
     }
 
-    /// Remove any "jsonrpc: 1.0" fields in `data`, and return the resulting string.
-    pub fn remove_json_1_fields(data: String) -> String {
-        // Replace "jsonrpc = 1.0":
-        // - at the start or middle of a list, and
-        // - at the end of a list;
-        // with no spaces (lightwalletd format), and spaces after separators (example format).
-        //
-        // TODO: if we see errors from lightwalletd, make this replacement more accurate:
-        //     - use a partial JSON fragment parser
-        //     - combine the whole request into a single buffer, and use a JSON parser
-        //     - use a regular expression
-        //
-        // We could also just handle the exact lightwalletd format,
-        // by replacing `{"jsonrpc":"1.0",` with `{"jsonrpc":"2.0`.
-        data.replace("\"jsonrpc\":\"1.0\",", "\"jsonrpc\":\"2.0\",")
-            .replace("\"jsonrpc\": \"1.0\",", "\"jsonrpc\": \"2.0\",")
-            .replace(",\"jsonrpc\":\"1.0\"", ",\"jsonrpc\":\"2.0\"")
-            .replace(", \"jsonrpc\": \"1.0\"", ", \"jsonrpc\": \"2.0\"")
+    /// Maps whatever JSON-RPC version the client is using to JSON-RPC 2.0.
+    async fn request_to_json_rpc_2(
+        request: HttpRequest<HttpBody>,
+    ) -> (JsonRpcVersion, HttpRequest<HttpBody>) {
+        let (parts, body) = request.into_parts();
+        let bytes = body
+            .collect()
+            .await
+            .expect("Failed to collect body data")
+            .to_bytes();
+        let (version, bytes) =
+            if let Ok(request) = serde_json::from_slice::<'_, JsonRpcRequest>(bytes.as_ref()) {
+                let version = request.version();
+                if matches!(version, JsonRpcVersion::Unknown) {
+                    (version, bytes)
+                } else {
+                    (
+                        version,
+                        serde_json::to_vec(&request.into_2()).expect("valid").into(),
+                    )
+                }
+            } else {
+                (JsonRpcVersion::Unknown, bytes)
+            };
+        (
+            version,
+            HttpRequest::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec())),
+        )
+    }
+    /// Maps JSON-2.0 to whatever JSON-RPC version the client is using.
+    async fn response_from_json_rpc_2(
+        version: JsonRpcVersion,
+        response: HttpResponse<HttpBody>,
+    ) -> HttpResponse<HttpBody> {
+        let (parts, body) = response.into_parts();
+        let bytes = body
+            .collect()
+            .await
+            .expect("Failed to collect body data")
+            .to_bytes();
+        let bytes =
+            if let Ok(response) = serde_json::from_slice::<'_, JsonRpcResponse>(bytes.as_ref()) {
+                serde_json::to_vec(&response.into_version(version))
+                    .expect("valid")
+                    .into()
+            } else {
+                bytes
+            };
+        HttpResponse::from_parts(parts, HttpBody::from(bytes.as_ref().to_vec()))
     }
 }
 
@@ -203,25 +235,109 @@ where
         Self::insert_or_replace_content_type_header(request.headers_mut());
 
         let mut service = self.service.clone();
-        let (parts, body) = request.into_parts();
 
         async move {
-            let bytes = body
-                .collect()
-                .await
-                .expect("Failed to collect body data")
-                .to_bytes();
-
-            let data = String::from_utf8_lossy(bytes.as_ref()).to_string();
-
-            // Fix JSON-RPC 1.0 requests.
-            let data = Self::remove_json_1_fields(data);
-            let body = HttpBody::from(Bytes::from(data).as_ref().to_vec());
-
-            let request = HttpRequest::from_parts(parts, body);
-
-            service.call(request).await.map_err(Into::into)
+            let (version, request) = Self::request_to_json_rpc_2(request).await;
+            let response = service.call(request).await.map_err(Into::into)?;
+            Ok(Self::response_from_json_rpc_2(version, response).await)
         }
         .boxed()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum JsonRpcVersion {
+    /// bitcoind used a mishmash of 1.0, 1.1, and 2.0 for its JSON-RPC.
+    Bitcoind,
+    /// lightwalletd uses the above mishmash, but also breaks spec to include a
+    /// `"jsonrpc": "1.0"` key.
+    Lightwalletd,
+    /// The client is indicating strict 2.0 handling.
+    TwoPointZero,
+    /// On parse errors we don't modify anything, and let the `jsonrpsee` crate handle it.
+    Unknown,
+}
+
+/// A version-agnostic JSON-RPC request.
+#[derive(Debug, Deserialize, Serialize)]
+struct JsonRpcRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jsonrpc: Option<String>,
+    method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<serde_json::Value>,
+}
+
+impl JsonRpcRequest {
+    fn version(&self) -> JsonRpcVersion {
+        match (self.jsonrpc.as_deref(), &self.params, &self.id) {
+            (
+                Some("2.0"),
+                _,
+                None
+                | Some(
+                    serde_json::Value::Null
+                    | serde_json::Value::String(_)
+                    | serde_json::Value::Number(_),
+                ),
+            ) => JsonRpcVersion::TwoPointZero,
+            (Some("1.0"), Some(_), Some(_)) => JsonRpcVersion::Lightwalletd,
+            (None, Some(_), Some(_)) => JsonRpcVersion::Bitcoind,
+            _ => JsonRpcVersion::Unknown,
+        }
+    }
+
+    fn into_2(mut self) -> Self {
+        self.jsonrpc = Some("2.0".into());
+        self
+    }
+}
+/// A version-agnostic JSON-RPC response.
+#[derive(Debug, Deserialize, Serialize)]
+struct JsonRpcResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    jsonrpc: Option<String>,
+    id: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<Box<serde_json::value::RawValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<serde_json::Value>,
+}
+
+impl JsonRpcResponse {
+    fn into_version(mut self, version: JsonRpcVersion) -> Self {
+        match version {
+            JsonRpcVersion::Bitcoind => {
+                self.jsonrpc = None;
+                self.result = self
+                    .result
+                    .or_else(|| serde_json::value::to_raw_value(&()).ok());
+                self.error = self.error.or(Some(serde_json::Value::Null));
+            }
+            JsonRpcVersion::Lightwalletd => {
+                self.jsonrpc = Some("1.0".into());
+                self.result = self
+                    .result
+                    .or_else(|| serde_json::value::to_raw_value(&()).ok());
+                self.error = self.error.or(Some(serde_json::Value::Null));
+            }
+            JsonRpcVersion::TwoPointZero => {
+                // `jsonrpsee` should be returning valid JSON-RPC 2.0 responses. However,
+                // a valid result of `null` can be parsed into `None` by this parser, so
+                // we map the result explicitly to `Null` when there is no error.
+                assert_eq!(self.jsonrpc.as_deref(), Some("2.0"));
+                if self.error.is_none() {
+                    self.result = self
+                        .result
+                        .or_else(|| serde_json::value::to_raw_value(&()).ok());
+                } else {
+                    assert!(self.result.is_none());
+                }
+            }
+            JsonRpcVersion::Unknown => (),
+        }
+        self
     }
 }

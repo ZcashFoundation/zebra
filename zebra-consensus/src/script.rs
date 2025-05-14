@@ -59,10 +59,6 @@ impl tower::Service<Request> for Verifier {
             upgrade,
         } = req;
         let input = &cached_ffi_transaction.inputs()[input_index];
-        let branch_id = upgrade
-            .branch_id()
-            .expect("post-Sapling NUs have a consensus branch ID");
-
         match input {
             transparent::Input::PrevOut { outpoint, .. } => {
                 let outpoint = *outpoint;
@@ -71,7 +67,7 @@ impl tower::Service<Request> for Verifier {
                 let span = tracing::trace_span!("script", ?outpoint);
 
                 async move {
-                    cached_ffi_transaction.is_valid(branch_id, input_index)?;
+                    cached_ffi_transaction.is_valid(upgrade, input_index)?;
                     tracing::trace!("script verification succeeded");
 
                     Ok(())

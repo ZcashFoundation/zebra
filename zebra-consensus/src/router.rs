@@ -139,6 +139,15 @@ impl RouterError {
             RouterError::Block { source, .. } => source.is_duplicate_request(),
         }
     }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub fn misbehavior_score(&self) -> u32 {
+        // TODO: Adjust these values based on zcashd (#9258).
+        match self {
+            RouterError::Checkpoint { source } => source.misbehavior_score(),
+            RouterError::Block { source } => source.misbehavior_score(),
+        }
+    }
 }
 
 impl<S, V> Service<Request> for BlockVerifierRouter<S, V>
@@ -183,7 +192,6 @@ where
         let block = request.block();
 
         match block.coinbase_height() {
-            #[cfg(feature = "getblocktemplate-rpcs")]
             // There's currently no known use case for block proposals below the checkpoint height,
             // so it's okay to immediately return an error here.
             Some(height) if height <= self.max_checkpoint_height && request.is_proposal() => {

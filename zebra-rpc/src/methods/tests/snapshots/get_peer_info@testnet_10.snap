@@ -1,0 +1,10 @@
+---
+source: zebra-rpc/src/methods/tests/snapshot.rs
+expression: get_peer_info
+---
+[
+  {
+    "addr": "127.0.0.1:18233",
+    "inbound": false
+  }
+]

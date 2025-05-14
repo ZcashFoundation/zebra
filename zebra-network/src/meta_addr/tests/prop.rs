@@ -48,6 +48,8 @@ proptest! {
             // also check the address, port, and services individually
             prop_assert!(!addr.addr.ip().is_unspecified());
             prop_assert_ne!(addr.addr.port(), 0);
+            prop_assert_eq!(addr.misbehavior(), 0);
+            prop_assert!(!addr.is_inbound());
 
             if let Some(services) = addr.services {
                 prop_assert!(services.contains(PeerServices::NODE_NETWORK));

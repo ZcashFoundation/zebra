@@ -16,7 +16,7 @@ Some of our builds and tests are repeated on the `main` branch, due to:
 - our cached state sharing rules, or
 - generating base coverage for PR coverage reports.
 
-Currently, each Zebra and lightwalletd full and update sync will updates cached state images,
+Currently, each Zebra and lightwalletd full and update sync will update cached state images,
 which are shared by all tests. Tests prefer the latest image generated from the same commit.
 But if a state from the same commit is not available, tests will use the latest image from
 any branch and commit, as long as the state version is the same.

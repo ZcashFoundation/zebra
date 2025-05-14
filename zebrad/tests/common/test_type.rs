@@ -14,14 +14,14 @@ use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
-    cached_state::ZEBRA_CACHED_STATE_DIR,
+    cached_state::ZEBRA_CACHE_DIR,
     config::{default_test_config, random_known_rpc_port_config},
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
         PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
     },
     launch::{LIGHTWALLETD_DELAY, LIGHTWALLETD_FULL_SYNC_TIP_DELAY, LIGHTWALLETD_UPDATE_TIP_DELAY},
-    lightwalletd::LIGHTWALLETD_DATA_DIR,
+    lightwalletd::LWD_CACHE_DIR,
     sync::FINISH_PARTIAL_SYNC_TIMEOUT,
 };
 
@@ -140,7 +140,7 @@ impl TestType {
         }
     }
 
-    /// Can this test create a new `LIGHTWALLETD_DATA_DIR` cached state?
+    /// Can this test create a new `LWD_CACHE_DIR` cached state?
     pub fn can_create_lightwalletd_cached_state(&self) -> bool {
         match self {
             LaunchWithEmptyState { .. } | UseAnyState => false,
@@ -152,13 +152,13 @@ impl TestType {
     /// Returns the Zebra state path for this test, if set.
     #[allow(clippy::print_stderr)]
     pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
-        match env::var_os(ZEBRA_CACHED_STATE_DIR) {
+        match env::var_os(ZEBRA_CACHE_DIR) {
             Some(path) => Some(path.into()),
             None => {
                 let test_name = test_name.as_ref();
                 eprintln!(
                     "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {ZEBRA_CACHED_STATE_DIR:?} environment variable to run the test",
+                     set the {ZEBRA_CACHE_DIR:?} environment variable to run the test",
                 );
 
                 None
@@ -200,7 +200,7 @@ impl TestType {
         if !use_internet_connection {
             config.network.initial_mainnet_peers = IndexSet::new();
             config.network.initial_testnet_peers = IndexSet::new();
-            // Avoid re-using cached peers from disk when we're supposed to be a disconnected instance
+            // Avoid reusing cached peers from disk when we're supposed to be a disconnected instance
             config.network.cache_dir = CacheDir::disabled();
 
             // Activate the mempool immediately by default
@@ -235,24 +235,24 @@ impl TestType {
         if !self.launches_lightwalletd() || !use_or_create_lwd_cache {
             tracing::info!(
                 "running {test_name:?} {self:?} lightwalletd test, \
-                 ignoring any cached state in the {LIGHTWALLETD_DATA_DIR:?} environment variable",
+                 ignoring any cached state in the {LWD_CACHE_DIR:?} environment variable",
             );
 
             return None;
         }
 
-        match env::var_os(LIGHTWALLETD_DATA_DIR) {
+        match env::var_os(LWD_CACHE_DIR) {
             Some(path) => Some(path.into()),
             None => {
                 if self.needs_lightwalletd_cached_state() {
                     tracing::info!(
                         "skipped {test_name:?} {self:?} lightwalletd test, \
-                         set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run the test",
+                         set the {LWD_CACHE_DIR:?} environment variable to run the test",
                     );
                 } else if self.allow_lightwalletd_cached_state() {
                     tracing::info!(
                         "running {test_name:?} {self:?} lightwalletd test without cached state, \
-                         set the {LIGHTWALLETD_DATA_DIR:?} environment variable to run with cached state",
+                         set the {LWD_CACHE_DIR:?} environment variable to run with cached state",
                     );
                 }
 

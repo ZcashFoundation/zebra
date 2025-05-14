@@ -25,7 +25,7 @@ use zcash_client_backend::{
     },
     scanning::{Nullifiers, ScanError, ScanningKeys},
 };
-use zcash_primitives::zip32::{AccountId, Scope};
+use zip32::{AccountId, Scope};
 
 use sapling_crypto::zip32::DiversifiableFullViewingKey;
 
@@ -542,7 +542,12 @@ pub fn scanning_keys<'a>(
     dfvks
         .into_iter()
         .enumerate()
-        .map(|(i, dfvk)| Ok((AccountId::try_from(u32::try_from(i)?)?, dfvk_to_ufvk(dfvk)?)))
+        .map(|(i, dfvk)| {
+            Ok((
+                AccountId::try_from(u32::try_from(i)?).map_err(|err| eyre!(err))?,
+                dfvk_to_ufvk(dfvk)?,
+            ))
+        })
         .try_collect::<(_, _), Vec<(_, _)>, _>()
         .map(ScanningKeys::from_account_ufvks)
 }
@@ -556,10 +561,10 @@ pub fn dfvk_to_ufvk(dfvk: &DiversifiableFullViewingKey) -> Result<UnifiedFullVie
     .map_err(|e| eyre!(e))
 }
 
-/// Returns the [`zcash_primitives::consensus::Network`] for this network.
-pub fn zp_network(network: &Network) -> zcash_primitives::consensus::Network {
+/// Returns the [`zcash_protocol::consensus::Network`] for this network.
+pub fn zp_network(network: &Network) -> zcash_protocol::consensus::Network {
     match network {
-        Network::Mainnet => zcash_primitives::consensus::Network::MainNetwork,
-        Network::Testnet(_) => zcash_primitives::consensus::Network::TestNetwork,
+        Network::Mainnet => zcash_protocol::consensus::Network::MainNetwork,
+        Network::Testnet(_) => zcash_protocol::consensus::Network::TestNetwork,
     }
 }

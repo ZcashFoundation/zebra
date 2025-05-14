@@ -19,6 +19,7 @@ use std::{fmt, sync::Arc};
 
 use crate::{
     amount::{Amount, NonNegative},
+    block::Height,
     serialization::ZcashSerialize,
     transaction::{
         AuthDigest, Hash,
@@ -141,6 +142,8 @@ impl From<&Transaction> for UnminedTxId {
         match transaction {
             V1 { .. } | V2 { .. } | V3 { .. } | V4 { .. } => Legacy(transaction.into()),
             V5 { .. } => Witnessed(transaction.into()),
+            #[cfg(feature = "tx_v6")]
+            V6 { .. } => Witnessed(transaction.into()),
         }
     }
 }
@@ -358,6 +361,14 @@ pub struct VerifiedUnminedTx {
     ///
     /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
     pub fee_weight_ratio: f32,
+
+    /// The time the transaction was added to the mempool, or None if it has not
+    /// reached the mempool yet.
+    pub time: Option<chrono::DateTime<chrono::Utc>>,
+
+    /// The tip height when the transaction was added to the mempool, or None if
+    /// it has not reached the mempool yet.
+    pub height: Option<Height>,
 }
 
 impl fmt::Debug for VerifiedUnminedTx {
@@ -399,6 +410,8 @@ impl VerifiedUnminedTx {
             fee_weight_ratio,
             conventional_actions,
             unpaid_actions,
+            time: None,
+            height: None,
         })
     }
 

@@ -204,7 +204,7 @@ pub enum TransactionError {
     #[error("could not find a mempool transaction input UTXO in the best chain")]
     TransparentInputNotFound,
 
-    #[error("could not validate nullifiers and anchors on best chain: {0}")]
+    #[error("could not contextually validate transaction on best chain: {0}")]
     #[cfg_attr(any(test, feature = "proptest-impl"), proptest(skip))]
     // This error variant is at least 128 bytes
     ValidateContextError(Box<ValidateContextError>),
@@ -281,6 +281,50 @@ impl From<BoxError> for TransactionError {
         TransactionError::InternalDowncastError(format!(
             "downcast to known transaction error type failed, original error: {err:?}",
         ))
+    }
+}
+
+impl TransactionError {
+    /// Returns a suggested misbehaviour score increment for a certain error when
+    /// verifying a mempool transaction.
+    pub fn mempool_misbehavior_score(&self) -> u32 {
+        use TransactionError::*;
+
+        // TODO: Adjust these values based on zcashd (#9258).
+        match self {
+            ImmatureTransparentCoinbaseSpend { .. }
+            | UnshieldedTransparentCoinbaseSpend { .. }
+            | CoinbasePosition
+            | CoinbaseAfterFirst
+            | CoinbaseHasJoinSplit
+            | CoinbaseHasSpend
+            | CoinbaseHasOutputPreHeartwood
+            | CoinbaseHasEnableSpendsOrchard
+            | CoinbaseOutputsNotDecryptable
+            | CoinbaseInMempool
+            | NonCoinbaseHasCoinbaseInput
+            | CoinbaseExpiryBlockHeight { .. }
+            | IncorrectFee
+            | Subsidy(_)
+            | WrongVersion
+            | NoInputs
+            | NoOutputs
+            | BadBalance
+            | Script(_)
+            | SmallOrder
+            | Groth16(_)
+            | MalformedGroth16(_)
+            | Ed25519(_)
+            | RedJubjub(_)
+            | RedPallas(_)
+            | BothVPubsNonZero
+            | DisabledAddToSproutPool
+            | NotEnoughFlags
+            | WrongConsensusBranchId
+            | MissingConsensusBranchId => 100,
+
+            _other => 0,
+        }
     }
 }
 
@@ -372,5 +416,19 @@ impl BlockError {
     /// Some duplicate requests might not be detected, and therefore return `false`.
     pub fn is_duplicate_request(&self) -> bool {
         matches!(self, BlockError::AlreadyInChain(..))
+    }
+
+    /// Returns a suggested misbehaviour score increment for a certain error.
+    pub(crate) fn misbehavior_score(&self) -> u32 {
+        use BlockError::*;
+
+        match self {
+            MissingHeight(_)
+            | MaxHeight(_, _, _)
+            | InvalidDifficulty(_, _)
+            | TargetDifficultyLimit(_, _, _, _, _)
+            | DifficultyFilter(_, _, _, _) => 100,
+            _other => 0,
+        }
     }
 }

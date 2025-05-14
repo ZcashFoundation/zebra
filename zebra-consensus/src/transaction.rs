@@ -402,7 +402,7 @@ where
         async move {
             tracing::trace!(?tx_id, ?req, "got tx verify request");
 
-            if let Some(result) = Self::try_find_verified_unmined_tx(&req, mempool.clone()).await {
+            if let Some(result) = Self::find_verified_unmined_tx(&req, mempool.clone(), state.clone()).await {
                 let verified_tx = result?;
 
                 return Ok(Response::Block {
@@ -523,6 +523,19 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                #[cfg(feature="tx_v6")]
+                Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => Self::verify_v6_transaction(
+                    &req,
+                    &network,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )?,
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -575,12 +588,10 @@ where
                     miner_fee,
                     legacy_sigop_count,
                 },
-                Request::Mempool { transaction, .. } => {
+                Request::Mempool { transaction: tx, .. } => {
                     let transaction = VerifiedUnminedTx::new(
-                        transaction,
-                        miner_fee.expect(
-                            "unexpected mempool coinbase transaction: should have already rejected",
-                        ),
+                        tx,
+                        miner_fee.expect("fee should have been checked earlier"),
                         legacy_sigop_count,
                     )?;
 
@@ -645,17 +656,22 @@ where
     }
 
     /// Attempts to find a transaction in the mempool by its transaction hash and checks
-    /// that all of its dependencies are available in the block.
+    /// that all of its dependencies are available in the block or in the state.  Waits
+    /// for UTXOs being spent by the given transaction to arrive in the state if they're
+    /// not found elsewhere.
     ///
     /// Returns [`Some(Ok(VerifiedUnminedTx))`](VerifiedUnminedTx) if successful,
     /// None if the transaction id was not found in the mempool,
     /// or `Some(Err(TransparentInputNotFound))` if the transaction was found, but some of its
-    /// dependencies are missing in the block.
-    async fn try_find_verified_unmined_tx(
+    /// dependencies were not found in the block or state after a timeout.
+    async fn find_verified_unmined_tx(
         req: &Request,
         mempool: Option<Timeout<Mempool>>,
+        state: Timeout<ZS>,
     ) -> Option<Result<VerifiedUnminedTx, TransactionError>> {
-        if req.is_mempool() || req.transaction().is_coinbase() {
+        let tx = req.transaction();
+
+        if req.is_mempool() || tx.is_coinbase() {
             return None;
         }
 
@@ -664,7 +680,7 @@ where
         let tx_id = req.tx_mined_id();
 
         let mempool::Response::TransactionWithDeps {
-            transaction,
+            transaction: verified_tx,
             dependencies,
         } = mempool
             .oneshot(mempool::Request::TransactionWithDepsByMinedId(tx_id))
@@ -676,17 +692,35 @@ where
 
         // Note: This does not verify that the spends are in order, the spend order
         //       should be verified during contextual validation in zebra-state.
-        let has_all_tx_deps = dependencies
+        let missing_deps: HashSet<_> = dependencies
             .into_iter()
-            .all(|dependency_id| known_outpoint_hashes.contains(&dependency_id));
+            .filter(|dependency_id| !known_outpoint_hashes.contains(dependency_id))
+            .collect();
 
-        let result = if has_all_tx_deps {
-            Ok(transaction)
-        } else {
-            Err(TransactionError::TransparentInputNotFound)
-        };
+        if missing_deps.is_empty() {
+            return Some(Ok(verified_tx));
+        }
 
-        Some(result)
+        let missing_outpoints = tx.inputs().iter().filter_map(|input| {
+            if let transparent::Input::PrevOut { outpoint, .. } = input {
+                missing_deps.contains(&outpoint.hash).then_some(outpoint)
+            } else {
+                None
+            }
+        });
+
+        for missing_outpoint in missing_outpoints {
+            let query = state
+                .clone()
+                .oneshot(zebra_state::Request::AwaitUtxo(*missing_outpoint));
+            match query.await {
+                Ok(zebra_state::Response::Utxo(_)) => {}
+                Err(_) => return Some(Err(TransactionError::TransparentInputNotFound)),
+                _ => unreachable!("AwaitUtxo always responds with Utxo"),
+            };
+        }
+
+        Some(Ok(verified_tx))
     }
 
     /// Wait for the UTXOs that are being spent by the given transaction.
@@ -732,7 +766,10 @@ where
                         .clone()
                         .oneshot(zs::Request::UnspentBestChainUtxo(*outpoint));
 
-                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query.await? else {
+                    let zebra_state::Response::UnspentBestChainUtxo(utxo) = query
+                        .await
+                        .map_err(|_| TransactionError::TransparentInputNotFound)?
+                    else {
                         unreachable!("UnspentBestChainUtxo always responds with Option<Utxo>")
                     };
 
@@ -848,14 +885,12 @@ where
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
-        let upgrade = request.upgrade(network);
+        let nu = request.upgrade(network);
 
-        Self::verify_v4_transaction_network_upgrade(&tx, upgrade)?;
+        Self::verify_v4_transaction_network_upgrade(&tx, nu)?;
 
         let shielded_sighash = tx.sighash(
-            upgrade
-                .branch_id()
-                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
+            nu,
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
             None,
@@ -903,7 +938,8 @@ where
             | NetworkUpgrade::Heartwood
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
-            | NetworkUpgrade::Nu6 => Ok(()),
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu7 => Ok(()),
 
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
@@ -944,14 +980,12 @@ where
         orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
-        let upgrade = request.upgrade(network);
+        let nu = request.upgrade(network);
 
-        Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
+        Self::verify_v5_transaction_network_upgrade(&transaction, nu)?;
 
         let shielded_sighash = transaction.sighash(
-            upgrade
-                .branch_id()
-                .expect("Overwinter-onwards must have branch ID, and we checkpoint on Canopy"),
+            nu,
             HashType::ALL,
             cached_ffi_transaction.all_previous_outputs(),
             None,
@@ -991,7 +1025,7 @@ where
             //
             // Note: Here we verify the transaction version number of the above rule, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
-            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => Ok(()),
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu7 => Ok(()),
 
             // Does not support V5 transactions
             NetworkUpgrade::Genesis
@@ -1005,6 +1039,26 @@ where
                 network_upgrade,
             )),
         }
+    }
+
+    /// Passthrough to verify_v5_transaction, but for V6 transactions.
+    #[cfg(feature = "tx_v6")]
+    fn verify_v6_transaction(
+        request: &Request,
+        network: &Network,
+        script_verifier: script::Verifier,
+        cached_ffi_transaction: Arc<CachedFfiTransaction>,
+        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData>,
+    ) -> Result<AsyncChecks, TransactionError> {
+        Self::verify_v5_transaction(
+            request,
+            network,
+            script_verifier,
+            cached_ffi_transaction,
+            sapling_shielded_data,
+            orchard_shielded_data,
+        )
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided

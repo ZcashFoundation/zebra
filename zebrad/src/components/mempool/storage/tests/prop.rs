@@ -72,7 +72,7 @@ proptest! {
         for (transaction_to_accept, transaction_to_reject) in input_permutations {
             let id_to_accept = transaction_to_accept.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new()), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None), Ok(id_to_accept));
 
             // Make unique IDs by converting the index to bytes, and writing it to each ID
             let unique_ids = (0..MAX_EVICTION_MEMORY_ENTRIES as u32).map(move |index| {
@@ -96,7 +96,7 @@ proptest! {
             // - transaction_to_accept, or
             // - a rejection from rejections
             prop_assert_eq!(
-                storage.insert(transaction_to_reject, Vec::new()),
+                storage.insert(transaction_to_reject, Vec::new(), None),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -147,13 +147,13 @@ proptest! {
             if i < transactions.len() - 1 {
                 // The initial transactions should be successful
                 prop_assert_eq!(
-                    storage.insert(transaction.clone(), Vec::new()),
+                    storage.insert(transaction.clone(), Vec::new(), None),
                     Ok(tx_id)
                 );
             } else {
                 // The final transaction will cause a random eviction,
                 // which might return an error if this transaction is chosen
-                let result = storage.insert(transaction.clone(), Vec::new());
+                let result = storage.insert(transaction.clone(), Vec::new(), None);
 
                 if result.is_ok() {
                     prop_assert_eq!(
@@ -281,10 +281,10 @@ proptest! {
             let id_to_accept = transaction_to_accept.transaction.id;
             let id_to_reject = transaction_to_reject.transaction.id;
 
-            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new()), Ok(id_to_accept));
+            prop_assert_eq!(storage.insert(transaction_to_accept, Vec::new(), None), Ok(id_to_accept));
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject, Vec::new()),
+                storage.insert(transaction_to_reject, Vec::new(), None),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
@@ -332,19 +332,19 @@ proptest! {
             let id_to_reject = transaction_to_reject.transaction.id;
 
             prop_assert_eq!(
-                storage.insert(first_transaction_to_accept, Vec::new()),
+                storage.insert(first_transaction_to_accept, Vec::new(), None),
                 Ok(first_id_to_accept)
             );
 
             prop_assert_eq!(
-                storage.insert(transaction_to_reject, Vec::new()),
+                storage.insert(transaction_to_reject, Vec::new(), None),
                 Err(MempoolError::StorageEffectsTip(SameEffectsTipRejectionError::SpendConflict))
             );
 
             prop_assert!(storage.contains_rejected(&id_to_reject));
 
             prop_assert_eq!(
-                storage.insert(second_transaction_to_accept, Vec::new()),
+                storage.insert(second_transaction_to_accept, Vec::new(), None),
                 Ok(second_id_to_accept)
             );
 
@@ -371,7 +371,7 @@ proptest! {
             .filter_map(|transaction| {
                 let id = transaction.transaction.id;
 
-                storage.insert(transaction.clone(), Vec::new()).ok().map(|_| id)
+                storage.insert(transaction.clone(), Vec::new(), None).ok().map(|_| id)
             })
             .collect();
 
@@ -478,14 +478,14 @@ impl SpendConflictTestInput {
             VerifiedUnminedTx::new(
                 first.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
                 second.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -508,14 +508,14 @@ impl SpendConflictTestInput {
             VerifiedUnminedTx::new(
                 first.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
             VerifiedUnminedTx::new(
                 second.0.into(),
                 // make sure miner fee is big enough for all cases
-                Amount::try_from(1_000_000).expect("invalid value"),
+                Amount::try_from(1_000_000).expect("valid amount"),
                 0,
             )
             .expect("verification should pass"),
@@ -568,6 +568,8 @@ impl SpendConflictTestInput {
 
                 // No JoinSplits
                 Transaction::V1 { .. } | Transaction::V5 { .. } => {}
+                #[cfg(feature = "tx_v6")]
+                Transaction::V6 { .. } => {}
             }
         }
     }
@@ -632,6 +634,14 @@ impl SpendConflictTestInput {
                 }
 
                 Transaction::V5 {
+                    sapling_shielded_data,
+                    ..
+                } => {
+                    Self::remove_sapling_transfers_with_conflicts(sapling_shielded_data, &conflicts)
+                }
+
+                #[cfg(feature = "tx_v6")]
+                Transaction::V6 {
                     sapling_shielded_data,
                     ..
                 } => {
@@ -705,6 +715,12 @@ impl SpendConflictTestInput {
         for transaction in [first, second] {
             match transaction {
                 Transaction::V5 {
+                    orchard_shielded_data,
+                    ..
+                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
+
+                #[cfg(feature = "tx_v6")]
+                Transaction::V6 {
                     orchard_shielded_data,
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),

@@ -3,12 +3,14 @@
 //! This test will get block templates via the `getblocktemplate` RPC method and submit them as new blocks
 //! via the `submitblock` RPC method on Regtest.
 
-use std::{net::SocketAddr, sync::Arc, time::Duration};
-
+use crate::common::{
+    config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
+    launch::ZebradTestDirExt,
+};
 use color_eyre::eyre::{eyre, Context, Result};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tower::BoxError;
 use tracing::*;
-
 use zebra_chain::{
     block::{Block, Height},
     parameters::{testnet::REGTEST_NU5_ACTIVATION_HEIGHT, Network, NetworkUpgrade},
@@ -18,22 +20,17 @@ use zebra_chain::{
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     methods::{
-        get_block_template_rpcs::{
-            get_block_template::{
-                proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
-            },
-            types::submit_block,
-        },
         hex_data::HexData,
+        types::{
+            get_block_template::{
+                proposal::proposal_block_from_template, GetBlockTemplate, TimeSource,
+            },
+            submit_block,
+        },
     },
     server::{self, OPENED_RPC_ENDPOINT_MSG},
 };
 use zebra_test::args;
-
-use crate::common::{
-    config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
-    launch::ZebradTestDirExt,
-};
 
 /// Number of blocks that should be submitted before the test is considered successful.
 const NUM_BLOCKS_TO_SUBMIT: usize = 200;
@@ -42,7 +39,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
     info!("starting regtest submit_blocks test");
 
-    let network = Network::new_regtest(None, None);
+    let network = Network::new_regtest(Default::default());
     let mut config = os_assigned_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
 

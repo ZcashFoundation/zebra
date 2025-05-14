@@ -29,8 +29,7 @@ pub enum NetworkKind {
     /// A test network.
     Testnet,
 
-    /// Regtest mode, not yet implemented
-    // TODO: Add `new_regtest()` and `is_regtest` methods on `Network`.
+    /// Regtest mode
     Regtest,
 }
 
@@ -150,12 +149,10 @@ impl Network {
 
     /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
     pub fn new_regtest(
-        nu5_activation_height: Option<u32>,
-        nu6_activation_height: Option<u32>,
+        configured_activation_heights: testnet::ConfiguredActivationHeights,
     ) -> Self {
         Self::new_configured_testnet(testnet::Parameters::new_regtest(
-            nu5_activation_height,
-            nu6_activation_height,
+            configured_activation_heights,
         ))
     }
 
@@ -182,6 +179,16 @@ impl Network {
         match self {
             Network::Mainnet => NetworkKind::Mainnet,
             Network::Testnet(params) if params.is_regtest() => NetworkKind::Regtest,
+            Network::Testnet(_) => NetworkKind::Testnet,
+        }
+    }
+
+    /// Returns [`NetworkKind::Testnet`] on Testnet and Regtest, or [`NetworkKind::Mainnet`] on Mainnet.
+    ///
+    /// This is used for transparent addresses, as the address prefix is the same on Regtest as it is on Testnet.
+    pub fn t_addr_kind(&self) -> NetworkKind {
+        match self {
+            Network::Mainnet => NetworkKind::Mainnet,
             Network::Testnet(_) => NetworkKind::Testnet,
         }
     }
@@ -277,7 +284,7 @@ impl FromStr for Network {
 pub struct InvalidNetworkError(String);
 
 impl zcash_protocol::consensus::Parameters for Network {
-    fn network_type(&self) -> zcash_address::Network {
+    fn network_type(&self) -> zcash_protocol::consensus::NetworkType {
         self.kind().into()
     }
 

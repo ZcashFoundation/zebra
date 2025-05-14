@@ -21,15 +21,15 @@ use futures::{
 use tokio::sync::oneshot::{self, error::TryRecvError};
 use tower::{buffer::Buffer, timeout::Timeout, util::BoxService, Service, ServiceExt};
 
-use zebra_network as zn;
-use zebra_state as zs;
+use zebra_network::{self as zn, PeerSocketAddr};
+use zebra_state::{self as zs};
 
 use zebra_chain::{
     block::{self, Block},
     serialization::ZcashSerialize,
     transaction::UnminedTxId,
 };
-use zebra_consensus::router::RouterError;
+use zebra_consensus::{router::RouterError, VerifyBlockError};
 use zebra_network::{AddressBook, InventoryResponse};
 use zebra_node_services::mempool;
 
@@ -107,6 +107,9 @@ pub struct InboundSetupData {
 
     /// Allows efficient access to the best tip of the blockchain.
     pub latest_chain_tip: zs::LatestChainTip,
+
+    /// A channel to send misbehavior reports to the [`AddressBook`].
+    pub misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
 }
 
 /// Tracks the internal state of the [`Inbound`] service during setup.
@@ -148,6 +151,9 @@ pub enum Setup {
 
         /// A service that manages cached blockchain state.
         state: State,
+
+        /// A channel to send misbehavior reports to the [`AddressBook`].
+        misbehavior_sender: tokio::sync::mpsc::Sender<(PeerSocketAddr, u32)>,
     },
 
     /// Temporary state used in the inbound service's internal initialization code.
@@ -261,6 +267,7 @@ impl Service<zn::Request> for Inbound {
                         mempool,
                         state,
                         latest_chain_tip,
+                        misbehavior_sender,
                     } = setup_data;
 
                     let cached_peer_addr_response = CachedPeerAddrResponse::new(address_book);
@@ -279,6 +286,7 @@ impl Service<zn::Request> for Inbound {
                         block_downloads,
                         mempool,
                         state,
+                        misbehavior_sender,
                     }
                 }
                 Err(TryRecvError::Empty) => {
@@ -314,13 +322,27 @@ impl Service<zn::Request> for Inbound {
                 mut block_downloads,
                 mempool,
                 state,
+                misbehavior_sender,
             } => {
                 // # Correctness
                 //
                 // Clear the stream but ignore the final Pending return value.
                 // If we returned Pending here, and there were no waiting block downloads,
                 // then inbound requests would wait for the next block download, and hang forever.
-                while let Poll::Ready(Some(_)) = block_downloads.as_mut().poll_next(cx) {}
+                while let Poll::Ready(Some(result)) = block_downloads.as_mut().poll_next(cx) {
+                    let Err((err, Some(advertiser_addr))) = result else {
+                        continue;
+                    };
+
+                    let Ok(err) = err.downcast::<VerifyBlockError>() else {
+                        continue;
+                    };
+
+                    if err.misbehavior_score() != 0 {
+                        let _ =
+                            misbehavior_sender.try_send((advertiser_addr, err.misbehavior_score()));
+                    }
+                }
 
                 result = Ok(());
 
@@ -329,6 +351,7 @@ impl Service<zn::Request> for Inbound {
                     block_downloads,
                     mempool,
                     state,
+                    misbehavior_sender,
                 }
             }
         };
@@ -362,6 +385,7 @@ impl Service<zn::Request> for Inbound {
                 block_downloads,
                 mempool,
                 state,
+                misbehavior_sender: _,
             } => (cached_peer_addr_response, block_downloads, mempool, state),
             _ => {
                 debug!("ignoring request from remote peer during setup");
@@ -398,7 +422,7 @@ impl Service<zn::Request> for Inbound {
                 let state = state.clone();
 
                 async move {
-                    let mut blocks: Vec<InventoryResponse<Arc<Block>, block::Hash>> = Vec::new();
+                    let mut blocks: Vec<InventoryResponse<(Arc<Block>, Option<PeerSocketAddr>), block::Hash>> = Vec::new();
                     let mut total_size = 0;
 
                     // Ignore any block hashes past the response limit.
@@ -422,7 +446,7 @@ impl Service<zn::Request> for Inbound {
                                 // return the size from the state using a wrapper type.
                                 total_size += block.zcash_serialized_size();
 
-                                blocks.push(Available(block))
+                                blocks.push(Available((block, None)))
                             },
                             // We don't need to limit the size of the missing block IDs list,
                             // because it is already limited to the size of the getdata request
@@ -473,7 +497,7 @@ impl Service<zn::Request> for Inbound {
                         total_size += tx.size;
 
                         within_limit
-                    }).map(Available);
+                    }).map(|tx| Available((tx, None)));
 
                     // The network layer handles splitting this response into multiple `tx`
                     // messages, and a `notfound` message if needed.

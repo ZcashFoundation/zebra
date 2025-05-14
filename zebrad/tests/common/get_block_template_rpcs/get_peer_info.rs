@@ -4,7 +4,7 @@ use color_eyre::eyre::{eyre, Context, Result};
 
 use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::get_block_template_rpcs::types::peer_info::PeerInfo;
+use zebra_rpc::methods::types::peer_info::PeerInfo;
 
 use crate::common::{
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
@@ -40,7 +40,7 @@ pub(crate) async fn run() -> Result<()> {
 
     // call `getpeerinfo` RPC method
     let peer_info_result: Vec<PeerInfo> = RpcRequestClient::new(rpc_address)
-        .json_result_from_call("getpeerinfo", "[]".to_string())
+        .json_result_from_call("getpeerinfo", "[]")
         .await
         .map_err(|err| eyre!(err))?;
 

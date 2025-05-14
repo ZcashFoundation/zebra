@@ -3,6 +3,9 @@ updates:
   # Rust section
   - package-ecosystem: cargo
     directory: '/'
+    # Update only the lockfile. We shouldn't update Cargo.toml unless it's for
+    # a security issue, or if we need a new feature of the dependency.
+    versioning-strategy: lockfile-only
     # serde, clap, and other dependencies sometimes have multiple updates in a week
     schedule:
       interval: monthly
@@ -11,7 +14,7 @@ updates:
     # Limit dependabot to 1 PR per reviewer
     open-pull-requests-limit: 6
     labels:
-      - 'C-trivial'
+      - 'C-exclude-from-changelog'
       - 'A-rust'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
@@ -46,7 +49,7 @@ updates:
       timezone: America/New_York
     open-pull-requests-limit: 4
     labels:
-      - 'C-trivial'
+      - 'C-exclude-from-changelog'
       - 'A-devops'
       - 'A-dependencies'
       - 'P-Low :snowflake:'
