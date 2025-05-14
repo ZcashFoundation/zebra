@@ -2226,6 +2226,24 @@ where
             extra_coinbase_data,
         );
 
+        // - Validate the block template
+        let network_upgrade = NetworkUpgrade::current(&network, next_block_height);
+
+        let block = proposal_block_from_template(&response, None, network_upgrade)
+            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+        let block_bytes = block
+            .zcash_serialize_to_vec()
+            .map_err(|error| ErrorObject::owned(0, error.to_string(), None::<()>))?;
+
+        get_block_template::validate_block_proposal(
+            self.gbt.block_verifier_router(),
+            block_bytes,
+            network,
+            latest_chain_tip,
+            sync_status,
+        )
+        .await?;
+
         Ok(response.into())
     }
 
