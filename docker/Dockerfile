@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.7-labs
 # check=skip=UndefinedVar,UserExist # We use gosu in the entrypoint instead of USER directive
 
 # If you want to include a file in the Docker image, add it to .dockerignore.
@@ -92,8 +92,7 @@ ARG CARGO_TARGET_DIR
 # Leverage a cache mount to ${CARGO_HOME} for downloaded dependencies,
 # and for git repository dependencies, and a cache mount to ${CARGO_TARGET_DIR}
 # for compiled dependencies which will speed up subsequent builds.
-# Bind mounts to each crate directory are not leveraged here as we need to copy
-# the source code into the container anyways for some tests to run as expected.
+# We need to copy the source code into the container anyways for some tests to run as expected.
 # Once built, copy the executables to an output directory before the cache
 # mounted ${CARGO_TARGET_DIR} is unmounted, and copy the cargo home directory
 # to a temporary directory to avoid having to re-download dependencies for
