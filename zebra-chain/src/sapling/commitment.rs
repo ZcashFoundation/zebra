@@ -396,7 +396,8 @@ impl FromHex for NotSmallOrderValueCommitment {
         // Convert from big-endian (display) to little-endian (internal)
         bytes.reverse();
 
-        Self::zcash_deserialize(Cursor::new(&bytes)).map_err(|_| FromHexError::InvalidStringLength)
+        Self::zcash_deserialize(io::Cursor::new(&bytes))
+            .map_err(|_| FromHexError::InvalidStringLength)
     }
 }
 
