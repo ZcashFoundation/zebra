@@ -396,11 +396,7 @@ impl FromHex for NotSmallOrderValueCommitment {
         // Convert from big-endian (display) to little-endian (internal)
         bytes.reverse();
 
-        // Try to construct ValueCommitment from raw bytes
-        let vc = ValueCommitment::try_from(bytes).map_err(|_| FromHexError::InvalidStringLength)?;
-
-        // Check small order and wrap
-        vc.try_into().map_err(|_| FromHexError::InvalidStringLength)
+        Self::zcash_deserialize(Cursor::new(&bytes)).map_err(|_| FromHexError::InvalidStringLength)
     }
 }
 
