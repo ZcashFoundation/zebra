@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
+    block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -163,6 +164,10 @@ pub enum ReadResponse {
         /// The value pool balance at the current best chain tip.
         value_balance: ValueBalance<NonNegative>,
     },
+
+    /// Response to [`ReadRequest::BlockInfo`] with
+    /// the block info after the specified block.
+    BlockInfo(Option<BlockInfo>),
 
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
@@ -354,6 +359,7 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
+            | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
