@@ -102,7 +102,7 @@ impl std::str::FromStr for Address {
             return Address::zcash_deserialize(&data[..]);
         }
 
-        // Try Bech32 (prefixes: tex1, textest)
+        // Try Bech32 (prefixes: tex, textest)
         let (hrp, payload) =
             bech32::decode(s).map_err(|_| SerializationError::Parse("invalid Bech32 encoding"))?;
 
