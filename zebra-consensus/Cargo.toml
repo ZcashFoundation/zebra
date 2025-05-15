@@ -33,7 +33,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "ze
 blake2b_simd = { workspace = true }
 bellman = { workspace = true }
 bls12_381 = { workspace = true }
-halo2 = { package = "halo2_proofs", version = "0.3.0" }
+halo2 = { package = "halo2_proofs", version = "0.3" }
 jubjub = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
