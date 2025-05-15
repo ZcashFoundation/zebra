@@ -148,6 +148,8 @@
 //! export TMPDIR=/path/to/disk/directory
 //! ```
 
+mod common;
+
 use std::{
     cmp::Ordering,
     collections::HashSet,
@@ -185,10 +187,6 @@ use zebra_rpc::{
     server::OPENED_RPC_ENDPOINT_MSG,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
-
-#[cfg(not(target_os = "windows"))]
-use zebra_network::constants::PORT_IN_USE_ERROR;
-
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
@@ -196,9 +194,14 @@ use zebra_test::{
     prelude::*,
 };
 
-mod common;
+#[cfg(not(target_os = "windows"))]
+use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use common::{
+    cached_state::{
+        wait_for_state_version_message, wait_for_state_version_upgrade,
+        DATABASE_FORMAT_UPGRADE_IS_LONG,
+    },
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
@@ -217,10 +220,6 @@ use common::{
         TINY_CHECKPOINT_TIMEOUT,
     },
     test_type::TestType::{self, *},
-};
-
-use crate::common::cached_state::{
-    wait_for_state_version_message, wait_for_state_version_upgrade, DATABASE_FORMAT_UPGRADE_IS_LONG,
 };
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
