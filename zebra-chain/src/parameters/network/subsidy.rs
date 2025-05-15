@@ -290,6 +290,7 @@ const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
 
 /// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
 /// in [ZIP-1015](https://zips.z.cash/zip-1015).
+// TODO: Update this when defining activation heights for NU6.1
 const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
 
 /// The post-NU6 funding stream height range on Mainnet
@@ -444,6 +445,7 @@ pub const FUNDING_STREAM_MG_ADDRESSES_MAINNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+// TODO: Update this to 48 when defining a Mainnet activation height for NU6.1
 pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_MAINNET: usize = 12;
 
 /// List of addresses for the Major Grants post-NU6 funding stream on Mainnet administered by the Financial Privacy Fund (FPF).
@@ -526,6 +528,7 @@ pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
+// TODO: Update this when defining a Testnet activation height for NU6.1
 pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
 
 /// List of addresses for the Major Grants post-NU6 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
