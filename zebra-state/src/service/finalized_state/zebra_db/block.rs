@@ -338,7 +338,7 @@ impl ZebraDb {
     /// Returns an iterator of all raw [`Transaction`]s in the provided range
     /// of [`TransactionLocation`]s in finalized state.
     #[allow(clippy::unwrap_in_result)]
-    fn raw_transactions_by_location_range<R>(
+    pub fn raw_transactions_by_location_range<R>(
         &self,
         range: R,
     ) -> impl Iterator<Item = (TransactionLocation, RawBytes)> + '_
