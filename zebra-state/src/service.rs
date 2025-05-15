@@ -45,6 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
+    error::WritesFrozenError,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -895,8 +896,7 @@ impl Service<Request> for StateService {
             | Request::CommitCheckpointVerifiedBlock(_)
                 if self.read_service.db.should_freeze_writes() =>
             {
-                async move { Err("db writes are frozen until format upgrade is complete".into()) }
-                    .boxed()
+                async move { Err(WritesFrozenError.into()) }.boxed()
             }
 
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService

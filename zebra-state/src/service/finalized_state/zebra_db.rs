@@ -115,9 +115,7 @@ impl ZebraDb {
         // A boolean flag indicating whether database writes should be frozen until
         // some db format upgrade is complete. Should be unused and false in read-only mode.
         let (should_freeze_block_commits_sender, should_freeze_block_commits_receiver) =
-            tokio::sync::watch::channel(
-                !(debug_skip_format_upgrades || (cfg!(test) && config.ephemeral)),
-            );
+            tokio::sync::watch::channel(!(debug_skip_format_upgrades || config.ephemeral));
 
         let disk_version = database_format_version_on_disk(
             config,
