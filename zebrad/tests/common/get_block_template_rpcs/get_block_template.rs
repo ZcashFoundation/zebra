@@ -5,14 +5,11 @@
 //!
 //! After finishing the sync, it will call getblocktemplate.
 
-use crate::common::{
-    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
-    sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
-    test_type::TestType,
-};
+use std::time::Duration;
+
 use color_eyre::eyre::{eyre, Context, Result};
 use futures::FutureExt;
-use std::time::Duration;
+
 use zebra_chain::{
     parameters::{Network, NetworkUpgrade},
     serialization::ZcashSerialize,
@@ -21,6 +18,12 @@ use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::methods::types::get_block_template::{
     proposal::proposal_block_from_template, GetBlockTemplate, JsonParameters, ProposalResponse,
     TimeSource,
+};
+
+use crate::common::{
+    launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
+    sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
+    test_type::TestType,
 };
 
 /// Delay between getting block proposal results and cancelling long poll requests.

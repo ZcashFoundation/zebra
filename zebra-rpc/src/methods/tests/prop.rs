@@ -1,28 +1,19 @@
 //! Randomised property tests for RPC methods.
 
-use crate::methods::{
-    self,
-    types::{
-        get_blockchain_info,
-        get_raw_mempool::{GetRawMempool, MempoolObject},
-    },
-};
-
-use super::super::{
-    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
-};
-use futures::{join, FutureExt, TryFutureExt};
-use hex::{FromHex, ToHex};
-use jsonrpsee_types::{ErrorCode, ErrorObject};
-use proptest::{collection::vec, prelude::*};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     sync::Arc,
 };
+
+use futures::{join, FutureExt, TryFutureExt};
+use hex::{FromHex, ToHex};
+use jsonrpsee_types::{ErrorCode, ErrorObject};
+use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::buffer::Buffer;
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
@@ -40,6 +31,18 @@ use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 use zebra_test::mock_service::MockService;
+
+use crate::methods::{
+    self,
+    types::{
+        get_blockchain_info,
+        get_raw_mempool::{GetRawMempool, MempoolObject},
+    },
+};
+
+use super::super::{
+    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
+};
 
 proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.

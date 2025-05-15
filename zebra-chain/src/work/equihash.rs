@@ -2,7 +2,7 @@
 
 use std::{fmt, io};
 
-use hex::ToHex;
+use hex::{FromHex, FromHexError, ToHex};
 use serde_big_array::BigArray;
 
 use crate::{
@@ -284,5 +284,14 @@ impl ToHex for Solution {
 
     fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
         (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for Solution {
+    type Error = FromHexError;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let bytes = Vec::from_hex(hex)?;
+        Solution::from_bytes(&bytes).map_err(|_| FromHexError::InvalidStringLength)
     }
 }

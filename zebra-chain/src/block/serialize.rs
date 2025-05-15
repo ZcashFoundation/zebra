@@ -4,6 +4,7 @@ use std::{borrow::Borrow, io};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
+use hex::{FromHex, FromHexError};
 
 use crate::{
     block::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header},
@@ -192,5 +193,14 @@ impl AsRef<[u8]> for SerializedBlock {
 impl From<Vec<u8>> for SerializedBlock {
     fn from(bytes: Vec<u8>) -> Self {
         Self { bytes }
+    }
+}
+
+impl FromHex for SerializedBlock {
+    type Error = FromHexError;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let bytes = Vec::from_hex(hex)?;
+        Ok(SerializedBlock { bytes })
     }
 }

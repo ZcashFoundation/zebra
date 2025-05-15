@@ -2,7 +2,7 @@
 
 use std::{fmt, io};
 
-use hex::ToHex;
+use hex::{FromHex, FromHexError, ToHex};
 
 use crate::serialization::{
     zcash_serialize_bytes, SerializationError, ZcashDeserialize, ZcashSerialize,
@@ -73,6 +73,15 @@ impl ToHex for Script {
 
     fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
         (&self).encode_hex_upper()
+    }
+}
+
+impl FromHex for Script {
+    type Error = FromHexError;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let bytes = Vec::from_hex(hex)?;
+        Ok(Script::new(&bytes))
     }
 }
 

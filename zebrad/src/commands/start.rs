@@ -73,8 +73,22 @@
 //!
 //! Some of the diagnostic features are optional, and need to be enabled at compile-time.
 
-#[cfg(feature = "internal-miner")]
-use crate::components;
+use std::sync::Arc;
+
+use abscissa_core::{config, Command, FrameworkError};
+use color_eyre::eyre::{eyre, Report};
+use futures::FutureExt;
+use tokio::{pin, select, sync::oneshot};
+use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
+use tracing_futures::Instrument;
+
+use zebra_chain::block::genesis::regtest_genesis_block;
+use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
+use zebra_rpc::{
+    methods::{types::submit_block::SubmitBlockChannel, RpcImpl},
+    server::RpcServer,
+};
+
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},
     components::{
@@ -87,19 +101,9 @@ use crate::{
     config::ZebradConfig,
     prelude::*,
 };
-use abscissa_core::{config, Command, FrameworkError};
-use color_eyre::eyre::{eyre, Report};
-use futures::FutureExt;
-use std::sync::Arc;
-use tokio::{pin, select, sync::oneshot};
-use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
-use tracing_futures::Instrument;
-use zebra_chain::block::genesis::regtest_genesis_block;
-use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
-use zebra_rpc::{
-    methods::{types::submit_block::SubmitBlockChannel, RpcImpl},
-    server::RpcServer,
-};
+
+#[cfg(feature = "internal-miner")]
+use crate::components;
 
 /// Start the application (default command)
 #[derive(Command, Debug, Default, clap::Parser)]

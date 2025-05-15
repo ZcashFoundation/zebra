@@ -6,13 +6,15 @@
 //!   <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 //! - move common code into zebra-chain or zebra-node-services and remove the RPC dependency.
 
+use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
+
 use color_eyre::Report;
 use futures::{stream::FuturesUnordered, StreamExt};
-use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
 use tower::Service;
 use tracing::{Instrument, Span};
+
 use zebra_chain::{
     block::{self, Block, Height},
     chain_sync_status::ChainSyncStatus,
