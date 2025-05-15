@@ -25,9 +25,9 @@ const NETWORK_UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     Canopy,
     Nu5,
     Nu6,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "zebra-test"))]
     Nu6_1,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "zebra-test"))]
     Nu7,
 ];
 
@@ -257,9 +257,9 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
-    #[cfg(test)]
+    #[cfg(any(test, feature = "zebra-test"))]
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
-    #[cfg(test)]
+    #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0x77190ad8)),
 ];
 
