@@ -9,10 +9,7 @@
 //! [`crate::constants::state_database_format_version_in_code()`] must be incremented
 //! each time the database format (column, serialization, etc) changes.
 
-use std::{
-    path::Path,
-    sync::{atomic::AtomicBool, Arc},
-};
+use std::{path::Path, sync::Arc};
 
 use crossbeam_channel::bounded;
 use semver::Version;
@@ -81,7 +78,7 @@ pub struct ZebraDb {
 
     /// A boolean flag indicating whether database writes should be frozen until
     /// some db format upgrade is complete.
-    should_freeze_block_commits: Arc<AtomicBool>,
+    should_freeze_block_commits_receiver: tokio::sync::watch::Receiver<bool>,
 
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
@@ -107,9 +104,10 @@ impl ZebraDb {
     ) -> ZebraDb {
         // A boolean flag indicating whether database writes should be frozen until
         // some db format upgrade is complete. Should be unused and false in read-only mode.
-        let should_freeze_block_commits: Arc<AtomicBool> = Arc::new(AtomicBool::new(
-            !(read_only || config.ephemeral || debug_skip_format_upgrades || cfg!(test)),
-        ));
+        let (should_freeze_block_commits_sender, should_freeze_block_commits_receiver) =
+            tokio::sync::watch::channel(
+                !(read_only || config.ephemeral || debug_skip_format_upgrades || cfg!(test)),
+            );
 
         let disk_version = database_format_version_on_disk(
             config,
@@ -145,7 +143,7 @@ impl ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
-            should_freeze_block_commits: should_freeze_block_commits.clone(),
+            should_freeze_block_commits_receiver,
             // After the database directory is created, a newly created database temporarily
             // changes to the default database version. Then we set the correct version in the
             // upgrade thread. We need to do the version change in this order, because the version
@@ -160,7 +158,7 @@ impl ZebraDb {
             ),
         };
 
-        db.spawn_format_change(format_change, should_freeze_block_commits);
+        db.spawn_format_change(format_change, should_freeze_block_commits_sender);
 
         db
     }
@@ -169,7 +167,7 @@ impl ZebraDb {
     pub fn spawn_format_change(
         &mut self,
         format_change: DbFormatChange,
-        should_freeze_block_commits: Arc<AtomicBool>,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
     ) {
         if self.debug_skip_format_upgrades {
             return;
@@ -189,7 +187,7 @@ impl ZebraDb {
         let format_change_handle = format_change.spawn_format_change(
             upgrade_db,
             initial_tip_height,
-            should_freeze_block_commits,
+            should_freeze_block_commits_sender,
         );
 
         self.format_change_handle = Some(format_change_handle);
@@ -217,8 +215,7 @@ impl ZebraDb {
 
     /// Returns true if db writes should be suspended or frozen.
     pub fn should_freeze_writes(&self) -> bool {
-        self.should_freeze_block_commits
-            .load(std::sync::atomic::Ordering::SeqCst)
+        *self.should_freeze_block_commits_receiver.borrow()
     }
 
     /// Returns the format version of this database on disk.

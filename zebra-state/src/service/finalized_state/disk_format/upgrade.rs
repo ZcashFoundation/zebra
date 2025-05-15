@@ -2,7 +2,7 @@
 
 use std::{
     cmp::Ordering,
-    sync::{atomic::AtomicBool, Arc},
+    sync::Arc,
     thread::{self, JoinHandle},
 };
 
@@ -299,7 +299,7 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
-        should_freeze_block_commits: Arc<AtomicBool>,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
     ) -> DbFormatChangeThreadHandle {
         // # Correctness
         //
@@ -313,7 +313,7 @@ impl DbFormatChange {
                 self.format_change_run_loop(
                     db,
                     initial_tip_height,
-                    should_freeze_block_commits,
+                    should_freeze_block_commits_sender,
                     cancel_receiver,
                 )
             })
@@ -338,13 +338,13 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
-        should_freeze_block_commits: Arc<AtomicBool>,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
         cancel_receiver: Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         self.run_format_change_or_check(
             &db,
             initial_tip_height,
-            Some(should_freeze_block_commits),
+            Some(should_freeze_block_commits_sender),
             &cancel_receiver,
         )?;
 
@@ -377,13 +377,13 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
-        should_freeze_block_commits: Option<Arc<AtomicBool>>,
+        should_freeze_block_commits_sender: Option<tokio::sync::watch::Sender<bool>>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        match (self, should_freeze_block_commits.clone()) {
+        match (self, should_freeze_block_commits_sender.clone()) {
             (Upgrade { .. }, _) | (_, None) => {}
             (_, Some(should_freeze_block_commits)) => {
-                should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst)
+                let _ = should_freeze_block_commits.send(false);
             }
         };
 
@@ -392,7 +392,7 @@ impl DbFormatChange {
             Upgrade { .. } => self.apply_format_upgrade(
                 db,
                 initial_tip_height,
-                should_freeze_block_commits.expect("must be provided for upgrades"),
+                should_freeze_block_commits_sender.expect("must be provided for upgrades"),
                 cancel_receiver,
             )?,
 
@@ -537,7 +537,7 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
-        should_freeze_block_commits: Arc<AtomicBool>,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
@@ -559,7 +559,8 @@ impl DbFormatChange {
                 "marking empty database as upgraded"
             );
 
-            should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst);
+            // Ignore the error if all receivers have been dropped, Zebra is likely shutting down.
+            let _ = should_freeze_block_commits_sender.send(false);
             Self::mark_as_upgraded_to(db, newer_running_version);
 
             info!(
@@ -578,7 +579,7 @@ impl DbFormatChange {
         {
             Some(last_blocking_upgrade.version())
         } else {
-            should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst);
+            let _ = should_freeze_block_commits_sender.send(false);
             None
         };
 
@@ -606,14 +607,14 @@ impl DbFormatChange {
             );
 
             if Some(upgrade.version()) == last_blocking_version {
-                should_freeze_block_commits.store(false, std::sync::atomic::Ordering::SeqCst);
+                let _ = should_freeze_block_commits_sender.send(false);
             }
 
             Self::mark_as_upgraded_to(db, &upgrade.version());
         }
 
         assert!(
-            !should_freeze_block_commits.load(std::sync::atomic::Ordering::SeqCst),
+            !*should_freeze_block_commits_sender.subscribe().borrow(),
             "should always be false at this point"
         );
 

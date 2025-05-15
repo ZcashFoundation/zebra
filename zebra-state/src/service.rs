@@ -55,7 +55,7 @@ use crate::{
         watch_receiver::WatchReceiver,
     },
     BoxError, CheckpointVerifiedBlock, CloneError, Config, ReadRequest, ReadResponse, Request,
-    Response, SemanticallyVerifiedBlock, MAX_BLOCK_REORG_HEIGHT,
+    Response, SemanticallyVerifiedBlock,
 };
 
 pub mod block_iter;
@@ -470,9 +470,7 @@ impl StateService {
                 );
             }
 
-            if !self.read_service.db.should_freeze_writes() {
-                self.drain_finalized_queue_and_commit();
-            }
+            self.drain_finalized_queue_and_commit();
         } else {
             // We've finished committing checkpoint verified blocks to the finalized state,
             // so drop any repeated queued blocks, and return an error.
@@ -609,22 +607,6 @@ impl StateService {
         std::mem::drop(finalized);
     }
 
-    /// Returns true if non-finalized block writes should be frozen to avoid writing to the db
-    /// while db writes should be frozen.
-    fn should_freeze_non_finalized_writes(&self) -> bool {
-        // If db writes should be frozen, check that:
-        // - the best chain length is at least 2 blocks shorter than the `MAX_BLOCK_REORG_HEIGHT`, and
-        // - that there is only 1 chain in the non-finalized state to avoid an edge case where a block
-        //   is committed to some chain that is not at least 2 blocks shorter than `MAX_BLOCK_REORG_HEIGHT`,
-        //   and is not the best chain, but which becomes the best chain once that block is committed.
-        self.read_service.db.should_freeze_writes()
-            && !(self
-                .read_service
-                .latest_best_chain()
-                .is_none_or(|c| (c.len().saturating_add(1) as u32) < MAX_BLOCK_REORG_HEIGHT)
-                && self.read_service.latest_non_finalized_state().chain_count() == 1)
-    }
-
     /// Queue a semantically verified block for contextual verification and check if any queued
     /// blocks are ready to be verified and committed to the state.
     ///
@@ -706,20 +688,16 @@ impl StateService {
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
             self.non_finalized_block_write_sent_hashes
                 .can_fork_chain_at_hashes = true;
-            if !self.should_freeze_non_finalized_writes() {
-                // Send blocks from non-finalized queue
-                self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
-                // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
-                self.clear_finalized_block_queue(
-                    "already finished committing checkpoint verified blocks: dropped duplicate block, \
+            // Send blocks from non-finalized queue
+            self.send_ready_non_finalized_queued(self.finalized_block_write_last_sent_hash);
+            // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
+            self.clear_finalized_block_queue(
+                "already finished committing checkpoint verified blocks: dropped duplicate block, \
                     block is already committed to the state",
-                );
-            }
+            );
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
-        } else if self.finalized_block_write_sender.is_none()
-            && !self.should_freeze_non_finalized_writes()
-        {
+        } else if self.finalized_block_write_sender.is_none() {
             // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
             self.send_ready_non_finalized_queued(parent_hash);
 
@@ -913,6 +891,14 @@ impl Service<Request> for StateService {
         let span = Span::current();
 
         match req {
+            Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitCheckpointVerifiedBlock(_)
+                if self.read_service.db.should_freeze_writes() =>
+            {
+                async move { Err("db writes are frozen until format upgrade is complete".into()) }
+                    .boxed()
+            }
+
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             Request::CommitSemanticallyVerifiedBlock(semantically_verified) => {
