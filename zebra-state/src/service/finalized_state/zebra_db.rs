@@ -102,12 +102,20 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> ZebraDb {
+        // Format upgrades try to write to the database, so we always skip them if `read_only` is
+        // `true`.
+        //
+        // We allow skipping the upgrades by the scanner because it doesn't support them yet and we
+        // also allow skipping them when we are running tests.
+        //
+        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
+        let debug_skip_format_upgrades = read_only
+            || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
+
         // A boolean flag indicating whether database writes should be frozen until
         // some db format upgrade is complete. Should be unused and false in read-only mode.
         let (should_freeze_block_commits_sender, should_freeze_block_commits_receiver) =
-            tokio::sync::watch::channel(
-                !(read_only || config.ephemeral || debug_skip_format_upgrades || cfg!(test)),
-            );
+            tokio::sync::watch::channel(!debug_skip_format_upgrades);
 
         let disk_version = database_format_version_on_disk(
             config,
@@ -127,16 +135,6 @@ impl ZebraDb {
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
-
-        // Format upgrades try to write to the database, so we always skip them if `read_only` is
-        // `true`.
-        //
-        // We allow skipping the upgrades by the scanner because it doesn't support them yet and we
-        // also allow skipping them when we are running tests.
-        //
-        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
-        let debug_skip_format_upgrades = read_only
-            || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {
