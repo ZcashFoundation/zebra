@@ -42,6 +42,16 @@ pub enum Address {
         /// hash of a SHA-256 hash of a compressed ECDSA key encoding.
         pub_key_hash: [u8; 20],
     },
+
+    /// Transparent-Source-Only Address.
+    ///
+    /// <https://zips.z.cash/zip-0320.html>
+    Tex {
+        /// Production, test, or other network
+        network_kind: NetworkKind,
+        /// 20 bytes specifying the validating key hash.
+        validating_key_hash: [u8; 20],
+    },
 }
 
 impl fmt::Debug for Address {
@@ -63,6 +73,13 @@ impl fmt::Debug for Address {
                 .field("network_kind", network_kind)
                 .field("pub_key_hash", &hex::encode(pub_key_hash))
                 .finish(),
+            Address::Tex {
+                network_kind,
+                validating_key_hash,
+            } => debug_struct
+                .field("network_kind", network_kind)
+                .field("validating_key_hash", &hex::encode(validating_key_hash))
+                .finish(),
         }
     }
 }
@@ -80,11 +97,41 @@ impl std::str::FromStr for Address {
     type Err = SerializationError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let result = &bs58::decode(s).with_check(None).into_vec();
+        // Try Base58Check (prefixes: t1, t3, tm, t2)
+        if let Ok(data) = bs58::decode(s).with_check(None).into_vec() {
+            return Address::zcash_deserialize(&data[..]);
+        }
 
-        match result {
-            Ok(bytes) => Self::zcash_deserialize(&bytes[..]),
-            Err(_) => Err(SerializationError::Parse("t-addr decoding error")),
+        // Try Bech32 (prefixes: tex, textest)
+        let (hrp, payload) =
+            bech32::decode(s).map_err(|_| SerializationError::Parse("invalid Bech32 encoding"))?;
+
+        // We can’t meaningfully call `Address::zcash_deserialize` for Bech32 addresses, because
+        // that method is explicitly reading two binary prefix bytes (the Base58Check version) + 20 hash bytes.
+        // Bech32 textual addresses carry no such binary "version" on the wire, so there’s nothing in the
+        // reader for zcash_deserialize to match.
+
+        // Instead, we deserialize the Bech32 address here:
+
+        if payload.len() != 20 {
+            return Err(SerializationError::Parse("unexpected payload length"));
+        }
+
+        let mut hash_bytes = [0u8; 20];
+        hash_bytes.copy_from_slice(&payload);
+
+        match hrp.as_str() {
+            zcash_primitives::constants::mainnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
+                network_kind: NetworkKind::Mainnet,
+                validating_key_hash: hash_bytes,
+            }),
+
+            zcash_primitives::constants::testnet::HRP_TEX_ADDRESS => Ok(Address::Tex {
+                network_kind: NetworkKind::Testnet,
+                validating_key_hash: hash_bytes,
+            }),
+
+            _ => Err(SerializationError::Parse("unknown Bech32 HRP")),
         }
     }
 }
@@ -105,6 +152,13 @@ impl ZcashSerialize for Address {
             } => {
                 writer.write_all(&network_kind.b58_pubkey_address_prefix())?;
                 writer.write_all(pub_key_hash)?
+            }
+            Address::Tex {
+                network_kind,
+                validating_key_hash,
+            } => {
+                writer.write_all(&network_kind.tex_address_prefix())?;
+                writer.write_all(validating_key_hash)?
             }
         }
 
@@ -172,6 +226,7 @@ impl Address {
         match self {
             Address::PayToScriptHash { network_kind, .. } => *network_kind,
             Address::PayToPublicKeyHash { network_kind, .. } => *network_kind,
+            Address::Tex { network_kind, .. } => *network_kind,
         }
     }
 
@@ -189,11 +244,17 @@ impl Address {
         match *self {
             Address::PayToScriptHash { script_hash, .. } => script_hash,
             Address::PayToPublicKeyHash { pub_key_hash, .. } => pub_key_hash,
+            Address::Tex {
+                validating_key_hash,
+                ..
+            } => validating_key_hash,
         }
     }
 
     /// Given a transparent address (P2SH or a P2PKH), create a script that can be used in a coinbase
     /// transaction output.
+    ///
+    /// TEX addresses are not supported and return an empty script.
     pub fn create_script_from_address(&self) -> Script {
         let mut script_bytes = Vec::new();
 
@@ -214,9 +275,18 @@ impl Address {
                 script_bytes.push(OpCode::EqualVerify as u8);
                 script_bytes.push(OpCode::CheckSig as u8);
             }
+            Address::Tex { .. } => {}
         };
 
         Script::new(&script_bytes)
+    }
+
+    /// Create a TEX address from the given network kind and validating key hash.
+    pub fn from_tex(network_kind: NetworkKind, validating_key_hash: [u8; 20]) -> Self {
+        Self::Tex {
+            network_kind,
+            validating_key_hash,
+        }
     }
 }
 

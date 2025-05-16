@@ -83,6 +83,7 @@ secp256k1 = { workspace = true, features = ["serde"] }
 sha2 = { workspace = true, features = ["compress"] }
 uint = { workspace = true }
 x25519-dalek = { workspace = true, features = ["serde"] }
+bech32 = { workspace = true }
 
 # ECC deps
 halo2 = { package = "halo2_proofs", version = "0.3.0" }

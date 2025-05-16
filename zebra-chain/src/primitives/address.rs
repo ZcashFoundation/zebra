@@ -129,6 +129,16 @@ impl zcash_address::TryFromAddress for Address {
             transparent,
         })
     }
+
+    fn try_from_tex(
+        network: NetworkType,
+        data: [u8; 20],
+    ) -> Result<Self, zcash_address::ConversionError<Self::Error>> {
+        Ok(Self::Transparent(transparent::Address::from_tex(
+            network.into(),
+            data,
+        )))
+    }
 }
 
 impl Address {
