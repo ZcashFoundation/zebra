@@ -27,7 +27,6 @@ indexer-rpcs = [
     "tonic-reflection",
     "prost",
     "tokio-stream",
-    "zebra-state/indexer"
 ]
 
 # Production features that activate extra dependencies, or extra features in
