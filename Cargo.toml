@@ -223,4 +223,4 @@ panic = "abort"
 lto = "thin"
 
 [patch.crates-io]
-zcash_script = { path = "/home/conrado/zfnd/zcash_script" }
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "d72cb63dd02dae1a9798cf8d3a78e24bc3006791" }

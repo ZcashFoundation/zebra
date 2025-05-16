@@ -55,6 +55,23 @@ impl From<zcash_script::Error> for Error {
     }
 }
 
+/// Get the interpreter according to the feature flag
+fn get_interpreter(
+    sighash: zcash_script::SighashCalculator,
+    lock_time: u32,
+    is_final: bool,
+    flags: zcash_script::VerificationFlags,
+) -> impl ZcashScript + use<'_> {
+    #[cfg(feature = "comparison-interpreter")]
+    return zcash_script::cxx_rust_comparison_interpreter(sighash, lock_time, is_final, flags);
+    #[cfg(not(feature = "comparison-interpreter"))]
+    zcash_script::CxxInterpreter {
+        sighash,
+        lock_time,
+        is_final,
+    }
+}
+
 /// A preprocessed Transaction which can be used to verify scripts within said
 /// Transaction.
 #[derive(Debug)]
@@ -139,12 +156,7 @@ impl CachedFfiTransaction {
                     .0,
             )
         };
-        let interpreter = zcash_script::cxx_rust_comparison_interpreter(
-            &calculate_sighash,
-            lock_time,
-            is_final,
-            flags,
-        );
+        let interpreter = get_interpreter(&calculate_sighash, lock_time, is_final, flags);
         interpreter
             .verify_callback(script_pub_key, signature_script, flags)
             .map_err(Error::from)
@@ -158,7 +170,7 @@ impl CachedFfiTransaction {
 
         // Create a dummy interpreter since these inputs are not used to count
         // the sigops
-        let interpreter = zcash_script::cxx_rust_comparison_interpreter(
+        let interpreter = get_interpreter(
             &|_, _| None,
             0,
             true,
