@@ -257,12 +257,16 @@ pub struct ScriptPubKey {
     hex: Script,
     /// The required sigs.
     #[serde(rename = "reqSigs")]
-    req_sigs: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    req_sigs: Option<u32>,
     /// The type, eg 'pubkeyhash'.
     // #9330: The `type` field is not currently populated.
     r#type: String,
     /// The addresses.
-    addresses: Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    addresses: Option<Vec<String>>,
 }
 
 /// The scriptSig of a transaction input.
@@ -434,19 +438,30 @@ impl TransactionObject {
                     .iter()
                     .enumerate()
                     .map(|output| {
-                        let addresses = match output.1.address(network) {
-                            Some(address) => vec![address.to_string()],
-                            None => vec![],
-                        };
+                        // Parse the scriptPubKey to find destination addresses.
+                        let (addresses, req_sigs) = match output.1.address(network) {
+                            // TODO: For multisig scripts, this should populate `addresses`
+                            // with the pubkey IDs and `req_sigs` with the number of
+                            // signatures required to spend.
+
+                            // For other standard destinations, `addresses` is populated
+                            // with a single value and `req_sigs` is set to 1.
+                            Some(address) => Some((vec![address.to_string()], 1)),
+                            // For null-data or nonstandard outputs, both are omitted.
+                            None => None,
+                        }
+                        .unzip();
 
                         Output {
                             value: Zec::from(output.1.value).lossy_zec(),
                             value_zat: output.1.value.zatoshis(),
                             n: output.0 as u32,
                             script_pub_key: ScriptPubKey {
+                                // TODO: Fill this out.
                                 asm: "".to_string(),
                                 hex: output.1.lock_script.clone(),
-                                req_sigs: addresses.len() as u32,
+                                req_sigs,
+                                // TODO: Fill this out.
                                 r#type: "".to_string(),
                                 addresses,
                             },
