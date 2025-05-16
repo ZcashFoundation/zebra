@@ -242,7 +242,7 @@ proptest-derive = { workspace = true, optional = true }
 console-subscriber = { workspace = true, optional = true }
 
 [build-dependencies]
-vergen = { workspace = true, features = ["cargo", "git", "git2", "rustc"] }
+vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
 # test feature lightwalletd-grpc-tests
 tonic-build = { workspace = true, optional = true }
