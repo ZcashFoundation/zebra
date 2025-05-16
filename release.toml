@@ -1,5 +1,5 @@
 # Only allow releases from the main branch
-allow-branch = [ 'main' ]
+allow-branch = [ 'main', 'hotfix-metrics' ]
 
 # TODO:
 # configure all zebra-* crates with a shared version,

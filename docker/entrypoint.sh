@@ -58,6 +58,13 @@ $( [[ -n ${ZEBRA_COOKIE_DIR} ]] && echo "cookie_dir = \"${ZEBRA_COOKIE_DIR}\"" )
 SUB_EOF
 )
 
+$( ( ! [[ " ${FEATURES} " =~ " prometheus " ]] ) && cat <<-SUB_EOF
+
+[metrics]
+# endpoint_addr = "${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
+SUB_EOF
+)
+
 $( [[ " ${FEATURES} " =~ " prometheus " ]] && cat <<-SUB_EOF
 
 [metrics]
