@@ -148,7 +148,7 @@ tracing-journald = "0.3.0"
 tracing-subscriber = "0.3.19"
 tracing-test = "0.2.4"
 uint = "0.10.0"
-vergen = { version = "8.3.2", default-features = false }
+vergen-git2 = { version = "1.0.0", default-features = false }
 wagyu-zcash-parameters = "0.2.0"
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
