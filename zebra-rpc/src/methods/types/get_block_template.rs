@@ -5,30 +5,13 @@ pub mod parameters;
 pub mod proposal;
 pub mod zip317;
 
-pub use constants::{
-    CAPABILITIES_FIELD, DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
-    MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, MEMPOOL_LONG_POLL_INTERVAL, MUTABLE_FIELD,
-    NONCE_RANGE_FIELD, NOT_SYNCED_ERROR_CODE, ZCASHD_FUNDING_STREAM_ORDER,
-};
-pub use parameters::{GetBlockTemplateRequestMode, JsonParameters};
-pub use proposal::{ProposalResponse, TimeSource};
+use std::{collections::HashMap, fmt, iter, sync::Arc};
 
-use crate::{
-    config,
-    methods::{
-        types::{
-            default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
-            transaction::TransactionTemplate,
-        },
-        GetBlockHash,
-    },
-    server::error::OkOrError,
-};
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use std::{collections::HashMap, fmt, iter, sync::Arc};
 use tokio::sync::watch::{self, error::SendError};
 use tower::{Service, ServiceExt};
+
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
@@ -52,6 +35,26 @@ use zebra_consensus::{
 };
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
+
+use crate::{
+    config,
+    methods::{
+        types::{
+            default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
+            transaction::TransactionTemplate,
+        },
+        GetBlockHash,
+    },
+    server::error::OkOrError,
+};
+
+pub use constants::{
+    CAPABILITIES_FIELD, DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
+    MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, MEMPOOL_LONG_POLL_INTERVAL, MUTABLE_FIELD,
+    NONCE_RANGE_FIELD, NOT_SYNCED_ERROR_CODE, ZCASHD_FUNDING_STREAM_ORDER,
+};
+pub use parameters::{GetBlockTemplateRequestMode, JsonParameters};
+pub use proposal::{ProposalResponse, TimeSource};
 
 /// An alias to indicate that a usize value represents the depth of in-block dependencies of a
 /// transaction.

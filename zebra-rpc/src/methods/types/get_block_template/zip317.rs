@@ -6,16 +6,13 @@
 //! > when computing `size_target`, since there is no consensus requirement for this to be
 //! > exactly the same between implementations.
 
-#[cfg(test)]
-use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
-use crate::methods::{
-    get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
-};
+use std::collections::{HashMap, HashSet};
+
 use rand::{
     distributions::{Distribution, WeightedIndex},
     prelude::thread_rng,
 };
-use std::collections::{HashMap, HashSet};
+
 use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
@@ -26,8 +23,15 @@ use zebra_chain::{
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
 
+use crate::methods::{
+    get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
+};
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
 
 /// Used in the return type of [`select_mempool_transactions()`] for test compilations.
 #[cfg(test)]
