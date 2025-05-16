@@ -96,8 +96,10 @@ fn format_upgrades(
         Box::new(prune_trees::PruneTrees),
         Box::new(add_subtrees::AddSubtrees),
         Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
-        // Value balance upgrade
-        Box::new(no_migration::NoMigration::new(26, 0, 0)),
+        Box::new(no_migration::NoMigration::new(
+            "add value balance upgrade",
+            Version::new(26, 0, 0),
+        )),
         Box::new(add_balance_received::AddAddressBalanceReceived),
     ] as [Box<dyn DiskFormatUpgrade>; 5])
         .into_iter()

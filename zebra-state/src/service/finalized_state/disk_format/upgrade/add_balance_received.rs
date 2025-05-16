@@ -59,7 +59,7 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
                 tracing::info!("processing chunk {} of {num_chunks}", chunk_index + 1);
             }
 
-            let tx_loc_range = TransactionLocation::min_for_height(chunk_start_height(chunk_index))
+            let tx_loc_range = TransactionLocation::from_index(chunk_start_height(chunk_index), 1)
                 ..=TransactionLocation::max_for_height(chunk_start_height(chunk_index + 1));
 
             // Return early before reading from disk if the upgrade was cancelled.
