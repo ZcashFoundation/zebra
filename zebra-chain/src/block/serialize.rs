@@ -64,7 +64,7 @@ fn check_version(version: u32) -> Result<(), &'static str> {
 impl ZcashSerialize for Header {
     #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        check_version(self.version).map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
+        check_version(self.version).map_err(io::Error::other)?;
 
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
