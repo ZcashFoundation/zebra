@@ -55,7 +55,9 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
         // Read all of the transactions up to the initial tip height and tally the received balances by address.
         // Commit the received balances to disk in chunks of `NUM_BLOCKS_PER_CHUNK` blocks.
         for chunk_index in 0..num_chunks {
-            tracing::info!("processing chunk {} of {num_chunks}", chunk_index + 1);
+            if chunk_index % 100 == 0 {
+                tracing::info!("processing chunk {} of {num_chunks}", chunk_index + 1);
+            }
 
             let tx_loc_range = TransactionLocation::min_for_height(chunk_start_height(chunk_index))
                 ..=TransactionLocation::max_for_height(chunk_start_height(chunk_index + 1));
