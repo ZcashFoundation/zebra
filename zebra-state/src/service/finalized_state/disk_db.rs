@@ -918,10 +918,8 @@ impl DiskDb {
                 let mut cf_options = db_options.clone();
 
                 if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
-                    // TODO: Enable merging operands without an existing value and replace this with `set_merge_operator_associative()`.
-                    cf_options.set_merge_operator(
+                    cf_options.set_merge_operator_associative(
                         BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
-                        fetch_add_balance_and_received,
                         fetch_add_balance_and_received,
                     );
                 }

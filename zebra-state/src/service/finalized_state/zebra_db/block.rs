@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use itertools::Itertools;
 
 use zebra_chain::{
-    amount::{Amount, NonNegative},
+    amount::NonNegative,
     block::{self, Block, Height},
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -37,7 +37,7 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             block::TransactionLocation,
-            transparent::{AddressBalanceLocation, OutputLocation},
+            transparent::{AddressBalanceLocationChange, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FromDisk, RawBytes,
@@ -517,18 +517,15 @@ impl ZebraDb {
             .collect();
 
         // Get the current address balances, before the transactions in this block
-        let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
+        let address_balances: HashMap<transparent::Address, AddressBalanceLocationChange> =
             changed_addresses
                 .into_iter()
                 .filter_map(|address| {
-                    let mut addr_loc = self.address_balance_location(&address)?;
                     // # Correctness
                     //
-                    // Address balances are updated with a fetch_add merge operator, so the values should
-                    // represent the changes to the balance, not the final balance.
-                    *addr_loc.received_mut() = 0;
-                    *addr_loc.balance_mut() = Amount::zero();
-
+                    // Address balances are updated with the `fetch_add_balance_and_received` merge operator, so
+                    // the values must represent the changes to the balance, not the final balance.
+                    let addr_loc = self.address_balance_location(&address)?.into_new_change();
                     Some((address.clone(), addr_loc))
                 })
                 .collect();
@@ -605,7 +602,7 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
-        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocationChange>,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
