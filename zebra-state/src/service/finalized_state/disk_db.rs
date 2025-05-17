@@ -32,6 +32,10 @@ use crate::{
     Config,
 };
 
+use super::zebra_db::transparent::{
+    fetch_add_balance_and_received, BALANCE_BY_TRANSPARENT_ADDR,
+    BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+};
 // Doc-only imports
 #[allow(unused_imports)]
 use super::{TypedColumnFamily, WriteTypedBatch};
@@ -146,6 +150,14 @@ pub trait WriteDisk {
         K: IntoDisk + Debug,
         V: IntoDisk;
 
+    /// Serialize and merge the given key and value into a rocksdb column family,
+    /// merging with any existing `value` for `key`.
+    fn zs_merge<C, K, V>(&mut self, cf: &C, key: K, value: V)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+        V: IntoDisk;
+
     /// Remove the given key from a rocksdb column family, if it exists.
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
     where
@@ -179,6 +191,17 @@ impl WriteDisk for DiskWriteBatch {
         let key_bytes = key.as_bytes();
         let value_bytes = value.as_bytes();
         self.batch.put_cf(cf, key_bytes, value_bytes);
+    }
+
+    fn zs_merge<C, K, V>(&mut self, cf: &C, key: K, value: V)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+        V: IntoDisk,
+    {
+        let key_bytes = key.as_bytes();
+        let value_bytes = value.as_bytes();
+        self.batch.merge_cf(cf, key_bytes, value_bytes);
     }
 
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
@@ -216,6 +239,15 @@ where
         V: IntoDisk,
     {
         (*self).zs_insert(cf, key, value)
+    }
+
+    fn zs_merge<C, K, V>(&mut self, cf: &C, key: K, value: V)
+    where
+        C: rocksdb::AsColumnFamilyRef,
+        K: IntoDisk + Debug,
+        V: IntoDisk,
+    {
+        (*self).zs_merge(cf, key, value)
     }
 
     fn zs_delete<C, K>(&mut self, cf: &C, key: K)
@@ -824,9 +856,21 @@ impl DiskDb {
             .chain(column_families_in_code.iter().cloned())
             .unique()
             .collect::<Vec<_>>();
+
         column_families
             .into_iter()
-            .map(|cf_name| ColumnFamilyDescriptor::new(cf_name, db_options.clone()))
+            .map(|cf_name: String| {
+                let mut cf_options = db_options.clone();
+
+                if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
+                    cf_options.set_merge_operator_associative(
+                        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+                        fetch_add_balance_and_received,
+                    );
+                }
+
+                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
+            })
             .collect()
     }
 
@@ -870,7 +914,18 @@ impl DiskDb {
             .into_iter()
             .chain(column_families_in_code)
             .unique()
-            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
+            .map(|cf_name: String| {
+                let mut cf_options = db_options.clone();
+
+                if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
+                    cf_options.set_merge_operator_associative(
+                        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
+                        fetch_add_balance_and_received,
+                    );
+                }
+
+                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
+            });
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory

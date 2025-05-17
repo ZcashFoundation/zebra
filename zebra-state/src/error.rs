@@ -319,3 +319,11 @@ impl DuplicateNullifierError for orchard::Nullifier {
         }
     }
 }
+
+/// An error indicating that a block could not be committed to the state because writes are frozen.
+///
+/// This can happen if a blocking db format upgrade is in progress and the state won't be ready to
+/// update its global state until the upgrade is complete.
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[error("db writes are frozen until format upgrade is complete")]
+pub struct WritesFrozenError;

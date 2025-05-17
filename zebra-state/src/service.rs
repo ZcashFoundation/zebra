@@ -45,6 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
+    error::WritesFrozenError,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -693,7 +694,7 @@ impl StateService {
             // We've finished committing checkpoint verified blocks to finalized state, so drop any repeated queued blocks.
             self.clear_finalized_block_queue(
                 "already finished committing checkpoint verified blocks: dropped duplicate block, \
-                 block is already committed to the state",
+                    block is already committed to the state",
             );
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
@@ -891,6 +892,13 @@ impl Service<Request> for StateService {
         let span = Span::current();
 
         match req {
+            Request::CommitSemanticallyVerifiedBlock(_)
+            | Request::CommitCheckpointVerifiedBlock(_)
+                if self.read_service.db.should_freeze_writes() =>
+            {
+                async move { Err(WritesFrozenError.into()) }.boxed()
+            }
+
             // Uses non_finalized_state_queued_blocks and pending_utxos in the StateService
             // Accesses shared writeable state in the StateService, NonFinalizedState, and ZebraDb.
             Request::CommitSemanticallyVerifiedBlock(semantically_verified) => {
@@ -1715,20 +1723,20 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let balance = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
+                        let (balance, received) = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
                                 read::transparent_balance(
                                     non_finalized_state.best_chain().cloned(),
                                     &state.db,
                                     addresses,
                                 )
-                            },
-                        )?;
+                            })?;
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
 
-                        Ok(ReadResponse::AddressBalance(balance))
+                        Ok(ReadResponse::AddressBalance { balance, received })
                     })
                 })
                 .wait_for_panics()

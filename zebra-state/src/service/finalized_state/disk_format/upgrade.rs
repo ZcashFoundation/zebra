@@ -22,6 +22,7 @@ use DbFormatChange::*;
 
 use crate::service::finalized_state::ZebraDb;
 
+pub(crate) mod add_balance_received;
 pub(crate) mod add_subtrees;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
@@ -78,11 +79,16 @@ pub trait DiskFormatUpgrade {
     fn needs_migration(&self) -> bool {
         true
     }
+
+    /// Returns true if block commits should be paused until after this format upgrade has been applied.
+    fn should_freeze_block_commits(&self) -> bool {
+        false
+    }
 }
 
 fn format_upgrades(
     min_version: Option<Version>,
-) -> impl Iterator<Item = Box<dyn DiskFormatUpgrade>> {
+) -> impl DoubleEndedIterator<Item = Box<dyn DiskFormatUpgrade>> {
     let min_version = move || min_version.clone().unwrap_or(Version::new(0, 0, 0));
 
     // Note: Disk format upgrades must be run in order of database version.
@@ -90,9 +96,12 @@ fn format_upgrades(
         Box::new(prune_trees::PruneTrees),
         Box::new(add_subtrees::AddSubtrees),
         Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
-        // Value balance upgrade
-        Box::new(no_migration::NoMigration::new(26, 0, 0)),
-    ] as [Box<dyn DiskFormatUpgrade>; 4])
+        Box::new(no_migration::NoMigration::new(
+            "add value balance upgrade",
+            Version::new(26, 0, 0),
+        )),
+        Box::new(add_balance_received::AddAddressBalanceReceived),
+    ] as [Box<dyn DiskFormatUpgrade>; 5])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
@@ -292,6 +301,7 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
     ) -> DbFormatChangeThreadHandle {
         // # Correctness
         //
@@ -302,7 +312,12 @@ impl DbFormatChange {
         let span = Span::current();
         let update_task = thread::spawn(move || {
             span.in_scope(move || {
-                self.format_change_run_loop(db, initial_tip_height, cancel_receiver)
+                self.format_change_run_loop(
+                    db,
+                    initial_tip_height,
+                    should_freeze_block_commits_sender,
+                    cancel_receiver,
+                )
             })
         });
 
@@ -325,9 +340,15 @@ impl DbFormatChange {
         self,
         db: ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
         cancel_receiver: Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        self.run_format_change_or_check(&db, initial_tip_height, &cancel_receiver)?;
+        self.run_format_change_or_check(
+            &db,
+            initial_tip_height,
+            Some(should_freeze_block_commits_sender),
+            &cancel_receiver,
+        )?;
 
         let Some(debug_validity_check_interval) = db.config().debug_validity_check_interval else {
             return Ok(());
@@ -346,6 +367,7 @@ impl DbFormatChange {
             Self::check_new_blocks(&db).run_format_change_or_check(
                 &db,
                 initial_tip_height,
+                None,
                 &cancel_receiver,
             )?;
         }
@@ -357,11 +379,24 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits_sender: Option<tokio::sync::watch::Sender<bool>>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        match (self, should_freeze_block_commits_sender.clone()) {
+            (Upgrade { .. }, _) | (_, None) => {}
+            (_, Some(should_freeze_block_commits)) => {
+                let _ = should_freeze_block_commits.send(false);
+            }
+        };
+
         match self {
             // Perform any required upgrades, then mark the state as upgraded.
-            Upgrade { .. } => self.apply_format_upgrade(db, initial_tip_height, cancel_receiver)?,
+            Upgrade { .. } => self.apply_format_upgrade(
+                db,
+                initial_tip_height,
+                should_freeze_block_commits_sender.expect("must be provided for upgrades"),
+                cancel_receiver,
+            )?,
 
             NewlyCreated { .. } => {
                 Self::mark_as_newly_created(db);
@@ -504,6 +539,7 @@ impl DbFormatChange {
         &self,
         db: &ZebraDb,
         initial_tip_height: Option<Height>,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
         cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
         let Upgrade {
@@ -525,6 +561,8 @@ impl DbFormatChange {
                 "marking empty database as upgraded"
             );
 
+            // Ignore the error if all receivers have been dropped, Zebra is likely shutting down.
+            let _ = should_freeze_block_commits_sender.send(false);
             Self::mark_as_upgraded_to(db, newer_running_version);
 
             info!(
@@ -534,6 +572,17 @@ impl DbFormatChange {
             );
 
             return Ok(());
+        };
+
+        let last_blocking_version = if let Some(last_blocking_upgrade) =
+            format_upgrades(Some(older_disk_version.clone()))
+                .rev()
+                .find(|upgrade| upgrade.should_freeze_block_commits())
+        {
+            Some(last_blocking_upgrade.version())
+        } else {
+            let _ = should_freeze_block_commits_sender.send(false);
+            None
         };
 
         // Apply or validate format upgrades
@@ -558,8 +607,18 @@ impl DbFormatChange {
                 newer_running_version = ?upgrade.version(),
                 "Zebra automatically upgraded the database format"
             );
+
+            if Some(upgrade.version()) == last_blocking_version {
+                let _ = should_freeze_block_commits_sender.send(false);
+            }
+
             Self::mark_as_upgraded_to(db, &upgrade.version());
         }
+
+        assert!(
+            !*should_freeze_block_commits_sender.subscribe().borrow(),
+            "should always be false at this point"
+        );
 
         Ok(())
     }
