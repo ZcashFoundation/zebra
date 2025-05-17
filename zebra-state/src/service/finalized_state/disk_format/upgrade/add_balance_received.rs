@@ -4,12 +4,16 @@
 use std::collections::HashSet;
 
 use crossbeam_channel::{Receiver, TryRecvError};
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use semver::Version;
 
-use zebra_chain::block::Height;
+use zebra_chain::{block::Height, transaction::Transaction};
 
 use super::{CancelFormatChange, DiskFormatUpgrade};
-use crate::{service::finalized_state::ZebraDb, TransactionLocation};
+use crate::{
+    service::finalized_state::{disk_format::transparent::AddressBalanceLocationChange, ZebraDb},
+    DiskWriteBatch, FromDisk, TransactionLocation, WriteDisk,
+};
 
 /// How many blocks to read transactions from per chunk when migrating the db format to add
 /// received amounts by transparent address.
@@ -32,11 +36,63 @@ impl DiskFormatUpgrade for AddAddressBalanceReceived {
     #[allow(clippy::unwrap_in_result)]
     fn run(
         &self,
-        _initial_tip_height: Height,
-        _db: &ZebraDb,
-        _cancel_receiver: &Receiver<CancelFormatChange>,
+        initial_tip_height: Height,
+        db: &ZebraDb,
+        cancel_receiver: &Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
-        // TODO: Rewrite this using merges instead of inserts.
+        // TODO:
+        // - Mark upgrade progress in the database so we don't count the same outputs twice.
+        // - Merge this upgrade with the value pools / block info one, get ^ for free.
+
+        let network = db.network();
+        let balance_by_transparent_addr = db.address_balance_cf();
+        // TODO: Move 500k to constant if keeping this.
+        let (output_sender, output_receiver) = std::sync::mpsc::sync_channel(500_000);
+
+        let tx_loc_range =
+            TransactionLocation::MIN..=TransactionLocation::max_for_height(initial_tip_height);
+
+        // Return early before reading from disk if the upgrade was cancelled.
+        if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+            return Err(CancelFormatChange);
+        }
+
+        let db2 = db.clone();
+        rayon::spawn_fifo(move || {
+            db2.raw_transactions_by_location_range(tx_loc_range)
+                // Parse and process transactions and outputs in parallel
+                .par_bridge()
+                // Deserialize each transaction and iterate over its transparent outputs
+                .flat_map(|(_tx_loc, tx_bytes)| {
+                    Transaction::from_bytes(tx_bytes.raw_bytes())
+                        .outputs()
+                        .to_vec()
+                })
+                .for_each(|output| {
+                    if let Some(address) = output.address(&network) {
+                        output_sender
+                            .send((address, output.value().into()))
+                            .expect("must send output to channel");
+                    }
+                });
+        });
+
+        while let Ok((address, value)) = output_receiver.recv() {
+            // Return early before reading from disk if the upgrade was cancelled.
+            if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
+                return Err(CancelFormatChange);
+            }
+
+            // Update the value on disk.
+            let mut batch = DiskWriteBatch::new();
+            batch.zs_merge(
+                balance_by_transparent_addr,
+                address,
+                AddressBalanceLocationChange::new_from_received(value),
+            );
+            db.write_batch(batch).expect("should write batch");
+        }
+
         Ok(())
     }
 

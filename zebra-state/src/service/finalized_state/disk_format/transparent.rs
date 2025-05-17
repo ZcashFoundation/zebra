@@ -263,6 +263,17 @@ impl AddressBalanceLocationChange {
         }
     }
 
+    /// Creates a new [`AddressBalanceLocationChange`] with a dummy location.
+    ///
+    /// The returned value has a zero initial balance and the provided received balance.
+    pub fn new_from_received(received: u64) -> AddressBalanceLocationChange {
+        AddressBalanceLocationChange {
+            balance: Amount::zero(),
+            received,
+            location: AddressLocation::from_usize(Height(0), 0, 0),
+        }
+    }
+
     /// Returns the current balance delta for the address.
     pub fn balance(&self) -> Amount<NegativeAllowed> {
         self.balance
@@ -279,6 +290,7 @@ impl AddressBalanceLocationChange {
     }
 
     /// Updates the current balance by adding the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
     pub fn receive_output(
         &mut self,
         unspent_output: &transparent::Output,
@@ -294,6 +306,7 @@ impl AddressBalanceLocationChange {
     }
 
     /// Updates the current balance by subtracting the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
     pub fn spend_output(
         &mut self,
         spent_output: &transparent::Output,
