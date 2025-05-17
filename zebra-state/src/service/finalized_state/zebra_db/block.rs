@@ -19,7 +19,7 @@ use chrono::{DateTime, Utc};
 use itertools::Itertools;
 
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{Amount, NonNegative},
     block::{self, Block, Height},
     orchard,
     parallel::tree::NoteCommitmentTrees,
@@ -521,7 +521,15 @@ impl ZebraDb {
             changed_addresses
                 .into_iter()
                 .filter_map(|address| {
-                    Some((address.clone(), self.address_balance_location(&address)?))
+                    let mut addr_loc = self.address_balance_location(&address)?;
+                    // # Correctness
+                    //
+                    // Address balances are updated with a fetch_add merge operator, so the values should
+                    // represent the changes to the balance, not the final balance.
+                    *addr_loc.received_mut() = 0;
+                    *addr_loc.balance_mut() = Amount::zero();
+
+                    Some((address.clone(), addr_loc))
                 })
                 .collect();
 

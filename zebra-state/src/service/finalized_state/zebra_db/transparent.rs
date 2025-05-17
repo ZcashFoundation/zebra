@@ -39,15 +39,44 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError,
+    BoxError, FromDisk, IntoDisk,
 };
 
 use super::super::TypedColumnFamily;
 
 /// The name of the transaction hash by spent outpoints column family.
-///
-/// This constant should be used so the compiler can detect typos.
 pub const TX_LOC_BY_SPENT_OUT_LOC: &str = "tx_loc_by_spent_out_loc";
+
+/// The name of the [balance](AddressBalanceLocation) by transparent address column family.
+pub const BALANCE_BY_TRANSPARENT_ADDR: &str = "balance_by_transparent_addr";
+
+/// The name of the [`BALANCE_BY_TRANSPARENT_ADDR`] column family's merge operator
+pub const BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP: &str = "fetch_add_balance_and_received";
+
+/// A RocksDB merge operator for the [`BALANCE_BY_TRANSPARENT_ADDR`] column family.
+pub fn fetch_add_balance_and_received(
+    _: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &rocksdb::MergeOperands,
+) -> Option<Vec<u8>> {
+    // # Correctness
+    //
+    // Merge operands are ordered, but may be combined without an existing value in partial merges, so
+    // we may need to return None here if that's not possible to use a full merge instead.
+    existing_val
+        .into_iter()
+        .chain(operands)
+        .map(AddressBalanceLocation::from_bytes)
+        .map(AddressBalanceLocation::into_raw_parts)
+        .reduce(
+            // TODO: Remove the constraint on `balance: Amount` and use the std::ops::Add impl here.
+            |(a_balance, a_received, a_location), (b_balance, b_received, _)| {
+                (a_balance + b_balance, a_received + b_received, a_location)
+            },
+        )
+        .and_then(AddressBalanceLocation::from_raw_parts)
+        .map(|address_balance_location| address_balance_location.as_bytes().to_vec())
+}
 
 /// The type for reading value pools from the database.
 ///
@@ -80,7 +109,7 @@ impl ZebraDb {
 
     /// Returns a handle to the `balance_by_transparent_addr` RocksDB column family.
     pub fn address_balance_cf(&self) -> &ColumnFamily {
-        self.db.cf_handle("balance_by_transparent_addr").unwrap()
+        self.db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap()
     }
 
     /// Returns the [`AddressBalanceLocation`] for a [`transparent::Address`],
@@ -562,11 +591,13 @@ impl DiskWriteBatch {
             if let Some(sending_address) = sending_address {
                 let address_balance_location = address_balances
                     .get_mut(&sending_address)
+                    // TODO: Sending address could be missing now that it's only looking at the diff between this block and the previous one.
                     .expect("spent outputs must already have an address balance");
 
                 // Update the address balance by subtracting this UTXO's value, in memory.
                 address_balance_location
                     .spend_output(spent_output)
+                    // TODO: Balance could be negative now that it's only looking at the diff between this block and the previous one.
                     .expect("balance underflow already checked");
 
                 // Delete the link from the AddressLocation to the spent OutputLocation in the database.
@@ -669,12 +700,12 @@ impl DiskWriteBatch {
         db: &DiskDb,
         address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
-        let balance_by_transparent_addr = db.cf_handle("balance_by_transparent_addr").unwrap();
+        let balance_by_transparent_addr = db.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
 
         // Update all the changed address balances in the database.
         for (address, address_balance_location) in address_balances.into_iter() {
             // Some of these balances are new, and some are updates
-            self.zs_insert(
+            self.zs_merge(
                 &balance_by_transparent_addr,
                 address,
                 address_balance_location,

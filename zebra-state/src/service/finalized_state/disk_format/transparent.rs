@@ -302,6 +302,22 @@ impl AddressBalanceLocation {
         self.location
     }
 
+    /// Returns struct fields as a tuple.
+    pub fn into_raw_parts(self) -> (i64, u64, AddressLocation) {
+        (self.balance.zatoshis(), self.received, self.location)
+    }
+
+    /// Creates a new [`AddressBalanceLocation`] from a tuple.
+    pub fn from_raw_parts(
+        (balance, received, location): (i64, u64, AddressLocation),
+    ) -> Option<Self> {
+        Some(AddressBalanceLocation {
+            balance: balance.try_into().ok()?,
+            received,
+            location,
+        })
+    }
+
     /// Allows tests to set the height of the address location.
     #[cfg(any(test, feature = "proptest-impl"))]
     #[allow(dead_code)]
