@@ -45,6 +45,8 @@ proptest-impl = [
     "zebra-chain/proptest-impl",
 ]
 
+tx_v6 = []
+
 [dependencies]
 chrono = { workspace = true, features = ["clock", "std"] }
 futures = { workspace = true }
@@ -127,3 +129,6 @@ zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = [
 ] }
 
 zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46" }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nsm"))'] }
