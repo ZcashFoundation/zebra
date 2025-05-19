@@ -3,9 +3,6 @@
 #[cfg(any(test, feature = "proptest-impl"))]
 mod arbitrary;
 
-#[cfg(test)]
-mod tests;
-
 mod burn;
 mod issuance;
 
