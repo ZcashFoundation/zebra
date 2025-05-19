@@ -248,7 +248,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
-    (Nu7, ConsensusBranchId(0x77190ad8)),
+    (Nu7, ConsensusBranchId(0xffffffff)),
 ];
 
 /// The target block spacing before Blossom.
@@ -558,7 +558,8 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
-            // zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
+            #[cfg(zcash_unstable = "nu7")]
+            zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
         }
     }
 }
