@@ -36,6 +36,8 @@ proptest-impl = [
     "zebra-chain/proptest-impl",
 ]
 
+tx_v6 = []
+
 [dependencies]
 chrono = { workspace = true, features = ["clock", "std"] }
 futures = { workspace = true }
