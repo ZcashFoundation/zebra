@@ -145,7 +145,7 @@ lightwalletd-grpc-tests = ["tonic-prost-build"]
 # https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
 tokio-console = ["console-subscriber"]
 
-tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
+tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6", "zebra-rpc/tx_v6"]
 
 # Enable the C++/Rust comparison interpreter. See zebra-script/Cargo.toml for
 # details. This should be only used for testing.
