@@ -3,7 +3,7 @@
 use zebra_chain::parameters::Network;
 
 /// Response to a `getmininginfo` RPC request.
-#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Response {
     /// The current tip height.
     #[serde(rename = "blocks")]
