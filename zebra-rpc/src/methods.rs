@@ -2491,6 +2491,8 @@ where
             mempool_txs,
             mempool_tx_deps,
             extra_coinbase_data.clone(),
+            #[cfg(feature = "tx_v6")]
+            None,
         );
 
         tracing::debug!(
@@ -2511,6 +2513,8 @@ where
             mempool_txs,
             submit_old,
             extra_coinbase_data,
+            #[cfg(feature = "tx_v6")]
+            None,
         );
 
         Ok(response.into())
