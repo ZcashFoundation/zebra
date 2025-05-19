@@ -193,16 +193,14 @@ where
 
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_vanilla() {
-    verify_generated_halo2_proofs::<OrchardVanilla>(
-        &zebra_test::vectors::ORCHARD_VANILLA_SHIELDED_DATA,
-    )
-    .await
+    verify_generated_halo2_proofs::<OrchardVanilla>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA)
+        .await
 }
 
 #[cfg(feature = "tx-v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_zsa() {
-    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA)
+    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA)
         .await
 }
 
@@ -285,7 +283,7 @@ async fn correctly_err_on_invalid_halo2_proofs<V: OrchardVerifier>(
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
     correctly_err_on_invalid_halo2_proofs::<OrchardVanilla>(
-        &zebra_test::vectors::ORCHARD_VANILLA_SHIELDED_DATA,
+        &zebra_test::vectors::ORCHARD_SHIELDED_DATA,
     )
     .await
 }
@@ -294,7 +292,7 @@ async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_zsa() {
     correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(
-        &zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA,
+        &zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA,
     )
     .await
 }

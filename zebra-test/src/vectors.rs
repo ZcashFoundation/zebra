@@ -4,16 +4,16 @@ use hex::FromHex;
 use lazy_static::lazy_static;
 
 mod block;
-mod orchard_vanilla_note_encryption;
-mod orchard_vanilla_shielded_data;
-mod orchard_zsa_shielded_data;
-mod orchard_zsa_workflow_blocks;
+mod orchard_note_encryption;
+mod orchard_shielded_data;
+mod orchard_shielded_data_zsa;
+mod orchard_workflow_blocks_zsa;
 
 pub use block::*;
-pub use orchard_vanilla_note_encryption::*;
-pub use orchard_vanilla_shielded_data::*;
-pub use orchard_zsa_shielded_data::*;
-pub use orchard_zsa_workflow_blocks::*;
+pub use orchard_note_encryption::*;
+pub use orchard_shielded_data::*;
+pub use orchard_shielded_data_zsa::*;
+pub use orchard_workflow_blocks_zsa::*;
 
 /// A testnet transaction test vector
 ///
