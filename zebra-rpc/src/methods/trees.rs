@@ -13,7 +13,7 @@ pub type SubtreeRpcData = NoteCommitmentSubtreeData<String>;
 ///
 /// Contains the Sapling or Orchard pool label, the index of the first subtree in the list,
 /// and a list of subtree roots and end heights.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetSubtrees {
     /// The shielded pool to which the subtrees belong.
     //
@@ -57,7 +57,7 @@ impl Default for GetSubtrees {
 /// whereas in `CommitmentTree`, the vector of ommers is sparse with [`None`] values in the gaps.
 ///
 /// The dense format might be used in future RPCs.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetTreestate {
     /// The block hash corresponding to the treestate, hex-encoded.
     #[serde(with = "hex")]
@@ -73,10 +73,10 @@ pub struct GetTreestate {
     time: u32,
 
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
-    sapling: Treestate<Vec<u8>>,
+    sapling: Treestate,
 
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
-    orchard: Treestate<Vec<u8>>,
+    orchard: Treestate,
 }
 
 impl GetTreestate {
@@ -135,26 +135,26 @@ impl Default for GetTreestate {
 /// A treestate that is included in the [`z_gettreestate`][1] RPC response.
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct Treestate<Tree: AsRef<[u8]>> {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Treestate {
     /// Contains an Orchard or Sapling serialized note commitment tree,
     /// hex-encoded.
-    commitments: Commitments<Tree>,
+    commitments: Commitments,
 }
 
-impl<Tree: AsRef<[u8]>> Treestate<Tree> {
+impl Treestate {
     /// Returns a new instance of ['Treestate'].
-    pub fn new(commitments: Commitments<Tree>) -> Self {
+    pub fn new(commitments: Commitments) -> Self {
         Treestate { commitments }
     }
 
     /// Returns a reference to the commitments.
-    pub fn inner(&self) -> &Commitments<Tree> {
+    pub fn inner(&self) -> &Commitments {
         &self.commitments
     }
 }
 
-impl Default for Treestate<Vec<u8>> {
+impl Default for Treestate {
     fn default() -> Self {
         Self {
             commitments: Commitments { final_state: None },
@@ -169,23 +169,23 @@ impl Default for Treestate<Vec<u8>> {
 ///
 /// [1]: https://zcash.github.io/rpc/z_gettreestate.html
 #[serde_with::serde_as]
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
-pub struct Commitments<Tree: AsRef<[u8]>> {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Commitments {
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.
     #[serde_as(as = "Option<serde_with::hex::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(rename = "finalState")]
-    final_state: Option<Tree>,
+    final_state: Option<Vec<u8>>,
 }
 
-impl<Tree: AsRef<[u8]>> Commitments<Tree> {
+impl Commitments {
     /// Returns a new instance of ['Commitments'] with optional `final_state`.
-    pub fn new(final_state: Option<Tree>) -> Self {
+    pub fn new(final_state: Option<Vec<u8>>) -> Self {
         Commitments { final_state }
     }
 
     /// Returns a reference to the optional `final_state`.
-    pub fn inner(&self) -> &Option<Tree> {
+    pub fn inner(&self) -> &Option<Vec<u8>> {
         &self.final_state
     }
 }
