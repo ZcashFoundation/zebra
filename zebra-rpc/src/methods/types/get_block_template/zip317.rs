@@ -23,6 +23,9 @@ use zebra_chain::{
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
 
+#[cfg(feature = "tx_v6")]
+use zebra_chain::amount::{Amount, NonNegative};
+
 use crate::methods::{
     get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
 };
@@ -53,6 +56,7 @@ type SelectedMempoolTx = VerifiedUnminedTx;
 /// Returns selected transactions from `mempool_txs`.
 ///
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
+#[allow(clippy::too_many_arguments)]
 pub fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
@@ -61,6 +65,7 @@ pub fn select_mempool_transactions(
     mempool_tx_deps: TransactionDependencies,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
+    #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
@@ -70,6 +75,8 @@ pub fn select_mempool_transactions(
         miner_address,
         like_zcashd,
         extra_coinbase_data,
+        #[cfg(feature = "tx_v6")]
+        zip233_amount,
     );
 
     let tx_dependencies = mempool_tx_deps.dependencies();
@@ -149,6 +156,7 @@ pub fn fake_coinbase_transaction(
     miner_address: &transparent::Address,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
+    #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
     // They can also change the `u32` consensus branch id.
@@ -168,6 +176,8 @@ pub fn fake_coinbase_transaction(
         miner_fee,
         like_zcashd,
         extra_coinbase_data,
+        #[cfg(feature = "tx_v6")]
+        zip233_amount,
     );
 
     TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)
