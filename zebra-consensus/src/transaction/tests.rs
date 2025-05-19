@@ -2132,7 +2132,7 @@ async fn v5_coinbase_transaction_expiry_height() {
     // for the tx as well.
     new_transaction
         .update_network_upgrade(NetworkUpgrade::Nu6)
-        .expect("updating the network upgrade for a V5 tx should succeed");
+        .expect("updating the network upgrade for a V6 tx should succeed");
 
     let verification_result = verifier
         .clone()
