@@ -39,7 +39,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        subsidy::{
+            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
+            ParameterSubsidy,
+        },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
@@ -52,10 +55,7 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
-    ParameterCheckpoint, RouterError,
-};
+use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
 use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{
