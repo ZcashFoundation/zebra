@@ -151,7 +151,7 @@ vergen-git2 = { version = "1.0.0", default-features = false }
 wagyu-zcash-parameters = "0.2.0"
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.3.0"
+zcash_script = "0.3.1"
 
 [workspace.metadata.release]
 
@@ -221,6 +221,3 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
-
-[patch.crates-io]
-zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script.git", rev = "d72cb63dd02dae1a9798cf8d3a78e24bc3006791" }

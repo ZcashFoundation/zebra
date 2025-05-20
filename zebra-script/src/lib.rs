@@ -60,7 +60,7 @@ fn get_interpreter(
     sighash: zcash_script::SighashCalculator,
     lock_time: u32,
     is_final: bool,
-    flags: zcash_script::VerificationFlags,
+    #[allow(unused)] flags: zcash_script::VerificationFlags,
 ) -> impl ZcashScript + use<'_> {
     #[cfg(feature = "comparison-interpreter")]
     return zcash_script::cxx_rust_comparison_interpreter(sighash, lock_time, is_final, flags);
