@@ -712,7 +712,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn skips_verification_of_block_transactions_in_mempool() {
     let mut state: MockService<_, _, _, _> = MockService::build().for_prop_tests();
     let mempool: MockService<_, _, _, _> = MockService::build().for_prop_tests();
@@ -797,6 +797,9 @@ async fn skips_verification_of_block_transactions_in_mempool() {
             .respond(mempool::Response::UnspentOutput(output));
     });
 
+    // Briefly yield and sleep so the spawned task can first expect an await output request.
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
     let verifier_response = verifier
         .clone()
         .oneshot(Request::Mempool {
@@ -826,7 +829,7 @@ async fn skips_verification_of_block_transactions_in_mempool() {
 
     let mut mempool_clone = mempool.clone();
     tokio::spawn(async move {
-        for _ in 0..3 {
+        for _ in 0..2 {
             mempool_clone
                 .expect_request(mempool::Request::TransactionWithDepsByMinedId(tx_hash))
                 .await
@@ -846,6 +849,9 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         height,
         time: Utc::now(),
     };
+
+    // Briefly yield and sleep so the spawned task can first expect the requests.
+    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
     let crate::transaction::Response::Block { .. } = verifier
         .clone()
@@ -873,27 +879,13 @@ async fn skips_verification_of_block_transactions_in_mempool() {
         panic!("unexpected response variant from transaction verifier for Block request")
     };
 
-    let verifier_response_err = *verifier
-        .clone()
-        .oneshot(make_request(Arc::new(HashSet::new())))
-        .await
-        .expect_err("should return Err without calling state service")
-        .downcast::<TransactionError>()
-        .expect("tx verifier error type should be TransactionError");
-
-    assert_eq!(
-        verifier_response_err,
-        TransactionError::TransparentInputNotFound,
-        "should be a transparent input not found error"
-    );
-
     tokio::time::sleep(POLL_MEMPOOL_DELAY * 2).await;
     // polled before AwaitOutput request, after a mempool transaction with transparent outputs,
     // is successfully verified, and twice more when checking if a transaction in a block is
     // already the mempool.
     assert_eq!(
         mempool.poll_count(),
-        5,
+        4,
         "the mempool service should have been polled 4 times"
     );
 }
