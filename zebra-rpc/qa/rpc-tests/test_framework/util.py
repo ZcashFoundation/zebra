@@ -54,6 +54,9 @@ PORT_RANGE = 5000
 def zcashd_binary():
     return os.getenv("CARGO_BIN_EXE_zebrad", os.path.join("..", "target", "debug", "zebrad"))
 
+def zallet_binary():
+    return os.path.join("..", "target", "debug", "zallet")
+
 def zebrad_config(datadir):
     base_location = os.path.join('qa', 'base_config.toml')
     new_location = os.path.join(datadir, "config.toml")
