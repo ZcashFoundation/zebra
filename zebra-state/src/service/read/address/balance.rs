@@ -26,14 +26,14 @@ use crate::{
     BoxError,
 };
 
-/// Returns the total transparent balance for the supplied [`transparent::Address`]es.
+/// Returns the total transparent balance and received balance for the supplied [`transparent::Address`]es.
 ///
 /// If the addresses do not exist in the non-finalized `chain` or finalized `db`, returns zero.
 pub fn transparent_balance(
     chain: Option<Arc<Chain>>,
     db: &ZebraDb,
     addresses: HashSet<transparent::Address>,
-) -> Result<Amount<NonNegative>, BoxError> {
+) -> Result<(Amount<NonNegative>, u64), BoxError> {
     let mut balance_result = finalized_transparent_balance(db, &addresses);
 
     // Retry the finalized balance query if it was interrupted by a finalizing block
@@ -71,7 +71,7 @@ pub fn transparent_balance(
 fn finalized_transparent_balance(
     db: &ZebraDb,
     addresses: &HashSet<transparent::Address>,
-) -> Result<(Amount<NonNegative>, Option<Height>), BoxError> {
+) -> Result<((Amount<NonNegative>, u64), Option<Height>), BoxError> {
     // # Correctness
     //
     // The StateService can commit additional blocks while we are querying address balances.
@@ -101,7 +101,7 @@ fn chain_transparent_balance_change(
     mut chain: Arc<Chain>,
     addresses: &HashSet<transparent::Address>,
     finalized_tip: Option<Height>,
-) -> Amount<NegativeAllowed> {
+) -> (Amount<NegativeAllowed>, u64) {
     // # Correctness
     //
     // Find the balance adjustment that corrects for overlapping finalized and non-finalized blocks.
@@ -123,7 +123,7 @@ fn chain_transparent_balance_change(
     // If we've already committed this entire chain, ignore its balance changes.
     // This is more likely if the non-finalized state is just getting started.
     if chain_tip < required_chain_root {
-        return Amount::zero();
+        return (Amount::zero(), 0);
     }
 
     // Correctness: some balances might have duplicate creates or spends,
@@ -133,16 +133,21 @@ fn chain_transparent_balance_change(
         chain.pop_root();
     }
 
-    chain.partial_transparent_balance_change(addresses)
+    (
+        chain.partial_transparent_balance_change(addresses),
+        chain.partial_transparent_received_change(addresses),
+    )
 }
 
 /// Add the supplied finalized and non-finalized balances together,
 /// and return the result.
 fn apply_balance_change(
-    finalized_balance: Amount<NonNegative>,
-    chain_balance_change: Amount<NegativeAllowed>,
-) -> amount::Result<Amount<NonNegative>> {
+    (finalized_balance, finalized_received): (Amount<NonNegative>, u64),
+    (chain_balance_change, chain_received_change): (Amount<NegativeAllowed>, u64),
+) -> amount::Result<(Amount<NonNegative>, u64)> {
     let balance = finalized_balance.constrain()? + chain_balance_change;
-
-    balance?.constrain()
+    // Addresses could receive more than the max money supply by sending to themselves,
+    // use u64::MAX if the addition overflows.
+    let received = finalized_received.saturating_add(chain_received_change);
+    Ok((balance?.constrain()?, received))
 }

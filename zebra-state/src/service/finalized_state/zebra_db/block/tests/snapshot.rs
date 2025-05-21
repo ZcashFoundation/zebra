@@ -26,7 +26,7 @@
 //!
 //! If this test fails, run:
 //! ```sh
-//! cargo insta test --review
+//! cargo insta test --review --release -p zebra-state --lib -- test_raw_rocksdb_column_families
 //! ```
 //! to update the test snapshots, then commit the `test_*.snap` files using git.
 
@@ -50,6 +50,7 @@ use crate::{
             disk_format::{
                 block::TransactionIndex, transparent::OutputLocation, FromDisk, TransactionLocation,
             },
+            zebra_db::transparent::BALANCE_BY_TRANSPARENT_ADDR,
             FinalizedState,
         },
         read::ADDRESS_HEIGHTS_FULL_RANGE,
@@ -460,7 +461,7 @@ fn snapshot_block_and_transaction_data(state: &FinalizedState) {
 
 /// Snapshot transparent address data, using `cargo insta` and RON serialization.
 fn snapshot_transparent_address_data(state: &FinalizedState, height: u32) {
-    let balance_by_transparent_addr = state.cf_handle("balance_by_transparent_addr").unwrap();
+    let balance_by_transparent_addr = state.cf_handle(BALANCE_BY_TRANSPARENT_ADDR).unwrap();
     let utxo_loc_by_transparent_addr_loc =
         state.cf_handle("utxo_loc_by_transparent_addr_loc").unwrap();
     let tx_loc_by_transparent_addr_loc = state.cf_handle("tx_loc_by_transparent_addr_loc").unwrap();

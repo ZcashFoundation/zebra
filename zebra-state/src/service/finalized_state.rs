@@ -20,7 +20,10 @@ use std::{
 };
 
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
-use zebra_db::transparent::TX_LOC_BY_SPENT_OUT_LOC;
+use zebra_db::{
+    chain::BLOCK_INFO,
+    transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
+};
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
@@ -74,7 +77,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "hash_by_tx_loc",
     "tx_loc_by_hash",
     // Transparent
-    "balance_by_transparent_addr",
+    BALANCE_BY_TRANSPARENT_ADDR,
     "tx_loc_by_transparent_addr_loc",
     "utxo_by_out_loc",
     "utxo_loc_by_transparent_addr_loc",
@@ -96,6 +99,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     // Chain
     "history_tree",
     "tip_chain_value_pool",
+    BLOCK_INFO,
 ];
 
 /// The finalized part of the chain state, stored in the db.

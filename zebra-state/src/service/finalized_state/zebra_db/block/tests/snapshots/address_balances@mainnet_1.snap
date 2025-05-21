@@ -5,6 +5,7 @@ expression: stored_address_balances
 [
   ("t3Vz22vK5z2LcKEdg16Yv4FFneEL1zg9ojd", AddressBalanceLocation(
     balance: 12500,
+    received: 12500,
     location: OutputLocation(
       transaction_location: TransactionLocation(
         height: Height(1),

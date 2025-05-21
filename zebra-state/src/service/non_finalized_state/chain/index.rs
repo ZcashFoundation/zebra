@@ -230,6 +230,12 @@ impl TransparentTransfers {
         self.balance
     }
 
+    /// Returns the partial received balance for this address.
+    pub fn received(&self) -> u64 {
+        let received_utxos = self.created_utxos.values();
+        received_utxos.map(|out| out.value()).map(u64::from).sum()
+    }
+
     /// Returns the [`transaction::Hash`]es of the transactions that sent or
     /// received transparent transfers to this address, in this partial chain,
     /// filtered by `query_height_range`.
