@@ -1026,7 +1026,7 @@ where
         let response = state.oneshot(request).await.map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+            zebra_state::ReadResponse::AddressBalance { balance, .. } => Ok(AddressBalance {
                 balance: u64::from(balance),
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
