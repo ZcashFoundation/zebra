@@ -21,11 +21,11 @@ use super::DiskFormatUpgrade;
 
 /// Implements [`DiskFormatUpgrade`] for adding additionl block info to the
 /// database.
-pub struct AddBlockInfo {
+pub struct Upgrade {
     network: Network,
 }
 
-impl AddBlockInfo {
+impl Upgrade {
     /// Creates a new [`BlockInfo`] upgrade for the given network.
     pub fn new(network: Network) -> Self {
         Self { network }
@@ -44,7 +44,7 @@ enum LoadResult {
     },
 }
 
-impl DiskFormatUpgrade for AddBlockInfo {
+impl DiskFormatUpgrade for Upgrade {
     fn version(&self) -> semver::Version {
         semver::Version::new(26, 1, 0)
     }

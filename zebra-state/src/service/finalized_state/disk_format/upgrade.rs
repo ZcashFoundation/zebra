@@ -23,9 +23,8 @@ use DbFormatChange::*;
 
 use crate::service::finalized_state::ZebraDb;
 
-pub(crate) mod add_balance_received;
-pub(crate) mod add_block_info;
 pub(crate) mod add_subtrees;
+pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
 pub(crate) mod no_migration;
@@ -98,9 +97,8 @@ fn format_upgrades(
             "add value balance upgrade",
             Version::new(26, 0, 0),
         )),
-        Box::new(add_block_info::AddBlockInfo::new(network)),
-        Box::new(add_balance_received::AddAddressBalanceReceived),
-    ] as [Box<dyn DiskFormatUpgrade>; 6])
+        Box::new(block_info_and_address_received::Upgrade::new(network)),
+    ] as [Box<dyn DiskFormatUpgrade>; 5])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
 }
