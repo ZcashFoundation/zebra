@@ -263,13 +263,11 @@ impl AddressBalanceLocationChange {
         }
     }
 
-    /// Creates a new [`AddressBalanceLocationChange`] with a dummy location.
-    ///
-    /// The returned value has a zero initial balance and the provided received balance.
-    pub fn new_from_received(received: u64) -> AddressBalanceLocationChange {
+    /// Creates a new [`AddressBalanceLocationChange`] with all zero values.
+    pub fn empty() -> AddressBalanceLocationChange {
         AddressBalanceLocationChange {
             balance: Amount::zero(),
-            received,
+            received: 0,
             location: AddressLocation::from_usize(Height(0), 0, 0),
         }
     }
