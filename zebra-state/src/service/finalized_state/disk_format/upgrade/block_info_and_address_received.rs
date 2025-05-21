@@ -214,7 +214,7 @@ impl DiskFormatUpgrade for Upgrade {
                 batch.zs_merge(balance_by_transparent_addr, address, change);
             }
 
-            db.write(batch)
+            db.write_batch(batch)
                 .expect("writing block info and address received changes should succeed");
         }
 
