@@ -134,6 +134,7 @@ fn chain_transparent_balance_change(
     }
 
     (
+        // TODO: Iterate over transparent transfers once here instead of twice.
         chain.partial_transparent_balance_change(addresses),
         chain.partial_transparent_received_change(addresses),
     )
