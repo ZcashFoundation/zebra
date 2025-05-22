@@ -76,6 +76,10 @@ pub struct ZebraDb {
     // TODO: move the generic upgrade code and fields to DiskDb
     format_change_handle: Option<DbFormatChangeThreadHandle>,
 
+    /// A boolean flag indicating whether database writes should be frozen until
+    /// some db format upgrade is complete.
+    should_freeze_block_commits_receiver: tokio::sync::watch::Receiver<bool>,
+
     /// The inner low-level database wrapper for the RocksDB database.
     db: DiskDb,
 }
@@ -98,6 +102,21 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> ZebraDb {
+        // Format upgrades try to write to the database, so we always skip them if `read_only` is
+        // `true`.
+        //
+        // We allow skipping the upgrades by the scanner because it doesn't support them yet and we
+        // also allow skipping them when we are running tests.
+        //
+        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
+        let debug_skip_format_upgrades = read_only
+            || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
+
+        // A boolean flag indicating whether database writes should be frozen until
+        // some db format upgrade is complete. Should be unused and false in read-only mode.
+        let (should_freeze_block_commits_sender, should_freeze_block_commits_receiver) =
+            tokio::sync::watch::channel(!(debug_skip_format_upgrades || config.ephemeral));
+
         let disk_version = database_format_version_on_disk(
             config,
             &db_kind,
@@ -117,21 +136,12 @@ impl ZebraDb {
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
-        // Format upgrades try to write to the database, so we always skip them if `read_only` is
-        // `true`.
-        //
-        // We allow skipping the upgrades by the scanner because it doesn't support them yet and we
-        // also allow skipping them when we are running tests.
-        //
-        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
-        let debug_skip_format_upgrades = read_only
-            || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
-
         // Open the database and do initial checks.
         let mut db = ZebraDb {
             config: Arc::new(config.clone()),
             debug_skip_format_upgrades,
             format_change_handle: None,
+            should_freeze_block_commits_receiver,
             // After the database directory is created, a newly created database temporarily
             // changes to the default database version. Then we set the correct version in the
             // upgrade thread. We need to do the version change in this order, because the version
@@ -146,13 +156,17 @@ impl ZebraDb {
             ),
         };
 
-        db.spawn_format_change(format_change);
+        db.spawn_format_change(format_change, should_freeze_block_commits_sender);
 
         db
     }
 
     /// Launch any required format changes or format checks, and store their thread handle.
-    pub fn spawn_format_change(&mut self, format_change: DbFormatChange) {
+    pub fn spawn_format_change(
+        &mut self,
+        format_change: DbFormatChange,
+        should_freeze_block_commits_sender: tokio::sync::watch::Sender<bool>,
+    ) {
         if self.debug_skip_format_upgrades {
             return;
         }
@@ -168,8 +182,11 @@ impl ZebraDb {
 
         // TODO:
         // - should debug_stop_at_height wait for the upgrade task to finish?
-        let format_change_handle =
-            format_change.spawn_format_change(upgrade_db, initial_tip_height);
+        let format_change_handle = format_change.spawn_format_change(
+            upgrade_db,
+            initial_tip_height,
+            should_freeze_block_commits_sender,
+        );
 
         self.format_change_handle = Some(format_change_handle);
     }
@@ -192,6 +209,11 @@ impl ZebraDb {
     /// Returns the fixed major version for this database.
     pub fn major_version(&self) -> u64 {
         self.db.major_version()
+    }
+
+    /// Returns true if db writes should be suspended or frozen.
+    pub fn should_freeze_writes(&self) -> bool {
+        *self.should_freeze_block_commits_receiver.borrow()
     }
 
     /// Returns the format version of this database on disk.
@@ -300,6 +322,7 @@ impl ZebraDb {
                         .run_format_change_or_check(
                             self,
                             // The initial tip height is not used by the new blocks format check.
+                            None,
                             None,
                             &never_cancel_receiver,
                         )
