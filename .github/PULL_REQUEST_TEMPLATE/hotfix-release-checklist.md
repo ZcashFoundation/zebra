@@ -9,16 +9,14 @@ assignees: ''
 
 ## Create the Release PR
 
-- [ ] Create a branch to fix the issue based on the tag of the release being fixed.
+- [ ] Create a branch to fix the issue based on the tag of the release being fixed (not the main branch).
       for example: `hotfix-v2.3.1` - this needs to be different to the tag name
 - [ ] Make the required changes
 - [ ] Create a hotfix release PR by adding `&template=hotfix-release-checklist.md` to the comparing url ([Example](https://github.com/ZcashFoundation/zebra/compare/bump-v1.0.0?expand=1&template=hotfix-release-checklist.md)).
-- [ ] If there are state changes, run a [a full sync test](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml) on the hotfix branch.
 - [ ] Add the `C-exclude-from-changelog` label so that the PR is omitted from the next release changelog
 - [ ] Add the `A-release` tag to the release pull request in order for the `check_no_git_refs_in_cargo_lock` to run.
 - [ ] Ensure the `check_no_git_refs_in_cargo_lock` check passes.
 - [ ] Add a changelog entry for the release summarizing user-visible changes.
-- [ ] If required, update the End of Support height
 
 ## Update Versions
 
@@ -90,8 +88,6 @@ cargo release commit --verbose --execute --allow-branch '*'
 
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
-- [ ] Un-freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
-- [ ] Remove `do-not-merge` from the PRs you added it to
 
 ## Release Failures
 
