@@ -46,10 +46,6 @@ cargo release commit --verbose --execute --allow-branch '*'
 
 - [ ] Push the version increments and the release constants to the hotfix release branch.
 
-## Merge hotfix into main
-
-- [ ] Review and merge the hotfix branch into the main branch. The changes and the update to the changelog must be included in the next release from main as well.
-
 # Publish the Zebra Release
 
 ## Create the GitHub Pre-Release
@@ -91,6 +87,11 @@ cargo release commit --verbose --execute --allow-branch '*'
 
 - [ ] Wait for the [the Docker images to be published successfully](https://github.com/ZcashFoundation/zebra/actions/workflows/release-binaries.yml?query=event%3Arelease).
 - [ ] Wait for the new tag in the [dockerhub zebra space](https://hub.docker.com/r/zfnd/zebra/tags)
+
+## Merge hotfix into main
+
+- [ ] Review and merge the hotfix branch into the main branch. The changes and the update to the changelog must be included in the next release from main as well.
+- [ ] If there are conflicts between the hotfix branch and main, the conflicts should be resolved after the hotfix release is tagged and published.
 
 ## Release Failures
 
