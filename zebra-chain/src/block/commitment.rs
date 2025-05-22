@@ -125,7 +125,7 @@ impl Commitment {
             // NetworkUpgrade::current() returns the latest network upgrade that's activated at the provided height, so
             // on Regtest for heights above height 0, it could return NU6, and it's possible for the current network upgrade
             // to be NU6 (or Canopy, or any network upgrade above Heartwood) at the Heartwood activation height.
-            (Canopy | Nu5 | Nu6 | Nu7, activation_height)
+            (Canopy | Nu5 | Nu6 | Nu6_1 | Nu7, activation_height)
                 if height == activation_height
                     && Some(height) == Heartwood.activation_height(network) =>
             {
@@ -136,7 +136,7 @@ impl Commitment {
                 }
             }
             (Heartwood | Canopy, _) => Ok(ChainHistoryRoot(ChainHistoryMmrRootHash(bytes))),
-            (Nu5 | Nu6 | Nu7, _) => Ok(ChainHistoryBlockTxAuthCommitment(
+            (Nu5 | Nu6 | Nu6_1 | Nu7, _) => Ok(ChainHistoryBlockTxAuthCommitment(
                 ChainHistoryBlockTxAuthCommitmentHash(bytes),
             )),
         }
