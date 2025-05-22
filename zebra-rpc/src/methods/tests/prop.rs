@@ -1,7 +1,10 @@
 //! Randomised property tests for RPC methods.
 
-use std::collections::HashMap;
-use std::{collections::HashSet, fmt::Debug, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Debug,
+    sync::Arc,
+};
 
 use futures::{join, FutureExt, TryFutureExt};
 use hex::{FromHex, ToHex};
@@ -11,29 +14,30 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::buffer::Buffer;
 
-use zebra_chain::history_tree::HistoryTree;
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{Block, Height},
+    block::{self, Block, Height},
+    chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, ChainTip, NoChainTip},
+    history_tree::HistoryTree,
     parameters::{ConsensusBranchId, Network, NetworkUpgrade},
     serialization::{DateTime32, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     transaction::{self, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent,
     value_balance::ValueBalance,
 };
-
 use zebra_consensus::ParameterCheckpoint;
 use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
-
 use zebra_test::mock_service::MockService;
 
-use crate::methods::types::MempoolObject;
 use crate::methods::{
     self,
-    types::{Balance, GetRawMempool},
+    types::{
+        get_blockchain_info,
+        get_raw_mempool::{GetRawMempool, MempoolObject},
+    },
 };
 
 use super::super::{
@@ -583,7 +587,7 @@ proptest! {
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
-            prop_assert_eq!(response.value_pools, Balance::value_pools(ValueBalance::zero()));
+            prop_assert_eq!(response.value_pools, get_blockchain_info::Balance::value_pools(ValueBalance::zero()));
 
             let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
             let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");
@@ -948,6 +952,12 @@ fn mock_services<Tip>(
         >,
         Tip,
         MockAddressBookPeers,
+        zebra_test::mock_service::MockService<
+            zebra_consensus::Request,
+            block::Hash,
+            zebra_test::mock_service::PropTestAssertion,
+        >,
+        MockSyncStatus,
     >,
     tokio::task::JoinHandle<()>,
 )
@@ -956,19 +966,23 @@ where
 {
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
+    let block_verifier_router = MockService::build().for_prop_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, mempool_tx_queue) = RpcImpl::new(
+        network,
+        Default::default(),
+        Default::default(),
         "0.0.1",
         "RPC test",
-        network,
-        false,
-        true,
         mempool.clone(),
         Buffer::new(state.clone(), 1),
+        block_verifier_router,
+        MockSyncStatus::default(),
         chain_tip,
-        MockAddressBookPeers::new(vec![]),
+        MockAddressBookPeers::default(),
         rx,
+        None,
     );
 
     (mempool, state, rpc, mempool_tx_queue)

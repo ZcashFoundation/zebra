@@ -1,14 +1,13 @@
 //! Types used in `getrawmempool` RPC method.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use hex::ToHex as _;
 
-use super::Zec;
-use zebra_chain::transaction::VerifiedUnminedTx;
-use zebra_chain::{amount::NonNegative, block::Height};
+use zebra_chain::{amount::NonNegative, block::Height, transaction::VerifiedUnminedTx};
 use zebra_node_services::mempool::TransactionDependencies;
+
+use super::zec::Zec;
 
 /// Response to a `getrawmempool` RPC request.
 ///

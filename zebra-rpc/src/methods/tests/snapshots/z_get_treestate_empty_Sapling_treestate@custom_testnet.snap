@@ -10,5 +10,8 @@ expression: treestate
     "commitments": {
       "finalState": "000000"
     }
+  },
+  "orchard": {
+    "commitments": {}
   }
 }

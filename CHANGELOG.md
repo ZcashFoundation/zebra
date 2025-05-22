@@ -5,6 +5,84 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 2.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.3.0) - 2025-05-06
+
+### Breaking Changes
+
+- The RPC endpoint is no longer enabled by default in Docker. To enable it,
+  follow the docs [here](https://zebra.zfnd.org/user/docker.html#rpc).
+- We will no longer be publishing Docker images tagged with the `sha-` or `v`
+  prefixes. If you use tags starting with the `v` prefix, please update to
+  images tagged `N.N.N`. For example, use `2.3.0` instead of `v2.3.0`. If you
+  need a specific hash, each tag has a digest that you can use instead.
+- All functionality that used to be guarded by the `getblocktemplate-rpcs` Cargo
+  feature was moved out and the feature is no longer present in the codebase.
+  Note that all release builds following Zebra 1.3.0 had this feature enabled by
+  default.
+
+### Added
+
+- Track misbehaving peer connections and ban them past a threshold ([#9201](https://github.com/ZcashFoundation/zebra/pull/9201))
+- Restore internal miner ([#9311](https://github.com/ZcashFoundation/zebra/pull/9311))
+- Add `reconsider_block` method to non-finalized state ([#9260](https://github.com/ZcashFoundation/zebra/pull/9260))
+- Add NU7 constants ([#9256](https://github.com/ZcashFoundation/zebra/pull/9256))
+- Add `invalidate_block_method` and `invalidated_blocks` field to non-finalized state ([#9167](https://github.com/ZcashFoundation/zebra/pull/9167))
+- Add unused `Transaction::V6` variant ([#9339](https://github.com/ZcashFoundation/zebra/pull/9339))
+
+### Changed
+
+- Downgrade verbose info message ([#9448](https://github.com/ZcashFoundation/zebra/pull/9448))
+- Use read-only db instance when running `tip-height` or `copy-state` commands ([#9359](https://github.com/ZcashFoundation/zebra/pull/9359))
+- Refactor format upgrades into trait ([#9263](https://github.com/ZcashFoundation/zebra/pull/9263))
+- Remove the `getblocktemplate-rpcs` Cargo feature ([#9401](https://github.com/ZcashFoundation/zebra/pull/9401))
+- Improve cache dir and database startup panics ([#9441](https://github.com/ZcashFoundation/zebra/pull/9441)) 
+
+### Fixed
+
+- Remove a redundant startup warning ([#9397](https://github.com/ZcashFoundation/zebra/pull/9397))
+- Advertise mined blocks ([#9176](https://github.com/ZcashFoundation/zebra/pull/9176))
+- Ensure secondary rocksdb instance has caught up to the primary instance ([#9346](https://github.com/ZcashFoundation/zebra/pull/9346))
+- Use network kind of `TestnetKind` in transparent addresses on Regtest ([#9175](https://github.com/ZcashFoundation/zebra/pull/9175))
+- Fix redundant attributes on enum variants ([#9309](https://github.com/ZcashFoundation/zebra/pull/9309))
+
+### RPCs
+
+- Add `time` and `size` fields to `TransactionObject` ([#9458](https://github.com/ZcashFoundation/zebra/pull/9458)) 
+- Add inbound peers to `getpeerinfo` response ([#9214](https://github.com/ZcashFoundation/zebra/pull/9214))
+- Extend `getinfo` ([#9261](https://github.com/ZcashFoundation/zebra/pull/9261))
+- Add fields to `getblockchaininfo` RPC output ([#9215](https://github.com/ZcashFoundation/zebra/pull/9215))
+- Add some missing fields to transaction object ([#9329](https://github.com/ZcashFoundation/zebra/pull/9329))
+- Support negative heights in `HashOrHeight` ([#9316](https://github.com/ZcashFoundation/zebra/pull/9316))
+- Add verbose support to getrawmempool ([#9249](https://github.com/ZcashFoundation/zebra/pull/9249))
+- Fill size field in getblock with verbosity=2 ([#9327](https://github.com/ZcashFoundation/zebra/pull/9327))
+- Add `blockcommitments` field to `getblock` output ([#9217](https://github.com/ZcashFoundation/zebra/pull/9217))
+- Accept an unused second param in `sendrawtransaction` RPC ([#9242](https://github.com/ZcashFoundation/zebra/pull/9242))
+- Make start and end fields optional and apply range rules to match zcashd ([#9408](https://github.com/ZcashFoundation/zebra/pull/9408))
+- Return only the history tree root in `GetBlockTemplateChainInfo` response ([#9444](https://github.com/ZcashFoundation/zebra/pull/9444))
+- Correctly map JSON-RPC to/from 2.0 ([#9216](https://github.com/ZcashFoundation/zebra/pull/9216))
+- Permit JSON-RPC IDs to be non-strings ([#9341](https://github.com/ZcashFoundation/zebra/pull/9341))
+- Match coinbase outputs order in `Getblocktemplate` ([#9272](https://github.com/ZcashFoundation/zebra/pull/9272))
+
+### Docker
+
+- Refactor Dockerfile and entrypoint ([#8923](https://github.com/ZcashFoundation/zebra/pull/8923))
+- Enhance Zebra configuration options and entrypoint logic ([#9344](https://github.com/ZcashFoundation/zebra/pull/9344))
+- Better permission and cache dirs handling in Docker ([#9323](https://github.com/ZcashFoundation/zebra/pull/9323))
+- Allow r/w access in mounted volumes ([#9281](https://github.com/ZcashFoundation/zebra/pull/9281))
+
+### Documentation
+
+- Update examples for running Zebra in Docker ([#9269](https://github.com/ZcashFoundation/zebra/pull/9269))
+- Add architectural decision records structure ([#9310](https://github.com/ZcashFoundation/zebra/pull/9310))
+- Add Mempool Specification to Zebra Book ([#9336](https://github.com/ZcashFoundation/zebra/pull/9336))
+- Complete the Treestate RFC documentation ([#9340](https://github.com/ZcashFoundation/zebra/pull/9340))
+
+### Contributors
+
+@AloeareV, @Metalcape, @PaulLaux, @VolodymyrBg, @aphelionz, @arya2, @conradoplg,
+@crStiv, @elijahhampton, @gustavovalverde, @mdqst, @natalieesk, @nuttycom,
+@oxarbitrage, @podZzzzz, @sellout, @str4d, @upbqdn and @zeroprooff.
+
 ## [Zebra 2.2.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.2.0) - 2025-02-03
 
 In this release, Zebra introduced an additional consensus check on the branch ID of Nu6 transactions
