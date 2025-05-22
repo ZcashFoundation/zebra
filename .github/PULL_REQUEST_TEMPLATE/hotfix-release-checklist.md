@@ -45,7 +45,10 @@ cargo release commit --verbose --execute --allow-branch '*'
 ## Update the Release PR
 
 - [ ] Push the version increments and the release constants to the hotfix release branch.
-- [ ] Review and merge the hotfix release into the main branch.
+
+## Merge hotfix into main
+
+- [ ] Review and merge the hotfix branch into the main branch. The changes and the update to the changelog must be included in the next release from main as well.
 
 # Publish the Zebra Release
 
