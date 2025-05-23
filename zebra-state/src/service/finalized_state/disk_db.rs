@@ -850,10 +850,10 @@ impl DiskDb {
         // from the current implementation.
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
+        let column_families_on_disk = DB::list_cf(&db_options, path).unwrap_or_default();
         let column_families_in_code = column_families_in_code.into_iter();
 
-        let column_families = column_families_on_disk
+        column_families_on_disk
             .into_iter()
             .chain(column_families_in_code)
             .unique()
@@ -868,9 +868,7 @@ impl DiskDb {
                 }
 
                 rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
-            });
-
-        column_families
+            })
     }
 
     /// Opens or creates the database at a path based on the kind, major version and network,

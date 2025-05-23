@@ -211,9 +211,9 @@ pub type AddressLocation = OutputLocation;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, Serialize, Deserialize),
+    serde(bound = "C: Constraint + Clone")
 )]
-#[serde(bound = "C: Constraint + Clone")]
 pub struct AddressBalanceLocationInner<C: Constraint + Copy + std::fmt::Debug> {
     /// The total balance of all UTXOs sent to an address.
     balance: Amount<C>,
