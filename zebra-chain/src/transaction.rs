@@ -53,75 +53,6 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-// Macro to iterate Orchard shielded data via mapper (avoids repeating the
-// same long match block). Empty for Tx V1–V4.
-macro_rules! orchard_shielded_data_iter {
-    ($self:expr, $mapper:expr) => {
-        match $self {
-            // No Orchard shielded data
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => Box::new(std::iter::empty()),
-
-            Transaction::V5 {
-                orchard_shielded_data,
-                ..
-            } => Box::new(orchard_shielded_data.into_iter().flat_map($mapper)),
-
-            #[cfg(feature = "tx-v6")]
-            Transaction::V6 {
-                orchard_shielded_data,
-                ..
-            } => Box::new(orchard_shielded_data.into_iter().flat_map($mapper)),
-        }
-    };
-}
-
-// Macro to to get an Orchard shielded data field (avoids repeating the
-// same long match block). Empty for Tx V1–V4.
-macro_rules! orchard_shielded_data_field {
-    ($self:expr, $field:ident) => {
-        match $self {
-            // No Orchard shielded data
-            Transaction::V1 { .. }
-            | Transaction::V2 { .. }
-            | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => None,
-
-            Transaction::V5 {
-                orchard_shielded_data,
-                ..
-            } => orchard_shielded_data.as_ref().map(|data| data.$field),
-
-            #[cfg(feature = "tx-v6")]
-            Transaction::V6 {
-                orchard_shielded_data,
-                ..
-            } => orchard_shielded_data.as_ref().map(|data| data.$field),
-        }
-    };
-}
-
-// Define the macro to include the V6 variant.
-// Needed only with the `tx-v6` feature to avoid duplicating code.
-#[cfg(feature = "tx-v6")]
-macro_rules! tx_v5_and_v6 {
-    { $($fields:tt)* } => {
-        Transaction::V5 { $($fields)* } | Transaction::V6 { $($fields)* }
-    };
-}
-
-/// Same as above, without the V6 arm.
-#[cfg(not(feature = "tx-v6"))]
-macro_rules! tx_v5_and_v6 {
-    { $($fields:tt)* } => {
-        Transaction::V5 { $($fields)* }
-    };
-}
-
-pub(crate) use tx_v5_and_v6;
-
 /// A Zcash transaction.
 ///
 /// A transaction is an encoded data structure that facilitates the transfer of
@@ -265,6 +196,51 @@ impl fmt::Display for Transaction {
 
         fmter.finish()
     }
+}
+
+// Define the macro to include the V6 variant.
+// Needed only with the `tx-v6` feature to avoid duplicating code.
+#[cfg(feature = "tx-v6")]
+macro_rules! tx_v5_and_v6 {
+    { $($fields:tt)* } => {
+        Transaction::V5 { $($fields)* } | Transaction::V6 { $($fields)* }
+    };
+}
+
+/// Same as above, without the V6 arm.
+#[cfg(not(feature = "tx-v6"))]
+macro_rules! tx_v5_and_v6 {
+    { $($fields:tt)* } => {
+        Transaction::V5 { $($fields)* }
+    };
+}
+
+pub(crate) use tx_v5_and_v6;
+
+// Macro to get a specific field from an Orchard shielded data struct.
+// Returns `None` for transaction versions that don't support Orchard (V1-V4).
+// This avoids repeating the same match block pattern across multiple accessor methods.
+macro_rules! orchard_shielded_data_field {
+    ($self:expr, $field:ident) => {
+        match $self {
+            // No Orchard shielded data
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => None,
+
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => orchard_shielded_data.as_ref().map(|data| data.$field),
+        }
+    };
 }
 
 impl Transaction {
@@ -1021,12 +997,60 @@ impl Transaction {
 
     /// Iterate over the [`orchard::Action`]s in this transaction.
     pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = orchard::ActionCommon> + '_> {
-        orchard_shielded_data_iter!(self, orchard::ShieldedData::action_commons)
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => Box::new(std::iter::empty()),
+
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::action_commons),
+            ),
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::action_commons),
+            ),
+        }
     }
 
     /// Access the [`orchard::Nullifier`]s in this transaction.
     pub fn orchard_nullifiers(&self) -> Box<dyn Iterator<Item = &orchard::Nullifier> + '_> {
-        orchard_shielded_data_iter!(self, orchard::ShieldedData::nullifiers)
+        match self {
+            Transaction::V1 { .. }
+            | Transaction::V2 { .. }
+            | Transaction::V3 { .. }
+            | Transaction::V4 { .. } => Box::new(std::iter::empty()),
+
+            Transaction::V5 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::nullifiers),
+            ),
+
+            #[cfg(feature = "tx-v6")]
+            Transaction::V6 {
+                orchard_shielded_data,
+                ..
+            } => Box::new(
+                orchard_shielded_data
+                    .into_iter()
+                    .flat_map(orchard::ShieldedData::nullifiers),
+            ),
+        }
     }
 
     /// Access the note commitments in this transaction.

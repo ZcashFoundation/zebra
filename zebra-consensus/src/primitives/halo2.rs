@@ -142,7 +142,7 @@ impl<V: OrchardVerifier> From<&ShieldedData<V>> for Item {
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
 
         let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
-            .expect("type should not have unexpected bits");
+            .expect("failed to convert flags: shielded_data.flags contains unexpected bits that are not valid in orchard::bundle::Flags");
 
         let instances = shielded_data
             .actions()

@@ -222,7 +222,16 @@ impl<Flavor: ShieldedDataFlavor> AuthorizedAction<Flavor> {
     /// is constrained by these factors and cannot exceed this calculated size.
     pub const ACTION_MAX_ALLOCATION: u64 = (MAX_BLOCK_BYTES - 1) / Self::AUTHORIZED_ACTION_SIZE;
 
-    // Ensure ACTION_MAX_ALLOCATION is less than 2^16 on compile time
+    /// Enforce consensus limit at compile time:
+    ///
+    /// # Consensus
+    ///
+    /// > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
+    ///
+    /// https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+    ///
+    /// This check works because if `ACTION_MAX_ALLOCATION` were ≥ 2^16, the subtraction below
+    /// would underflow for `u64`, causing a compile-time error.
     const _ACTION_MAX_ALLOCATION_OK: u64 = (1 << 16) - Self::ACTION_MAX_ALLOCATION;
 
     /// Split out the action and the signature for V5 transaction
@@ -274,21 +283,6 @@ impl<Flavor: ShieldedDataFlavor> From<&Action<Flavor>> for ActionCommon {
 /// rejecting these large edge-case transactions can never break consensus.
 impl<Flavor: ShieldedDataFlavor> TrustedPreallocate for Action<Flavor> {
     fn max_allocation() -> u64 {
-        // # Consensus
-        //
-        // > [NU5 onward] nSpendsSapling, nOutputsSapling, and nActionsOrchard MUST all be less than 2^16.
-        //
-        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-        //
-        // This acts as nActionsOrchard and is therefore subject to the rule.
-        // The maximum value is actually smaller due to the block size limit,
-        // but we ensure the 2^16 limit with a static assertion.
-        //
-        // TODO: FIXME: find a better way to use static check (see https://github.com/nvzqz/static-assertions/issues/40,
-        // https://users.rust-lang.org/t/how-do-i-static-assert-a-property-of-a-generic-u32-parameter/76307)?
-        // The following expression doesn't work for generics, so a workaround with _ACTION_MAX_ALLOCATION_OK in
-        // AuthorizedAction impl is used instead:
-        // static_assertions::const_assert!(AuthorizedAction::<Flavor>::ACTION_MAX_ALLOCATION < (1 << 16));
         AuthorizedAction::<Flavor>::ACTION_MAX_ALLOCATION
     }
 }

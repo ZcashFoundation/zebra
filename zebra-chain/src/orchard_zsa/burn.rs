@@ -26,7 +26,6 @@ impl ZcashDeserialize for AssetBase {
     }
 }
 
-// TODO: FIXME: Define BurnItem (or, even Burn/NoBurn) in Orchard and reuse it here?
 /// OrchardZSA burn item.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, NoteValue);
@@ -129,7 +128,7 @@ impl ZcashDeserialize for NoBurn {
     }
 }
 
-/// OrchardZSA burn items (assets intended for burning)
+/// OrchardZSA burn items.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Burn(Vec<BurnItem>);
 

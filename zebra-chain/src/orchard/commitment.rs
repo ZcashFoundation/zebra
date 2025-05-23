@@ -236,8 +236,6 @@ impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
-    // TODO: Remove `#[allow(clippy::unwrap_in_result)]` after making
-    // `ValueSum::from_raw` public in the `orchard` crate.
     #[allow(clippy::unwrap_in_result)]
     pub fn randomized<T>(csprng: &mut T, value: Amount) -> Result<Self, RandError>
     where
@@ -245,12 +243,12 @@ impl ValueCommitment {
     {
         let rcv = generate_trapdoor(csprng)?;
 
-        // Build the right commitment depending on whether tx-v6 is enabled
         #[cfg(feature = "tx-v6")]
         let vc = Self::new(
             rcv,
             // TODO: Make the `ValueSum::from_raw` function public in the `orchard` crate
-            // and use `ValueSum::from_raw(value.into())` instead of the next line
+            // and use `ValueSum::from_raw(value.into())` instead of the next line.
+            // Remove `#[allow(clippy::unwrap_in_result)]` after doing so.
             (ValueSum::default() + i64::from(value)).unwrap(),
             AssetBase::native(),
         );
@@ -267,7 +265,6 @@ impl ValueCommitment {
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
     #[cfg(not(feature = "tx-v6"))]
-    #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
         let v = pallas::Scalar::from(value);
         Self::from(*V * v + *R * rcv)
@@ -275,7 +272,6 @@ impl ValueCommitment {
 
     /// Generate a new `ValueCommitment` from an existing `rcv on a `value` (ZSA version).
     #[cfg(feature = "tx-v6")]
-    #[allow(non_snake_case)]
     pub fn new(rcv: pallas::Scalar, value: ValueSum, asset: AssetBase) -> Self {
         // TODO: Add `pub` methods to `ValueCommitTrapdoor` and `ValueCommitment` in `orchard`
         // to simplify type conversions when calling `orchard::value::ValueCommitment::derive`.

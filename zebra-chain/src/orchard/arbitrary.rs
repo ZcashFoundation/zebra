@@ -59,7 +59,6 @@ impl Arbitrary for note::Nullifier {
 }
 
 impl<Flavor: ShieldedDataFlavor + 'static> Arbitrary for AuthorizedAction<Flavor>
-// FIXME: define the constraint in ShieldedDataFlavor?
 where
     <Flavor::EncryptedNote as Arbitrary>::Strategy: 'static,
 {
