@@ -19,7 +19,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::disk_format::transparent::AddressBalanceLocationChange,
+    service::finalized_state::disk_format::transparent::{
+        AddressBalanceLocationChange, AddressLocation,
+    },
     DiskWriteBatch, HashOrHeight, TransactionLocation, WriteDisk,
 };
 
@@ -296,5 +298,12 @@ impl DiskFormatUpgrade for Upgrade {
         }
 
         Ok(Ok(()))
+    }
+}
+
+impl AddressBalanceLocationChange {
+    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and a dummy location.
+    fn empty() -> Self {
+        Self::new(AddressLocation::from_usize(Height(0), 0, 0))
     }
 }
