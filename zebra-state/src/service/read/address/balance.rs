@@ -133,11 +133,7 @@ fn chain_transparent_balance_change(
         chain.pop_root();
     }
 
-    (
-        // TODO: Iterate over transparent transfers once here instead of twice.
-        chain.partial_transparent_balance_change(addresses),
-        chain.partial_transparent_received_change(addresses),
-    )
+    chain.partial_transparent_balance_change(addresses)
 }
 
 /// Add the supplied finalized and non-finalized balances together,
