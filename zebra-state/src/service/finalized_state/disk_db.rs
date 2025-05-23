@@ -553,12 +553,12 @@ impl DiskDb {
         let mut total_size_in_mem = 0;
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
-        let column_families = DiskDb::construct_column_families(&db_options, db.path(), &[]);
+        let column_families = DiskDb::construct_column_families(db_options, db.path(), []);
         let mut column_families_log_string = String::from("");
 
         write!(column_families_log_string, "Column families and sizes: ").unwrap();
 
-        for cf_descriptor in column_families.iter() {
+        for cf_descriptor in column_families {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
@@ -607,7 +607,7 @@ impl DiskDb {
         let db: &Arc<DB> = &self.db;
         let db_options = DiskDb::options();
         let mut total_size_on_disk = 0;
-        for cf_descriptor in DiskDb::construct_column_families(&db_options, db.path(), &[]).iter() {
+        for cf_descriptor in DiskDb::construct_column_families(db_options, db.path(), []) {
             let cf_name = &cf_descriptor.name();
             let cf_handle = db
                 .cf_handle(cf_name)
@@ -839,10 +839,10 @@ impl DiskDb {
     /// Build a vector of current column families on the disk and optionally any new column families.
     /// Returns an iterable collection of all column families.
     fn construct_column_families(
-        db_options: &Options,
+        db_options: Options,
         path: &Path,
-        column_families_in_code: &[String],
-    ) -> Vec<ColumnFamilyDescriptor> {
+        column_families_in_code: impl IntoIterator<Item = String>,
+    ) -> impl Iterator<Item = ColumnFamilyDescriptor> {
         // When opening the database in read/write mode, all column families must be opened.
         //
         // To make Zebra forward-compatible with databases updated by later versions,
@@ -850,16 +850,14 @@ impl DiskDb {
         // from the current implementation.
         //
         // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk = DB::list_cf(db_options, path).unwrap_or_default();
+        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
+        let column_families_in_code = column_families_in_code.into_iter();
+
         let column_families = column_families_on_disk
             .into_iter()
-            .chain(column_families_in_code.iter().cloned())
+            .chain(column_families_in_code)
             .unique()
-            .collect::<Vec<_>>();
-
-        column_families
-            .into_iter()
-            .map(|cf_name: String| {
+            .map(move |cf_name: String| {
                 let mut cf_options = db_options.clone();
 
                 if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
@@ -870,8 +868,9 @@ impl DiskDb {
                 }
 
                 rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
-            })
-            .collect()
+            });
+
+        column_families
     }
 
     /// Opens or creates the database at a path based on the kind, major version and network,
@@ -900,32 +899,8 @@ impl DiskDb {
 
         let db_options = DiskDb::options();
 
-        // When opening the database in read/write mode, all column families must be opened.
-        //
-        // To make Zebra forward-compatible with databases updated by later versions,
-        // we read any existing column families off the disk, then add any new column families
-        // from the current implementation.
-        //
-        // <https://github.com/facebook/rocksdb/wiki/Column-Families#reference>
-        let column_families_on_disk = DB::list_cf(&db_options, &path).unwrap_or_default();
-        let column_families_in_code = column_families_in_code.into_iter();
-
-        let column_families = column_families_on_disk
-            .into_iter()
-            .chain(column_families_in_code)
-            .unique()
-            .map(|cf_name: String| {
-                let mut cf_options = db_options.clone();
-
-                if cf_name == BALANCE_BY_TRANSPARENT_ADDR {
-                    cf_options.set_merge_operator_associative(
-                        BALANCE_BY_TRANSPARENT_ADDR_MERGE_OP,
-                        fetch_add_balance_and_received,
-                    );
-                }
-
-                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options.clone())
-            });
+        let column_families =
+            DiskDb::construct_column_families(db_options.clone(), &path, column_families_in_code);
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory
