@@ -62,7 +62,7 @@ pub fn fetch_add_balance_and_received(
     // # Correctness
     //
     // Merge operands are ordered, but may be combined without an existing value in partial merges, so
-    // we may need to return a negatove balance here.
+    // we may need to return a negative balance here.
     existing_val
         .into_iter()
         .chain(operands)
