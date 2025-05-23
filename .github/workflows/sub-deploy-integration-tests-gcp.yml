@@ -112,7 +112,7 @@ jobs:
   get-disk-name:
     name: Get disk name
     uses: ./.github/workflows/sub-find-cached-disks.yml
-    if: ${{ inputs.needs_zebra_state || inputs.needs_lwd_state }}
+    if: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) || (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: ${{ inputs.needs_lwd_state && 'lwd-cache' || inputs.needs_zebra_state && 'zebrad-cache' }}
@@ -133,7 +133,7 @@ jobs:
       cached_disk_name: ${{ needs.get-disk-name.outputs.cached_disk_name }}
       state_version: ${{ needs.get-disk-name.outputs.state_version }}
     env:
-      CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
+      CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
     permissions:
       contents: 'read'
       id-token: 'write'
