@@ -46,11 +46,6 @@ on:
         options:
           - tip
           - checkpoint
-      prefer_main_cached_state:
-        default: false
-        description: "Prefer cached state from the main branch"
-        required: false
-        type: boolean
       need_cached_disk:
         default: true
         description: "Use a cached state disk"
@@ -157,7 +152,6 @@ jobs:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
-      prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
