@@ -51,16 +51,17 @@ where
                 else {
                     continue;
                 };
-                let tx = response_sender.clone();
-                tokio::spawn(async move {
-                    tx.send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)))
-                        .await
-                        .unwrap_or_else(|err| {
-                            tracing::warn!("Failed to send chain tip change: {}", err);
-                        });
-                });
+
+                if let Err(error) = response_sender
+                    .send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)))
+                    .await
+                {
+                    tracing::info!(?error, "failed to send chain tip change, dropping task");
+                    return;
+                }
             }
 
+            tracing::warn!("chain_tip_change channel has closed");
             let _ = response_sender
                 .send(Err(Status::unavailable(
                     "chain_tip_change channel has closed",
@@ -82,33 +83,34 @@ where
         tokio::spawn(async move {
             // Notify the client of chain tip changes until the channel is closed
             while let Ok(change) = mempool_change.recv().await {
-                let tx = response_sender.clone();
+                for tx_id in change.tx_ids() {
+                    tracing::debug!("mempool change: {:?}", change);
 
-                tokio::spawn(async move {
-                    for tx_id in change.tx_ids() {
-                        tracing::debug!("Mempool change: {:?}", change);
-
-                        let _ = tx
-                            .send(Ok(MempoolChangeMessage {
-                                change_type: match change.kind() {
-                                    MempoolChangeKind::Added => 0,
-                                    MempoolChangeKind::Invalidated => 1,
-                                    MempoolChangeKind::Mined => 2,
-                                },
-                                tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
-                                auth_digest: tx_id
-                                    .auth_digest()
-                                    .map(|d| d.bytes_in_display_order().to_vec())
-                                    .unwrap_or_default(),
-                            }))
-                            .await;
+                    if let Err(error) = response_sender
+                        .send(Ok(MempoolChangeMessage {
+                            change_type: match change.kind() {
+                                MempoolChangeKind::Added => 0,
+                                MempoolChangeKind::Invalidated => 1,
+                                MempoolChangeKind::Mined => 2,
+                            },
+                            tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
+                            auth_digest: tx_id
+                                .auth_digest()
+                                .map(|d| d.bytes_in_display_order().to_vec())
+                                .unwrap_or_default(),
+                        }))
+                        .await
+                    {
+                        tracing::info!(?error, "failed to send mempool change, dropping task");
+                        return;
                     }
-                });
+                }
             }
 
+            tracing::warn!("mempool_change channel has closed");
             let _ = response_sender
                 .send(Err(Status::unavailable(
-                    "chain_tip_change channel has closed",
+                    "mempool_change channel has closed",
                 )))
                 .await;
         });
