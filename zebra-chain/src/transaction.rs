@@ -1008,7 +1008,7 @@ impl Transaction {
                 ..
             } => Box::new(
                 orchard_shielded_data
-                    .into_iter()
+                    .iter()
                     .flat_map(orchard::ShieldedData::action_commons),
             ),
 
@@ -1018,7 +1018,7 @@ impl Transaction {
                 ..
             } => Box::new(
                 orchard_shielded_data
-                    .into_iter()
+                    .iter()
                     .flat_map(orchard::ShieldedData::action_commons),
             ),
         }
@@ -1037,7 +1037,7 @@ impl Transaction {
                 ..
             } => Box::new(
                 orchard_shielded_data
-                    .into_iter()
+                    .iter()
                     .flat_map(orchard::ShieldedData::nullifiers),
             ),
 
@@ -1047,7 +1047,7 @@ impl Transaction {
                 ..
             } => Box::new(
                 orchard_shielded_data
-                    .into_iter()
+                    .iter()
                     .flat_map(orchard::ShieldedData::nullifiers),
             ),
         }
