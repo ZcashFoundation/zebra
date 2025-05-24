@@ -28,6 +28,7 @@ use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_end
 
 use crate::{
     constants::DATABASE_FORMAT_VERSION_FILE_NAME,
+    database_format_version_on_disk,
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
     Config,
 };
@@ -1012,23 +1013,26 @@ impl DiskDb {
     /// db to a new path so it can be used again. It does so by merely trying to rename the path
     /// corresponding to the db version directly preceding the current version to the path that is
     /// used by the current db. If successful, it also deletes the db version file.
+    ///
+    /// Returns the old disk version if one existed and the db directory was renamed, or None otherwise.
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
         restorable_db_versions: &[u64],
         format_version_in_code: &Version,
         config: &Config,
         db_kind: impl AsRef<str>,
         network: &Network,
-    ) {
+    ) -> Option<Version> {
         if let Some(&major_db_ver) = restorable_db_versions
             .iter()
             .find(|v| **v == format_version_in_code.major)
         {
             let db_kind = db_kind.as_ref();
 
-            let old_path = config.db_path(db_kind, major_db_ver - 1, network);
+            let old_major_db_ver = major_db_ver - 1;
+            let old_path = config.db_path(db_kind, old_major_db_ver, network);
             // Exit early if the path doesn't exist or there's an error checking it.
             if !fs::exists(&old_path).unwrap_or(false) {
-                return;
+                return None;
             }
 
             let new_path = config.db_path(db_kind, major_db_ver, network);
@@ -1037,7 +1041,7 @@ impl DiskDb {
                 Ok(canonicalized_old_path) => canonicalized_old_path,
                 Err(e) => {
                     warn!("could not canonicalize {old_path:?}: {e}");
-                    return;
+                    return None;
                 }
             };
 
@@ -1045,7 +1049,7 @@ impl DiskDb {
                 Ok(canonicalized_cache_path) => canonicalized_cache_path,
                 Err(e) => {
                     warn!("could not canonicalize {:?}: {e}", config.cache_dir);
-                    return;
+                    return None;
                 }
             };
 
@@ -1060,7 +1064,7 @@ impl DiskDb {
             // (TOCTOU attacks). Zebra should not be run with elevated privileges.
             if !old_path.starts_with(&cache_path) {
                 info!("skipped reusing previous state cache: state is outside cache directory");
-                return;
+                return None;
             }
 
             let opts = DiskDb::options();
@@ -1081,13 +1085,25 @@ impl DiskDb {
                         warn!(
                             "could not create new directory for state cache at {new_path:?}: {e}"
                         );
-                        return;
+                        return None;
                     }
                 };
 
                 match fs::rename(&old_path, &new_path) {
                     Ok(()) => {
                         info!("moved state cache from {old_path:?} to {new_path:?}");
+
+                        let disk_version = database_format_version_on_disk(
+                            config,
+                            &db_kind,
+                            major_db_ver,
+                            network,
+                        )
+                        .expect("unable to read database format version file")
+                        .map(|mut v| {
+                            v.major = old_major_db_ver;
+                            v
+                        });
 
                         match fs::remove_file(new_path.join(DATABASE_FORMAT_VERSION_FILE_NAME)) {
                             Ok(()) => info!("removed version file at {new_path:?}"),
@@ -1119,13 +1135,17 @@ impl DiskDb {
                                 }
                             }
                         }
+
+                        return disk_version;
                     }
                     Err(e) => {
-                        warn!("could not move state cache from {old_path:?} to {new_path:?}: {e}")
+                        warn!("could not move state cache from {old_path:?} to {new_path:?}: {e}");
                     }
-                }
+                };
             }
-        }
+        };
+
+        None
     }
 
     /// Returns the database options for the finalized state database.

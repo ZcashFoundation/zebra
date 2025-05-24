@@ -55,7 +55,7 @@ enum LoadResult {
 
 impl DiskFormatUpgrade for Upgrade {
     fn version(&self) -> semver::Version {
-        semver::Version::new(26, 1, 0)
+        semver::Version::new(27, 0, 0)
     }
 
     fn description(&self) -> &'static str {
