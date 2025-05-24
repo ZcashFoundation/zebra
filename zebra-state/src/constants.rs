@@ -46,7 +46,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 26;
+const DATABASE_FORMAT_VERSION: u64 = 27;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -108,7 +108,8 @@ pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 
 /// These database versions can be recreated from their directly preceding versions.
-pub const RESTORABLE_DB_VERSIONS: [u64; 1] = [26];
+// TODO: Make this a function that computes restorable versions from db format upgrades to major versions
+pub const RESTORABLE_DB_VERSIONS: [u64; 2] = [26, 27];
 
 /// The maximum number of invalidated block records.
 ///

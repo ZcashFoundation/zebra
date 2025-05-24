@@ -98,6 +98,7 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> ZebraDb {
+        // TODO: Consider refactoring this and the `DiskDb::try_reusing_previous_db_after_major_upgrade()` call below.
         let disk_version = database_format_version_on_disk(
             config,
             &db_kind,
@@ -106,13 +107,14 @@ impl ZebraDb {
         )
         .expect("unable to read database format version file");
 
-        DiskDb::try_reusing_previous_db_after_major_upgrade(
+        let disk_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
             &RESTORABLE_DB_VERSIONS,
             format_version_in_code,
             config,
             &db_kind,
             network,
-        );
+        )
+        .or(disk_version);
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);

@@ -1243,6 +1243,32 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            // Used by getblock
+            ReadRequest::BlockInfo(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let value_balance = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block_info(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        // TODO: Do this in the Drop impl with the variant name?
+                        timer.finish(module_path!(), line!(), "ReadRequest::BlockInfo");
+
+                        Ok(ReadResponse::BlockInfo(value_balance))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             // Used by the StateService.
             ReadRequest::Depth(hash) => {
                 let state = self.clone();
@@ -1715,20 +1741,20 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let balance = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
+                        let (balance, received) = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
                                 read::transparent_balance(
                                     non_finalized_state.best_chain().cloned(),
                                     &state.db,
                                     addresses,
                                 )
-                            },
-                        )?;
+                            })?;
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
 
-                        Ok(ReadResponse::AddressBalance(balance))
+                        Ok(ReadResponse::AddressBalance { balance, received })
                     })
                 })
                 .wait_for_panics()
