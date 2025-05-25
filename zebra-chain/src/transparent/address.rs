@@ -10,6 +10,7 @@ use crate::{
 
 #[cfg(test)]
 use proptest::prelude::*;
+use zcash_address::{ToAddress, ZcashAddress};
 
 /// Transparent Zcash Addresses
 ///
@@ -22,6 +23,7 @@ use proptest::prelude::*;
 /// to a Bitcoin address just by removing the "t".)
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding>
+// TODO Remove this type and move to `TransparentAddress` in `zcash-transparent`.
 #[derive(
     Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
@@ -52,6 +54,21 @@ pub enum Address {
         /// 20 bytes specifying the validating key hash.
         validating_key_hash: [u8; 20],
     },
+}
+
+impl From<Address> for ZcashAddress {
+    fn from(taddr: Address) -> Self {
+        match taddr {
+            Address::PayToScriptHash {
+                network_kind,
+                script_hash,
+            } => ZcashAddress::from_transparent_p2sh(network_kind.into(), script_hash),
+            Address::PayToPublicKeyHash {
+                network_kind,
+                pub_key_hash,
+            } => ZcashAddress::from_transparent_p2pkh(network_kind.into(), pub_key_hash),
+        }
+    }
 }
 
 impl fmt::Debug for Address {
@@ -251,11 +268,10 @@ impl Address {
         }
     }
 
-    /// Given a transparent address (P2SH or a P2PKH), create a script that can be used in a coinbase
-    /// transaction output.
+    /// Turns the address into the `scriptPubKey` script that can be used in a coinbase output.
     ///
     /// TEX addresses are not supported and return an empty script.
-    pub fn create_script_from_address(&self) -> Script {
+    pub fn script(&self) -> Script {
         let mut script_bytes = Vec::new();
 
         match self {
