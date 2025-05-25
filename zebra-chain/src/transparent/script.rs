@@ -42,6 +42,12 @@ impl Script {
     }
 }
 
+impl From<zcash_transparent::address::Script> for Script {
+    fn from(script: zcash_transparent::address::Script) -> Self {
+        Script(script.0)
+    }
+}
+
 impl fmt::Display for Script {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.write_str(&self.encode_hex::<String>())
