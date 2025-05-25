@@ -28,8 +28,8 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         Network, NetworkUpgrade,
-        subsidy::{FundingStreamReceiver, block_subsidy, funding_stream_values, miner_subsidy},
     },
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
@@ -38,7 +38,7 @@ use zebra_chain::{
     },
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
-use zebra_consensus::{MAX_BLOCK_SIGOPS, funding_stream_address};
+use zebra_consensus::{funding_stream_address, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -469,9 +469,9 @@ where
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Check that the configured miner address is valid.
-        let miner_address = conf.miner_address.map(|zaddr| {
-            if zaddr.can_receive_as(PoolType::Transparent) {
-                Address::try_from_zcash_address(net, zaddr)
+        let miner_address = conf.miner_address.map(|addr| {
+            if addr.can_receive_as(PoolType::Transparent) {
+                Address::try_from_zcash_address(net, addr)
                     .expect("miner_address must be a valid Zcash address")
             } else {
                 // TODO: Remove this panic once we support mining to shielded addresses.
