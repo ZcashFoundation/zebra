@@ -1,19 +1,20 @@
 //! Mining config
 
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 
-use zebra_chain::transparent;
+use zcash_address::ZcashAddress;
 
 /// Mining configuration section.
+#[serde_as]
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// The address used for miner payouts.
-    /// Zebra currently only supports P2SH and P2PKH transparent addresses.
+    /// Address for receiving miner subsidy and tx fees.
     ///
-    /// Zebra sends mining fees and miner rewards to this address in the
-    /// `getblocktemplate` RPC coinbase transaction.
-    pub miner_address: Option<transparent::Address>,
+    /// Used in coinbase tx constructed in `getblocktemplate` RPC.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub miner_address: Option<ZcashAddress>,
 
     // TODO: Internal miner config code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
     // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L18-L38
