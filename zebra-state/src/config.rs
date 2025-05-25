@@ -122,7 +122,7 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
         .prefix(prefix)
         .tempdir()
         .expect("temporary directory is created successfully")
-        .into_path()
+        .keep()
 }
 
 impl Config {
