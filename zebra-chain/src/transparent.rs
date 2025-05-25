@@ -9,8 +9,6 @@ mod utxo;
 
 use std::{collections::HashMap, fmt, iter};
 
-use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
-
 use crate::{
     amount::{Amount, NonNegative},
     block,
@@ -19,6 +17,8 @@ use crate::{
 };
 
 pub use address::Address;
+use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
+
 pub use script::Script;
 pub use serialize::{GENESIS_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN};
 pub use utxo::{

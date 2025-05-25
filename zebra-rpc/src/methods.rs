@@ -3933,7 +3933,7 @@ where
     let response = match (should_use_default, response) {
         (_, Ok(res)) => res,
         (true, Err(_)) => {
-            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64)
+            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64);
         }
         (false, Err(error)) => return Err(ErrorObject::owned(0, error.to_string(), None::<()>)),
     };

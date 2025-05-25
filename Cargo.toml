@@ -25,14 +25,14 @@ resolver = "2"
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.11"
 sapling-crypto = "0.5"
-zcash_address = "0.7"
-zcash_client_backend = "0.18"
+zcash_address = "0.8"
+zcash_client_backend = "0.19"
 zcash_encoding = "0.3"
 zcash_history = "0.4"
-zcash_keys = "0.8"
-zcash_primitives = "0.22"
-zcash_proofs = "0.22"
-zcash_transparent = "0.2.3"
+zcash_keys = "0.9"
+zcash_primitives = "0.23"
+zcash_proofs = "0.23"
+zcash_transparent = "0.3"
 zcash_protocol = "0.5.1"
 zip32 = "0.2"
 abscissa_core = "0.7"
@@ -149,10 +149,22 @@ tracing-subscriber = "0.3.19"
 tracing-test = "0.2.4"
 uint = "0.10"
 vergen-git2 = { version = "1.0", default-features = false }
-wagyu-zcash-parameters = "0.2"
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.3.1"
+
+[patch.crates-io]
+sapling-crypto = { path = "../sapling-crypto" }
+
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_client_backend = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
 
 [workspace.metadata.release]
 
