@@ -67,6 +67,10 @@ impl From<Address> for ZcashAddress {
                 network_kind,
                 pub_key_hash,
             } => ZcashAddress::from_transparent_p2pkh(network_kind.into(), pub_key_hash),
+            Address::Tex {
+                network_kind,
+                validating_key_hash,
+            } => ZcashAddress::from_tex(network_kind.into(), validating_key_hash),
         }
     }
 }
