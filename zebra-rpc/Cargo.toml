@@ -57,7 +57,7 @@ jsonrpsee-proc-macros = { workspace = true }
 hyper = { workspace = true }
 http-body-util = { workspace = true }
 semver = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["raw_value"] }
 serde_with = { workspace = true, features = ["hex"] }
 indexmap = { workspace = true, features = ["serde"] }
 
