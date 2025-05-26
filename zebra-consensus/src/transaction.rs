@@ -519,7 +519,6 @@ impl OrchardTransaction for orchard::OrchardVanilla {
 
 #[cfg(feature = "tx-v6")]
 impl OrchardTransaction for orchard::OrchardZSA {
-    // FIXME: is this a correct set of Nu values?
     const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[NetworkUpgrade::Nu7];
 }
 
@@ -792,8 +791,11 @@ where
         network_upgrade: NetworkUpgrade,
     ) -> Result<(), TransactionError> {
         if V::SUPPORTED_NETWORK_UPGRADES.contains(&network_upgrade) {
-            // FIXME: extend comment to cover V6
-            // FIXME: Should V5 support Nu5 and Nu6 or Nu7 as well? Should V6 support Nu7 only?
+            // FIXME: Extend this comment to include V6. Also, it may be confusing to
+            // mention version group IDs and other rules here since they aren’t actually
+            // checked. This function only verifies compatibility between the transaction
+            // version and the network upgrade.
+
             // Supports V5/V6 transactions
             //
             // # Consensus
