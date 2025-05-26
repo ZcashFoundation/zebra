@@ -64,6 +64,8 @@ pub use disk_format::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
 
+pub use disk_format::upgrade::restorable_db_versions;
+
 /// The column families supported by the running `zebra-state` database code.
 ///
 /// Existing column families that aren't listed here are preserved when the database is opened.

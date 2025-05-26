@@ -18,7 +18,6 @@ use zebra_chain::parameters::Network;
 
 use crate::{
     config::database_format_version_on_disk,
-    constants::RESTORABLE_DB_VERSIONS,
     service::finalized_state::{
         disk_db::DiskDb,
         disk_format::{
@@ -28,6 +27,8 @@ use crate::{
     },
     write_database_format_version_to_disk, BoxError, Config,
 };
+
+use super::disk_format::upgrade::restorable_db_versions;
 
 pub mod block;
 pub mod chain;
@@ -98,23 +99,17 @@ impl ZebraDb {
         column_families_in_code: impl IntoIterator<Item = String>,
         read_only: bool,
     ) -> ZebraDb {
-        // TODO: Consider refactoring this and the `DiskDb::try_reusing_previous_db_after_major_upgrade()` call below.
-        let disk_version = database_format_version_on_disk(
-            config,
-            &db_kind,
-            format_version_in_code.major,
-            network,
-        )
-        .expect("unable to read database format version file");
-
         let disk_version = DiskDb::try_reusing_previous_db_after_major_upgrade(
-            &RESTORABLE_DB_VERSIONS,
+            &restorable_db_versions(),
             format_version_in_code,
             config,
             &db_kind,
             network,
         )
-        .or(disk_version);
+        .or_else(|| {
+            database_format_version_on_disk(config, &db_kind, format_version_in_code.major, network)
+                .expect("unable to read database format version file")
+        });
 
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);

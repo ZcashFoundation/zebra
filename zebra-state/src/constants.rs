@@ -107,10 +107,6 @@ pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 /// The maximum number of block headers allowed in `getheaders` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
 
-/// These database versions can be recreated from their directly preceding versions.
-// TODO: Make this a function that computes restorable versions from db format upgrades to major versions
-pub const RESTORABLE_DB_VERSIONS: [u64; 2] = [26, 27];
-
 /// The maximum number of invalidated block records.
 ///
 /// This limits the memory use to around:

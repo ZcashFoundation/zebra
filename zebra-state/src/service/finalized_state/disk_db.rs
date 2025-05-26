@@ -1015,6 +1015,7 @@ impl DiskDb {
     /// used by the current db. If successful, it also deletes the db version file.
     ///
     /// Returns the old disk version if one existed and the db directory was renamed, or None otherwise.
+    #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
         restorable_db_versions: &[u64],
         format_version_in_code: &Version,
@@ -1093,17 +1094,13 @@ impl DiskDb {
                     Ok(()) => {
                         info!("moved state cache from {old_path:?} to {new_path:?}");
 
-                        let disk_version = database_format_version_on_disk(
-                            config,
-                            &db_kind,
-                            major_db_ver,
-                            network,
-                        )
-                        .expect("unable to read database format version file")
-                        .map(|mut v| {
-                            v.major = old_major_db_ver;
-                            v
-                        });
+                        let disk_version =
+                            database_format_version_on_disk(config, db_kind, major_db_ver, network)
+                                .expect("unable to read database format version file")
+                                .map(|mut v| {
+                                    v.major = old_major_db_ver;
+                                    v
+                                });
 
                         match fs::remove_file(new_path.join(DATABASE_FORMAT_VERSION_FILE_NAME)) {
                             Ok(()) => info!("removed version file at {new_path:?}"),

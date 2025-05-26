@@ -10,10 +10,7 @@ use zebra_chain::{
     amount::NonNegative,
     block::{Block, Height},
     block_info::BlockInfo,
-    parameters::{
-        subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
-        Network,
-    },
+    parameters::subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
     transparent::{self, OutPoint, Utxo},
     value_balance::ValueBalance,
 };
@@ -29,16 +26,7 @@ use super::{CancelFormatChange, DiskFormatUpgrade};
 
 /// Implements [`DiskFormatUpgrade`] for adding additionl block info to the
 /// database.
-pub struct Upgrade {
-    network: Network,
-}
-
-impl Upgrade {
-    /// Creates a new [`BlockInfo`] upgrade for the given network.
-    pub fn new(network: Network) -> Self {
-        Self { network }
-    }
-}
+pub struct Upgrade;
 
 /// The result of loading data to create a [`BlockInfo`]. If the info was
 /// already there we only need to ValueBalance to keep track of the totals.
@@ -69,6 +57,7 @@ impl DiskFormatUpgrade for Upgrade {
         db: &crate::ZebraDb,
         cancel_receiver: &crossbeam_channel::Receiver<super::CancelFormatChange>,
     ) -> Result<(), super::CancelFormatChange> {
+        let network = db.network();
         let balance_by_transparent_addr = db.address_balance_cf();
         let chunk_size = rayon::current_num_threads();
         tracing::info!(chunk_size = ?chunk_size, "adding block info data");
@@ -128,7 +117,7 @@ impl DiskFormatUpgrade for Upgrade {
                         }
 
                         for output in tx.outputs() {
-                            if let Some(address) = output.address(&self.network) {
+                            if let Some(address) = output.address(&network) {
                                 *address_balance_changes
                                     .entry(address)
                                     .or_insert_with(AddressBalanceLocationChange::empty)
@@ -180,12 +169,12 @@ impl DiskFormatUpgrade for Upgrade {
             };
 
             // Get the deferred amount which is required to update the value pool.
-            let expected_deferred_amount = if height > self.network.slow_start_interval() {
+            let expected_deferred_amount = if height > network.slow_start_interval() {
                 // See [ZIP-1015](https://zips.z.cash/zip-1015).
                 funding_stream_values(
                     height,
-                    &self.network,
-                    block_subsidy(height, &self.network).unwrap_or_default(),
+                    &network,
+                    block_subsidy(height, &network).unwrap_or_default(),
                 )
                 .unwrap_or_default()
                 .remove(&FundingStreamReceiver::Deferred)
@@ -229,6 +218,8 @@ impl DiskFormatUpgrade for Upgrade {
         db: &crate::ZebraDb,
         cancel_receiver: &crossbeam_channel::Receiver<super::CancelFormatChange>,
     ) -> Result<Result<(), String>, super::CancelFormatChange> {
+        let network = db.network();
+
         // Return early before the next disk read if the upgrade was cancelled.
         if !matches!(cancel_receiver.try_recv(), Err(TryRecvError::Empty)) {
             return Err(super::CancelFormatChange);
@@ -271,7 +262,7 @@ impl DiskFormatUpgrade for Upgrade {
             .flat_map(|(_, tx)| tx.outputs().to_vec())
             .filter_map(|output| {
                 if output.value != 0 {
-                    output.address(&self.network)
+                    output.address(&network)
                 } else {
                     None
                 }
