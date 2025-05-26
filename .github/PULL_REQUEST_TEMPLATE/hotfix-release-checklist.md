@@ -1,11 +1,13 @@
 ---
 name: 'Hotfix Release Checklist Template'
-about: 'Checklist to create and publish a Zebra release'
+about: 'Checklist to create and publish a hotfix Zebra release'
 title: 'Release Zebra (version)'
 labels: 'A-release, C-exclude-from-changelog, P-Critical :ambulance:'
 assignees: ''
 
 ---
+
+A hotfix release should only be created when a bug or critical issue is discovered in an existing release, and waiting for the next scheduled release is impractical or unacceptable.
 
 ## Create the Release PR
 
@@ -20,9 +22,7 @@ assignees: ''
 
 ## Update Versions
 
-Choose a release level for `zebrad`. Release levels are based on user-visible changes from the changelog:
-- significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
-- otherwise, it is a `patch` release
+The release level for a hotfix should always follow semantic versioning as a `patch` release.
 
 <details>
 <summary>Update crate versions, commit the changes to the release branch, and do a release dry-run:</summary>
@@ -34,7 +34,7 @@ cargo release version --verbose --execute --allow-branch '*' --workspace --exclu
 cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.4
 cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.2
 # Update zebrad:
-cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
+cargo release version --verbose --execute --allow-branch '*' --package zebrad patch
 # Continue with the release process:
 cargo release replace --verbose --execute --allow-branch '*' --package zebrad
 cargo release commit --verbose --execute --allow-branch '*'
@@ -53,10 +53,10 @@ cargo release commit --verbose --execute --allow-branch '*'
 - [ ] Wait for the hotfix release PR to be reviewed, approved, and merged into main.
 - [ ] Create a new release
 - [ ] Set the tag name to the version tag,
-      for example: `v1.0.0`
+      for example: `v2.3.1`
 - [ ] Set the release to target the hotfix release branch
 - [ ] Set the release title to `Zebra ` followed by the version tag,
-      for example: `Zebra 1.0.0`
+      for example: `Zebra 2.3.1`
 - [ ] Populate the release description with the final changelog you created;
       starting just _after_ the title `## [Zebra ...` of the current version being released,
       and ending just _before_ the title of the previous release.
@@ -98,13 +98,5 @@ cargo release commit --verbose --execute --allow-branch '*'
 If building or running fails after tagging:
 
 <details>
-
-<summary>Tag a new release, following these instructions...</summary>
-
-1. Fix the bug that caused the failure
-2. Start a new `patch` release
-3. Skip the **Release Preparation**, and start at the **Release Changes** step
-4. Update `CHANGELOG.md` with details about the fix
-5. Follow the release checklist for the new Zebra version
-
+1. Create a new hotfix release, starting from the top of this document.
 </details>
