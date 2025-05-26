@@ -28,7 +28,9 @@ use crate::{service::read::AddressUtxos, TransactionLocation};
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
 pub enum Response {
     /// Response to [`Request::CommitSemanticallyVerifiedBlock`] indicating that a block was
-    /// successfully committed to the state.
+    /// successfully committed to the state, or a response to [`Request::InvalidateBlock`] or
+    /// [`Request::ReconsiderBlock`] indicating that the state attempted to send a message to
+    /// the block write task to invalidate or reconsider the block hash.
     Committed(block::Hash),
 
     /// Response to [`Request::Depth`] with the depth of the specified block.
