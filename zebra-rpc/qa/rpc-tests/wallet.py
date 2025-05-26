@@ -7,7 +7,7 @@
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.authproxy import JSONRPCException
 from test_framework.mininode import COIN
-from test_framework.util import assert_equal, start_nodes, start_node, \
+from test_framework.util import assert_equal, start_nodes, start_wallets, start_node, \
     connect_nodes_bi, sync_blocks, sync_mempools
 from test_framework.zip317 import conventional_fee
 
@@ -23,11 +23,23 @@ class WalletTest (BitcoinTestFramework):
     def setup_network(self, split=False):
         self.nodes = start_nodes(3, self.options.tmpdir)
 
-        connect_nodes_bi(self.nodes,0,1)
-        connect_nodes_bi(self.nodes,1,2)
-        connect_nodes_bi(self.nodes,0,2)
+        # TODO: Connect nodes between them, we need addnode RPC method: #XXXX
+        #connect_nodes_bi(self.nodes,0,1)
+        #connect_nodes_bi(self.nodes,1,2)
+        #connect_nodes_bi(self.nodes,0,2)
         self.is_network_split=False
         self.sync_all()
+
+        # If nodes were connected, only one of them would generate a block
+        self.nodes[0].generate(1)
+        self.sync_all()
+
+        # But as we can't connect nodes yet, we need to generate a block to each node manually
+        # TODO: Remove this when we have addnode RPC method: #XXXX
+        for i in range(1, len(self.nodes)):
+            self.nodes[i].generate(1)
+
+        self.wallets = start_wallets(3, self.options.tmpdir)
 
     def run_test(self):
         print("Mining blocks...")
@@ -35,9 +47,9 @@ class WalletTest (BitcoinTestFramework):
         self.nodes[0].generate(4)
         self.sync_all()
 
-        #walletinfo = self.nodes[0].getwalletinfo()
+        walletinfo = self.wallets[0].getwalletinfo()
         #assert_equal(Decimal(walletinfo['immature_balance']), Decimal('40'))
-        #assert_equal(Decimal(walletinfo['balance']), Decimal('0'))
+        assert_equal(Decimal(walletinfo['balance']), Decimal('0'))
 
 if __name__ == '__main__':
     WalletTest ().main ()

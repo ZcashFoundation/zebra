@@ -106,6 +106,10 @@ def p2p_port(n):
 def rpc_port(n):
     return PORT_MIN + PORT_RANGE + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
+def wallet_rpc_port(n):
+    return PORT_MIN + PORT_RANGE + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
+
+
 def check_json_precision():
     """Make sure json library being used does not lose precision converting ZEC values"""
     n = Decimal("20000000.00000003")
@@ -185,6 +189,7 @@ def sync_mempools(rpc_connections, wait=0.5, timeout=60):
     return True
 
 bitcoind_processes = {}
+zallet_processes = {}
 
 def initialize_datadir(dirname, n, clock_offset=0):
     datadir = os.path.join(dirname, "node"+str(n))
@@ -803,3 +808,119 @@ def tarfile_extractall(tarfile, path):
         tarfile.extractall(path=path, filter='data')
     else:
         tarfile.extractall(path=path)
+
+def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=None):
+    """
+    Start multiple wallets, return RPC connections to them
+    """
+    if extra_args is None: extra_args = [ None for _ in range(num_wallets) ]
+    if binary is None: binary = [ None for _ in range(num_wallets) ]
+    rpcs = []
+    try:
+        for i in range(num_wallets):
+            rpcs.append(start_wallet(i, dirname, extra_args[i], rpchost, binary=binary[i]))
+    except: # If one node failed to start, stop the others
+        stop_wallets(rpcs)
+        raise
+    return rpcs
+
+
+def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=None, stderr=None):
+    """
+    Start a Zallet wallet and return RPC connection to it
+    """
+
+    datadir = os.path.join(dirname, "wallet"+str(i))
+    if binary is None:
+        binary = zallet_binary()
+
+    validator_port = rpc_port(i)
+    print("validator_port: ", validator_port)
+    zallet_port = wallet_rpc_port(i + 1000)
+    print("zallet_port: ", zallet_port)
+
+    config = update_zallet_conf(datadir, validator_port, zallet_port)
+    args = [ binary, "-c="+config, "start" ]
+
+    #if extra_args is not None: args.extend(extra_args)
+    zallet_processes[i] = subprocess.Popen(args, stderr=stderr)
+    if os.getenv("PYTHON_DEBUG", ""):
+        print("start_wallet: wallet started, waiting for RPC to come up")
+    url = rpc_url_wallet(i, zallet_port, rpchost)
+    wait_for_wallet_start(zallet_processes[i], url, i)
+    if os.getenv("PYTHON_DEBUG", ""):
+        print("start_wallet: RPC successfully started for wallet {} with pid {}".format(i, zallet_processes[i].pid))
+    proxy = get_rpc_proxy(url, i, timeout=timewait)
+    if COVERAGE_DIR:
+        coverage.write_all_rpc_commands(COVERAGE_DIR, proxy)
+
+    return proxy
+
+
+def update_zallet_conf(datadir, validator_port, zallet_port):
+    import toml
+
+    config_path = zallet_config(datadir)
+
+    with open(config_path, 'r') as f:
+        config_file = toml.load(f)
+
+    config_file['rpc']['bind'][0] = '127.0.0.1:'+str(zallet_port)
+    config_file['indexer']['validator_address'] = '127.0.0.1:'+str(validator_port)
+
+    config_file['wallet_db'] = os.path.join(datadir, 'datadir/data.sqlite')
+    config_file['indexer']['db_path'] = os.path.join(datadir, 'datadir/zaino')
+    config_file['keystore']['identity'] = os.path.join(datadir, 'datadir/identity.txt')
+
+    with open(config_path, 'w') as f:
+        toml.dump(config_file, f)
+
+    return config_path
+
+def stop_wallets(wallets):
+    for wallet in wallets:
+        try:
+            wallet.stop()
+        except http.client.CannotSendRequest as e:
+            print("WARN: Unable to stop wallet: " + repr(e))
+    del wallets[:] # Emptying array closes connections as a side effect
+
+def zallet_config(datadir):
+    base_location = os.path.join('qa', 'zallet-datadir')
+    new_location = os.path.join(datadir, "datadir")
+    shutil.copytree(base_location, new_location)
+    config = new_location + "/zallet.toml"
+    return config
+
+def wait_for_wallet_start(process, url, i):
+    '''
+    Wait for the wallet to start. This means that RPC is accessible and fully initialized.
+    Raise an exception if zallet exits during initialization.
+    '''
+    time.sleep(1) # give the wallet a moment to start
+    while True:
+        if process.poll() is not None:
+            raise Exception('%s wallet %d exited with status %i during initialization' % (zallet_binary(), i, process.returncode))
+        try:
+            rpc = get_rpc_proxy(url, i)
+            rpc.getwalletinfo()
+            break # break out of loop on success
+        except IOError as e:
+            if e.errno != errno.ECONNREFUSED: # Port not yet open?
+                raise # unknown IO error
+        except JSONRPCException as e: # Initialization phase
+            if e.error['code'] != -28: # RPC in warmup?
+                raise # unknown JSON RPC exception
+        time.sleep(0.25)
+
+def rpc_url_wallet(i, zallet_port, rpchost=None):
+    host = '127.0.0.1'
+    port = zallet_port
+    if rpchost:
+        parts = rpchost.split(':')
+        if len(parts) == 2:
+            host, port = parts
+        else:
+            host = rpchost
+    # For zallet, we just use a non-authenticated endpoint.
+    return "http://%s:%d" % (host, int(port))
