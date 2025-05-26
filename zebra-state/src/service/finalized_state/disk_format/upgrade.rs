@@ -105,7 +105,6 @@ fn format_upgrades(
 /// previous major database format.
 pub fn restorable_db_versions() -> Vec<u64> {
     format_upgrades(None)
-        .into_iter()
         .filter_map(|upgrade| {
             let version = upgrade.version();
             if version.minor == 0 && version.patch == 0 {
