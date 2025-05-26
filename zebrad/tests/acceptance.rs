@@ -3261,7 +3261,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_node_services::mempool;
     use zebra_rpc::methods::hex_data::HexData;
     use zebra_test::mock_service::MockService;
-
     let _init_guard = zebra_test::init();
 
     tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
@@ -3299,7 +3298,12 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network);
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
@@ -3331,6 +3335,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         "0.0.1",
         "Zebra tests",
         mempool.clone(),
+        state.clone(),
         read_state.clone(),
         block_verifier_router,
         mock_sync_status,
@@ -3358,9 +3363,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let get_block_template::Response::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
-        panic!(
-            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
-        )
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
     };
 
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
@@ -3688,6 +3691,219 @@ async fn has_spending_transaction_ids() -> Result<()> {
         !is_failure,
         "at least one spend was missing a spending transaction id"
     );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalidate_and_reconsider_block() -> Result<()> {
+    use std::sync::Arc;
+
+    use common::regtest::MiningRpcMethods;
+    use eyre::Error;
+    use tokio::time::timeout;
+    use zebra_chain::parameters::testnet::REGTEST_NU5_ACTIVATION_HEIGHT;
+    use zebra_state::ReadResponse;
+
+    let _init_guard = zebra_test::init();
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
+    config.state.ephemeral = false;
+
+    let test_dir = testdir()?.with_config(&mut config)?;
+
+    let mut child = test_dir.spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tracing::info!("waiting for Zebra state cache to be opened");
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    tracing::info!("starting read state with syncer");
+    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
+    let (read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            config.state,
+            &config.network.network,
+            rpc_address,
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
+
+    tracing::info!("waiting for first chain tip change");
+
+    // Wait for Zebrad to start up
+    let tip_action = timeout(LAUNCH_DELAY, chain_tip_change.wait_for_tip_change()).await??;
+    assert!(
+        tip_action.is_reset(),
+        "first tip action should be a reset for the genesis block"
+    );
+
+    tracing::info!("got genesis chain tip change, submitting more blocks ..");
+
+    let rpc_client = RpcRequestClient::new(rpc_address);
+    let mut blocks = Vec::new();
+    for _ in 0..10 {
+        let (block, height) = rpc_client
+            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
+            .await?;
+        // TODO: Submit 50 blocks instead of 5, call reconsiderblock, and check that there's another chain tip reset.
+        // let header = Arc::make_mut(&mut block.header);
+        // while header.hash() < network.target_difficulty_limit() {
+        //     increment_big_endian(header.nonce.as_mut());
+        // }
+        rpc_client.submit_block(block.clone()).await?;
+        blocks.push(block);
+        let tip_action = timeout(
+            Duration::from_secs(1),
+            chain_tip_change.wait_for_tip_change(),
+        )
+        .await??;
+
+        assert_eq!(
+            tip_action.best_tip_height(),
+            height,
+            "tip action height should match block submission"
+        );
+    }
+
+    tracing::info!("checking that read state has the new non-finalized best chain blocks");
+    for expected_block in blocks.clone() {
+        let height = expected_block.coinbase_height().unwrap();
+        let zebra_block = rpc_client
+            .get_block(height.0 as i32)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("Zebra test child should have the expected block");
+
+        assert_eq!(
+            zebra_block,
+            Arc::new(expected_block),
+            "Zebra should have the same block"
+        );
+
+        let ReadResponse::Block(read_state_block) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("unexpected read response to a block request")
+        };
+
+        assert_eq!(
+            zebra_block,
+            read_state_block.expect("read state should have the block"),
+            "read state should have the same block"
+        );
+    }
+
+    tracing::info!("invalidating blocks to trigger a best chain change");
+
+    let block_6_hash = blocks.get(5).expect("should have 11 blocks").hash();
+    let _ = rpc_client
+        .call("invalidateblock", format!("[${block_6_hash}]"))
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    for _ in 0..10 {
+        let fut = rpc_client
+            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
+            .await;
+
+        let (block, _height) = fut?;
+
+        rpc_client.submit_block(block.clone()).await?;
+    }
+
+    tracing::info!("newly submitted blocks are in the best chain, checking for reset");
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let tip_action = timeout(
+        Duration::from_secs(1),
+        chain_tip_change.wait_for_tip_change(),
+    )
+    .await??;
+    assert!(tip_action.is_reset(), "tip action should be reset");
+
+    tracing::info!("checking that read state has the new non-finalized best chain blocks");
+    for expected_block in blocks {
+        let height = expected_block.coinbase_height().unwrap();
+        let zebra_block = rpc_client
+            .get_block(height.0 as i32)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("Zebra test child should have the expected block");
+
+        assert_eq!(
+            zebra_block,
+            Arc::new(expected_block),
+            "Zebra should have the same block"
+        );
+
+        let ReadResponse::Block(read_state_block) = read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Block(height.into()))
+            .await
+            .map_err(|err| eyre!(err))?
+        else {
+            unreachable!("unexpected read response to a block request")
+        };
+
+        assert_eq!(
+            zebra_block,
+            read_state_block.expect("read state should have the block"),
+            "read state should have the same block"
+        );
+    }
+
+    tracing::info!("restarting Zebra on Mainnet");
+
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    output.assert_failure()?;
+
+    let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
+    config.state.ephemeral = false;
+    let rpc_address = config.rpc.listen_addr.unwrap();
+
+    let test_dir = testdir()?.with_config(&mut config)?;
+
+    let _child = test_dir.spawn_child(args!["start"])?;
+
+    tracing::info!("waiting for Zebra state cache to be opened");
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    tracing::info!("starting read state with syncer");
+    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
+    let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
+        zebra_rpc::sync::init_read_state_with_syncer(
+            config.state,
+            &config.network.network,
+            rpc_address,
+        )
+        .await?
+        .map_err(|err| eyre!(err))?;
+
+    tracing::info!("waiting for finalized chain tip changes");
+
+    timeout(
+        Duration::from_secs(100),
+        tokio::spawn(async move {
+            for _ in 0..2 {
+                chain_tip_change
+                    .wait_for_tip_change()
+                    .await
+                    .map_err(|err| eyre!(err))?;
+            }
+
+            Ok::<(), Error>(())
+        }),
+    )
+    .await???;
 
     Ok(())
 }
