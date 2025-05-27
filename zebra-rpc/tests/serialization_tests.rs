@@ -215,7 +215,10 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_block_height_hash() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#"
-{"height":2931705,"hash":[35,5,244,118,21,236,8,168,3,119,95,171,238,9,233,152,250,106,153,253,6,176,155,7,155,161,146,1,0,0,0,0]}
+{
+    "height": 2931705,
+    "hash": [35, 5, 244, 118, 21, 236, 8, 168, 3, 119, 95, 171, 238, 9, 233, 152, 250, 106, 153, 253, 6, 176, 155, 7, 155, 161, 146, 1, 0, 0, 0, 0]
+}
 "#;
     let obj: GetBlockHeightAndHash = serde_json::from_str(json)?;
     let new_obj = GetBlockHeightAndHash {
