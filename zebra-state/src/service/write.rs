@@ -5,7 +5,7 @@ use std::sync::Arc;
 use indexmap::IndexMap;
 use tokio::sync::{
     mpsc::{UnboundedReceiver, UnboundedSender},
-    watch,
+    oneshot, watch,
 };
 
 use tracing::Span;
@@ -132,10 +132,16 @@ pub enum NonFinalizedWriteMessage {
     Commit(QueuedSemanticallyVerified),
     /// The hash of a block that should be invalidated and removed from
     /// the non-finalized state, if present.
-    Invalidate(block::Hash),
+    Invalidate {
+        hash: block::Hash,
+        rsp_tx: oneshot::Sender<Result<block::Hash, BoxError>>,
+    },
     /// The hash of a block that was previously invalidated but should be
     /// reconsidered and reinserted into the non-finalized state.
-    Reconsider(block::Hash),
+    Reconsider {
+        hash: block::Hash,
+        rsp_tx: oneshot::Sender<Result<Vec<block::Hash>, BoxError>>,
+    },
 }
 
 impl From<QueuedSemanticallyVerified> for NonFinalizedWriteMessage {
@@ -328,13 +334,18 @@ impl WriteBlockWorkerTask {
         while let Some(msg) = non_finalized_block_write_receiver.blocking_recv() {
             let queued_child_and_rsp_tx = match msg {
                 NonFinalizedWriteMessage::Commit(queued_child) => Some(queued_child),
-                NonFinalizedWriteMessage::Invalidate(hash) => {
-                    non_finalized_state.invalidate_block(hash);
+                NonFinalizedWriteMessage::Invalidate { hash, rsp_tx } => {
+                    tracing::info!(?hash, "invalidating a block in the non-finalized state");
+                    let _ = rsp_tx.send(non_finalized_state.invalidate_block(hash));
                     None
                 }
-                NonFinalizedWriteMessage::Reconsider(_hash) => {
-                    // TODO: Uncomment after #9260 has merged.
-                    // non_finalized_state.reconsider_block(hash);
+                NonFinalizedWriteMessage::Reconsider { hash, rsp_tx } => {
+                    tracing::info!(?hash, "reconsidering a block in the non-finalized state");
+                    let _ = rsp_tx.send(
+                        non_finalized_state
+                            .reconsider_block(hash, &finalized_state.db)
+                            .map_err(BoxError::from),
+                    );
                     None
                 }
             };

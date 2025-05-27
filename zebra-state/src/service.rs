@@ -753,6 +753,62 @@ impl StateService {
         self.read_service.best_tip()
     }
 
+    fn send_invalidate_block(
+        &self,
+        hash: block::Hash,
+    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+
+        let Some(sender) = &self.block_write_sender.non_finalized else {
+            let _ = rsp_tx.send(Err(
+                "cannot invalidate blocks while still committing checkpointed blocks".into(),
+            ));
+            return rsp_rx;
+        };
+
+        if let Err(tokio::sync::mpsc::error::SendError(error)) =
+            sender.send(NonFinalizedWriteMessage::Invalidate { hash, rsp_tx })
+        {
+            let NonFinalizedWriteMessage::Invalidate { rsp_tx, .. } = error else {
+                unreachable!("should return the same Invalidate message could not be sent");
+            };
+
+            let _ = rsp_tx.send(Err(
+                "failed to send invalidate block request to block write task".into(),
+            ));
+        }
+
+        rsp_rx
+    }
+
+    fn send_reconsider_block(
+        &self,
+        hash: block::Hash,
+    ) -> oneshot::Receiver<Result<Vec<block::Hash>, BoxError>> {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+
+        let Some(sender) = &self.block_write_sender.non_finalized else {
+            let _ = rsp_tx.send(Err(
+                "cannot reconsider blocks while still committing checkpointed blocks".into(),
+            ));
+            return rsp_rx;
+        };
+
+        if let Err(tokio::sync::mpsc::error::SendError(error)) =
+            sender.send(NonFinalizedWriteMessage::Reconsider { hash, rsp_tx })
+        {
+            let NonFinalizedWriteMessage::Reconsider { rsp_tx, .. } = error else {
+                unreachable!("should return the same Reconsider message could not be sent");
+            };
+
+            let _ = rsp_tx.send(Err(
+                "failed to send reconsider block request to block write task".into(),
+            ));
+        }
+
+        rsp_rx
+    }
+
     /// Assert some assumptions about the semantically verified `block` before it is queued.
     fn assert_block_can_be_validated(&self, block: &SemanticallyVerifiedBlock) {
         // required by `Request::CommitSemanticallyVerifiedBlock` call
@@ -1057,23 +1113,48 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
-            req @ (Request::InvalidateBlock(_) | Request::ReconsiderBlock(_)) => {
-                use NonFinalizedWriteMessage::*;
+            Request::InvalidateBlock(block_hash) => {
+                let rsp_rx = tokio::task::block_in_place(move || {
+                    span.in_scope(|| self.send_invalidate_block(block_hash))
+                });
 
-                let (msg, hash) = match req {
-                    Request::InvalidateBlock(hash) => (Invalidate(hash), hash),
-                    Request::ReconsiderBlock(hash) => (Reconsider(hash), hash),
-                    _ => unreachable!("Request::InvalidateBlock and Request::ReconsiderBlock"),
-                };
-
-                if let Some(non_finalized_block_write_sender) =
-                    &self.block_write_sender.non_finalized
-                {
-                    let _ = non_finalized_block_write_sender.send(msg);
+                let span = Span::current();
+                async move {
+                    rsp_rx
+                        .await
+                        .map_err(|_recv_error| {
+                            BoxError::from("invalidate block request was unexpectedly dropped")
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
+                        .map(Response::Invalidated)
                 }
-
-                async move { Ok(Response::Committed(hash)) }.boxed()
+                .instrument(span)
+                .boxed()
             }
+
+            Request::ReconsiderBlock(block_hash) => {
+                let rsp_rx = tokio::task::block_in_place(move || {
+                    span.in_scope(|| self.send_reconsider_block(block_hash))
+                });
+
+                let span = Span::current();
+                async move {
+                    rsp_rx
+                        .await
+                        .map_err(|_recv_error| {
+                            BoxError::from("reconsider block request was unexpectedly dropped")
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
+                        .map(Response::Reconsidered)
+                }
+                .instrument(span)
+                .boxed()
+            }
+
             // Runs concurrently using the ReadStateService
             Request::Tip
             | Request::Depth(_)

@@ -576,7 +576,7 @@ pub trait Rpc {
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.
     // TODO: Invalidate block hashes even if they're not present in the non-finalized state.
     #[method(name = "invalidateblock")]
-    async fn invalidate_block(&self, block_hash: GetBlockHash) -> Result<()>;
+    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()>;
 
     /// Reconsiders a previously invalidated block if it exists in the cache of previously invalidated blocks.
     ///
@@ -584,7 +584,7 @@ pub trait Rpc {
     ///
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to reconsider.
     #[method(name = "reconsiderblock")]
-    async fn reconsider_block(&self, block_hash: GetBlockHash) -> Result<()>;
+    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>>;
 
     #[method(name = "generate")]
     /// Mine blocks immediately. Returns the block hashes of the generated blocks.
@@ -2678,21 +2678,24 @@ where
         ))
     }
 
-    async fn invalidate_block(&self, GetBlockHash(block_hash): GetBlockHash) -> Result<()> {
+    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()> {
         self.state
             .clone()
             .oneshot(zebra_state::Request::InvalidateBlock(block_hash))
             .await
-            .map(|rsp| assert_eq!(rsp, zebra_state::Response::Committed(block_hash)))
+            .map(|rsp| assert_eq!(rsp, zebra_state::Response::Invalidated(block_hash)))
             .map_misc_error()
     }
 
-    async fn reconsider_block(&self, GetBlockHash(block_hash): GetBlockHash) -> Result<()> {
+    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>> {
         self.state
             .clone()
             .oneshot(zebra_state::Request::ReconsiderBlock(block_hash))
             .await
-            .map(|rsp| assert_eq!(rsp, zebra_state::Response::Committed(block_hash)))
+            .map(|rsp| match rsp {
+                zebra_state::Response::Reconsidered(block_hashes) => block_hashes,
+                _ => unreachable!("unmatched response to a reconsider block request"),
+            })
             .map_misc_error()
     }
 

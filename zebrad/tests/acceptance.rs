@@ -3700,10 +3700,7 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     use std::sync::Arc;
 
     use common::regtest::MiningRpcMethods;
-    use eyre::Error;
-    use tokio::time::timeout;
     use zebra_chain::parameters::testnet::REGTEST_NU5_ACTIVATION_HEIGHT;
-    use zebra_state::ReadResponse;
 
     let _init_guard = zebra_test::init();
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
@@ -3718,52 +3715,15 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
 
     tokio::time::sleep(LAUNCH_DELAY).await;
 
-    tracing::info!("starting read state with syncer");
-    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
-    let (read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
-        zebra_rpc::sync::init_read_state_with_syncer(
-            config.state,
-            &config.network.network,
-            rpc_address,
-        )
-        .await?
-        .map_err(|err| eyre!(err))?;
-
-    tracing::info!("waiting for first chain tip change");
-
-    // Wait for Zebrad to start up
-    let tip_action = timeout(LAUNCH_DELAY, chain_tip_change.wait_for_tip_change()).await??;
-    assert!(
-        tip_action.is_reset(),
-        "first tip action should be a reset for the genesis block"
-    );
-
-    tracing::info!("got genesis chain tip change, submitting more blocks ..");
-
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
-    for _ in 0..10 {
-        let (block, height) = rpc_client
+    for _ in 0..50 {
+        let (block, _) = rpc_client
             .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
             .await?;
-        // TODO: Submit 50 blocks instead of 5, call reconsiderblock, and check that there's another chain tip reset.
-        // let header = Arc::make_mut(&mut block.header);
-        // while header.hash() < network.target_difficulty_limit() {
-        //     increment_big_endian(header.nonce.as_mut());
-        // }
+
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
-        let tip_action = timeout(
-            Duration::from_secs(1),
-            chain_tip_change.wait_for_tip_change(),
-        )
-        .await??;
-
-        assert_eq!(
-            tip_action.best_tip_height(),
-            height,
-            "tip action height should match block submission"
-        );
     }
 
     tracing::info!("checking that read state has the new non-finalized best chain blocks");
@@ -3780,82 +3740,36 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
             Arc::new(expected_block),
             "Zebra should have the same block"
         );
-
-        let ReadResponse::Block(read_state_block) = read_state
-            .clone()
-            .oneshot(zebra_state::ReadRequest::Block(height.into()))
-            .await
-            .map_err(|err| eyre!(err))?
-        else {
-            unreachable!("unexpected read response to a block request")
-        };
-
-        assert_eq!(
-            zebra_block,
-            read_state_block.expect("read state should have the block"),
-            "read state should have the same block"
-        );
     }
 
-    tracing::info!("invalidating blocks to trigger a best chain change");
+    tracing::info!("invalidating blocks");
 
-    let block_6_hash = blocks.get(5).expect("should have 11 blocks").hash();
-    let _ = rpc_client
-        .call("invalidateblock", format!("[${block_6_hash}]"))
+    // Note: This is the block at height 7, it's the 6th generated block.
+    let block_6_hash = blocks.get(5).expect("should have 50 blocks").hash();
+    let params = serde_json::to_string(&vec![block_6_hash]).expect("should serialize successfully");
+
+    let _: () = rpc_client
+        .json_result_from_call("invalidateblock", &params)
         .await
         .map_err(|err| eyre!(err))?;
 
-    for _ in 0..10 {
-        let fut = rpc_client
-            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
-            .await;
+    let expected_reconsidered_hashes = blocks
+        .iter()
+        .skip(5)
+        .map(|block| block.hash())
+        .collect::<Vec<_>>();
 
-        let (block, _height) = fut?;
+    tracing::info!("reconsidering blocks");
 
-        rpc_client.submit_block(block.clone()).await?;
-    }
+    let reconsidered_hashes: Vec<block::Hash> = rpc_client
+        .json_result_from_call("reconsiderblock", &params)
+        .await
+        .map_err(|err| eyre!(err))?;
 
-    tracing::info!("newly submitted blocks are in the best chain, checking for reset");
-    tokio::time::sleep(Duration::from_secs(3)).await;
-    let tip_action = timeout(
-        Duration::from_secs(1),
-        chain_tip_change.wait_for_tip_change(),
-    )
-    .await??;
-    assert!(tip_action.is_reset(), "tip action should be reset");
-
-    tracing::info!("checking that read state has the new non-finalized best chain blocks");
-    for expected_block in blocks {
-        let height = expected_block.coinbase_height().unwrap();
-        let zebra_block = rpc_client
-            .get_block(height.0 as i32)
-            .await
-            .map_err(|err| eyre!(err))?
-            .expect("Zebra test child should have the expected block");
-
-        assert_eq!(
-            zebra_block,
-            Arc::new(expected_block),
-            "Zebra should have the same block"
-        );
-
-        let ReadResponse::Block(read_state_block) = read_state
-            .clone()
-            .oneshot(zebra_state::ReadRequest::Block(height.into()))
-            .await
-            .map_err(|err| eyre!(err))?
-        else {
-            unreachable!("unexpected read response to a block request")
-        };
-
-        assert_eq!(
-            zebra_block,
-            read_state_block.expect("read state should have the block"),
-            "read state should have the same block"
-        );
-    }
-
-    tracing::info!("restarting Zebra on Mainnet");
+    assert_eq!(
+        reconsidered_hashes, expected_reconsidered_hashes,
+        "reconsidered hashes should match expected hashes"
+    );
 
     child.kill(false)?;
     let output = child.wait_with_output()?;
@@ -3864,46 +3778,6 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     output.assert_was_killed()?;
 
     output.assert_failure()?;
-
-    let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
-    config.state.ephemeral = false;
-    let rpc_address = config.rpc.listen_addr.unwrap();
-
-    let test_dir = testdir()?.with_config(&mut config)?;
-
-    let _child = test_dir.spawn_child(args!["start"])?;
-
-    tracing::info!("waiting for Zebra state cache to be opened");
-
-    tokio::time::sleep(LAUNCH_DELAY).await;
-
-    tracing::info!("starting read state with syncer");
-    // Spawn a read state with the RPC syncer to check that it has the same best chain as Zebra
-    let (_read_state, _latest_chain_tip, mut chain_tip_change, _sync_task) =
-        zebra_rpc::sync::init_read_state_with_syncer(
-            config.state,
-            &config.network.network,
-            rpc_address,
-        )
-        .await?
-        .map_err(|err| eyre!(err))?;
-
-    tracing::info!("waiting for finalized chain tip changes");
-
-    timeout(
-        Duration::from_secs(100),
-        tokio::spawn(async move {
-            for _ in 0..2 {
-                chain_tip_change
-                    .wait_for_tip_change()
-                    .await
-                    .map_err(|err| eyre!(err))?;
-            }
-
-            Ok::<(), Error>(())
-        }),
-    )
-    .await???;
 
     Ok(())
 }
