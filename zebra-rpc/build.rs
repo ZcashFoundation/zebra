@@ -1,18 +1,16 @@
 //! Compile proto files
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(all(feature = "indexer-rpcs", not(feature = "zallet")))]
+    #[cfg(feature = "indexer-rpcs")]
     {
-        use std::{env, path::PathBuf};
-        let out_dir = env::var("OUT_DIR").map(PathBuf::from);
+        let out_dir = std::env::var("OUT_DIR").map(std::path::PathBuf::from);
         tonic_build::configure()
             .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
             .file_descriptor_set_path(out_dir.unwrap().join("indexer_descriptor.bin"))
             .compile_protos(&["proto/indexer.proto"], &[""])?;
     }
 
-    #[cfg(all(feature = "zallet", not(feature = "indexer-rpcs")))]
-    {
+    if std::env::var_os("ZALLET").is_some() {
         use std::{env, fs, path::PathBuf, process::Command};
 
         // The following code will clone the zallet repo and build the binary,

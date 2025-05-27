@@ -30,8 +30,6 @@ indexer-rpcs = [
     "zebra-state/indexer"
 ]
 
-zallet = []
-
 # Production features that activate extra dependencies, or extra features in
 # dependencies
 
