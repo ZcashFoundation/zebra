@@ -83,7 +83,7 @@ pub trait DiskFormatUpgrade {
     /// Returns true if the upgrade is a major upgrade that can reuse the cache in the previous major db format version.
     fn is_reusable_major_upgrade(&self) -> bool {
         let version = self.version();
-        self.needs_migration() && version.minor == 0 && version.patch == 0
+        version.minor == 0 && version.patch == 0
     }
 }
 
