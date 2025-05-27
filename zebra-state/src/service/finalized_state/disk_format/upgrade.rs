@@ -79,6 +79,12 @@ pub trait DiskFormatUpgrade {
     fn needs_migration(&self) -> bool {
         true
     }
+
+    /// Returns true if the upgrade is a major upgrade that can reuse the cache in the previous major db format version.
+    fn is_reusable_major_upgrade(&self) -> bool {
+        let version = self.version();
+        self.needs_migration() && version.minor == 0 && version.patch == 0
+    }
 }
 
 fn format_upgrades(
@@ -106,12 +112,9 @@ fn format_upgrades(
 pub fn restorable_db_versions() -> Vec<u64> {
     format_upgrades(None)
         .filter_map(|upgrade| {
-            let version = upgrade.version();
-            if version.minor == 0 && version.patch == 0 {
-                Some(version.major)
-            } else {
-                None
-            }
+            upgrade
+                .is_reusable_major_upgrade()
+                .then_some(upgrade.version().major)
         })
         .collect()
 }
@@ -847,7 +850,6 @@ impl Drop for DbFormatChangeThreadHandle {
 #[test]
 fn format_upgrades_are_in_version_order() {
     let mut last_version = Version::new(0, 0, 0);
-    // The particular network shouldn't matter for the test; use Mainnet
     for upgrade in format_upgrades(None) {
         assert!(upgrade.version() > last_version);
         last_version = upgrade.version();
