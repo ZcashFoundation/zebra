@@ -16,6 +16,8 @@ use std::{
 };
 
 use chrono::Utc;
+use derive_getters::Getters;
+use derive_new::new;
 use futures::{future::OptionFuture, stream::FuturesOrdered, StreamExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use hex_data::HexData;
@@ -64,7 +66,7 @@ use zebra_state::{
 
 use crate::{
     config,
-    methods::trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
+    methods::trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData},
     queue::Queue,
     server::{
         self,
@@ -78,7 +80,7 @@ use types::{
         GetBlockTemplate, GetBlockTemplateHandler, ZCASHD_FUNDING_STREAM_ORDER,
     },
     get_blockchain_info, get_mining_info,
-    get_raw_mempool::{self, GetRawMempool},
+    get_raw_mempool::{self, GetRawMempoolResponse},
     long_poll::LongPollInput,
     peer_info::PeerInfo,
     submit_block,
@@ -112,7 +114,7 @@ pub trait Rpc {
     /// Some fields from the zcashd reference are missing from Zebra's [`GetInfo`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L91-L95)
     #[method(name = "getinfo")]
-    async fn get_info(&self) -> Result<GetInfo>;
+    async fn get_info(&self) -> Result<GetInfoResponse>;
 
     /// Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
     ///
@@ -125,7 +127,7 @@ pub trait Rpc {
     /// Some fields from the zcashd reference are missing from Zebra's [`GetBlockChainInfo`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
     #[method(name = "getblockchaininfo")]
-    async fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+    async fn get_blockchain_info(&self) -> Result<GetBlockChainInfoResponse>;
 
     /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
     ///
@@ -150,7 +152,10 @@ pub trait Rpc {
     /// zcashd actually [returns an
     /// integer](https://github.com/zcash/lightwalletd/blob/bdaac63f3ee0dbef62bde04f6817a9f90d483b00/common/common.go#L128-L130).
     #[method(name = "getaddressbalance")]
-    async fn get_address_balance(&self, address_strings: AddressStrings) -> Result<AddressBalance>;
+    async fn get_address_balance(
+        &self,
+        address_strings: GetAddressBalanceRequest,
+    ) -> Result<GetAddressBalanceResponse>;
 
     /// Sends the raw bytes of a signed transaction to the local node's mempool, if the transaction is valid.
     /// Returns the [`SentTransactionHash`] for the transaction, as a JSON string.
@@ -173,7 +178,7 @@ pub trait Rpc {
         &self,
         raw_transaction_hex: String,
         _allow_high_fees: Option<bool>,
-    ) -> Result<SentTransactionHash>;
+    ) -> Result<SendRawTransactionResponse>;
 
     /// Returns the requested block by hash or height, as a [`GetBlock`] JSON string.
     /// If the block is not in Zebra's state, returns
@@ -195,7 +200,11 @@ pub trait Rpc {
     ///
     /// The undocumented `chainwork` field is not returned.
     #[method(name = "getblock")]
-    async fn get_block(&self, hash_or_height: String, verbosity: Option<u8>) -> Result<GetBlock>;
+    async fn get_block(
+        &self,
+        hash_or_height: String,
+        verbosity: Option<u8>,
+    ) -> Result<GetBlockResponse>;
 
     /// Returns the requested block header by hash or height, as a [`GetBlockHeader`] JSON string.
     /// If the block is not in Zebra's state,
@@ -219,7 +228,7 @@ pub trait Rpc {
         &self,
         hash_or_height: String,
         verbose: Option<bool>,
-    ) -> Result<GetBlockHeader>;
+    ) -> Result<GetBlockHeaderResponse>;
 
     /// Returns the hash of the current best blockchain tip block, as a [`GetBlockHash`] JSON string.
     ///
@@ -235,7 +244,7 @@ pub trait Rpc {
     /// method: post
     /// tags: blockchain
     #[method(name = "getbestblockheightandhash")]
-    fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash>;
+    fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHashResponse>;
 
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
@@ -247,7 +256,7 @@ pub trait Rpc {
     /// method: post
     /// tags: blockchain
     #[method(name = "getrawmempool")]
-    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool>;
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempoolResponse>;
 
     /// Returns information about the given block's Sapling & Orchard tree state.
     ///
@@ -266,7 +275,7 @@ pub trait Rpc {
     /// `lightwalletd` only uses positive heights, so Zebra does not support
     /// negative heights.
     #[method(name = "z_gettreestate")]
-    async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestate>;
+    async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse>;
 
     /// Returns information about a range of Sapling or Orchard subtrees.
     ///
@@ -292,7 +301,7 @@ pub trait Rpc {
         pool: String,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
-    ) -> Result<GetSubtrees>;
+    ) -> Result<GetSubtreesByIndexResponse>;
 
     /// Returns the raw transaction data, as a [`GetRawTransaction`] JSON string or structure.
     ///
@@ -318,7 +327,7 @@ pub trait Rpc {
         &self,
         txid: String,
         verbose: Option<u8>,
-    ) -> Result<GetRawTransaction>;
+    ) -> Result<GetRawTransactionResponse>;
 
     /// Returns the transaction ids made by the provided transparent addresses.
     ///
@@ -840,14 +849,15 @@ where
     <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    async fn get_info(&self) -> Result<GetInfo> {
-        let version = GetInfo::version(&self.build_version).expect("invalid version string");
+    async fn get_info(&self) -> Result<GetInfoResponse> {
+        let version = GetInfoResponse::version_from_string(&self.build_version)
+            .expect("invalid version string");
 
         let connections = self.address_book.recently_live_peers(Utc::now()).len();
 
         let last_error_recorded = self.last_warn_error_log_rx.borrow().clone();
         let (last_error_log, _level, last_error_log_time) = last_error_recorded.unwrap_or((
-            GetInfo::default().errors,
+            GetInfoResponse::default().errors,
             tracing::Level::INFO,
             Utc::now(),
         ));
@@ -871,7 +881,7 @@ where
             .await
             .expect("should always be Ok when `should_use_default` is true");
 
-        let response = GetInfo {
+        let response = GetInfoResponse {
             version,
             build: self.build_version.clone(),
             subversion: self.user_agent.clone(),
@@ -891,7 +901,7 @@ where
     }
 
     #[allow(clippy::unwrap_in_result)]
-    async fn get_blockchain_info(&self) -> Result<GetBlockChainInfo> {
+    async fn get_blockchain_info(&self) -> Result<GetBlockChainInfoResponse> {
         let debug_force_finished_sync = self.debug_force_finished_sync;
         let network = &self.network;
 
@@ -994,7 +1004,7 @@ where
             ),
         };
 
-        let response = GetBlockChainInfo {
+        let response = GetBlockChainInfoResponse {
             chain: network.bip70_network_name(),
             blocks: tip_height,
             best_block_hash: tip_hash,
@@ -1017,7 +1027,10 @@ where
         Ok(response)
     }
 
-    async fn get_address_balance(&self, address_strings: AddressStrings) -> Result<AddressBalance> {
+    async fn get_address_balance(
+        &self,
+        address_strings: GetAddressBalanceRequest,
+    ) -> Result<GetAddressBalanceResponse> {
         let state = self.state.clone();
 
         let valid_addresses = address_strings.valid_addresses()?;
@@ -1026,7 +1039,7 @@ where
         let response = state.oneshot(request).await.map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+            zebra_state::ReadResponse::AddressBalance(balance) => Ok(GetAddressBalanceResponse {
                 balance: u64::from(balance),
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
@@ -1038,7 +1051,7 @@ where
         &self,
         raw_transaction_hex: String,
         _allow_high_fees: Option<bool>,
-    ) -> Result<SentTransactionHash> {
+    ) -> Result<SendRawTransactionResponse> {
         let mempool = self.mempool.clone();
         let queue_sender = self.queue_sender.clone();
 
@@ -1082,7 +1095,7 @@ where
         tracing::debug!("sent transaction to mempool: {:?}", &queue_result);
 
         queue_result
-            .map(|_| SentTransactionHash(transaction_hash))
+            .map(|_| SendRawTransactionResponse(transaction_hash))
             // Reference for the legacy error code:
             // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/rawtransaction.cpp#L1290-L1301>
             // Note that this error code might not exactly match the one returned by zcashd
@@ -1100,7 +1113,11 @@ where
     // TODO:
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
-    async fn get_block(&self, hash_or_height: String, verbosity: Option<u8>) -> Result<GetBlock> {
+    async fn get_block(
+        &self,
+        hash_or_height: String,
+        verbosity: Option<u8>,
+    ) -> Result<GetBlockResponse> {
         let mut state = self.state.clone();
         let verbosity = verbosity.unwrap_or(1);
         let network = self.network.clone();
@@ -1128,20 +1145,23 @@ where
                 .map_misc_error()?;
 
             match response {
-                zebra_state::ReadResponse::Block(Some(block)) => Ok(GetBlock::Raw(block.into())),
+                zebra_state::ReadResponse::Block(Some(block)) => {
+                    Ok(GetBlockResponse::Raw(block.into()))
+                }
                 zebra_state::ReadResponse::Block(None) => {
                     Err("Block not found").map_error(server::error::LegacyCode::InvalidParameter)
                 }
                 _ => unreachable!("unmatched response to a block request"),
             }
         } else if let Some(get_block_header_future) = get_block_header_future {
-            let get_block_header_result: Result<GetBlockHeader> = get_block_header_future.await;
+            let get_block_header_result: Result<GetBlockHeaderResponse> =
+                get_block_header_future.await;
 
-            let GetBlockHeader::Object(block_header) = get_block_header_result? else {
+            let GetBlockHeaderResponse::Object(block_header) = get_block_header_result? else {
                 panic!("must return Object")
             };
 
-            let GetBlockHeaderObject {
+            let BlockHeaderObject {
                 hash,
                 confirmations,
                 height,
@@ -1255,7 +1275,7 @@ where
 
             let trees = GetBlockTrees { sapling, orchard };
 
-            Ok(GetBlock::Object {
+            Ok(GetBlockResponse::Object(Box::new(BlockObject {
                 hash,
                 confirmations,
                 height: Some(height),
@@ -1274,7 +1294,7 @@ where
                 final_orchard_root,
                 previous_block_hash: Some(previous_block_hash),
                 next_block_hash,
-            })
+            })))
         } else {
             Err("invalid verbosity value").map_error(server::error::LegacyCode::InvalidParameter)
         }
@@ -1284,7 +1304,7 @@ where
         &self,
         hash_or_height: String,
         verbose: Option<bool>,
-    ) -> Result<GetBlockHeader> {
+    ) -> Result<GetBlockHeaderResponse> {
         let state = self.state.clone();
         let verbose = verbose.unwrap_or(true);
         let network = self.network.clone();
@@ -1320,7 +1340,7 @@ where
         };
 
         let response = if !verbose {
-            GetBlockHeader::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
+            GetBlockHeaderResponse::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
         } else {
             let zebra_state::ReadResponse::SaplingTree(sapling_tree) = state
                 .clone()
@@ -1381,7 +1401,7 @@ where
                 }
             };
 
-            let block_header = GetBlockHeaderObject {
+            let block_header = BlockHeaderObject {
                 hash: GetBlockHash(hash),
                 confirmations,
                 height,
@@ -1399,7 +1419,7 @@ where
                 next_block_hash: next_block_hash.map(GetBlockHash),
             };
 
-            GetBlockHeader::Object(Box::new(block_header))
+            GetBlockHeaderResponse::Object(Box::new(block_header))
         };
 
         Ok(response)
@@ -1412,14 +1432,14 @@ where
             .ok_or_misc_error("No blocks in state")
     }
 
-    fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash> {
+    fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHashResponse> {
         self.latest_chain_tip
             .best_tip_height_and_hash()
-            .map(|(height, hash)| GetBlockHeightAndHash { height, hash })
+            .map(|(height, hash)| GetBlockHeightAndHashResponse { height, hash })
             .ok_or_misc_error("No blocks in state")
     }
 
-    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool> {
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempoolResponse> {
         #[allow(unused)]
         let verbose = verbose.unwrap_or(false);
 
@@ -1463,7 +1483,7 @@ where
                             )
                         })
                         .collect::<HashMap<_, _>>();
-                    Ok(GetRawMempool::Verbose(map))
+                    Ok(GetRawMempoolResponse::Verbose(map))
                 } else {
                     // Sort transactions in descending order by fee/size, using
                     // hash in serialized byte order as a tie-breaker. Note that
@@ -1484,7 +1504,7 @@ where
                         .map(|unmined_tx| unmined_tx.transaction.id.mined_id().encode_hex())
                         .collect();
 
-                    Ok(GetRawMempool::TxIds(tx_ids))
+                    Ok(GetRawMempoolResponse::TxIds(tx_ids))
                 }
             }
 
@@ -1497,7 +1517,7 @@ where
                 // Sort returned transaction IDs in numeric/string order.
                 tx_ids.sort();
 
-                Ok(GetRawMempool::TxIds(tx_ids))
+                Ok(GetRawMempoolResponse::TxIds(tx_ids))
             }
 
             _ => unreachable!("unmatched response to a transactionids request"),
@@ -1508,7 +1528,7 @@ where
         &self,
         txid: String,
         verbose: Option<u8>,
-    ) -> Result<GetRawTransaction> {
+    ) -> Result<GetRawTransactionResponse> {
         let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
         let verbose = verbose.unwrap_or(0) != 0;
@@ -1530,16 +1550,18 @@ where
             mempool::Response::Transactions(txns) => {
                 if let Some(tx) = txns.first() {
                     return Ok(if verbose {
-                        GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
-                            tx.transaction.clone(),
-                            None,
-                            None,
-                            &self.network,
-                            None,
-                        )))
+                        GetRawTransactionResponse::Object(Box::new(
+                            TransactionObject::from_transaction(
+                                tx.transaction.clone(),
+                                None,
+                                None,
+                                &self.network,
+                                None,
+                            ),
+                        ))
                     } else {
                         let hex = tx.transaction.clone().into();
-                        GetRawTransaction::Raw(hex)
+                        GetRawTransactionResponse::Raw(hex)
                     });
                 }
             }
@@ -1555,7 +1577,7 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
-                GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
+                GetRawTransactionResponse::Object(Box::new(TransactionObject::from_transaction(
                     tx.tx.clone(),
                     Some(tx.height),
                     Some(tx.confirmations),
@@ -1566,7 +1588,7 @@ where
                 )))
             } else {
                 let hex = tx.tx.into();
-                GetRawTransaction::Raw(hex)
+                GetRawTransactionResponse::Raw(hex)
             }),
 
             zebra_state::ReadResponse::Transaction(None) => {
@@ -1581,7 +1603,7 @@ where
     // TODO:
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
-    async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestate> {
+    async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse> {
         let mut state = self.state.clone();
         let network = self.network.clone();
 
@@ -1660,7 +1682,7 @@ where
             None
         };
 
-        Ok(GetTreestate::from_parts(
+        Ok(GetTreestateResponse::from_parts(
             hash, height, time, sapling, orchard,
         ))
     }
@@ -1670,7 +1692,7 @@ where
         pool: String,
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
-    ) -> Result<GetSubtrees> {
+    ) -> Result<GetSubtreesByIndexResponse> {
         let mut state = self.state.clone();
 
         const POOL_LIST: &[&str] = &["sapling", "orchard"];
@@ -1696,7 +1718,7 @@ where
                 })
                 .collect();
 
-            Ok(GetSubtrees {
+            Ok(GetSubtreesByIndexResponse {
                 pool,
                 start_index,
                 subtrees,
@@ -1722,7 +1744,7 @@ where
                 })
                 .collect();
 
-            Ok(GetSubtrees {
+            Ok(GetSubtreesByIndexResponse {
                 pool,
                 start_index,
                 subtrees,
@@ -2681,9 +2703,11 @@ where
 /// Response to a `getinfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_info` method].
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GetInfo {
+#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct GetInfoResponse {
     /// The node version
+    #[getter(rename = "raw_version")]
     version: u64,
 
     /// The node version build number
@@ -2728,9 +2752,12 @@ pub struct GetInfo {
     errors_timestamp: String,
 }
 
-impl Default for GetInfo {
+#[deprecated(note = "Use `GetInfoResponse` instead")]
+pub use self::GetInfoResponse as GetInfo;
+
+impl Default for GetInfoResponse {
     fn default() -> Self {
-        GetInfo {
+        GetInfoResponse {
             version: 0,
             build: "some build version".to_string(),
             subversion: "some subversion".to_string(),
@@ -2748,9 +2775,10 @@ impl Default for GetInfo {
     }
 }
 
-impl GetInfo {
+impl GetInfoResponse {
     /// Constructs [`GetInfo`] from its constituent parts.
     #[allow(clippy::too_many_arguments)]
+    #[deprecated(note = "Use `GetInfoResponse::new` instead")]
     pub fn from_parts(
         version: u64,
         build: String,
@@ -2819,7 +2847,7 @@ impl GetInfo {
     }
 
     /// Create the node version number.
-    pub fn version(build_string: &str) -> Option<u64> {
+    fn version_from_string(build_string: &str) -> Option<u64> {
         let semver_version = semver::Version::parse(build_string.strip_prefix('v')?).ok()?;
         let build_number = semver_version
             .build
@@ -2842,16 +2870,18 @@ impl GetInfo {
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct GetBlockChainInfo {
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters)]
+pub struct GetBlockChainInfoResponse {
     /// Current network name as defined in BIP70 (main, test, regtest)
     chain: String,
 
     /// The current number of blocks processed in the server, numeric
+    #[getter(copy)]
     blocks: Height,
 
     /// The current number of headers we have validated in the best chain, that is,
     /// the height of the best chain.
+    #[getter(copy)]
     headers: Height,
 
     /// The estimated network solution rate in Sol/s.
@@ -2876,12 +2906,14 @@ pub struct GetBlockChainInfo {
 
     /// The hash of the currently best block, in big-endian order, hex-encoded
     #[serde(rename = "bestblockhash", with = "hex")]
+    #[getter(copy)]
     best_block_hash: block::Hash,
 
     /// If syncing, the estimated height of the chain, else the current best height, numeric.
     ///
     /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
     #[serde(rename = "estimatedheight")]
+    #[getter(copy)]
     estimated_height: Height,
 
     /// Chain supply balance
@@ -2896,12 +2928,16 @@ pub struct GetBlockChainInfo {
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
 
     /// Branch IDs of the current and upcoming consensus rules
+    #[getter(copy)]
     consensus: TipConsensusBranch,
 }
 
-impl Default for GetBlockChainInfo {
+#[deprecated(note = "Use `GetBlockChainInfoResponse` instead")]
+pub use self::GetBlockChainInfoResponse as GetBlockChainInfo;
+
+impl Default for GetBlockChainInfoResponse {
     fn default() -> Self {
-        GetBlockChainInfo {
+        GetBlockChainInfoResponse {
             chain: "main".to_string(),
             blocks: Height(1),
             best_block_hash: block::Hash([0; 32]),
@@ -2924,8 +2960,10 @@ impl Default for GetBlockChainInfo {
     }
 }
 
-impl GetBlockChainInfo {
+impl GetBlockChainInfoResponse {
     /// Creates a new [`GetBlockChainInfo`] instance.
+    // We don't use derive(new) because the method already existed but the arguments
+    // have a different order. No reason to unnecessarily break existing code.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         chain: String,
@@ -2962,45 +3000,6 @@ impl GetBlockChainInfo {
             commitments,
         }
     }
-
-    /// Returns the current network name as defined in BIP70 (main, test, regtest).
-    pub fn chain(&self) -> String {
-        self.chain.clone()
-    }
-
-    /// Returns the current number of blocks processed in the server.
-    pub fn blocks(&self) -> Height {
-        self.blocks
-    }
-
-    /// Returns the hash of the current best chain tip block, in big-endian order, hex-encoded.
-    pub fn best_block_hash(&self) -> &block::Hash {
-        &self.best_block_hash
-    }
-
-    /// Returns the estimated height of the chain.
-    ///
-    /// If syncing, the estimated height of the chain, else the current best height, numeric.
-    ///
-    /// In Zebra, this is always the height estimate, so it might be a little inaccurate.
-    pub fn estimated_height(&self) -> Height {
-        self.estimated_height
-    }
-
-    /// Returns the value pool balances.
-    pub fn value_pools(&self) -> &[get_blockchain_info::Balance; 5] {
-        &self.value_pools
-    }
-
-    /// Returns the network upgrades.
-    pub fn upgrades(&self) -> &IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo> {
-        &self.upgrades
-    }
-
-    /// Returns the Branch IDs of the current and upcoming consensus rules.
-    pub fn consensus(&self) -> &TipConsensusBranch {
-        &self.consensus
-    }
 }
 
 /// A wrapper type with a list of transparent address strings.
@@ -3013,14 +3012,19 @@ pub struct AddressStrings {
     addresses: Vec<String>,
 }
 
+/// A request to get the transparent balance of a set of addresses.
+pub type GetAddressBalanceRequest = AddressStrings;
+
 impl AddressStrings {
     /// Creates a new `AddressStrings` given a vector.
-    #[cfg(test)]
     pub fn new(addresses: Vec<String>) -> AddressStrings {
         AddressStrings { addresses }
     }
 
     /// Creates a new [`AddressStrings`] from a given vector, returns an error if any addresses are incorrect.
+    #[deprecated(
+        note = "Use `AddressStrings::new` instead. Validity will be checked by the server."
+    )]
     pub fn new_valid(addresses: Vec<String>) -> Result<AddressStrings> {
         let address_strings = Self { addresses };
         address_strings.clone().valid_addresses()?;
@@ -3057,12 +3061,25 @@ impl AddressStrings {
 
 /// The transparent balance of a set of addresses.
 #[derive(
-    Clone, Copy, Debug, Default, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    PartialEq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    Getters,
+    new,
 )]
-pub struct AddressBalance {
+pub struct GetAddressBalanceResponse {
     /// The total transparent balance.
-    pub balance: u64,
+    balance: u64,
 }
+
+#[deprecated(note = "Use `GetAddressBalanceResponse` instead.")]
+pub use self::GetAddressBalanceResponse as AddressBalance;
 
 /// A hex-encoded [`ConsensusBranchId`] string.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
@@ -3170,22 +3187,31 @@ impl TipConsensusBranch {
 ///
 /// See the notes for the [`Rpc::send_raw_transaction` method].
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct SentTransactionHash(#[serde(with = "hex")] transaction::Hash);
+pub struct SendRawTransactionResponse(#[serde(with = "hex")] transaction::Hash);
 
-impl Default for SentTransactionHash {
+#[deprecated(note = "Use `SendRawTransactionResponse` instead")]
+pub use self::SendRawTransactionResponse as SentTransactionHash;
+
+impl Default for SendRawTransactionResponse {
     fn default() -> Self {
         Self(transaction::Hash::from([0; 32]))
     }
 }
 
-impl SentTransactionHash {
+impl SendRawTransactionResponse {
     /// Constructs a new [`SentTransactionHash`].
     pub fn new(hash: transaction::Hash) -> Self {
-        SentTransactionHash(hash)
+        SendRawTransactionResponse(hash)
     }
 
     /// Returns the contents of ['SentTransactionHash'].
+    #[deprecated(note = "Use `SentTransactionHash::hash` instead")]
     pub fn inner(&self) -> transaction::Hash {
+        self.hash()
+    }
+
+    /// Returns the contents of ['SentTransactionHash'].
+    pub fn hash(&self) -> transaction::Hash {
         self.0
     }
 }
@@ -3195,106 +3221,19 @@ impl SentTransactionHash {
 /// See the notes for the [`RpcServer::get_block`] method.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
-#[allow(clippy::large_enum_variant)] //TODO: create a struct for the Object and Box it
-pub enum GetBlock {
+pub enum GetBlockResponse {
     /// The request block, hex-encoded.
     Raw(#[serde(with = "hex")] SerializedBlock),
     /// The block object.
-    Object {
-        /// The hash of the requested block.
-        hash: GetBlockHash,
-
-        /// The number of confirmations of this block in the best chain,
-        /// or -1 if it is not in the best chain.
-        confirmations: i64,
-
-        /// The block size. TODO: fill it
-        #[serde(skip_serializing_if = "Option::is_none")]
-        size: Option<i64>,
-
-        /// The height of the requested block.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        height: Option<Height>,
-
-        /// The version field of the requested block.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        version: Option<u32>,
-
-        /// The merkle root of the requested block.
-        #[serde(with = "opthex", rename = "merkleroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        merkle_root: Option<block::merkle::Root>,
-
-        /// The blockcommitments field of the requested block. Its interpretation changes
-        /// depending on the network and height.
-        #[serde(with = "opthex", rename = "blockcommitments")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        block_commitments: Option<[u8; 32]>,
-
-        // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
-        //
-        /// The root of the Sapling commitment tree after applying this block.
-        #[serde(with = "opthex", rename = "finalsaplingroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        final_sapling_root: Option<[u8; 32]>,
-
-        /// The root of the Orchard commitment tree after applying this block.
-        #[serde(with = "opthex", rename = "finalorchardroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        final_orchard_root: Option<[u8; 32]>,
-
-        // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
-        //
-        /// List of transactions in block order, hex-encoded if verbosity=1 or
-        /// as objects if verbosity=2.
-        tx: Vec<GetBlockTransaction>,
-
-        /// The height of the requested block.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        time: Option<i64>,
-
-        /// The nonce of the requested block header.
-        #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        nonce: Option<[u8; 32]>,
-
-        /// The Equihash solution in the requested block header.
-        /// Note: presence of this field in getblock is not documented in zcashd.
-        #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        solution: Option<Solution>,
-
-        /// The difficulty threshold of the requested block header displayed in compact form.
-        #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
-        bits: Option<CompactDifficulty>,
-
-        /// Floating point number that represents the difficulty limit for this block as a multiple
-        /// of the minimum difficulty for the network.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        difficulty: Option<f64>,
-
-        // `chainwork` would be here, but we don't plan on supporting it
-        // `anchor` would be here. Not planned to be supported.
-        // `chainSupply` would be here, TODO: implement
-        // `valuePools` would be here, TODO: implement
-        //
-        /// Information about the note commitment trees.
-        trees: GetBlockTrees,
-
-        /// The previous block hash of the requested block header.
-        #[serde(rename = "previousblockhash", skip_serializing_if = "Option::is_none")]
-        previous_block_hash: Option<GetBlockHash>,
-
-        /// The next block hash after the requested block header.
-        #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
-        next_block_hash: Option<GetBlockHash>,
-    },
+    Object(Box<BlockObject>),
 }
 
-impl Default for GetBlock {
+#[deprecated(note = "Use `GetBlockResponse` instead")]
+pub use self::GetBlockResponse as GetBlock;
+
+impl Default for GetBlockResponse {
     fn default() -> Self {
-        GetBlock::Object {
+        GetBlockResponse::Object(Box::new(BlockObject {
             hash: GetBlockHash::default(),
             confirmations: 0,
             height: None,
@@ -3313,8 +3252,118 @@ impl Default for GetBlock {
             previous_block_hash: None,
             next_block_hash: None,
             solution: None,
-        }
+        }))
     }
+}
+
+/// A Block object returned by the `getblock` RPC request.
+#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct BlockObject {
+    /// The hash of the requested block.
+    #[getter(copy)]
+    hash: GetBlockHash,
+
+    /// The number of confirmations of this block in the best chain,
+    /// or -1 if it is not in the best chain.
+    confirmations: i64,
+
+    /// The block size. TODO: fill it
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    size: Option<i64>,
+
+    /// The height of the requested block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    height: Option<Height>,
+
+    /// The version field of the requested block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    version: Option<u32>,
+
+    /// The merkle root of the requested block.
+    #[serde(with = "opthex", rename = "merkleroot")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    merkle_root: Option<block::merkle::Root>,
+
+    /// The blockcommitments field of the requested block. Its interpretation changes
+    /// depending on the network and height.
+    #[serde(with = "opthex", rename = "blockcommitments")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    block_commitments: Option<[u8; 32]>,
+
+    // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
+    //
+    /// The root of the Sapling commitment tree after applying this block.
+    #[serde(with = "opthex", rename = "finalsaplingroot")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    final_sapling_root: Option<[u8; 32]>,
+
+    /// The root of the Orchard commitment tree after applying this block.
+    #[serde(with = "opthex", rename = "finalorchardroot")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    final_orchard_root: Option<[u8; 32]>,
+
+    // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
+    //
+    /// List of transactions in block order, hex-encoded if verbosity=1 or
+    /// as objects if verbosity=2.
+    tx: Vec<GetBlockTransaction>,
+
+    /// The height of the requested block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    time: Option<i64>,
+
+    /// The nonce of the requested block header.
+    #[serde(with = "opthex")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    nonce: Option<[u8; 32]>,
+
+    /// The Equihash solution in the requested block header.
+    /// Note: presence of this field in getblock is not documented in zcashd.
+    #[serde(with = "opthex")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    solution: Option<Solution>,
+
+    /// The difficulty threshold of the requested block header displayed in compact form.
+    #[serde(with = "opthex")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    bits: Option<CompactDifficulty>,
+
+    /// Floating point number that represents the difficulty limit for this block as a multiple
+    /// of the minimum difficulty for the network.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    difficulty: Option<f64>,
+
+    // `chainwork` would be here, but we don't plan on supporting it
+    // `anchor` would be here. Not planned to be supported.
+    // `chainSupply` would be here, TODO: implement
+    // `valuePools` would be here, TODO: implement
+    //
+    /// Information about the note commitment trees.
+    #[getter(copy)]
+    trees: GetBlockTrees,
+
+    /// The previous block hash of the requested block header.
+    #[serde(rename = "previousblockhash", skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    previous_block_hash: Option<GetBlockHash>,
+
+    /// The next block hash after the requested block header.
+    #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    next_block_hash: Option<GetBlockHash>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -3333,89 +3382,106 @@ pub enum GetBlockTransaction {
 /// See the notes for the [`RpcServer::get_block_header`] method.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
-pub enum GetBlockHeader {
+pub enum GetBlockHeaderResponse {
     /// The request block header, hex-encoded.
     Raw(hex_data::HexData),
 
     /// The block header object.
-    Object(Box<GetBlockHeaderObject>),
+    Object(Box<BlockHeaderObject>),
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[deprecated(note = "Use `GetBlockHeaderResponse` instead")]
+pub use self::GetBlockHeaderResponse as GetBlockHeader;
+
+#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 /// Verbose response to a `getblockheader` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block_header`] method.
-pub struct GetBlockHeaderObject {
+pub struct BlockHeaderObject {
     /// The hash of the requested block.
-    pub hash: GetBlockHash,
+    #[getter(copy)]
+    hash: GetBlockHash,
 
     /// The number of confirmations of this block in the best chain,
     /// or -1 if it is not in the best chain.
-    pub confirmations: i64,
+    confirmations: i64,
 
     /// The height of the requested block.
-    pub height: Height,
+    #[getter(copy)]
+    height: Height,
 
     /// The version field of the requested block.
-    pub version: u32,
+    version: u32,
 
     /// The merkle root of the requesteed block.
     #[serde(with = "hex", rename = "merkleroot")]
-    pub merkle_root: block::merkle::Root,
+    #[getter(copy)]
+    merkle_root: block::merkle::Root,
 
     /// The blockcommitments field of the requested block. Its interpretation changes
     /// depending on the network and height.
     #[serde(with = "hex", rename = "blockcommitments")]
-    pub block_commitments: [u8; 32],
+    #[getter(copy)]
+    block_commitments: [u8; 32],
 
     /// The root of the Sapling commitment tree after applying this block.
     #[serde(with = "hex", rename = "finalsaplingroot")]
-    pub final_sapling_root: [u8; 32],
+    #[getter(copy)]
+    final_sapling_root: [u8; 32],
 
     /// The number of Sapling notes in the Sapling note commitment tree
     /// after applying this block. Used by the `getblock` RPC method.
     #[serde(skip)]
-    pub sapling_tree_size: u64,
+    sapling_tree_size: u64,
 
     /// The block time of the requested block header in non-leap seconds since Jan 1 1970 GMT.
-    pub time: i64,
+    time: i64,
 
     /// The nonce of the requested block header.
     #[serde(with = "hex")]
-    pub nonce: [u8; 32],
+    #[getter(copy)]
+    nonce: [u8; 32],
 
     /// The Equihash solution in the requested block header.
     #[serde(with = "hex")]
-    pub solution: Solution,
+    #[getter(copy)]
+    solution: Solution,
 
     /// The difficulty threshold of the requested block header displayed in compact form.
     #[serde(with = "hex")]
-    pub bits: CompactDifficulty,
+    #[getter(copy)]
+    bits: CompactDifficulty,
 
     /// Floating point number that represents the difficulty limit for this block as a multiple
     /// of the minimum difficulty for the network.
-    pub difficulty: f64,
+    difficulty: f64,
 
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash")]
-    pub previous_block_hash: GetBlockHash,
+    #[getter(copy)]
+    previous_block_hash: GetBlockHash,
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
-    pub next_block_hash: Option<GetBlockHash>,
+    #[getter(copy)]
+    next_block_hash: Option<GetBlockHash>,
 }
 
-impl Default for GetBlockHeader {
+#[deprecated(note = "Use `BlockHeaderObject` instead")]
+pub use BlockHeaderObject as GetBlockHeaderObject;
+
+impl Default for GetBlockHeaderResponse {
     fn default() -> Self {
-        GetBlockHeader::Object(Box::default())
+        GetBlockHeaderResponse::Object(Box::default())
     }
 }
 
-impl Default for GetBlockHeaderObject {
+impl Default for BlockHeaderObject {
     fn default() -> Self {
         let difficulty: ExpandedDifficulty = zebra_chain::work::difficulty::U256::one().into();
 
-        GetBlockHeaderObject {
+        BlockHeaderObject {
             hash: GetBlockHash::default(),
             confirmations: 0,
             height: Height::MIN,
@@ -3445,15 +3511,20 @@ impl Default for GetBlockHeaderObject {
 pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
 
 /// Response to a `getbestblockheightandhash` RPC request.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
-pub struct GetBlockHeightAndHash {
+#[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
+pub struct GetBlockHeightAndHashResponse {
     /// The best chain tip block height
-    pub height: block::Height,
+    #[getter(copy)]
+    height: block::Height,
     /// The best chain tip block hash
-    pub hash: block::Hash,
+    #[getter(copy)]
+    hash: block::Hash,
 }
 
-impl Default for GetBlockHeightAndHash {
+#[deprecated(note = "Use `GetBlockHeightAndHashResponse` instead.")]
+pub use GetBlockHeightAndHashResponse as GetBestBlockHeightAndHash;
+
+impl Default for GetBlockHeightAndHashResponse {
     fn default() -> Self {
         Self {
             height: block::Height::MIN,
@@ -3473,14 +3544,17 @@ impl Default for GetBlockHash {
 /// See the notes for the [`Rpc::get_raw_transaction` method].
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
-pub enum GetRawTransaction {
+pub enum GetRawTransactionResponse {
     /// The raw transaction, encoded as hex bytes.
     Raw(#[serde(with = "hex")] SerializedTransaction),
     /// The transaction object.
     Object(Box<TransactionObject>),
 }
 
-impl Default for GetRawTransaction {
+#[deprecated(note = "Use `GetRawTransactionResponse` instead")]
+pub use self::GetRawTransactionResponse as GetRawTransaction;
+
+impl Default for GetRawTransactionResponse {
     fn default() -> Self {
         Self::Object(Box::default())
     }

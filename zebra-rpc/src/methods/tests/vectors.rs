@@ -180,7 +180,7 @@ async fn rpc_getblock() {
 
     // Make height calls with verbosity=0 and check response
     for (i, block) in blocks.iter().enumerate() {
-        let expected_result = GetBlock::Raw(block.clone().into());
+        let expected_result = GetBlockResponse::Raw(block.clone().into());
 
         let get_block = rpc
             .get_block(i.to_string(), Some(0u8))
@@ -199,7 +199,7 @@ async fn rpc_getblock() {
 
     // Make hash calls with verbosity=0 and check response
     for (i, block) in blocks.iter().enumerate() {
-        let expected_result = GetBlock::Raw(block.clone().into());
+        let expected_result = GetBlockResponse::Raw(block.clone().into());
 
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(0u8))
@@ -221,7 +221,7 @@ async fn rpc_getblock() {
         // Convert negative height to corresponding index
         let index = (neg_height + (blocks.len() as i32)) as usize;
 
-        let expected_result = GetBlock::Raw(blocks[index].clone().into());
+        let expected_result = GetBlockResponse::Raw(blocks[index].clone().into());
 
         let get_block = rpc
             .get_block(neg_height.to_string(), Some(0u8))
@@ -248,7 +248,7 @@ async fn rpc_getblock() {
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
+            GetBlockResponse::Object(Box::new(BlockObject {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
@@ -276,7 +276,7 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
                 next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
                 solution: Some(block.header.solution),
-            }
+            }))
         );
     }
 
@@ -292,7 +292,7 @@ async fn rpc_getblock() {
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
+            GetBlockResponse::Object(Box::new(BlockObject {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
@@ -320,7 +320,7 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
                 next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
                 solution: Some(block.header.solution),
-            }
+            }))
         );
     }
 
@@ -335,27 +335,27 @@ async fn rpc_getblock() {
             get_block_data(&read_state, block.clone(), i).await;
 
         // partially compare the expected and actual GetBlock structs
-        if let GetBlock::Object {
-            hash,
-            confirmations,
-            height,
-            time,
-            tx,
-            trees,
-            size,
-            version,
-            merkle_root,
-            block_commitments,
-            final_sapling_root,
-            final_orchard_root,
-            nonce,
-            bits,
-            difficulty,
-            previous_block_hash,
-            next_block_hash,
-            solution,
-        } = &get_block
-        {
+        if let GetBlockResponse::Object(obj) = &get_block {
+            let BlockObject {
+                hash,
+                confirmations,
+                height,
+                time,
+                tx,
+                trees,
+                size,
+                version,
+                merkle_root,
+                block_commitments,
+                final_sapling_root,
+                final_orchard_root,
+                nonce,
+                bits,
+                difficulty,
+                previous_block_hash,
+                next_block_hash,
+                solution,
+            } = &**obj;
             assert_eq!(hash, &GetBlockHash(block.hash()));
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
@@ -423,27 +423,27 @@ async fn rpc_getblock() {
             get_block_data(&read_state, block.clone(), i).await;
 
         // partially compare the expected and actual GetBlock structs
-        if let GetBlock::Object {
-            hash,
-            confirmations,
-            height,
-            time,
-            tx,
-            trees,
-            size,
-            version,
-            merkle_root,
-            block_commitments,
-            final_sapling_root,
-            final_orchard_root,
-            nonce,
-            bits,
-            difficulty,
-            previous_block_hash,
-            next_block_hash,
-            solution,
-        } = &get_block
-        {
+        if let GetBlockResponse::Object(obj) = &get_block {
+            let BlockObject {
+                hash,
+                confirmations,
+                height,
+                time,
+                tx,
+                trees,
+                size,
+                version,
+                merkle_root,
+                block_commitments,
+                final_sapling_root,
+                final_orchard_root,
+                nonce,
+                bits,
+                difficulty,
+                previous_block_hash,
+                next_block_hash,
+                solution,
+            } = &**obj;
             assert_eq!(hash, &GetBlockHash(block.hash()));
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
@@ -512,7 +512,7 @@ async fn rpc_getblock() {
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
+            GetBlockResponse::Object(Box::new(BlockObject {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
@@ -540,7 +540,7 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
                 next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
                 solution: Some(block.header.solution),
-            }
+            }))
         );
     }
 
@@ -556,7 +556,7 @@ async fn rpc_getblock() {
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
+            GetBlockResponse::Object(Box::new(BlockObject {
                 hash: GetBlockHash(block.hash()),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
@@ -584,7 +584,7 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
                 next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
                 solution: Some(block.header.solution),
-            }
+            }))
         );
     }
 
@@ -736,7 +736,7 @@ async fn rpc_getblockheader() {
 
     // Make height calls with verbose=false and check response
     for (i, block) in blocks.iter().enumerate() {
-        let expected_result = GetBlockHeader::Raw(HexData(
+        let expected_result = GetBlockHeaderResponse::Raw(HexData(
             block
                 .header
                 .clone()
@@ -775,7 +775,7 @@ async fn rpc_getblockheader() {
             [0; 32]
         };
 
-        let expected_result = GetBlockHeader::Object(Box::new(GetBlockHeaderObject {
+        let expected_result = GetBlockHeaderResponse::Object(Box::new(BlockHeaderObject {
             hash: GetBlockHash(hash),
             confirmations: 11 - i as i64,
             height,
@@ -810,7 +810,7 @@ async fn rpc_getblockheader() {
         // Convert negative height to corresponding index
         let index = (neg_height + (blocks.len() as i32)) as usize;
 
-        let expected_result = GetBlockHeader::Raw(HexData(blocks[index].header.clone().as_bytes()));
+        let expected_result = GetBlockHeaderResponse::Raw(HexData(blocks[index].header.clone().as_bytes()));
 
         let get_block = rpc
             .get_block_header(neg_height.to_string(), Some(false))
@@ -941,7 +941,7 @@ async fn rpc_getrawtransaction() {
             let (rsp, _) = futures::join!(rpc_req, mempool_req);
             let get_tx = rsp.expect("we should have a `GetRawTransaction` struct");
 
-            if let GetRawTransaction::Raw(raw_tx) = get_tx {
+            if let GetRawTransactionResponse::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
                 unreachable!("Should return a Raw enum")
@@ -977,7 +977,7 @@ async fn rpc_getrawtransaction() {
         async move {
             let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(txid));
             let get_tx = response.expect("We should have a GetRawTransaction struct");
-            if let GetRawTransaction::Raw(raw_tx) = get_tx {
+            if let GetRawTransactionResponse::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
                 unreachable!("Should return a Raw enum")
@@ -988,8 +988,8 @@ async fn rpc_getrawtransaction() {
             let transaction_object = match response
                 .expect("We should have a GetRawTransaction struct")
             {
-                GetRawTransaction::Object(transaction_object) => transaction_object,
-                GetRawTransaction::Raw(_) => panic!("Expected GetRawTransaction::Object, got Raw"),
+                GetRawTransactionResponse::Object(transaction_object) => transaction_object,
+                GetRawTransactionResponse::Raw(_) => panic!("Expected GetRawTransaction::Object, got Raw"),
             };
             let TransactionObject {
                 hex,

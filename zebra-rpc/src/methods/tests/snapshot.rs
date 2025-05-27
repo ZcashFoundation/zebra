@@ -441,7 +441,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // make the api call
     let get_raw_mempool = rpc.get_raw_mempool(None);
     let (response, _) = futures::join!(get_raw_mempool, mempool_req);
-    let GetRawMempool::TxIds(get_raw_mempool) =
+    let GetRawMempoolResponse::TxIds(get_raw_mempool) =
         response.expect("We should have a GetRawTransaction struct")
     else {
         panic!("should return TxIds for non verbose");
@@ -646,7 +646,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
+fn snapshot_rpc_getinfo(info: GetInfoResponse, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
@@ -665,7 +665,7 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockchaininfo(
     variant_suffix: &str,
-    info: GetBlockChainInfo,
+    info: GetBlockChainInfoResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -687,7 +687,10 @@ fn snapshot_rpc_getblockchaininfo(
 }
 
 /// Snapshot `getaddressbalance` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &insta::Settings) {
+fn snapshot_rpc_getaddressbalance(
+    address_balance: GetAddressBalanceResponse,
+    settings: &insta::Settings,
+) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_balance", address_balance));
 }
 
@@ -697,7 +700,7 @@ fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &in
 /// The snapshot file does not contain any data, but it does enforce the response format.
 fn snapshot_rpc_getblock_data(
     variant: &'static str,
-    block: GetBlock,
+    block: GetBlockResponse,
     expected_block_data: &[u8],
     settings: &insta::Settings,
 ) {
@@ -718,7 +721,7 @@ fn snapshot_rpc_getblock_data(
 /// Check valid `getblock` response with verbosity=1, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblock_verbose(
     variant: &'static str,
-    block: GetBlock,
+    block: GetBlockResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!(format!("get_block_verbose_{variant}"), block));
@@ -727,7 +730,7 @@ fn snapshot_rpc_getblock_verbose(
 /// Check valid `getblockheader` response using `cargo insta`.
 fn snapshot_rpc_getblockheader(
     variant: &'static str,
-    block: GetBlockHeader,
+    block: GetBlockHeaderResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!(format!("get_block_header_{variant}"), block));
@@ -736,7 +739,7 @@ fn snapshot_rpc_getblockheader(
 /// Check invalid height `getblock` response using `cargo insta`.
 fn snapshot_rpc_getblock_invalid(
     variant: &'static str,
-    response: Result<GetBlock>,
+    response: Result<GetBlockResponse>,
     settings: &insta::Settings,
 ) {
     settings
