@@ -39,6 +39,7 @@ class WalletTest (BitcoinTestFramework):
         for i in range(1, len(self.nodes)):
             self.nodes[i].generate(1)
 
+        # TODO: Wallets can be started but we need to add miner address at least one of them: #XXXX
         self.wallets = start_wallets(3, self.options.tmpdir)
 
     def run_test(self):

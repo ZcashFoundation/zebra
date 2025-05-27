@@ -1,7 +1,7 @@
 //! Compile proto files
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(feature = "indexer-rpcs")]
+    #[cfg(all(feature = "indexer-rpcs", not(feature = "zallet")))]
     {
         use std::{env, path::PathBuf};
         let out_dir = env::var("OUT_DIR").map(PathBuf::from);
@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .compile_protos(&["proto/indexer.proto"], &[""])?;
     }
 
-    #[cfg(feature = "zallet")]
+    #[cfg(all(feature = "zallet", not(feature = "indexer-rpcs")))]
     {
         use std::{env, fs, path::PathBuf, process::Command};
 
