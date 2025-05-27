@@ -294,7 +294,7 @@ impl NonFinalizedState {
             invalidated_blocks
         };
 
-        // TODO: Allow for invalidating multiple block hashes at a given height.
+        // TODO: Allow for invalidating multiple block hashes at a given height (#9552).
         self.invalidated_blocks.insert(
             invalidated_blocks.first().unwrap().clone().height,
             Arc::new(invalidated_blocks),

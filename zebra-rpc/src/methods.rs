@@ -574,7 +574,7 @@ pub trait Rpc {
     /// # Parameters
     ///
     /// - `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.
-    // TODO: Invalidate block hashes even if they're not present in the non-finalized state.
+    // TODO: Invalidate block hashes even if they're not present in the non-finalized state (#9553).
     #[method(name = "invalidateblock")]
     async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()>;
 
