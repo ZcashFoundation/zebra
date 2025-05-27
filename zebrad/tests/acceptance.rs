@@ -177,8 +177,8 @@ use zebra_rpc::{
         types::{
             get_block_template::{
                 self, fetch_state_tip_and_local_time, generate_coinbase_and_roots,
-                proposal::proposal_block_from_template, GetBlockTemplate,
-                GetBlockTemplateRequestMode,
+                proposal::proposal_block_from_template, GetBlockTemplateRequestMode,
+                TemplateResponse,
             },
             submit_block::{self, SubmitBlockChannel},
         },
@@ -2980,7 +2980,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         chain_tip::ChainTip, parameters::NetworkUpgrade,
         primitives::byte_array::increment_big_endian,
     };
-    use zebra_rpc::methods::GetBlockHash;
+    use zebra_rpc::methods::GetBlockHashResponse;
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
@@ -3127,7 +3127,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
-        let GetBlockHash(best_block_hash) = rpc_client
+        let GetBlockHashResponse(best_block_hash) = rpc_client
             .json_result_from_call("getbestblockhash", "[]")
             .await
             .map_err(|err| eyre!(err))?;
@@ -3368,11 +3368,13 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     // Check that the block template is a valid block proposal
     let get_block_template::Response::ProposalMode(block_proposal_result) = rpc
-        .get_block_template(Some(get_block_template::JsonParameters {
-            mode: GetBlockTemplateRequestMode::Proposal,
-            data: Some(hex_proposal_block),
-            ..Default::default()
-        }))
+        .get_block_template(Some(get_block_template::GetBlockTemplateRequest::new(
+            GetBlockTemplateRequestMode::Proposal,
+            Some(hex_proposal_block),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )))
         .await?
     else {
         panic!(
@@ -3456,7 +3458,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
-        Height(block_template.height),
+        Height(block_template.height()),
         &miner_address,
         &[],
         chain_history_root,
@@ -3464,14 +3466,29 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
     );
 
-    let block_template = GetBlockTemplate {
-        coinbase_txn,
-        block_commitments_hash: default_roots.block_commitments_hash,
-        light_client_root_hash: default_roots.block_commitments_hash,
-        final_sapling_root_hash: default_roots.block_commitments_hash,
+    let block_template = TemplateResponse::new(
+        block_template.capabilities().clone(),
+        block_template.version(),
+        block_template.previous_block_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
         default_roots,
-        ..(*block_template)
-    };
+        block_template.transactions().clone(),
+        coinbase_txn,
+        block_template.long_poll_id(),
+        block_template.target(),
+        block_template.min_time(),
+        block_template.mutable().clone(),
+        block_template.nonce_range().clone(),
+        block_template.sigop_limit(),
+        block_template.size_limit(),
+        block_template.cur_time(),
+        block_template.bits(),
+        block_template.height(),
+        block_template.max_time(),
+        block_template.submit_old(),
+    );
 
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
@@ -3499,7 +3516,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
-        Height(block_template.height),
+        Height(block_template.height()),
         &miner_address,
         &[],
         chain_history_root,
@@ -3507,14 +3524,29 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
     );
 
-    let block_template = GetBlockTemplate {
-        coinbase_txn,
-        block_commitments_hash: default_roots.block_commitments_hash,
-        light_client_root_hash: default_roots.block_commitments_hash,
-        final_sapling_root_hash: default_roots.block_commitments_hash,
+    let block_template = TemplateResponse::new(
+        block_template.capabilities().clone(),
+        block_template.version(),
+        block_template.previous_block_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
         default_roots,
-        ..block_template
-    };
+        block_template.transactions().clone(),
+        coinbase_txn,
+        block_template.long_poll_id(),
+        block_template.target(),
+        block_template.min_time(),
+        block_template.mutable().clone(),
+        block_template.nonce_range().clone(),
+        block_template.sigop_limit(),
+        block_template.size_limit(),
+        block_template.cur_time(),
+        block_template.bits(),
+        block_template.height(),
+        block_template.max_time(),
+        block_template.submit_old(),
+    );
 
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 

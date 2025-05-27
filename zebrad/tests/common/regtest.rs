@@ -21,7 +21,7 @@ use zebra_rpc::{
         hex_data::HexData,
         types::{
             get_block_template::{
-                proposal::proposal_block_from_template, GetBlockTemplate, TimeSource,
+                proposal::proposal_block_from_template, TemplateResponse, TimeSource,
             },
             submit_block,
         },
@@ -105,12 +105,12 @@ pub trait MiningRpcMethods {
 
 impl MiningRpcMethods for RpcRequestClient {
     async fn block_from_template(&self, nu5_activation_height: Height) -> Result<(Block, Height)> {
-        let block_template: GetBlockTemplate = self
+        let block_template: TemplateResponse = self
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
 
-        let height = Height(block_template.height);
+        let height = Height(block_template.height());
 
         let network_upgrade = if height < nu5_activation_height {
             NetworkUpgrade::Canopy

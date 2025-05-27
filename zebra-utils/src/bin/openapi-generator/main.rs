@@ -8,7 +8,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
 use syn::LitStr;
 
-use zebra_rpc::methods::{trees::GetTreestate, *};
+use zebra_rpc::methods::{trees::GetTreestateResponse, *};
 
 use types::{get_mining_info, submit_block, subsidy, validate_address, z_validate_address};
 
@@ -477,9 +477,11 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         // mining
         // TODO: missing `getblocktemplate`. It's a complex method that requires a lot of parameters.
         "getnetworkhashps" => default_property(type_, items.clone(), u64::default())?,
-        "getblocksubsidy" => {
-            default_property(type_, items.clone(), subsidy::BlockSubsidy::default())?
-        }
+        "getblocksubsidy" => default_property(
+            type_,
+            items.clone(),
+            subsidy::GetBlockSubsidyResponse::default(),
+        )?,
         "getmininginfo" => {
             default_property(type_, items.clone(), get_mining_info::Response::default())?
         }
@@ -495,8 +497,10 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
             z_validate_address::Response::default(),
         )?,
         // address
-        "getaddressbalance" => default_property(type_, items.clone(), AddressBalance::default())?,
-        "getaddressutxos" => default_property(type_, items.clone(), GetAddressUtxos::default())?,
+        "getaddressbalance" => {
+            default_property(type_, items.clone(), GetAddressBalanceResponse::default())?
+        }
+        "getaddressutxos" => default_property(type_, items.clone(), Utxo::default())?,
         "getaddresstxids" => default_property(type_, items.clone(), Vec::<String>::default())?,
         // network
         "getpeerinfo" => {
@@ -505,17 +509,23 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         // blockchain
         "getdifficulty" => default_property(type_, items.clone(), f64::default())?,
         "getblockchaininfo" => {
-            default_property(type_, items.clone(), GetBlockChainInfo::default())?
+            default_property(type_, items.clone(), GetBlockChainInfoResponse::default())?
         }
         "getrawmempool" => default_property(type_, items.clone(), Vec::<String>::default())?,
-        "getblockhash" => default_property(type_, items.clone(), GetBlockHash::default())?,
-        "z_getsubtreesbyindex" => {
-            default_property(type_, items.clone(), trees::GetSubtrees::default())?
+        "getblockhash" => default_property(type_, items.clone(), GetBlockHashResponse::default())?,
+        "z_getsubtreesbyindex" => default_property(
+            type_,
+            items.clone(),
+            trees::GetSubtreesByIndexResponse::default(),
+        )?,
+        "z_gettreestate" => {
+            default_property(type_, items.clone(), GetTreestateResponse::default())?
         }
-        "z_gettreestate" => default_property(type_, items.clone(), GetTreestate::default())?,
         "getblockcount" => default_property(type_, items.clone(), u32::default())?,
-        "getbestblockhash" => default_property(type_, items.clone(), GetBlockHash::default())?,
-        "getblock" => default_property(type_, items.clone(), GetBlock::default())?,
+        "getbestblockhash" => {
+            default_property(type_, items.clone(), GetBlockHashResponse::default())?
+        }
+        "getblock" => default_property(type_, items.clone(), GetBlockResponse::default())?,
         // wallet
         "z_listunifiedreceivers" => default_property(
             type_,
@@ -523,14 +533,14 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
             types::unified_address::Response::default(),
         )?,
         // control
-        "getinfo" => default_property(type_, items.clone(), GetInfo::default())?,
+        "getinfo" => default_property(type_, items.clone(), GetInfoResponse::default())?,
         "stop" => default_property(type_, items.clone(), ())?,
         // transaction
         "sendrawtransaction" => {
-            default_property(type_, items.clone(), SentTransactionHash::default())?
+            default_property(type_, items.clone(), SendRawTransactionResponse::default())?
         }
         "getrawtransaction" => {
-            default_property(type_, items.clone(), GetRawTransaction::default())?
+            default_property(type_, items.clone(), GetRawTransactionResponse::default())?
         }
         // default
         _ => Property {

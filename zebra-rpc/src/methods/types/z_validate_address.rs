@@ -1,30 +1,36 @@
 //! Response type for the `z_validateaddress` RPC.
 
+use derive_getters::Getters;
+use derive_new::new;
 use zebra_chain::primitives::Address;
 
 /// `z_validateaddress` response
-#[derive(Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new,
+)]
 pub struct Response {
     /// Whether the address is valid.
     ///
     /// If not, this is the only property returned.
     #[serde(rename = "isvalid")]
-    pub is_valid: bool,
+    pub(crate) is_valid: bool,
 
     /// The zcash address that has been validated.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub address: Option<String>,
+    pub(crate) address: Option<String>,
 
     /// The type of the address.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub address_type: Option<AddressType>,
+    #[getter(copy)]
+    pub(crate) address_type: Option<AddressType>,
 
     /// Whether the address is yours or not.
     ///
     /// Always false for now since Zebra doesn't have a wallet yet.
     #[serde(rename = "ismine")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_mine: Option<bool>,
+    #[getter(copy)]
+    pub(crate) is_mine: Option<bool>,
 }
 
 impl Response {
@@ -36,7 +42,7 @@ impl Response {
 
 /// Address types supported by the `z_validateaddress` RPC according to
 /// <https://zcash.github.io/rpc/z_validateaddress.html>.
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum AddressType {
     /// The `p2pkh` address type.

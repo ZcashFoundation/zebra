@@ -15,9 +15,9 @@ use zebra_node_services::BoxError;
 use crate::methods::{
     types::{
         default_roots::DefaultRoots,
-        get_block_template::{GetBlockTemplate, Response},
+        get_block_template::{Response, TemplateResponse},
     },
-    GetBlockHash,
+    GetBlockHashResponse,
 };
 
 /// Response to a `getblocktemplate` RPC request in proposal mode.
@@ -72,8 +72,8 @@ impl From<ProposalResponse> for Response {
     }
 }
 
-impl From<GetBlockTemplate> for Response {
-    fn from(template: GetBlockTemplate) -> Self {
+impl From<TemplateResponse> for Response {
+    fn from(template: TemplateResponse) -> Self {
         Self::TemplateMode(Box::new(template))
     }
 }
@@ -111,7 +111,7 @@ pub enum TimeSource {
 
 impl TimeSource {
     /// Returns the time from `template` using this time source.
-    pub fn time_from_template(&self, template: &GetBlockTemplate) -> DateTime32 {
+    pub fn time_from_template(&self, template: &TemplateResponse) -> DateTime32 {
         use TimeSource::*;
 
         match self {
@@ -171,14 +171,14 @@ impl FromStr for TimeSource {
 ///
 /// If `time_source` is not supplied, uses the current time from the template.
 pub fn proposal_block_from_template(
-    template: &GetBlockTemplate,
+    template: &TemplateResponse,
     time_source: impl Into<Option<TimeSource>>,
     network_upgrade: NetworkUpgrade,
 ) -> Result<Block, SerializationError> {
-    let GetBlockTemplate {
+    let TemplateResponse {
         version,
         height,
-        previous_block_hash: GetBlockHash(previous_block_hash),
+        previous_block_hash: GetBlockHashResponse(previous_block_hash),
         default_roots:
             DefaultRoots {
                 merkle_root,

@@ -255,13 +255,13 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Pass the correct arguments, even if Zebra currently ignores them.
-    let mut parameters = get_block_template::JsonParameters {
-        mode: Template,
-        data: None,
-        capabilities: vec![LongPoll, CoinbaseTxn],
-        long_poll_id: None,
-        _work_id: None,
-    };
+    let parameters = get_block_template::GetBlockTemplateRequest::new(
+        Template,
+        None,
+        vec![LongPoll, CoinbaseTxn],
+        None,
+        None,
+    );
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
@@ -289,18 +289,24 @@ where
             .expect("invalid RPC response: proposal in response to a template request");
 
         info!(
-            height = ?template.height,
-            transactions = ?template.transactions.len(),
+            height = ?template.height(),
+            transactions = ?template.transactions().len(),
             "mining with an updated block template",
         );
 
         // Tell the next get_block_template() call to wait until the template has changed.
-        parameters.long_poll_id = Some(template.long_poll_id);
+        let parameters = get_block_template::GetBlockTemplateRequest::new(
+            Template,
+            None,
+            vec![LongPoll, CoinbaseTxn],
+            Some(template.long_poll_id()),
+            None,
+        );
 
         let block = proposal_block_from_template(
             &template,
             TimeSource::CurTime,
-            NetworkUpgrade::current(&network, Height(template.height)),
+            NetworkUpgrade::current(&network, Height(template.height())),
         )
         .expect("unexpected invalid block template");
 

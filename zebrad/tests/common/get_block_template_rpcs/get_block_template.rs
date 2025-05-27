@@ -16,8 +16,8 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::methods::types::get_block_template::{
-    proposal::proposal_block_from_template, GetBlockTemplate, JsonParameters, ProposalResponse,
-    TimeSource,
+    proposal::proposal_block_from_template, GetBlockTemplateRequest, ProposalResponse,
+    TemplateResponse, TimeSource,
 };
 
 use crate::common::{
@@ -158,7 +158,7 @@ pub(crate) async fn run() -> Result<()> {
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
 async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
-    let mut response_json_result: GetBlockTemplate = client
+    let mut response_json_result: TemplateResponse = client
         .json_result_from_call("getblocktemplate", "[]")
         .await
         .expect("response should be success output with a serialized `GetBlockTemplate`");
@@ -169,18 +169,22 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
 
     {
         let client = client.clone();
-        let mut long_poll_id = response_json_result.long_poll_id;
+        let mut long_poll_id = response_json_result.long_poll_id();
 
         tokio::spawn(async move {
             loop {
                 let long_poll_request = async {
-                    let long_poll_json_params = serde_json::to_string(&vec![JsonParameters {
-                        long_poll_id: Some(long_poll_id),
-                        ..Default::default()
-                    }])
-                    .expect("JsonParameters should serialize successfully");
+                    let long_poll_json_params =
+                        serde_json::to_string(&vec![GetBlockTemplateRequest::new(
+                            Default::default(),
+                            Default::default(),
+                            Default::default(),
+                            Some(long_poll_id),
+                            Default::default(),
+                        )])
+                        .expect("JsonParameters should serialize successfully");
 
-                    let result: GetBlockTemplate = client
+                    let result: TemplateResponse = client
                             .json_result_from_call("getblocktemplate", long_poll_json_params)
                             .await
                             .expect(
@@ -196,9 +200,9 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
                     }
 
                     long_poll_result = long_poll_request => {
-                        long_poll_id = long_poll_result.long_poll_id;
+                        long_poll_id = long_poll_result.long_poll_id();
 
-                        if let Some(false) = long_poll_result.submit_old {
+                        if let Some(false) = long_poll_result.submit_old() {
                             let _ = long_poll_result_tx.send(long_poll_result);
                         }
                     }
