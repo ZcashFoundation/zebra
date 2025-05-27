@@ -48,6 +48,7 @@ class WalletTest (BitcoinTestFramework):
         self.sync_all()
 
         walletinfo = self.wallets[0].getwalletinfo()
+        # TODO: getwalletinfo is not implemented: https://github.com/zcash/wallet/issues/55
         #assert_equal(Decimal(walletinfo['immature_balance']), Decimal('40'))
         assert_equal(Decimal(walletinfo['balance']), Decimal('0'))
 

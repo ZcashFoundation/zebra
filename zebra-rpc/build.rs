@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         use std::{env, fs, path::PathBuf, process::Command};
 
         // The following code will clone the zallet repo and build the binary,
-        // then copy the binary to the main target directory.
+        // then copy the binary to the project target directory.
         //
         // Code below is fragile and will just build the main branch of the wallet repository
         // so we can have it available for `qa` regtests.

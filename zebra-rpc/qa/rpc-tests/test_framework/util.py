@@ -189,7 +189,6 @@ def sync_mempools(rpc_connections, wait=0.5, timeout=60):
     return True
 
 bitcoind_processes = {}
-zallet_processes = {}
 
 def initialize_datadir(dirname, n, clock_offset=0):
     datadir = os.path.join(dirname, "node"+str(n))
@@ -809,6 +808,11 @@ def tarfile_extractall(tarfile, path):
     else:
         tarfile.extractall(path=path)
 
+
+# Wallet utilities
+
+zallet_processes = {}
+
 def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=None):
     """
     Start multiple wallets, return RPC connections to them
@@ -824,7 +828,6 @@ def start_wallets(num_wallets, dirname, extra_args=None, rpchost=None, binary=No
         raise
     return rpcs
 
-
 def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=None, stderr=None):
     """
     Start a Zallet wallet and return RPC connection to it
@@ -835,9 +838,7 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
         binary = zallet_binary()
 
     validator_port = rpc_port(i)
-    print("validator_port: ", validator_port)
     zallet_port = wallet_rpc_port(i + 1000)
-    print("zallet_port: ", zallet_port)
 
     config = update_zallet_conf(datadir, validator_port, zallet_port)
     args = [ binary, "-c="+config, "start" ]
@@ -855,7 +856,6 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
         coverage.write_all_rpc_commands(COVERAGE_DIR, proxy)
 
     return proxy
-
 
 def update_zallet_conf(datadir, validator_port, zallet_port):
     import toml
