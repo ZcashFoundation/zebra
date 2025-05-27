@@ -272,6 +272,7 @@ impl NonFinalizedState {
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
+    #[allow(clippy::unwrap_in_result)]
     pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, BoxError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
             return Err("block hash not found in any non-finalized chain".into());
@@ -296,7 +297,11 @@ impl NonFinalizedState {
 
         // TODO: Allow for invalidating multiple block hashes at a given height (#9552).
         self.invalidated_blocks.insert(
-            invalidated_blocks.first().unwrap().clone().height,
+            invalidated_blocks
+                .first()
+                .expect("should not be empty")
+                .clone()
+                .height,
             Arc::new(invalidated_blocks),
         );
 
