@@ -23,7 +23,8 @@ class WalletTest (BitcoinTestFramework):
     def setup_network(self, split=False):
         self.nodes = start_nodes(3, self.options.tmpdir)
 
-        # TODO: Connect nodes between them, we need addnode RPC method: #XXXX
+        # TODO: Connect nodes between them, we need addnode RPC method:
+        # https://github.com/ZcashFoundation/zebra/issues/9555
         #connect_nodes_bi(self.nodes,0,1)
         #connect_nodes_bi(self.nodes,1,2)
         #connect_nodes_bi(self.nodes,0,2)
@@ -35,11 +36,13 @@ class WalletTest (BitcoinTestFramework):
         self.sync_all()
 
         # But as we can't connect nodes yet, we need to generate a block to each node manually
-        # TODO: Remove this when we have addnode RPC method: #XXXX
+        # TODO: Remove this when we have addnode RPC method:
+        # https://github.com/ZcashFoundation/zebra/issues/9555
         for i in range(1, len(self.nodes)):
             self.nodes[i].generate(1)
 
-        # TODO: Wallets can be started but we need to add miner address at least one of them: #XXXX
+        # TODO: Wallets can be started but we need to add miner address at least one of them:
+        # https://github.com/ZcashFoundation/zebra/issues/9557
         self.wallets = start_wallets(3, self.options.tmpdir)
 
     def run_test(self):
@@ -49,7 +52,10 @@ class WalletTest (BitcoinTestFramework):
         self.sync_all()
 
         walletinfo = self.wallets[0].getwalletinfo()
-        # TODO: getwalletinfo is not implemented: https://github.com/zcash/wallet/issues/55
+        # TODO: getwalletinfo data is not implemented:
+        # https://github.com/zcash/wallet/issues/55
+        # TODO: Miner address is not in the wallet:
+        # https://github.com/ZcashFoundation/zebra/issues/9557
         #assert_equal(Decimal(walletinfo['immature_balance']), Decimal('40'))
         assert_equal(Decimal(walletinfo['balance']), Decimal('0'))
 
