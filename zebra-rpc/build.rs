@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .map(PathBuf::from)
             .expect("failed to get OUT_DIR");
 
-        let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+        let profile = "debug".to_string();
 
         let target_dir = env::var("CARGO_TARGET_DIR")
             .map(PathBuf::from)
