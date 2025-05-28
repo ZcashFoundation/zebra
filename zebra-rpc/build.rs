@@ -48,14 +48,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_dir.join(format!("target/{}/zallet", profile)),
             target_dir.join("zallet"),
         )
-        .expect(
-            format!(
+        .unwrap_or_else(|_| {
+            panic!(
                 "failed to copy zallet binary from {} to {}",
                 build_dir.display(),
                 target_dir.display()
             )
-            .as_str(),
-        );
+        });
     }
 
     Ok(())
