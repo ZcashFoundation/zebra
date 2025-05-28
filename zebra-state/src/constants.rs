@@ -64,7 +64,7 @@ const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 /// Returns the full semantic version of the currently running state database format code.
 ///
 /// This is the version implemented by the Zebra code that's currently running,
-/// the minor and patch versions on disk can be different.
+/// the version on disk can be different.
 pub fn state_database_format_version_in_code() -> Version {
     Version {
         major: DATABASE_FORMAT_VERSION,
@@ -78,7 +78,9 @@ pub fn state_database_format_version_in_code() -> Version {
     }
 }
 
-/// The name of the file containing the minor and patch database versions.
+/// The name of the file containing the database version.
+///
+/// Note: This file has historically omitted the major database version.
 ///
 /// Use [`Config::version_file_path()`] to get the path to this file.
 pub(crate) const DATABASE_FORMAT_VERSION_FILE_NAME: &str = "version";

@@ -213,6 +213,7 @@ impl ZebraDb {
         write_database_format_version_to_disk(
             self.config(),
             self.db_kind(),
+            self.major_version(),
             new_version,
             &self.network(),
         )

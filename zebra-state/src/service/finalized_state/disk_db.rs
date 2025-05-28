@@ -27,10 +27,9 @@ use semver::Version;
 use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_endian};
 
 use crate::{
-    constants::DATABASE_FORMAT_VERSION_FILE_NAME,
     database_format_version_on_disk,
     service::finalized_state::disk_format::{FromDisk, IntoDisk},
-    Config,
+    write_database_format_version_to_disk, Config,
 };
 
 use super::zebra_db::transparent::{
@@ -1094,20 +1093,21 @@ impl DiskDb {
                     Ok(()) => {
                         info!("moved state cache from {old_path:?} to {new_path:?}");
 
-                        let disk_version =
+                        let mut disk_version =
                             database_format_version_on_disk(config, db_kind, major_db_ver, network)
                                 .expect("unable to read database format version file")
-                                .map(|mut v| {
-                                    v.major = old_major_db_ver;
-                                    v
-                                });
+                                .expect("unable to parse database format version");
 
-                        match fs::remove_file(new_path.join(DATABASE_FORMAT_VERSION_FILE_NAME)) {
-                            Ok(()) => info!("removed version file at {new_path:?}"),
-                            Err(e) => {
-                                warn!("could not remove version file at {new_path:?}: {e}")
-                            }
-                        }
+                        disk_version.major = old_major_db_ver;
+
+                        write_database_format_version_to_disk(
+                            config,
+                            db_kind,
+                            major_db_ver,
+                            &disk_version,
+                            network,
+                        )
+                        .expect("unable to write database format version file to disk");
 
                         // Get the parent of the old path, e.g. `state/v25/` and delete it if it is
                         // empty.
@@ -1133,7 +1133,7 @@ impl DiskDb {
                             }
                         }
 
-                        return disk_version;
+                        return Some(disk_version);
                     }
                     Err(e) => {
                         warn!("could not move state cache from {old_path:?} to {new_path:?}: {e}");
