@@ -3,6 +3,7 @@
 use std::{collections::HashMap, fmt, iter};
 
 use halo2::pasta::pallas;
+use ::orchard::note::ExtractedNoteCommitment;
 
 mod auth_digest;
 mod hash;
@@ -1053,7 +1054,7 @@ impl Transaction {
 
     /// Access the note commitments in this transaction, if there are any,
     /// regardless of version.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &ExtractedNoteCommitment> {
         self.orchard_shielded_data()
             .into_iter()
             .flat_map(orchard::ShieldedData::note_commitments)

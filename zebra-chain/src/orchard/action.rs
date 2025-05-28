@@ -1,6 +1,5 @@
 use std::io;
 
-use halo2::pasta::pallas;
 use reddsa::orchard::SpendAuth;
 
 use crate::serialization::{
@@ -29,8 +28,8 @@ pub struct Action {
     /// The randomized validating key for spendAuthSig,
     pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
     /// The x-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::Base")]
-    pub cm_x: pallas::Base,
+    #[serde(with = "serde_helpers::ExtractedNoteCommitment")]
+    pub cm_x: orchard::note::ExtractedNoteCommitment,
     /// An encoding of an ephemeral Pallas public key corresponding to the
     /// encrypted private key in `out_ciphertext`.
     pub ephemeral_key: keys::EphemeralPublicKey,
@@ -47,7 +46,7 @@ impl ZcashSerialize for Action {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.nullifier)[..])?;
         writer.write_all(&<[u8; 32]>::from(self.rk)[..])?;
-        writer.write_all(&<[u8; 32]>::from(self.cm_x)[..])?;
+        writer.write_all(&<[u8; 32]>::from(&self.cm_x)[..])?;
         self.ephemeral_key.zcash_serialize(&mut writer)?;
         self.enc_ciphertext.zcash_serialize(&mut writer)?;
         self.out_ciphertext.zcash_serialize(&mut writer)?;
@@ -84,7 +83,7 @@ impl ZcashDeserialize for Action {
             // Type is `{0 .. 𝑞_ℙ − 1}`. Note that the second rule quoted above
             // is also enforced here and it is technically redundant with the first.
             // See [`pallas::Base::zcash_deserialize`].
-            cm_x: pallas::Base::zcash_deserialize(&mut reader)?,
+            cm_x: orchard::note::ExtractedNoteCommitment::zcash_deserialize(&mut reader)?,
             // Denoted by `epk` in the spec. Type is KA^{Orchard}.Public, i.e. ℙ^*.
             // https://zips.z.cash/protocol/protocol.pdf#concreteorchardkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].
@@ -100,5 +99,16 @@ impl ZcashDeserialize for Action {
             // See [`note::WrappedNoteKey::zcash_deserialize`].
             out_ciphertext: note::WrappedNoteKey::zcash_deserialize(&mut reader)?,
         })
+    }
+}
+
+/// TODO
+impl ZcashDeserialize for orchard::note::ExtractedNoteCommitment {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        orchard::note::ExtractedNoteCommitment::from_bytes(&reader.read_32_bytes()?)
+            .into_option()
+            .ok_or(SerializationError::Parse(
+                "Invalid pallas::Base, input not canonical",
+            ))
     }
 }

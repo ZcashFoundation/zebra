@@ -114,7 +114,7 @@ impl ShieldedData {
 
     /// Collect the cm_x's for this transaction, if it contains [`Action`]s with
     /// outputs, in the order they appear in the transaction.
-    pub fn note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+    pub fn note_commitments(&self) -> impl Iterator<Item = &orchard::note::ExtractedNoteCommitment> {
         self.actions().map(|action| &action.cm_x)
     }
 }

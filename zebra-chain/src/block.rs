@@ -174,8 +174,8 @@ impl Block {
             .flat_map(|transaction| transaction.sapling_note_commitments())
     }
 
-    /// Access the [orchard note commitments](pallas::Base) from all transactions in this block.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+    /// Access the [orchard note commitments](pallas::Base) from all transactions in this block. TODO NAT
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &::orchard::note::ExtractedNoteCommitment> {
         self.transactions
             .iter()
             .flat_map(|transaction| transaction.orchard_note_commitments())

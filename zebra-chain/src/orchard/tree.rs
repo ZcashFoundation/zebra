@@ -40,7 +40,7 @@ use legacy::LegacyNoteCommitmentTree;
 /// The type that is used to update the note commitment tree.
 ///
 /// Unfortunately, this is not the same as `orchard::NoteCommitment`.
-pub type NoteCommitmentUpdate = pallas::Base;
+pub type NoteCommitmentUpdate = orchard::note::ExtractedNoteCommitment;
 
 pub(super) const MERKLE_DEPTH: u8 = 32;
 
@@ -170,8 +170,8 @@ impl ZcashDeserialize for Root {
 }
 
 /// A node of the Orchard Incremental Note Commitment Tree.
-#[derive(Copy, Clone, Eq, PartialEq, Default)]
-pub struct Node(pallas::Base);
+#[derive(Copy, Clone, Eq, PartialEq)]
+pub struct Node(orchard::note::ExtractedNoteCommitment);
 
 impl Node {
     /// Calls `to_repr()` on inner value.

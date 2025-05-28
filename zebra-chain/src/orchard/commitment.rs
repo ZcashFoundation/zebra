@@ -12,6 +12,7 @@ use halo2::{
     pasta::pallas,
 };
 use lazy_static::lazy_static;
+use orchard::note::ExtractedNoteCommitment;
 use rand_core::{CryptoRng, RngCore};
 
 use crate::{
@@ -92,10 +93,11 @@ impl TryFrom<[u8; 32]> for NoteCommitment {
     }
 }
 
+// TODO NAT
 impl NoteCommitment {
     /// Extract the x coordinate of the note commitment.
-    pub fn extract_x(&self) -> pallas::Base {
-        extract_p(self.0.into())
+    pub fn extract_x(&self) -> orchard::note::ExtractedNoteCommitment {
+        ExtractedNoteCommitment::from_point(self.0)
     }
 }
 

@@ -64,3 +64,15 @@ impl From<Base> for pallas::Base {
         pallas::Base::from_repr(local.bytes).unwrap()
     }
 }
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "orchard::note::ExtractedNoteCommitment")]
+pub struct ExtractedNoteCommitment {
+    #[serde(getter = "orchard::note::ExtractedNoteCommitment::to_bytes")]
+    bytes: [u8; 32],
+}
+
+impl From<ExtractedNoteCommitment> for orchard::note::ExtractedNoteCommitment {
+    fn from(local: ExtractedNoteCommitment) -> Self {
+        orchard::note::ExtractedNoteCommitment::from_bytes(&local.bytes).unwrap()
+    }
+}
