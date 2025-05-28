@@ -6,6 +6,7 @@ on:
   push:
     tags:
       - '*' # Triggers the workflow on any new tag
+  workflow_dispatch: # Allows manual triggering
 
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
