@@ -19,9 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Code below is fragile and will just build the main branch of the wallet repository
         // so we can have it available for `qa` regtests.
 
-        let build_dir = env::var("OUT_DIR")
-            .map(PathBuf::from)
-            .expect("failed to get OUT_DIR");
+        let build_dir = env::var("OUT_DIR").map(PathBuf::from).unwrap_or_default();
 
         let profile = "debug".to_string();
 
@@ -50,7 +48,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             build_dir.join(format!("target/{}/zallet", profile)),
             target_dir.join("zallet"),
         )
-        .expect("failed to copy zallet binary");
+        .expect(
+            format!(
+                "failed to copy zallet binary from {} to {}",
+                build_dir.display(),
+                target_dir.display()
+            )
+            .as_str(),
+        );
     }
 
     Ok(())
