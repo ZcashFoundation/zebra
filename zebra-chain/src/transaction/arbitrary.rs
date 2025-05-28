@@ -880,13 +880,25 @@ impl Arbitrary for Transaction {
                 Self::v5_strategy(ledger_state)
             ]
             .boxed(),
-            #[cfg(feature = "tx-v6")]
-            NetworkUpgrade::Nu7 => prop_oneof![
-                Self::v4_strategy(ledger_state.clone()),
-                Self::v5_strategy(ledger_state.clone()),
-                Self::v6_strategy(ledger_state)
-            ]
-            .boxed(),
+            NetworkUpgrade::Nu7 => {
+                #[cfg(not(feature = "tx-v6"))]
+                {
+                    prop_oneof![
+                        Self::v4_strategy(ledger_state.clone()),
+                        Self::v5_strategy(ledger_state.clone()),
+                    ]
+                    .boxed()
+                }
+                #[cfg(feature = "tx-v6")]
+                {
+                    prop_oneof![
+                        Self::v4_strategy(ledger_state.clone()),
+                        Self::v5_strategy(ledger_state.clone()),
+                        Self::v6_strategy(ledger_state),
+                    ]
+                    .boxed()
+                }
+            }
         }
     }
 

@@ -28,7 +28,6 @@ use crate::primitives::halo2::*;
 #[allow(dead_code, clippy::print_stdout)]
 fn generate_test_vectors<Flavor: ShieldedDataFlavor>()
 where
-    Flavor::BurnType: for<'a> From<&'a [(AssetBase, NoteValue)]>,
     ShieldedData<Flavor>: ZcashSerialize,
 {
     let proving_key = ProvingKey::build::<Flavor>();

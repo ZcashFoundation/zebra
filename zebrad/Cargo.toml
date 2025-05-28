@@ -52,7 +52,7 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs", "tx-v6"]
+default = ["release_max_level_info", "progress-bar", "getblocktemplate-rpcs"]
 
 # Default features for official ZF binary release builds
 default-release-binaries = ["default", "sentry"]

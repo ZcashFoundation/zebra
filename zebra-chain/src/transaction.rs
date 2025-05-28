@@ -40,7 +40,7 @@ pub use unmined::{
 
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
-    block, orchard, orchard_zsa,
+    block, orchard,
     parameters::{ConsensusBranchId, NetworkUpgrade},
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
@@ -52,6 +52,9 @@ use crate::{
     },
     value_balance::{ValueBalance, ValueBalanceError},
 };
+
+#[cfg(feature = "tx-v6")]
+use crate::orchard_zsa;
 
 /// A Zcash transaction.
 ///

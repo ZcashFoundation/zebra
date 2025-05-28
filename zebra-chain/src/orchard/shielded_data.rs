@@ -27,10 +27,17 @@ use super::{OrchardVanilla, ShieldedDataFlavor};
 
 /// A bundle of [`Action`] descriptions and signature data.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(bound(
-    serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
-    deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
-))]
+#[cfg_attr(
+    not(feature = "tx-v6"),
+    serde(bound(serialize = "Flavor::EncryptedNote: serde::Serialize"))
+)]
+#[cfg_attr(
+    feature = "tx-v6",
+    serde(bound(
+        serialize = "Flavor::EncryptedNote: serde::Serialize, Flavor::BurnType: serde::Serialize",
+        deserialize = "Flavor::BurnType: serde::Deserialize<'de>"
+    ))
+)]
 pub struct ShieldedData<Flavor: ShieldedDataFlavor> {
     /// The orchard flags for this transaction.
     /// Denoted as `flagsOrchard` in the spec.

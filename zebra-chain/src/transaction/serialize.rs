@@ -10,20 +10,21 @@ use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{
     block::MAX_BLOCK_BYTES,
-    orchard::{OrchardVanilla, OrchardZSA, ShieldedDataFlavor},
-    orchard_zsa::NoBurn,
+    orchard::{OrchardVanilla, ShieldedDataFlavor},
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
-        zcash_serialize_external_count, AtLeastOne, CompactSizeMessage, ReadZcashExt,
-        SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
+        TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
 };
 
 #[cfg(feature = "tx-v6")]
-use crate::parameters::TX_V6_VERSION_GROUP_ID;
+use crate::{
+    orchard::OrchardZSA, orchard_zsa::NoBurn, parameters::TX_V6_VERSION_GROUP_ID,
+    serialization::CompactSizeMessage,
+};
 
 use super::*;
 use crate::sapling;
@@ -503,6 +504,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
         Ok(Some(orchard::ShieldedData::<OrchardVanilla> {
             flags,
             value_balance,
+            #[cfg(feature = "tx-v6")]
             burn: NoBurn,
             shared_anchor,
             proof,

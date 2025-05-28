@@ -9,15 +9,15 @@ use orchard::{domain::OrchardDomainCommon, orchard_flavor::OrchardFlavor};
 pub use orchard::orchard_flavor::OrchardVanilla;
 
 #[cfg(feature = "tx-v6")]
-pub use orchard::orchard_flavor::OrchardZSA;
+pub use orchard::{note::AssetBase, orchard_flavor::OrchardZSA, value::NoteValue};
 
-use crate::{
-    orchard::ValueCommitment,
-    serialization::{ZcashDeserialize, ZcashSerialize},
-};
+use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 #[cfg(feature = "tx-v6")]
-use crate::orchard_zsa::{Burn, BurnItem, NoBurn};
+use crate::{
+    orchard::ValueCommitment,
+    orchard_zsa::{Burn, BurnItem, NoBurn},
+};
 
 use super::note;
 
@@ -62,6 +62,7 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
         + ZcashSerialize
         + Into<ValueCommitment>
         + AsRef<[BurnItem]>
+        + for<'a> From<&'a [(AssetBase, NoteValue)]>
         + test_arbitrary::TestArbitrary;
 }
 
