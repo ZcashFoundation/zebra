@@ -48,7 +48,7 @@ NU6_BRANCH_ID = 0xC8E71055
 MAX_NODES = 8
 # Don't assign rpc or p2p ports lower than this
 PORT_MIN = 11000
-# The number of ports to "reserve" for p2p and rpc, each
+# The number of ports to "reserve" for p2p, rpc and wallet rpc each
 PORT_RANGE = 5000
 
 def zcashd_binary():
@@ -107,7 +107,7 @@ def rpc_port(n):
     return PORT_MIN + PORT_RANGE + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
 def wallet_rpc_port(n):
-    return PORT_MIN + PORT_RANGE + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
+    return PORT_MIN + (PORT_RANGE * 2) + n + (MAX_NODES * PortSeed.n) % (PORT_RANGE - 1 - MAX_NODES)
 
 
 def check_json_precision():
@@ -838,16 +838,16 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
         binary = zallet_binary()
 
     validator_port = rpc_port(i)
-    zallet_port = wallet_rpc_port(i + 1000)
+    zallet_port = wallet_rpc_port(i)
 
     config = update_zallet_conf(datadir, validator_port, zallet_port)
     args = [ binary, "-c="+config, "start" ]
 
-    #if extra_args is not None: args.extend(extra_args)
+    if extra_args is not None: args.extend(extra_args)
     zallet_processes[i] = subprocess.Popen(args, stderr=stderr)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_wallet: wallet started, waiting for RPC to come up")
-    url = rpc_url_wallet(i, zallet_port, rpchost)
+    url = rpc_url_wallet(i, rpchost)
     wait_for_wallet_start(zallet_processes[i], url, i)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_wallet: RPC successfully started for wallet {} with pid {}".format(i, zallet_processes[i].pid))
@@ -914,9 +914,9 @@ def wait_for_wallet_start(process, url, i):
                 raise # unknown JSON RPC exception
         time.sleep(0.25)
 
-def rpc_url_wallet(i, zallet_port, rpchost=None):
+def rpc_url_wallet(i, rpchost=None):
     host = '127.0.0.1'
-    port = zallet_port
+    port = wallet_rpc_port(i)
     if rpchost:
         parts = rpchost.split(':')
         if len(parts) == 2:
