@@ -34,6 +34,11 @@ Make sure `zebrad` binary exists in the `../target/debug/` folder or set the bin
 export CARGO_BIN_EXE_zebrad=/path/to/zebrad
 ```
 
+For wallet tests, make sure `zallet` binary exists in the `../target/debug/` folder.
+You can build `zebrad` and `zallet` with the following command:
+
+    ZALLET=1 cargo build
+
 You can run any single test by calling
 
     ./qa/pull-tester/rpc-tests.py <testname1>
@@ -78,7 +83,7 @@ to recover with:
 
 ```bash
 rm -rf cache
-killall zcashd
+killall zebrad
 ```
 
 Writing tests
