@@ -66,6 +66,11 @@ pub enum FundingStreamReceiver {
     /// The Major Grants (Zcash Community Grants) funding stream.
     MajorGrants,
 
+    /// The Community and Coinholder Funding Model Key-Holder Organizations funding stream.
+    // TODO: Figure out or confirm what this should be named.
+    #[serde(rename = "CoinvoterFundingModelKeyHolderOrgs")]
+    CcfmKho,
+
     /// The deferred pool contribution, see [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
     Deferred,
 }
@@ -78,27 +83,23 @@ impl FundingStreamReceiver {
     /// [`zcashd`]: https://github.com/zcash/zcash/blob/3f09cfa00a3c90336580a127e0096d99e25a38d6/src/consensus/funding.cpp#L13-L32
     /// [ZIP-1015]: https://zips.z.cash/zip-1015
     pub fn info(&self, is_post_nu6: bool) -> (&'static str, &'static str) {
-        if is_post_nu6 {
-            (
-                match self {
-                    FundingStreamReceiver::Ecc => "Electric Coin Company",
-                    FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
-                    FundingStreamReceiver::MajorGrants => "Zcash Community Grants NU6",
-                    FundingStreamReceiver::Deferred => "Lockbox NU6",
-                },
-                LOCKBOX_SPECIFICATION,
-            )
+        use FundingStreamReceiver::*;
+
+        let human_readable_name = match self {
+            Ecc => "Electric Coin Company",
+            ZcashFoundation => "Zcash Foundation",
+            MajorGrants => "Zcash Community Grants NU6",
+            CcfmKho => "Community Coinholder Funding Model Key-Holder Organizations",
+            Deferred => "Lockbox NU6",
+        };
+
+        let specification_url = if is_post_nu6 {
+            LOCKBOX_SPECIFICATION
         } else {
-            (
-                match self {
-                    FundingStreamReceiver::Ecc => "Electric Coin Company",
-                    FundingStreamReceiver::ZcashFoundation => "Zcash Foundation",
-                    FundingStreamReceiver::MajorGrants => "Major Grants",
-                    FundingStreamReceiver::Deferred => "Lockbox NU6",
-                },
-                FUNDING_STREAM_SPECIFICATION,
-            )
-        }
+            FUNDING_STREAM_SPECIFICATION
+        };
+
+        (human_readable_name, specification_url)
     }
 }
 
