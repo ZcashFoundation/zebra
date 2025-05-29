@@ -97,7 +97,8 @@ impl TryFrom<[u8; 32]> for NoteCommitment {
 impl NoteCommitment {
     /// Extract the x coordinate of the note commitment.
     pub fn extract_x(&self) -> orchard::note::ExtractedNoteCommitment {
-        ExtractedNoteCommitment::from_point(self.0)
+        // TODO: Confirm that this is correct.
+        ExtractedNoteCommitment::from_point(self.0.into())
     }
 }
 

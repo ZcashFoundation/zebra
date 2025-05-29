@@ -44,6 +44,9 @@ pub fn decrypts_successfully(tx: &Transaction, network: &Network, height: Height
             if zcash_note_encryption::try_output_recovery_with_ovk(
                 &orchard::note_encryption::OrchardDomain::for_action(act),
                 &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
+                // TODO: Use a local copy of zcash_note_encryption depending on the local orchard code, or
+                //       figure out how to patch deps to a local path, or
+                //       push changes to orchard to a git ref and patch the orchard dep with the git ref.
                 act,
                 act.cv_net(),
                 &act.encrypted_note().out_ciphertext,

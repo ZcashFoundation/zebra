@@ -67,8 +67,13 @@ impl From<Base> for pallas::Base {
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "orchard::note::ExtractedNoteCommitment")]
 pub struct ExtractedNoteCommitment {
-    #[serde(getter = "orchard::note::ExtractedNoteCommitment::to_bytes")]
+    #[serde(getter = "temp_convert_fn")]
     bytes: [u8; 32],
+}
+
+// TODO: Replace this with something reasonable like a method.
+fn temp_convert_fn(cm_x: &orchard::note::ExtractedNoteCommitment) -> [u8; 32] {
+    cm_x.to_bytes()
 }
 
 impl From<ExtractedNoteCommitment> for orchard::note::ExtractedNoteCommitment {

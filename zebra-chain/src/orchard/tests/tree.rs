@@ -1,4 +1,5 @@
-use halo2::pasta::{group::ff::PrimeField, pallas};
+use halo2::pasta::group::ff::PrimeField;
+use orchard::note::ExtractedNoteCommitment;
 
 use crate::orchard::tests::vectors;
 use crate::orchard::tree::*;
@@ -26,7 +27,7 @@ fn incremental_roots() {
 
     for (i, commitment_set) in vectors::COMMITMENTS.iter().enumerate() {
         for cm_x_bytes in commitment_set.iter() {
-            let cm_x = pallas::Base::from_repr(*cm_x_bytes).unwrap();
+            let cm_x = ExtractedNoteCommitment::from_bytes(cm_x_bytes).unwrap();
 
             leaves.push(cm_x);
 

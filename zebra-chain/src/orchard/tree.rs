@@ -22,6 +22,7 @@ use halo2::pasta::{group::ff::PrimeField, pallas};
 use hex::ToHex;
 use incrementalmerkletree::{frontier::NonEmptyFrontier, Hashable};
 use lazy_static::lazy_static;
+use orchard::note::ExtractedNoteCommitment;
 use thiserror::Error;
 use zcash_primitives::merkle_tree::HashSer;
 
@@ -176,7 +177,7 @@ pub struct Node(orchard::note::ExtractedNoteCommitment);
 impl Node {
     /// Calls `to_repr()` on inner value.
     pub fn to_repr(&self) -> [u8; 32] {
-        self.0.to_repr()
+        self.0.to_bytes()
     }
 
     /// Return the node bytes in big-endian byte-order suitable for printing out byte by byte.
@@ -201,7 +202,8 @@ impl TryFrom<[u8; 32]> for Node {
     type Error = &'static str;
 
     fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        Option::<pallas::Base>::from(pallas::Base::from_repr(bytes))
+        ExtractedNoteCommitment::from_bytes(&bytes)
+            .into_option()
             .map(Node)
             .ok_or("invalid Pallas field element")
     }
@@ -254,7 +256,7 @@ impl HashSer for Node {
     fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
         let mut repr = [0u8; 32];
         reader.read_exact(&mut repr)?;
-        let maybe_node = pallas::Base::from_repr(repr).map(Self);
+        let maybe_node = repr.try_into().ok();
 
         <Option<_>>::from(maybe_node).ok_or_else(|| {
             io::Error::new(
@@ -265,13 +267,17 @@ impl HashSer for Node {
     }
 
     fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(&self.0.to_repr())
+        writer.write_all(&self.0.to_bytes())
     }
 }
 
 impl Hashable for Node {
     fn empty_leaf() -> Self {
-        Self(NoteCommitmentTree::uncommitted())
+        // TODO: Avoid converting to and from repr here before merging.
+        NoteCommitmentTree::uncommitted()
+            .to_repr()
+            .try_into()
+            .unwrap()
     }
 
     /// Combine two nodes to generate a new node in the given level.
@@ -279,18 +285,29 @@ impl Hashable for Node {
     /// Level 31 is the root (layer 0).
     fn combine(level: incrementalmerkletree::Level, a: &Self, b: &Self) -> Self {
         let layer = MERKLE_DEPTH - 1 - u8::from(level);
-        Self(merkle_crh_orchard(layer, a.0, b.0))
+        merkle_crh_orchard(layer, a.0.inner(), b.0.inner())
+            .try_into()
+            .unwrap()
     }
 
     /// Return the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Level) -> Self {
         let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
-        Self(EMPTY_ROOTS[layer_below])
+        Self(ExtractedNoteCommitment::from_base(EMPTY_ROOTS[layer_below]))
     }
 }
 
+// TODO: Check if this is still used anywhere, it's no longer used in zebra_chain::orchard::NoteCommitmentTree.append(),
+//       it may not have been used anywhere else and there may not be any need for anything in the direction of a
+//       `ExtractedNoteCommitment::from_base` method otherwise.
 impl From<pallas::Base> for Node {
     fn from(x: pallas::Base) -> Self {
+        Node(ExtractedNoteCommitment::from_base(x))
+    }
+}
+
+impl From<ExtractedNoteCommitment> for Node {
+    fn from(x: ExtractedNoteCommitment) -> Self {
         Node(x)
     }
 }
@@ -300,7 +317,7 @@ impl serde::Serialize for Node {
     where
         S: serde::Serializer,
     {
-        self.0.to_repr().serialize(serializer)
+        self.0.to_bytes().serialize(serializer)
     }
 }
 
@@ -309,10 +326,9 @@ impl<'de> serde::Deserialize<'de> for Node {
     where
         D: serde::Deserializer<'de>,
     {
-        let bytes = <[u8; 32]>::deserialize(deserializer)?;
-        Option::<pallas::Base>::from(pallas::Base::from_repr(bytes))
-            .map(Node)
-            .ok_or_else(|| serde::de::Error::custom("invalid Pallas field element"))
+        <[u8; 32]>::deserialize(deserializer)?
+            .try_into()
+            .map_err(serde::de::Error::custom)
     }
 }
 
@@ -586,7 +602,7 @@ impl NoteCommitmentTree {
 
     /// Calculates and returns the current root of the tree, ignoring any caching.
     pub fn recalculate_root(&self) -> Root {
-        Root(self.inner.root().0)
+        Root(self.inner.root().0.inner())
     }
 
     /// Get the Pallas-based Sinsemilla hash / root node of this merkle tree of
@@ -684,9 +700,9 @@ impl PartialEq for NoteCommitmentTree {
     }
 }
 
-impl From<Vec<pallas::Base>> for NoteCommitmentTree {
+impl From<Vec<ExtractedNoteCommitment>> for NoteCommitmentTree {
     /// Compute the tree from a whole bunch of note commitments at once.
-    fn from(values: Vec<pallas::Base>) -> Self {
+    fn from(values: Vec<ExtractedNoteCommitment>) -> Self {
         let mut tree = Self::default();
 
         if values.is_empty() {

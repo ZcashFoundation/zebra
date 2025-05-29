@@ -117,6 +117,9 @@ impl
     }
 }
 
+// TODO: Use a local copy of zcash_note_encryption depending on the local orchard code, or
+//       figure out how to patch deps to a local path, or
+//       push changes to orchard to a git ref and patch the orchard dep with the git ref.
 impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::bundle::Authorized>
     for IdentityMap
 {
