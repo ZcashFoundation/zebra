@@ -5,6 +5,7 @@ use std::{fmt, str::FromStr, sync::Arc};
 use thiserror::Error;
 
 use crate::{
+    amount::{Amount, NonNegative},
     block::{self, Height},
     parameters::NetworkUpgrade,
 };
@@ -273,6 +274,61 @@ impl Network {
         super::NetworkUpgrade::Sapling
             .activation_height(self)
             .expect("Sapling activation height needs to be set")
+    }
+
+    /// Returns the NU6.1 lockbox disbursement amount for this network at the provided height.
+    pub fn lockbox_disbursement(
+        &self,
+        height: Height,
+        expected_block_subsidy: Amount<NonNegative>,
+    ) -> Option<(subsidy::FundingStreamReceiver, Amount<NonNegative>)> {
+        if Some(height) != NetworkUpgrade::Nu6_1.activation_height(self) {
+            return None;
+        }
+
+        let nu6_activation_height = NetworkUpgrade::Nu6
+            .activation_height(self)
+            .expect("must have NU6 activation height if there is a NU6.1 activation height");
+
+        // TODO:
+        // - Add assert_eq!(num_halvings(height, self), num_halvings(nu6_activation_height, self), "unexpected halving between NU6 and NU6.1");
+        //   once `num_halvings()` has been moved to zebra-chain.
+        // - Consider querying the state for the deferred pool balance at `height` instead to cover edge cases, or
+        // - Consider otherwise allowing for:
+        //   - halvings between NU6 and NU6.1, and
+        //   - post-NU6 funding stream height range that does not cover all heights between NU6 activation and the last block before NU6.1 activation.
+
+        let post_nu6_fs = self.post_nu6_funding_streams();
+        assert!(post_nu6_fs.height_range().contains(&nu6_activation_height));
+        assert!(post_nu6_fs.height_range().contains(
+            &height
+                .previous()
+                .expect("NU6.1 activation height must be above genesis height")
+        ));
+
+        // Deferred pool balance at NU6.1 activation height is (NU6_height - NU6_1_height) * expected_block_subsidy * lockbox_numerator / 100.
+        // It does not include the lockbox output of the NU6.1 activation block coinbase transaction.
+        let num_blocks_with_deferred_pool_outputs = height
+            .0
+            .checked_sub(nu6_activation_height.0)
+            .expect("NU6.1 activation height must be `>=` to NU6 activation height");
+
+        let lockbox_fs = post_nu6_fs
+            .recipient(subsidy::FundingStreamReceiver::Deferred)
+            .expect("should have deferred funding stream post-NU6");
+        let deferred_pool_per_block = ((expected_block_subsidy * lockbox_fs.numerator())
+            .expect("per-block contribution to deferred pool should not overflow")
+            // TODO: Replace 100 with `FUNDING_STREAM_RECEIVER_DENOMINATOR` once moved to zebra-chain.
+            / 100)
+            .expect("FUNDING_STREAM_RECEIVER_DENOMINATOR should not be zero or negative");
+        let lockbox_disbursement_amount = (deferred_pool_per_block
+            * num_blocks_with_deferred_pool_outputs.into())
+        .expect("deferred pool balance not overflow");
+
+        Some((
+            subsidy::FundingStreamReceiver::CcfmKho,
+            lockbox_disbursement_amount,
+        ))
     }
 }
 

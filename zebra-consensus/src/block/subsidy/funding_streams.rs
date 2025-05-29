@@ -42,6 +42,13 @@ pub fn funding_stream_values(
                 results.insert(receiver, amount_value);
             }
         }
+
+        // It's okay to skip this check before the Canopy activation height because Canopy must be active when NU6.1 is active.
+        if let Some((receiver, amount)) =
+            network.lockbox_disbursement(height, expected_block_subsidy)
+        {
+            results.insert(receiver, amount);
+        }
     }
 
     Ok(results)
