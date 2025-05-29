@@ -8,7 +8,6 @@
 use std::time::Duration;
 
 use color_eyre::eyre::{eyre, Context, Result};
-
 use futures::FutureExt;
 
 use zebra_chain::{
@@ -16,11 +15,9 @@ use zebra_chain::{
     serialization::ZcashSerialize,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::{
-        proposal::TimeSource, GetBlockTemplate, JsonParameters, ProposalResponse,
-    },
-    types::get_block_template::proposal_block_from_template,
+use zebra_rpc::methods::types::get_block_template::{
+    proposal::proposal_block_from_template, GetBlockTemplate, JsonParameters, ProposalResponse,
+    TimeSource,
 };
 
 use crate::common::{

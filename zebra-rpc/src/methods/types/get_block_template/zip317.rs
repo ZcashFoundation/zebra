@@ -23,15 +23,15 @@ use zebra_chain::{
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
 
-use crate::methods::get_block_template_rpcs::{
+use crate::methods::{
     get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
 };
 
 #[cfg(test)]
-use super::get_block_template::InBlockTxDependenciesDepth;
+mod tests;
 
 #[cfg(test)]
-mod tests;
+use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
 
 /// Used in the return type of [`select_mempool_transactions()`] for test compilations.
 #[cfg(test)]

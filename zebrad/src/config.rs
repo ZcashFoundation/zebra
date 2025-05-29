@@ -49,7 +49,7 @@ pub struct ZebradConfig {
     pub mempool: crate::components::mempool::Config,
 
     /// RPC configuration
-    pub rpc: zebra_rpc::config::Config,
+    pub rpc: zebra_rpc::config::rpc::Config,
 
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,

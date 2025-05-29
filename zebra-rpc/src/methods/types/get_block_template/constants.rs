@@ -17,15 +17,15 @@ use zebra_chain::{
 ///
 /// `zcashd` waits 10 seconds between checking the state
 /// <https://github.com/zcash/zcash/blob/420f8dfe38fd6b2465a665324366c2ae14aa98f4/src/rpc/mining.cpp#L626>
-pub const GET_BLOCK_TEMPLATE_MEMPOOL_LONG_POLL_INTERVAL: u64 = 5;
+pub const MEMPOOL_LONG_POLL_INTERVAL: u64 = 5;
 
 /// A range of valid block template nonces, that goes from `u32::MIN` to `u32::MAX` as a string.
-pub const GET_BLOCK_TEMPLATE_NONCE_RANGE_FIELD: &str = "00000000ffffffff";
+pub const NONCE_RANGE_FIELD: &str = "00000000ffffffff";
 
 /// A hardcoded list of fields that the miner can change from the block template.
 ///
 /// <https://en.bitcoin.it/wiki/BIP_0023#Mutations>
-pub const GET_BLOCK_TEMPLATE_MUTABLE_FIELD: &[&str] = &[
+pub const MUTABLE_FIELD: &[&str] = &[
     // Standard mutations, copied from zcashd
     "time",
     "transactions",
@@ -35,7 +35,7 @@ pub const GET_BLOCK_TEMPLATE_MUTABLE_FIELD: &[&str] = &[
 /// A hardcoded list of Zebra's getblocktemplate RPC capabilities.
 ///
 /// <https://en.bitcoin.it/wiki/BIP_0023#Block_Proposal>
-pub const GET_BLOCK_TEMPLATE_CAPABILITIES_FIELD: &[&str] = &["proposal"];
+pub const CAPABILITIES_FIELD: &[&str] = &["proposal"];
 
 /// The max estimated distance to the chain tip for the getblocktemplate method.
 ///
