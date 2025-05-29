@@ -94,6 +94,11 @@ pub fn funding_stream_address(
     network: &Network,
     receiver: FundingStreamReceiver,
 ) -> Option<&transparent::Address> {
+    // TODO: Move this logic and the exception for the one-time lockbox to a method on `FundingStreamRecipient` or otherwise refactor
+    if receiver == FundingStreamReceiver::CcfmKho {
+        return Some(network.lockbox_disbursement_address());
+    }
+
     let index = funding_stream_address_index(height, network, receiver)?;
     let funding_streams = network.funding_streams(height);
     funding_streams.recipient(receiver)?.addresses().get(index)

@@ -88,7 +88,8 @@ impl FundingStreamReceiver {
         let human_readable_name = match self {
             Ecc => "Electric Coin Company",
             ZcashFoundation => "Zcash Foundation",
-            MajorGrants => "Zcash Community Grants NU6",
+            MajorGrants if is_post_nu6 => "Zcash Community Grants NU6",
+            MajorGrants => "Major Grants",
             CcfmKho => "Community Coinholder Funding Model Key-Holder Organizations",
             Deferred => "Lockbox NU6",
         };

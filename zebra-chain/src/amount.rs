@@ -10,7 +10,7 @@ use std::{
     fmt,
     hash::{Hash, Hasher},
     marker::PhantomData,
-    ops::RangeInclusive,
+    ops::{Neg, RangeInclusive},
 };
 
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
@@ -75,6 +75,11 @@ impl<C> Amount<C> {
     /// Returns the number of zatoshis in this amount.
     pub fn zatoshis(&self) -> i64 {
         self.0
+    }
+
+    /// Checked subtraction. Computes self - rhs, returning None if overflow occurred.
+    pub fn checked_sub(self, rhs: Self) -> Option<Amount<NegativeAllowed>> {
+        self.0.checked_sub(rhs.0).and_then(|v| v.try_into().ok())
     }
 
     /// To little endian byte array

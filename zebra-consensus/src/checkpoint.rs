@@ -611,9 +611,28 @@ where
         // We can't get the block subsidy for blocks with heights in the slow start interval, so we
         // omit the calculation of the expected deferred amount.
         let expected_deferred_amount = if height > self.network.slow_start_interval() {
+            let mut funding_stream_values = funding_stream_values(
+                height,
+                &self.network,
+                block_subsidy(height, &self.network)?,
+            )?;
+
+            // TODO: De-duplicate this code with that in the semantic block verifier
+
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            funding_stream_values(height, &self.network, block_subsidy(height, &self.network)?)?
+            let expected_deferred_amount = funding_stream_values
                 .remove(&FundingStreamReceiver::Deferred)
+                .unwrap_or_default();
+
+            let expected_one_time_lockbox_disbursement = funding_stream_values
+                .remove(&FundingStreamReceiver::CcfmKho)
+                .unwrap_or_default();
+
+            let expected_deferred_pool_balance_change = expected_deferred_amount
+                .checked_sub(expected_one_time_lockbox_disbursement)
+                .expect("should not overflow");
+
+            Some(expected_deferred_pool_balance_change)
         } else {
             None
         };
