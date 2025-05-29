@@ -1,24 +1,150 @@
-//! Verbose transaction-related types.
+//! Transaction-related types.
 
 use std::sync::Arc;
 
+use crate::methods::arrayhex;
+use chrono::{DateTime, Utc};
 use hex::ToHex;
 
 use zebra_chain::{
-    block,
+    amount::{self, Amount, NegativeOrZero, NonNegative},
+    block::{self, merkle::AUTH_DIGEST_PLACEHOLDER},
     parameters::Network,
     sapling::NotSmallOrderValueCommitment,
-    transaction::{SerializedTransaction, Transaction},
+    transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
 use zebra_consensus::groth16::Description;
+use zebra_script::CachedFfiTransaction;
 use zebra_state::IntoDisk;
 
-use crate::methods::types;
+use super::zec::Zec;
+
+/// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(bound = "FeeConstraint: amount::Constraint + Clone")]
+pub struct TransactionTemplate<FeeConstraint>
+where
+    FeeConstraint: amount::Constraint + Clone,
+{
+    /// The hex-encoded serialized data for this transaction.
+    #[serde(with = "hex")]
+    pub data: SerializedTransaction,
+
+    /// The transaction ID of this transaction.
+    #[serde(with = "hex")]
+    pub(crate) hash: transaction::Hash,
+
+    /// The authorizing data digest of a v5 transaction, or a placeholder for older versions.
+    #[serde(rename = "authdigest")]
+    #[serde(with = "hex")]
+    pub(crate) auth_digest: transaction::AuthDigest,
+
+    /// The transactions in this block template that this transaction depends upon.
+    /// These are 1-based indexes in the `transactions` list.
+    ///
+    /// Zebra's mempool does not support transaction dependencies, so this list is always empty.
+    ///
+    /// We use `u16` because 2 MB blocks are limited to around 39,000 transactions.
+    pub(crate) depends: Vec<u16>,
+
+    /// The fee for this transaction.
+    ///
+    /// Non-coinbase transactions must be `NonNegative`.
+    /// The Coinbase transaction `fee` is the negative sum of the fees of the transactions in
+    /// the block, so their fee must be `NegativeOrZero`.
+    pub(crate) fee: Amount<FeeConstraint>,
+
+    /// The number of transparent signature operations in this transaction.
+    pub(crate) sigops: u64,
+
+    /// Is this transaction required in the block?
+    ///
+    /// Coinbase transactions are required, all other transactions are not.
+    pub(crate) required: bool,
+}
+
+// Convert from a mempool transaction to a non-coinbase transaction template.
+impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
+    fn from(tx: &VerifiedUnminedTx) -> Self {
+        assert!(
+            !tx.transaction.transaction.is_coinbase(),
+            "unexpected coinbase transaction in mempool"
+        );
+
+        Self {
+            data: tx.transaction.transaction.as_ref().into(),
+            hash: tx.transaction.id.mined_id(),
+            auth_digest: tx
+                .transaction
+                .id
+                .auth_digest()
+                .unwrap_or(AUTH_DIGEST_PLACEHOLDER),
+
+            // Always empty, not supported by Zebra's mempool.
+            depends: Vec::new(),
+
+            fee: tx.miner_fee,
+
+            sigops: tx.legacy_sigop_count,
+
+            // Zebra does not require any transactions except the coinbase transaction.
+            required: false,
+        }
+    }
+}
+
+impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
+    fn from(tx: VerifiedUnminedTx) -> Self {
+        Self::from(&tx)
+    }
+}
+
+impl TransactionTemplate<NegativeOrZero> {
+    /// Convert from a generated coinbase transaction into a coinbase transaction template.
+    ///
+    /// `miner_fee` is the total miner fees for the block, excluding newly created block rewards.
+    //
+    // TODO: use a different type for generated coinbase transactions?
+    pub fn from_coinbase(tx: &UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
+        assert!(
+            tx.transaction.is_coinbase(),
+            "invalid generated coinbase transaction: \
+             must have exactly one input, which must be a coinbase input",
+        );
+
+        let miner_fee = (-miner_fee)
+            .constrain()
+            .expect("negating a NonNegative amount always results in a valid NegativeOrZero");
+
+        let legacy_sigop_count = CachedFfiTransaction::new(tx.transaction.clone(), Vec::new())
+            .legacy_sigop_count()
+            .expect(
+                "invalid generated coinbase transaction: \
+                 failure in zcash_script sigop count",
+            );
+
+        Self {
+            data: tx.transaction.as_ref().into(),
+            hash: tx.id.mined_id(),
+            auth_digest: tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER),
+
+            // Always empty, coinbase transactions never have inputs.
+            depends: Vec::new(),
+
+            fee: miner_fee,
+
+            sigops: legacy_sigop_count,
+
+            // Zcash requires a coinbase transaction.
+            required: true,
+        }
+    }
+}
 
 /// A Transaction object as returned by `getrawtransaction` and `getblock` RPC
 /// requests.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TransactionObject {
     /// The raw transaction, encoded as hex bytes.
     #[serde(with = "hex")]
@@ -59,11 +185,19 @@ pub struct TransactionObject {
     /// The net value of Sapling Spends minus Outputs in zatoshis
     #[serde(rename = "valueBalanceZat", skip_serializing_if = "Option::is_none")]
     pub value_balance_zat: Option<i64>,
+
+    /// The size of the transaction in bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<i64>,
+
+    /// The time the transaction was included in a block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<i64>,
     // TODO: some fields not yet supported
 }
 
 /// The transparent input of a transaction.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Input {
     /// A coinbase input.
@@ -81,14 +215,15 @@ pub enum Input {
         /// The vout index.
         vout: u32,
         /// The script.
+        #[serde(rename = "scriptSig")]
         script_sig: ScriptSig,
         /// The script sequence number.
         sequence: u32,
         /// The value of the output being spent in ZEC.
         #[serde(skip_serializing_if = "Option::is_none")]
         value: Option<f64>,
-        /// The value of the output being spent, in zats.
-        #[serde(rename = "valueZat", skip_serializing_if = "Option::is_none")]
+        /// The value of the output being spent, in zats, named to match zcashd.
+        #[serde(rename = "valueSat", skip_serializing_if = "Option::is_none")]
         value_zat: Option<i64>,
         /// The address of the output being spent.
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,7 +232,7 @@ pub enum Input {
 }
 
 /// The transparent output of a transaction.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Output {
     /// The value in ZEC.
     value: f64,
@@ -112,7 +247,7 @@ pub struct Output {
 }
 
 /// The scriptPubKey of a transaction output.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptPubKey {
     /// the asm.
     // #9330: The `asm` field is not currently populated.
@@ -122,27 +257,30 @@ pub struct ScriptPubKey {
     hex: Script,
     /// The required sigs.
     #[serde(rename = "reqSigs")]
-    req_sigs: u32,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    req_sigs: Option<u32>,
     /// The type, eg 'pubkeyhash'.
     // #9330: The `type` field is not currently populated.
     r#type: String,
     /// The addresses.
-    addresses: Vec<String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    addresses: Option<Vec<String>>,
 }
 
 /// The scriptSig of a transaction input.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScriptSig {
     /// The asm.
     // #9330: The `asm` field is not currently populated.
     asm: String,
     /// The hex.
-    #[serde(with = "hex")]
     hex: Script,
 }
 
 /// A Sapling spend of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
@@ -165,7 +303,7 @@ pub struct ShieldedSpend {
 }
 
 /// A Sapling output of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
@@ -177,7 +315,7 @@ pub struct ShieldedOutput {
     #[serde(rename = "ephemeralKey", with = "hex")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext", with = "hex")]
+    #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "outCiphertext", with = "hex")]
@@ -188,7 +326,7 @@ pub struct ShieldedOutput {
 }
 
 /// Object with Orchard-specific information.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Orchard {
     /// Array of Orchard actions.
     actions: Vec<OrchardAction>,
@@ -201,7 +339,7 @@ pub struct Orchard {
 }
 
 /// The Orchard action of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OrchardAction {
     /// A value commitment to the net value of the input note minus the output note.
     #[serde(with = "hex")]
@@ -219,7 +357,7 @@ pub struct OrchardAction {
     #[serde(rename = "ephemeralKey", with = "hex")]
     ephemeral_key: [u8; 32],
     /// The output note encrypted to the recipient.
-    #[serde(rename = "encCiphertext", with = "hex")]
+    #[serde(rename = "encCiphertext", with = "arrayhex")]
     enc_ciphertext: [u8; 580],
     /// A ciphertext enabling the sender to recover the output note.
     #[serde(rename = "spendAuthSig", with = "hex")]
@@ -244,6 +382,8 @@ impl Default for TransactionObject {
             orchard: None,
             value_balance: None,
             value_balance_zat: None,
+            size: None,
+            time: None,
         }
     }
 }
@@ -251,11 +391,12 @@ impl Default for TransactionObject {
 impl TransactionObject {
     /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
     #[allow(clippy::unwrap_in_result)]
-    pub(crate) fn from_transaction(
+    pub fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
         confirmations: Option<u32>,
         network: &Network,
+        block_time: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
             hex: tx.clone().into(),
@@ -297,19 +438,30 @@ impl TransactionObject {
                     .iter()
                     .enumerate()
                     .map(|output| {
-                        let addresses = match output.1.address(network) {
-                            Some(address) => vec![address.to_string()],
-                            None => vec![],
-                        };
+                        // Parse the scriptPubKey to find destination addresses.
+                        let (addresses, req_sigs) = match output.1.address(network) {
+                            // TODO: For multisig scripts, this should populate `addresses`
+                            // with the pubkey IDs and `req_sigs` with the number of
+                            // signatures required to spend.
+
+                            // For other standard destinations, `addresses` is populated
+                            // with a single value and `req_sigs` is set to 1.
+                            Some(address) => Some((vec![address.to_string()], 1)),
+                            // For null-data or nonstandard outputs, both are omitted.
+                            None => None,
+                        }
+                        .unzip();
 
                         Output {
-                            value: types::Zec::from(output.1.value).lossy_zec(),
+                            value: Zec::from(output.1.value).lossy_zec(),
                             value_zat: output.1.value.zatoshis(),
                             n: output.0 as u32,
                             script_pub_key: ScriptPubKey {
+                                // TODO: Fill this out.
                                 asm: "".to_string(),
                                 hex: output.1.lock_script.clone(),
-                                req_sigs: addresses.len() as u32,
+                                req_sigs,
+                                // TODO: Fill this out.
                                 r#type: "".to_string(),
                                 addresses,
                             },
@@ -361,9 +513,7 @@ impl TransactionObject {
                     })
                     .collect(),
             ),
-            value_balance: Some(
-                types::Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec(),
-            ),
+            value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
 
             orchard: if !tx.has_orchard_shielded_data() {
@@ -410,11 +560,13 @@ impl TransactionObject {
                             }
                         })
                         .collect(),
-                    value_balance: types::Zec::from(tx.orchard_value_balance().orchard_amount())
+                    value_balance: Zec::from(tx.orchard_value_balance().orchard_amount())
                         .lossy_zec(),
                     value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
                 })
             },
+            size: tx.as_bytes().len().try_into().ok(),
+            time: block_time.map(|bt| bt.timestamp()),
         }
     }
 }

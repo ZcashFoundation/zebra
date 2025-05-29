@@ -13,7 +13,7 @@ use zebra_chain::{
 use zebra_node_services::BoxError;
 
 use crate::methods::{
-    get_block_template_rpcs::types::{
+    types::{
         default_roots::DefaultRoots,
         get_block_template::{GetBlockTemplate, Response},
     },

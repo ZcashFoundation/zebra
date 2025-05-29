@@ -30,9 +30,7 @@ expression: block
           "scriptPubKey": {
             "asm": "",
             "hex": "21025229e1240a21004cf8338db05679fa34753706e84f6aebba086ba04317fd8f99ac",
-            "reqSigs": 0,
-            "type": "",
-            "addresses": []
+            "type": ""
           }
         },
         {
@@ -53,7 +51,9 @@ expression: block
       "vShieldedSpend": [],
       "vShieldedOutput": [],
       "valueBalance": 0.0,
-      "valueBalanceZat": 0
+      "valueBalanceZat": 0,
+      "size": 130,
+      "time": 1477674473
     }
   ],
   "time": 1477674473,
