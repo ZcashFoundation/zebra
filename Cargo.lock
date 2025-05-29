@@ -6345,6 +6345,7 @@ dependencies = [
 name = "zebra-chain"
 version = "1.0.0-beta.46"
 dependencies = [
+ "bech32",
  "bitflags 2.9.0",
  "bitflags-serde-legacy",
  "bitvec",
