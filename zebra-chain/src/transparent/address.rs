@@ -214,7 +214,7 @@ impl Address {
     }
 
     /// Create an address for the given script hash and network.
-    pub fn from_script_hash(network_kind: NetworkKind, script_hash: [u8; 20]) -> Self {
+    pub const fn from_script_hash(network_kind: NetworkKind, script_hash: [u8; 20]) -> Self {
         Self::PayToScriptHash {
             network_kind,
             script_hash,

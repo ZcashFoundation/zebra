@@ -303,15 +303,27 @@ where
                 })?;
             }
 
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
+            // TODO: Consider passing this to `subsidy_is_valid()` as an arg to avoid duplicate calls.
+            let mut funding_stream_values = subsidy::funding_streams::funding_stream_values(
                 height,
                 &network,
                 expected_block_subsidy,
             )
-            .expect("we always expect a funding stream hashmap response even if empty")
-            .remove(&FundingStreamReceiver::Deferred)
-            .unwrap_or_default();
+            .expect("we always expect a funding stream hashmap response even if empty");
+
+            // See [ZIP-1015](https://zips.z.cash/zip-1015).
+            let expected_deferred_amount = funding_stream_values
+                .remove(&FundingStreamReceiver::Deferred)
+                .unwrap_or_default();
+
+            // TODO: Add reference to spec
+            let expected_one_time_lockbox_disbursement = funding_stream_values
+                .remove(&FundingStreamReceiver::CcfmKho)
+                .unwrap_or_default();
+
+            let expected_deferred_pool_balance_change = expected_deferred_amount
+                .checked_sub(expected_one_time_lockbox_disbursement)
+                .expect("should not overflow");
 
             let block_miner_fees =
                 block_miner_fees.map_err(|amount_error| BlockError::SummingMinerFees {
@@ -325,7 +337,7 @@ where
                 height,
                 block_miner_fees,
                 expected_block_subsidy,
-                expected_deferred_amount,
+                expected_deferred_pool_balance_change,
                 &network,
             )?;
 
@@ -339,7 +351,7 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                deferred_balance: Some(expected_deferred_amount),
+                deferred_balance: Some(expected_deferred_pool_balance_change),
             };
 
             // Return early for proposal requests.

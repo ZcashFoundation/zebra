@@ -531,7 +531,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
                 // Set the miner fees to a high-enough amount.
                 Amount::try_from(MAX_MONEY / 2).unwrap(),
                 expected_block_subsidy,
-                expected_deferred_amount,
+                expected_deferred_amount.constrain().unwrap(),
                 &network,
             )
             .is_ok(),);
@@ -563,7 +563,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
             // Set the miner fee to an invalid amount.
             Amount::zero(),
             expected_block_subsidy,
-            expected_deferred_amount,
+            expected_deferred_amount.constrain().unwrap(),
             &network
         ),
         Err(BlockError::Transaction(TransactionError::Subsidy(

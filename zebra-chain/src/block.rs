@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 use halo2::pasta::pallas;
 
 use crate::{
-    amount::{Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     orchard,
@@ -224,7 +224,7 @@ impl Block {
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        deferred_balance: Option<Amount<NonNegative>>,
+        deferred_balance: Option<Amount>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         Ok(*self
             .transactions

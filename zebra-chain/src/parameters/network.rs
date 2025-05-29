@@ -8,6 +8,7 @@ use crate::{
     amount::{Amount, NonNegative},
     block::{self, Height},
     parameters::NetworkUpgrade,
+    transparent,
 };
 
 pub mod magic;
@@ -274,6 +275,23 @@ impl Network {
         super::NetworkUpgrade::Sapling
             .activation_height(self)
             .expect("Sapling activation height needs to be set")
+    }
+
+    /// Returns the NU6.1 lockbox disbursement amount for this network at the provided height.
+    pub fn lockbox_disbursement_address(&self) -> &transparent::Address {
+        // TODO:
+        // - Move to constants in subsidy module, and
+        // - Replace with specified addresses.
+        const CCFM_KHO_ADDR_MAINNET: transparent::Address =
+            transparent::Address::from_script_hash(NetworkKind::Mainnet, [0; 20]);
+        const CCFM_KHO_ADDR_TESTNET: transparent::Address =
+            transparent::Address::from_script_hash(NetworkKind::Testnet, [0; 20]);
+
+        if self.is_a_test_network() {
+            &CCFM_KHO_ADDR_TESTNET
+        } else {
+            &CCFM_KHO_ADDR_MAINNET
+        }
     }
 
     /// Returns the NU6.1 lockbox disbursement amount for this network at the provided height.

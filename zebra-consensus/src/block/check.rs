@@ -237,7 +237,7 @@ pub fn miner_fees_are_valid(
     height: Height,
     block_miner_fees: Amount<NonNegative>,
     expected_block_subsidy: Amount<NonNegative>,
-    expected_deferred_amount: Amount<NonNegative>,
+    expected_deferred_amount: Amount,
     network: &Network,
 ) -> Result<(), BlockError> {
     let transparent_value_balance = subsidy::general::output_amounts(coinbase_tx)
@@ -260,9 +260,10 @@ pub fn miner_fees_are_valid(
     //
     // The expected lockbox funding stream output of the coinbase transaction is also subtracted
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
-    let total_output_value = (transparent_value_balance - sapling_value_balance - orchard_value_balance
-        + expected_deferred_amount.constrain().expect("valid Amount with NonNegative constraint should be valid with NegativeAllowed constraint"))
-    .map_err(|_| SubsidyError::SumOverflow)?;
+    let total_output_value =
+        (transparent_value_balance - sapling_value_balance - orchard_value_balance
+            + expected_deferred_amount)
+            .map_err(|_| SubsidyError::SumOverflow)?;
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 
