@@ -90,8 +90,16 @@ impl RpcServer {
     // TODO:
     // - replace VersionString with semver::Version, and update the tests to provide valid versions
     #[allow(clippy::too_many_arguments)]
-    pub async fn start<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
-        rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    pub async fn start<
+        Mempool,
+        State,
+        ReadState,
+        Tip,
+        BlockVerifierRouter,
+        SyncStatus,
+        AddressBook,
+    >(
+        rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
         conf: config::rpc::Config,
     ) -> Result<ServerTask, tower::BoxError>
     where
@@ -105,6 +113,15 @@ impl RpcServer {
             + 'static,
         Mempool::Future: Send,
         State: Service<
+                zebra_state::Request,
+                Response = zebra_state::Response,
+                Error = zebra_state::BoxError,
+            > + Clone
+            + Send
+            + Sync
+            + 'static,
+        State::Future: Send,
+        ReadState: Service<
                 zebra_state::ReadRequest,
                 Response = zebra_state::ReadResponse,
                 Error = zebra_state::BoxError,
@@ -112,7 +129,7 @@ impl RpcServer {
             + Send
             + Sync
             + 'static,
-        State::Future: Send,
+        ReadState::Future: Send,
         Tip: ChainTip + Clone + Send + Sync + 'static,
         AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
         BlockVerifierRouter: Service<
