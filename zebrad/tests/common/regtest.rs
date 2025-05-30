@@ -96,6 +96,7 @@ async fn submit_blocks(network: Network, rpc_address: SocketAddr) -> Result<()> 
     Ok(())
 }
 
+#[allow(dead_code)]
 pub trait MiningRpcMethods {
     async fn block_from_template(&self, nu5_activation_height: Height) -> Result<(Block, Height)>;
     async fn submit_block(&self, block: Block) -> Result<()>;
