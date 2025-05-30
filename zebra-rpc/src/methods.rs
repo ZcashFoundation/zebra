@@ -93,7 +93,7 @@ pub mod types;
 
 #[cfg(test)]
 mod tests;
-
+#[cfg(not(feature = "tx_v6"))]
 #[rpc(server)]
 /// RPC method signatures.
 pub trait Rpc {
@@ -575,6 +575,8 @@ pub trait Rpc {
     ///
     /// - `num_blocks`: (numeric, required, example=1) Number of blocks to be generated.
     ///
+    /// - `zip233_amount`: (numeric, optional) The amount of money to be burned in a transaction [ZIP-233]
+    ///
     /// # Notes
     ///
     /// Only works if the network of the running zebrad process is `Regtest`.
@@ -582,7 +584,171 @@ pub trait Rpc {
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
     /// tags: generating
-    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>>;
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        //TODO: uncomment this line and remove the below trait for NU7 release
+        // zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>>;
+}
+
+#[cfg(feature = "tx_v6")]
+#[rpc(server)]
+/// RPC method signatures.
+pub trait Rpc {
+    /// See trait above.
+    #[method(name = "getinfo")]
+    async fn get_info(&self) -> Result<GetInfo>;
+
+    /// See trait above.
+    #[method(name = "getblockchaininfo")]
+    async fn get_blockchain_info(&self) -> Result<GetBlockChainInfo>;
+
+    /// See trait above.
+    #[method(name = "getaddressbalance")]
+    async fn get_address_balance(&self, address_strings: AddressStrings) -> Result<AddressBalance>;
+
+    /// See trait above.
+    #[method(name = "sendrawtransaction")]
+    async fn send_raw_transaction(
+        &self,
+        raw_transaction_hex: String,
+        _allow_high_fees: Option<bool>,
+    ) -> Result<SentTransactionHash>;
+
+    /// See trait above.
+    #[method(name = "getblock")]
+    async fn get_block(&self, hash_or_height: String, verbosity: Option<u8>) -> Result<GetBlock>;
+
+    /// See trait above.
+    #[method(name = "getblockheader")]
+    async fn get_block_header(
+        &self,
+        hash_or_height: String,
+        verbose: Option<bool>,
+    ) -> Result<GetBlockHeader>;
+
+    /// See trait above.
+    #[method(name = "getbestblockhash")]
+    fn get_best_block_hash(&self) -> Result<GetBlockHash>;
+
+    /// See trait above.
+    #[method(name = "getbestblockheightandhash")]
+    fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHash>;
+
+    /// See trait above.
+    #[method(name = "getrawmempool")]
+    async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempool>;
+
+    /// See trait above.
+    #[method(name = "z_gettreestate")]
+    async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestate>;
+
+    /// See trait above.
+    #[method(name = "z_getsubtreesbyindex")]
+    async fn z_get_subtrees_by_index(
+        &self,
+        pool: String,
+        start_index: NoteCommitmentSubtreeIndex,
+        limit: Option<NoteCommitmentSubtreeIndex>,
+    ) -> Result<GetSubtrees>;
+
+    /// See trait above.
+    #[method(name = "getrawtransaction")]
+    async fn get_raw_transaction(
+        &self,
+        txid: String,
+        verbose: Option<u8>,
+    ) -> Result<GetRawTransaction>;
+
+    /// See trait above.
+    #[method(name = "getaddresstxids")]
+    async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>>;
+
+    /// See trait above.
+    #[method(name = "getaddressutxos")]
+    async fn get_address_utxos(
+        &self,
+        address_strings: AddressStrings,
+    ) -> Result<Vec<GetAddressUtxos>>;
+
+    /// See trait above.
+    #[method(name = "stop")]
+    fn stop(&self) -> Result<String>;
+
+    /// See trait above.
+    #[method(name = "getblockcount")]
+    fn get_block_count(&self) -> Result<u32>;
+
+    /// See trait above.
+    #[method(name = "getblockhash")]
+    async fn get_block_hash(&self, index: i32) -> Result<GetBlockHash>;
+
+    /// See trait above.
+    #[method(name = "getblocktemplate")]
+    async fn get_block_template(
+        &self,
+        parameters: Option<get_block_template::parameters::JsonParameters>,
+    ) -> Result<get_block_template::Response>;
+
+    /// See trait above.
+    #[method(name = "submitblock")]
+    async fn submit_block(
+        &self,
+        hex_data: HexData,
+        _parameters: Option<submit_block::JsonParameters>,
+    ) -> Result<submit_block::Response>;
+
+    /// See trait above.
+    #[method(name = "getmininginfo")]
+    async fn get_mining_info(&self) -> Result<get_mining_info::Response>;
+
+    /// See trait above.
+    #[method(name = "getnetworksolps")]
+    async fn get_network_sol_ps(&self, num_blocks: Option<i32>, height: Option<i32>)
+        -> Result<u64>;
+
+    /// See trait above.
+    #[method(name = "getnetworkhashps")]
+    async fn get_network_hash_ps(
+        &self,
+        num_blocks: Option<i32>,
+        height: Option<i32>,
+    ) -> Result<u64> {
+        self.get_network_sol_ps(num_blocks, height).await
+    }
+
+    /// See trait above.
+    #[method(name = "getpeerinfo")]
+    async fn get_peer_info(&self) -> Result<Vec<PeerInfo>>;
+
+    /// See trait above.
+    #[method(name = "validateaddress")]
+    async fn validate_address(&self, address: String) -> Result<validate_address::Response>;
+
+    /// See trait above.
+    #[method(name = "z_validateaddress")]
+    async fn z_validate_address(&self, address: String) -> Result<z_validate_address::Response>;
+
+    /// See trait above.
+    #[method(name = "getblocksubsidy")]
+    async fn get_block_subsidy(&self, height: Option<u32>) -> Result<BlockSubsidy>;
+
+    /// See trait above.
+    #[method(name = "getdifficulty")]
+    async fn get_difficulty(&self) -> Result<f64>;
+
+    /// See trait above.
+    #[method(name = "z_listunifiedreceivers")]
+    async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response>;
+
+    /// See trait above.
+    #[method(name = "generate")]
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>>;
 }
 
 /// RPC method implementations.
@@ -2194,6 +2360,13 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        #[cfg(feature = "tx_v6")]
+        let zip233_amount = if let Some(params) = parameters {
+            params.zip233_amount
+        } else {
+            None
+        };
+
         // Randomly select some mempool transactions.
         let mempool_txs = get_block_template::zip317::select_mempool_transactions(
             &network,
@@ -2203,6 +2376,8 @@ where
             mempool_tx_deps,
             debug_like_zcashd,
             extra_coinbase_data.clone(),
+            #[cfg(feature = "tx_v6")]
+            zip233_amount,
         );
 
         tracing::debug!(
@@ -2224,6 +2399,8 @@ where
             submit_old,
             debug_like_zcashd,
             extra_coinbase_data,
+            #[cfg(feature = "tx_v6")]
+            zip233_amount,
         );
 
         Ok(response.into())
@@ -2614,7 +2791,11 @@ where
         ))
     }
 
-    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>> {
+    async fn generate(
+        &self,
+        num_blocks: u32,
+        #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
+    ) -> Result<Vec<GetBlockHash>> {
         let rpc = self.clone();
         let network = self.network.clone();
 
@@ -2627,9 +2808,14 @@ where
         }
 
         let mut block_hashes = Vec::new();
+        let params = Some(get_block_template::JsonParameters {
+            #[cfg(feature = "tx_v6")]
+            zip233_amount,
+            ..Default::default()
+        });
         for _ in 0..num_blocks {
             let block_template = rpc
-                .get_block_template(None)
+                .get_block_template(params.clone())
                 .await
                 .map_error(server::error::LegacyCode::default())?;
 
