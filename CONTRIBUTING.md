@@ -20,8 +20,8 @@ Please [create an issue](https://github.com/ZcashFoundation/zebra/issues/new?ass
 [pull-requests]: #pull-requests
 
 PRs are welcome for small and large changes, but please don't make large PRs
-without coordinating with us via the issue tracker or Discord. This helps
-increase development coordination and makes PRs easier to merge.
+without coordinating with us via the [issue tracker](https://github.com/ZcashFoundation/zebra/issues) or [Discord](https://discord.gg/yVNhQwQE68). This helps
+increase development coordination and makes PRs easier to merge. Low-effort PRs, including but not limited to fixing typos and grammatical corrections, will generally be redone by us to dissuade metric farming.
 
 Check out the [help wanted][hw] or [good first issue][gfi] labels if you're
 looking for a place to get started!
