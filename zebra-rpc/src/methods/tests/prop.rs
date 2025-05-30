@@ -647,7 +647,7 @@ proptest! {
             let state_query = state
                 .expect_request(zebra_state::ReadRequest::AddressBalance(addresses))
                 .map_ok(|responder| {
-                    responder.respond(zebra_state::ReadResponse::AddressBalance(balance))
+                    responder.respond(zebra_state::ReadResponse::AddressBalance { balance, received: Default::default() })
                 });
 
             // Await the RPC call and the state query

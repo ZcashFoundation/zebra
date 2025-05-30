@@ -37,7 +37,7 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             block::TransactionLocation,
-            transparent::{AddressBalanceLocation, OutputLocation},
+            transparent::{AddressBalanceLocationChange, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FromDisk, RawBytes,
@@ -338,7 +338,7 @@ impl ZebraDb {
     /// Returns an iterator of all raw [`Transaction`]s in the provided range
     /// of [`TransactionLocation`]s in finalized state.
     #[allow(clippy::unwrap_in_result)]
-    fn raw_transactions_by_location_range<R>(
+    pub fn raw_transactions_by_location_range<R>(
         &self,
         range: R,
     ) -> impl Iterator<Item = (TransactionLocation, RawBytes)> + '_
@@ -517,11 +517,16 @@ impl ZebraDb {
             .collect();
 
         // Get the current address balances, before the transactions in this block
-        let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
+        let address_balances: HashMap<transparent::Address, AddressBalanceLocationChange> =
             changed_addresses
                 .into_iter()
                 .filter_map(|address| {
-                    Some((address.clone(), self.address_balance_location(&address)?))
+                    // # Correctness
+                    //
+                    // Address balances are updated with the `fetch_add_balance_and_received` merge operator, so
+                    // the values must represent the changes to the balance, not the final balance.
+                    let addr_loc = self.address_balance_location(&address)?.into_new_change();
+                    Some((address.clone(), addr_loc))
                 })
                 .collect();
 
@@ -597,7 +602,7 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
-        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocationChange>,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {
@@ -638,15 +643,14 @@ impl DiskWriteBatch {
                 &out_loc_by_outpoint,
                 address_balances,
             )?;
-
-            // Commit UTXOs and value pools
-            self.prepare_chain_value_pools_batch(
-                zebra_db,
-                finalized,
-                spent_utxos_by_outpoint,
-                value_pool,
-            )?;
         }
+        // Commit UTXOs and value pools
+        self.prepare_chain_value_pools_batch(
+            zebra_db,
+            finalized,
+            spent_utxos_by_outpoint,
+            value_pool,
+        )?;
 
         // The block has passed contextual validation, so update the metrics
         block_precommit_metrics(&finalized.block, finalized.hash, finalized.height);

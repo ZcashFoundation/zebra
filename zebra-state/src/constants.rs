@@ -46,7 +46,7 @@ pub const STATE_DATABASE_KIND: &str = "state";
 ///
 /// Instead of using this constant directly, use [`constants::state_database_format_version_in_code()`]
 /// or [`config::database_format_version_on_disk()`] to get the full semantic format version.
-const DATABASE_FORMAT_VERSION: u64 = 26;
+const DATABASE_FORMAT_VERSION: u64 = 27;
 
 /// The database format minor version, incremented each time the on-disk database format has a
 /// significant data format change.
@@ -64,7 +64,7 @@ const DATABASE_FORMAT_PATCH_VERSION: u64 = 0;
 /// Returns the full semantic version of the currently running state database format code.
 ///
 /// This is the version implemented by the Zebra code that's currently running,
-/// the minor and patch versions on disk can be different.
+/// the version on disk can be different.
 pub fn state_database_format_version_in_code() -> Version {
     Version {
         major: DATABASE_FORMAT_VERSION,
@@ -78,7 +78,9 @@ pub fn state_database_format_version_in_code() -> Version {
     }
 }
 
-/// The name of the file containing the minor and patch database versions.
+/// The name of the file containing the database version.
+///
+/// Note: This file has historically omitted the major database version.
 ///
 /// Use [`Config::version_file_path()`] to get the path to this file.
 pub(crate) const DATABASE_FORMAT_VERSION_FILE_NAME: &str = "version";
@@ -106,9 +108,6 @@ pub const MAX_FIND_BLOCK_HASHES_RESULTS: u32 = 500;
 
 /// The maximum number of block headers allowed in `getheaders` responses in the Zcash network protocol.
 pub const MAX_FIND_BLOCK_HEADERS_RESULTS: u32 = 160;
-
-/// These database versions can be recreated from their directly preceding versions.
-pub const RESTORABLE_DB_VERSIONS: [u64; 1] = [26];
 
 /// The maximum number of invalidated block records.
 ///
