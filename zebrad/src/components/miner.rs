@@ -255,7 +255,7 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Pass the correct arguments, even if Zebra currently ignores them.
-    let mut parameters = get_block_template::JsonParameters {
+    let mut parameters = get_block_template::GetBlockTemplateRequest {
         mode: Template,
         data: None,
         capabilities: vec![LongPoll, CoinbaseTxn],

@@ -2980,7 +2980,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         chain_tip::ChainTip, parameters::NetworkUpgrade,
         primitives::byte_array::increment_big_endian,
     };
-    use zebra_rpc::methods::GetBlockHash;
+    use zebra_rpc::methods::GetBlockHashResponse;
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
@@ -3127,7 +3127,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
-        let GetBlockHash(best_block_hash) = rpc_client
+        let GetBlockHashResponse(best_block_hash) = rpc_client
             .json_result_from_call("getbestblockhash", "[]")
             .await
             .map_err(|err| eyre!(err))?;
@@ -3368,7 +3368,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     // Check that the block template is a valid block proposal
     let get_block_template::Response::ProposalMode(block_proposal_result) = rpc
-        .get_block_template(Some(get_block_template::JsonParameters {
+        .get_block_template(Some(get_block_template::GetBlockTemplateRequest {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(hex_proposal_block),
             ..Default::default()

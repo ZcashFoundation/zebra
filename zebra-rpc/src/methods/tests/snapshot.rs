@@ -60,7 +60,7 @@ use crate::methods::{
         subsidy::BlockSubsidy,
         unified_address, validate_address, z_validate_address,
     },
-    GetBlockHash,
+    GetBlockHashResponse,
 };
 
 use super::super::*;
@@ -747,7 +747,7 @@ fn snapshot_rpc_getblock_invalid(
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHash, settings: &insta::Settings) {
+fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHashResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 
@@ -782,7 +782,7 @@ fn snapshot_rpc_getaddresstxids_invalid(
 }
 
 /// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::Settings) {
+fn snapshot_rpc_getaddressutxos(utxos: Vec<Utxo>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
 }
 
@@ -792,14 +792,14 @@ fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
 }
 
 /// Snapshot valid `getblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblockhash_valid(block_hash: GetBlockHash, settings: &insta::Settings) {
+fn snapshot_rpc_getblockhash_valid(block_hash: GetBlockHashResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_hash_valid", block_hash));
 }
 
 /// Snapshot invalid `getblockhash` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockhash_invalid(
     variant: &'static str,
-    block_hash: Result<GetBlockHash>,
+    block_hash: Result<GetBlockHashResponse>,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -1192,7 +1192,7 @@ pub async fn test_mining_rpcs<ReadState>(
     let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
     let get_block_template_fut = rpc_mock_state.get_block_template(
-        get_block_template::JsonParameters {
+        get_block_template::GetBlockTemplateRequest {
             long_poll_id: long_poll_id.into(),
             ..Default::default()
         }
@@ -1230,7 +1230,7 @@ pub async fn test_mining_rpcs<ReadState>(
     // `getblocktemplate` proposal mode variant
 
     let get_block_template =
-        rpc_mock_state.get_block_template(Some(get_block_template::JsonParameters {
+        rpc_mock_state.get_block_template(Some(get_block_template::GetBlockTemplateRequest {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData("".into())),
             ..Default::default()
@@ -1262,7 +1262,7 @@ pub async fn test_mining_rpcs<ReadState>(
     );
 
     let get_block_template_fut =
-        rpc_mock_state_verifier.get_block_template(Some(get_block_template::JsonParameters {
+        rpc_mock_state_verifier.get_block_template(Some(get_block_template::GetBlockTemplateRequest {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
             ..Default::default()

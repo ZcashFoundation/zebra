@@ -498,7 +498,7 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         "getaddressbalance" => {
             default_property(type_, items.clone(), GetAddressBalanceResponse::default())?
         }
-        "getaddressutxos" => default_property(type_, items.clone(), GetAddressUtxos::default())?,
+        "getaddressutxos" => default_property(type_, items.clone(), Utxo::default())?,
         "getaddresstxids" => default_property(type_, items.clone(), Vec::<String>::default())?,
         // network
         "getpeerinfo" => {
@@ -510,7 +510,7 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
             default_property(type_, items.clone(), GetBlockChainInfoResponse::default())?
         }
         "getrawmempool" => default_property(type_, items.clone(), Vec::<String>::default())?,
-        "getblockhash" => default_property(type_, items.clone(), GetBlockHash::default())?,
+        "getblockhash" => default_property(type_, items.clone(), GetBlockHashResponse::default())?,
         "z_getsubtreesbyindex" => default_property(
             type_,
             items.clone(),
@@ -520,7 +520,7 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
             default_property(type_, items.clone(), GetTreestateResponse::default())?
         }
         "getblockcount" => default_property(type_, items.clone(), u32::default())?,
-        "getbestblockhash" => default_property(type_, items.clone(), GetBlockHash::default())?,
+        "getbestblockhash" => default_property(type_, items.clone(), GetBlockHashResponse::default())?,
         "getblock" => default_property(type_, items.clone(), GetBlockResponse::default())?,
         // wallet
         "z_listunifiedreceivers" => default_property(

@@ -16,8 +16,8 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::methods::types::get_block_template::{
-    proposal::proposal_block_from_template, GetBlockTemplate, JsonParameters, ProposalResponse,
-    TimeSource,
+    proposal::proposal_block_from_template, GetBlockTemplate, GetBlockTemplateRequest,
+    ProposalResponse, TimeSource,
 };
 
 use crate::common::{
@@ -174,11 +174,12 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
         tokio::spawn(async move {
             loop {
                 let long_poll_request = async {
-                    let long_poll_json_params = serde_json::to_string(&vec![JsonParameters {
-                        long_poll_id: Some(long_poll_id),
-                        ..Default::default()
-                    }])
-                    .expect("JsonParameters should serialize successfully");
+                    let long_poll_json_params =
+                        serde_json::to_string(&vec![GetBlockTemplateRequest {
+                            long_poll_id: Some(long_poll_id),
+                            ..Default::default()
+                        }])
+                        .expect("JsonParameters should serialize successfully");
 
                     let result: GetBlockTemplate = client
                             .json_result_from_call("getblocktemplate", long_poll_json_params)

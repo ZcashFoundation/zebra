@@ -25,6 +25,7 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
+use serde::de;
 use tokio::{
     sync::{broadcast, watch},
     task::JoinHandle,
@@ -74,6 +75,7 @@ use crate::{
     },
 };
 
+pub use types::get_block_template::Response as GetBlockTemplateResponse;
 use types::{
     get_block_template::{
         self, constants::MEMPOOL_LONG_POLL_INTERVAL, proposal::proposal_block_from_template,
@@ -236,7 +238,7 @@ pub trait Rpc {
     /// method: post
     /// tags: blockchain
     #[method(name = "getbestblockhash")]
-    fn get_best_block_hash(&self) -> Result<GetBlockHash>;
+    fn get_best_block_hash(&self) -> Result<GetBlockHashResponse>;
 
     /// Returns the height and hash of the current best blockchain tip block, as a [`GetBlockHeightAndHash`] JSON struct.
     ///
@@ -367,7 +369,7 @@ pub trait Rpc {
     async fn get_address_utxos(
         &self,
         address_strings: AddressStrings,
-    ) -> Result<Vec<GetAddressUtxos>>;
+    ) -> Result<GetAddressUtxosResponse>;
 
     /// Stop the running zebrad process.
     ///
@@ -407,7 +409,7 @@ pub trait Rpc {
     /// - If `index` is positive then index = block height.
     /// - If `index` is negative then -1 is the last known valid block.
     #[method(name = "getblockhash")]
-    async fn get_block_hash(&self, index: i32) -> Result<GetBlockHash>;
+    async fn get_block_hash(&self, index: i32) -> Result<GetBlockHashResponse>;
 
     /// Returns a block template for mining new Zcash blocks.
     ///
@@ -433,7 +435,7 @@ pub trait Rpc {
     #[method(name = "getblocktemplate")]
     async fn get_block_template(
         &self,
-        parameters: Option<get_block_template::parameters::JsonParameters>,
+        parameters: Option<get_block_template::parameters::GetBlockTemplateRequest>,
     ) -> Result<get_block_template::Response>;
 
     /// Submits block to the node to be validated and committed.
@@ -591,7 +593,7 @@ pub trait Rpc {
     /// zcashd reference: [`generate`](https://zcash.github.io/rpc/generate.html)
     /// method: post
     /// tags: generating
-    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>>;
+    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHashResponse>>;
 }
 
 /// RPC method implementations.
@@ -1402,7 +1404,7 @@ where
             };
 
             let block_header = BlockHeaderObject {
-                hash: GetBlockHash(hash),
+                hash: GetBlockHashResponse(hash),
                 confirmations,
                 height,
                 version: header.version,
@@ -1415,8 +1417,8 @@ where
                 solution: header.solution,
                 bits: header.difficulty_threshold,
                 difficulty,
-                previous_block_hash: GetBlockHash(header.previous_block_hash),
-                next_block_hash: next_block_hash.map(GetBlockHash),
+                previous_block_hash: GetBlockHashResponse(header.previous_block_hash),
+                next_block_hash: next_block_hash.map(GetBlockHashResponse),
             };
 
             GetBlockHeaderResponse::Object(Box::new(block_header))
@@ -1425,10 +1427,10 @@ where
         Ok(response)
     }
 
-    fn get_best_block_hash(&self) -> Result<GetBlockHash> {
+    fn get_best_block_hash(&self) -> Result<GetBlockHashResponse> {
         self.latest_chain_tip
             .best_tip_hash()
-            .map(GetBlockHash)
+            .map(GetBlockHashResponse)
             .ok_or_misc_error("No blocks in state")
     }
 
@@ -1813,7 +1815,7 @@ where
     async fn get_address_utxos(
         &self,
         address_strings: AddressStrings,
-    ) -> Result<Vec<GetAddressUtxos>> {
+    ) -> Result<GetAddressUtxosResponse> {
         let mut state = self.state.clone();
         let mut response_utxos = vec![];
 
@@ -1850,7 +1852,7 @@ where
                      {last_output_location:?}",
             );
 
-            let entry = GetAddressUtxos {
+            let entry = Utxo {
                 address,
                 txid,
                 output_index,
@@ -1896,7 +1898,7 @@ where
         best_chain_tip_height(&self.latest_chain_tip).map(|height| height.0)
     }
 
-    async fn get_block_hash(&self, index: i32) -> Result<GetBlockHash> {
+    async fn get_block_hash(&self, index: i32) -> Result<GetBlockHashResponse> {
         let mut state = self.state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
@@ -1913,7 +1915,7 @@ where
             .map_error(server::error::LegacyCode::default())?;
 
         match response {
-            zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHash(hash)),
+            zebra_state::ReadResponse::BlockHash(Some(hash)) => Ok(GetBlockHashResponse(hash)),
             zebra_state::ReadResponse::BlockHash(None) => Err(ErrorObject::borrowed(
                 server::error::LegacyCode::InvalidParameter.into(),
                 "Block not found",
@@ -1925,7 +1927,7 @@ where
 
     async fn get_block_template(
         &self,
-        parameters: Option<get_block_template::JsonParameters>,
+        parameters: Option<get_block_template::GetBlockTemplateRequest>,
     ) -> Result<get_block_template::Response> {
         // Clone Configs
         let network = self.network.clone();
@@ -1941,7 +1943,7 @@ where
 
         if let Some(HexData(block_proposal_bytes)) = parameters
             .as_ref()
-            .and_then(get_block_template::JsonParameters::block_proposal_data)
+            .and_then(get_block_template::GetBlockTemplateRequest::block_proposal_data)
         {
             return get_block_template::validate_block_proposal(
                 self.gbt.block_verifier_router(),
@@ -2636,7 +2638,7 @@ where
         ))
     }
 
-    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>> {
+    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHashResponse>> {
         let rpc = self.clone();
         let network = self.network.clone();
 
@@ -2680,7 +2682,7 @@ where
                 .await
                 .map_error(server::error::LegacyCode::default())?;
 
-            block_hashes.push(GetBlockHash(proposal_block.hash()));
+            block_hashes.push(GetBlockHashResponse(proposal_block.hash()));
         }
 
         Ok(block_hashes)
@@ -3234,7 +3236,7 @@ pub use self::GetBlockResponse as GetBlock;
 impl Default for GetBlockResponse {
     fn default() -> Self {
         GetBlockResponse::Object(Box::new(BlockObject {
-            hash: GetBlockHash::default(),
+            hash: GetBlockHashResponse::default(),
             confirmations: 0,
             height: None,
             time: None,
@@ -3262,7 +3264,7 @@ impl Default for GetBlockResponse {
 pub struct BlockObject {
     /// The hash of the requested block.
     #[getter(copy)]
-    hash: GetBlockHash,
+    hash: GetBlockHashResponse,
 
     /// The number of confirmations of this block in the best chain,
     /// or -1 if it is not in the best chain.
@@ -3358,12 +3360,12 @@ pub struct BlockObject {
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    previous_block_hash: Option<GetBlockHash>,
+    previous_block_hash: Option<GetBlockHashResponse>,
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    next_block_hash: Option<GetBlockHash>,
+    next_block_hash: Option<GetBlockHashResponse>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -3401,7 +3403,7 @@ pub use self::GetBlockHeaderResponse as GetBlockHeader;
 pub struct BlockHeaderObject {
     /// The hash of the requested block.
     #[getter(copy)]
-    hash: GetBlockHash,
+    hash: GetBlockHashResponse,
 
     /// The number of confirmations of this block in the best chain,
     /// or -1 if it is not in the best chain.
@@ -3460,12 +3462,12 @@ pub struct BlockHeaderObject {
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash")]
     #[getter(copy)]
-    previous_block_hash: GetBlockHash,
+    previous_block_hash: GetBlockHashResponse,
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    next_block_hash: Option<GetBlockHash>,
+    next_block_hash: Option<GetBlockHashResponse>,
 }
 
 #[deprecated(note = "Use `BlockHeaderObject` instead")]
@@ -3482,7 +3484,7 @@ impl Default for BlockHeaderObject {
         let difficulty: ExpandedDifficulty = zebra_chain::work::difficulty::U256::one().into();
 
         BlockHeaderObject {
-            hash: GetBlockHash::default(),
+            hash: GetBlockHashResponse::default(),
             confirmations: 0,
             height: Height::MIN,
             version: 4,
@@ -3508,7 +3510,10 @@ impl Default for BlockHeaderObject {
 /// Also see the notes for the [`RpcServer::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(transparent)]
-pub struct GetBlockHash(#[serde(with = "hex")] pub block::Hash);
+pub struct GetBlockHashResponse(#[serde(with = "hex")] pub block::Hash);
+
+#[deprecated(note = "Use `GetBlockHashResponse` instead")]
+pub use self::GetBlockHashResponse as GetBlockHash;
 
 /// Response to a `getbestblockheightandhash` RPC request.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
@@ -3533,9 +3538,9 @@ impl Default for GetBlockHeightAndHashResponse {
     }
 }
 
-impl Default for GetBlockHash {
+impl Default for GetBlockHashResponse {
     fn default() -> Self {
-        GetBlockHash(block::Hash([0; 32]))
+        GetBlockHashResponse(block::Hash([0; 32]))
     }
 }
 
@@ -3561,19 +3566,24 @@ impl Default for GetRawTransactionResponse {
 }
 
 /// Response to a `getaddressutxos` RPC request.
+pub type GetAddressUtxosResponse = Vec<Utxo>;
+
+/// A UTXO returned by the `getaddressutxos` RPC request.
 ///
 /// See the notes for the [`Rpc::get_address_utxos` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GetAddressUtxos {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct Utxo {
     /// The transparent address, base58check encoded
     address: transparent::Address,
 
     /// The output txid, in big-endian order, hex-encoded
     #[serde(with = "hex")]
+    #[getter(copy)]
     txid: transaction::Hash,
 
     /// The transparent output index, numeric
     #[serde(rename = "outputIndex")]
+    #[getter(copy)]
     output_index: OutputIndex,
 
     /// The transparent output script, hex encoded
@@ -3586,10 +3596,14 @@ pub struct GetAddressUtxos {
     /// The block height, numeric.
     ///
     /// We put this field last, to match the zcashd order.
+    #[getter(copy)]
     height: Height,
 }
 
-impl Default for GetAddressUtxos {
+#[deprecated(note = "Use `Utxo` instead")]
+pub use self::Utxo as GetAddressUtxos;
+
+impl Default for Utxo {
     fn default() -> Self {
         Self {
             address: transparent::Address::from_pub_key_hash(
@@ -3605,8 +3619,9 @@ impl Default for GetAddressUtxos {
     }
 }
 
-impl GetAddressUtxos {
+impl Utxo {
     /// Constructs a new instance of [`GetAddressUtxos`].
+    #[deprecated(note = "Use `Utxo::new` instead")]
     pub fn from_parts(
         address: transparent::Address,
         txid: transaction::Hash,
@@ -3615,7 +3630,7 @@ impl GetAddressUtxos {
         satoshis: u64,
         height: Height,
     ) -> Self {
-        GetAddressUtxos {
+        Utxo {
             address,
             txid,
             output_index,
@@ -3650,7 +3665,7 @@ impl GetAddressUtxos {
 /// A struct to use as parameter of the `getaddresstxids`.
 ///
 /// See the notes for the [`Rpc::get_address_tx_ids` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
 pub struct GetAddressTxIdsRequest {
     // A list of addresses to get transactions from.
     addresses: Vec<String>,
@@ -3662,6 +3677,7 @@ pub struct GetAddressTxIdsRequest {
 
 impl GetAddressTxIdsRequest {
     /// Constructs [`GetAddressTxIdsRequest`] from its constituent parts.
+    #[deprecated(note = "Use `GetAddressTxIdsRequest::new` instead.")]
     pub fn from_parts(addresses: Vec<String>, start: u32, end: u32) -> Self {
         GetAddressTxIdsRequest {
             addresses,
@@ -3669,6 +3685,7 @@ impl GetAddressTxIdsRequest {
             end: Some(end),
         }
     }
+
     /// Returns the contents of [`GetAddressTxIdsRequest`].
     pub fn into_parts(&self) -> (Vec<String>, u32, u32) {
         (

@@ -17,7 +17,7 @@ use crate::methods::{
         default_roots::DefaultRoots,
         get_block_template::{GetBlockTemplate, Response},
     },
-    GetBlockHash,
+    GetBlockHashResponse,
 };
 
 /// Response to a `getblocktemplate` RPC request in proposal mode.
@@ -178,7 +178,7 @@ pub fn proposal_block_from_template(
     let GetBlockTemplate {
         version,
         height,
-        previous_block_hash: GetBlockHash(previous_block_hash),
+        previous_block_hash: GetBlockHashResponse(previous_block_hash),
         default_roots:
             DefaultRoots {
                 merkle_root,

@@ -290,33 +290,40 @@ pub struct ScriptSig {
 }
 
 /// A Sapling spend of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
+    #[getter(copy)]
     cv: NotSmallOrderValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
     #[serde(with = "hex")]
+    #[getter(copy)]
     anchor: [u8; 32],
     /// The nullifier of the input note.
     #[serde(with = "hex")]
+    #[getter(copy)]
     nullifier: [u8; 32],
     /// The randomized public key for spendAuthSig.
     #[serde(with = "hex")]
+    #[getter(copy)]
     rk: [u8; 32],
     /// A zero-knowledge proof using the Sapling Spend circuit.
     #[serde(with = "hex")]
+    #[getter(copy)]
     proof: [u8; 192],
     /// A signature authorizing this Spend.
     #[serde(rename = "spendAuthSig", with = "hex")]
+    #[getter(copy)]
     spend_auth_sig: [u8; 64],
 }
 
 /// A Sapling output of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
+    #[getter(copy)]
     cv: NotSmallOrderValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(rename = "cmu", with = "hex")]
@@ -336,7 +343,7 @@ pub struct ShieldedOutput {
 }
 
 /// Object with Orchard-specific information.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Orchard {
     /// Array of Orchard actions.
     actions: Vec<OrchardAction>,
@@ -349,7 +356,8 @@ pub struct Orchard {
 }
 
 /// The Orchard action of a transaction.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct OrchardAction {
     /// A value commitment to the net value of the input note minus the output note.
     #[serde(with = "hex")]
