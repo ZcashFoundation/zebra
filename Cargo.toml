@@ -25,10 +25,11 @@ resolver = "2"
 incrementalmerkletree = "0.5.1"
 orchard = "0.8.0"
 sapling-crypto = "0.1.3"
+# The dependency versions below are in accordance with the currently used orchard version.
+zcash_history = "0.4.0"
 zcash_address = "0.3.2"
 zcash_client_backend = "0.12.1"
 zcash_encoding = "0.2.0"
-zcash_history = "0.4.0"
 zcash_keys = "0.2.0"
 zcash_primitives = "0.15.0"
 zcash_proofs = "0.15.0"
@@ -108,11 +109,11 @@ halo2_proofs = { version = "0.3.0", git = "https://github.com/QED-it/halo2", bra
 halo2_gadgets = { version = "0.3.0", git = "https://github.com/QED-it/halo2", branch = "zsa1" }
 zcash_note_encryption = { version = "0.4.0", git = "https://github.com/QED-it/zcash_note_encryption", branch = "zsa1" }
 sapling-crypto = { version = "0.1.3", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
-orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", rev = "3394cfc1ac156f9cc7e8507467cd2ac792ce20bd" }
-zcash_primitives = { version = "0.15.0", git = "https://github.com/QED-it/librustzcash", branch = "pub-burn-read-write-orchard-flavors-eq" }
-zcash_protocol = { version = "0.1.1", git = "https://github.com/QED-it/librustzcash", branch = "pub-burn-read-write-orchard-flavors-eq" }
-zcash_address = { version = "0.3.2", git = "https://github.com/QED-it/librustzcash", branch = "pub-burn-read-write-orchard-flavors-eq" }
-zcash_encoding = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", branch = "pub-burn-read-write-orchard-flavors-eq" }
-zcash_history = { version = "0.4.0", git = "https://github.com/QED-it/librustzcash", branch = "pub-burn-read-write-orchard-flavors-eq" }
-zcash_client_backend = { version = "0.12.1", git = "https://github.com/QED-it/librustzcash", branch = "pub-burn-read-write-orchard-flavors-eq" }
-zcash_keys = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", branch = "pub-burn-read-write-orchard-flavors-eq" }
+orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", rev = "831ca109705a409bc3d3b82e76245e45dd0f0812" }
+zcash_primitives = { version = "0.15.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_protocol = { version = "0.1.1", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_address = { version = "0.3.2", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_encoding = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_history = { version = "0.4.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_client_backend = { version = "0.12.1", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_keys = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }

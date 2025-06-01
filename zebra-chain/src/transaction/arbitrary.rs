@@ -137,7 +137,7 @@ impl Transaction {
 
     /// Helper function to generate the common transaction fields.
     /// This function is generic over the Orchard shielded data type.
-    fn v5_v6_strategy_common<FL: orchard::ShieldedDataFlavor + 'static>(
+    fn v5_v6_strategy_common<Flavor: orchard::ShieldedDataFlavor + 'static>(
         ledger_state: LedgerState,
     ) -> impl Strategy<
         Value = (
@@ -147,7 +147,7 @@ impl Transaction {
             Vec<transparent::Input>,
             Vec<transparent::Output>,
             Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-            Option<orchard::ShieldedData<FL>>,
+            Option<orchard::ShieldedData<Flavor>>,
         ),
     > + 'static {
         (
@@ -157,7 +157,7 @@ impl Transaction {
             transparent::Input::vec_strategy(&ledger_state, MAX_ARBITRARY_ITEMS),
             vec(any::<transparent::Output>(), 0..MAX_ARBITRARY_ITEMS),
             option::of(any::<sapling::ShieldedData<sapling::SharedAnchor>>()),
-            option::of(any::<orchard::ShieldedData<FL>>()),
+            option::of(any::<orchard::ShieldedData<Flavor>>()),
         )
             .prop_map(
                 move |(
@@ -233,13 +233,11 @@ impl Transaction {
     pub fn v6_strategy(ledger_state: LedgerState) -> BoxedStrategy<Transaction> {
         Self::v5_v6_strategy_common::<orchard::OrchardZSA>(ledger_state)
             .prop_flat_map(|common_fields| {
-                // FIXME: Can IssueData present in V6 transaction without orchard::ShieldedData?
-                // If no, we possibly need to use something like prop_filter_map to filter wrong
-                // combnations (orchard_shielded_data: None, orchard_zsa_issue_data: Some)
                 option::of(any::<IssueData>())
                     .prop_map(move |issue_data| (common_fields.clone(), issue_data))
             })
-            .prop_map(
+            .prop_filter_map(
+                "orchard_shielded_data can not be None for V6",
                 |(
                     (
                         network_upgrade,
@@ -251,15 +249,17 @@ impl Transaction {
                         orchard_shielded_data,
                     ),
                     orchard_zsa_issue_data,
-                )| Transaction::V6 {
-                    network_upgrade,
-                    lock_time,
-                    expiry_height,
-                    inputs,
-                    outputs,
-                    sapling_shielded_data,
-                    orchard_shielded_data,
-                    orchard_zsa_issue_data,
+                )| {
+                    orchard_shielded_data.is_some().then_some(Transaction::V6 {
+                        network_upgrade,
+                        lock_time,
+                        expiry_height,
+                        inputs,
+                        outputs,
+                        sapling_shielded_data,
+                        orchard_shielded_data,
+                        orchard_zsa_issue_data,
+                    })
                 },
             )
             .boxed()
@@ -781,12 +781,7 @@ impl Arbitrary for sapling::TransferData<SharedAnchor> {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<FL: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedData<FL>
-// FIXME: remove the following lines
-// FIXME: define the constraint in orchard::ShieldedDataFlavor?
-//where
-//    <FL::EncryptedNote as Arbitrary>::Strategy: 'static,
-{
+impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedData<Flavor> {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
@@ -796,12 +791,12 @@ impl<FL: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::ShieldedD
             any::<orchard::tree::Root>(),
             any::<Halo2Proof>(),
             vec(
-                any::<orchard::shielded_data::AuthorizedAction<FL>>(),
+                any::<orchard::shielded_data::AuthorizedAction<Flavor>>(),
                 1..MAX_ARBITRARY_ITEMS,
             ),
             any::<BindingSignature>(),
             #[cfg(feature = "tx-v6")]
-            any::<FL::BurnType>(),
+            any::<Flavor::BurnType>(),
         )
             .prop_map(|props| {
                 #[cfg(not(feature = "tx-v6"))]
@@ -880,13 +875,30 @@ impl Arbitrary for Transaction {
             NetworkUpgrade::Blossom | NetworkUpgrade::Heartwood | NetworkUpgrade::Canopy => {
                 Self::v4_strategy(ledger_state)
             }
-            // FIXME: should v6_strategy be included here?
-            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu7 => prop_oneof![
+            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => prop_oneof![
                 Self::v4_strategy(ledger_state.clone()),
                 Self::v5_strategy(ledger_state)
             ]
             .boxed(),
-            // FIXME: process NetworkUpgrade::Nu7 properly, with v6 strategy
+            NetworkUpgrade::Nu7 => {
+                #[cfg(not(feature = "tx-v6"))]
+                {
+                    prop_oneof![
+                        Self::v4_strategy(ledger_state.clone()),
+                        Self::v5_strategy(ledger_state.clone()),
+                    ]
+                    .boxed()
+                }
+                #[cfg(feature = "tx-v6")]
+                {
+                    prop_oneof![
+                        Self::v4_strategy(ledger_state.clone()),
+                        Self::v5_strategy(ledger_state.clone()),
+                        Self::v6_strategy(ledger_state),
+                    ]
+                    .boxed()
+                }
+            }
         }
     }
 
@@ -953,7 +965,7 @@ impl Arbitrary for VerifiedUnminedTx {
 
 /// Convert `trans` into a fake v5 transaction,
 /// converting sapling shielded data from v4 to v5 if possible.
-pub fn transaction_to_fake_min_v5(
+pub fn transaction_to_fake_v5(
     trans: &Transaction,
     network: &Network,
     height: block::Height,
@@ -1023,7 +1035,7 @@ pub fn transaction_to_fake_min_v5(
         },
         v5 @ V5 { .. } => v5.clone(),
         #[cfg(feature = "tx-v6")]
-        _v6 @ V6 { .. } => panic!("V6 transactions are not supported in this test!"),
+        _ => panic!(" other transaction versions are not supported"),
     }
 }
 
@@ -1107,7 +1119,7 @@ pub fn fake_v5_transactions_for_network<'b>(
     blocks: impl DoubleEndedIterator<Item = (&'b u32, &'b &'static [u8])> + 'b,
 ) -> impl DoubleEndedIterator<Item = Transaction> + 'b {
     transactions_from_blocks(blocks)
-        .map(move |(height, transaction)| transaction_to_fake_min_v5(&transaction, network, height))
+        .map(move |(height, transaction)| transaction_to_fake_v5(&transaction, network, height))
 }
 
 /// Generate an iterator over ([`block::Height`], [`Arc<Transaction>`]).

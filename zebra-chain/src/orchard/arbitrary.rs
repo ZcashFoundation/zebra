@@ -14,10 +14,9 @@ use super::{
     ValueCommitment,
 };
 
-impl<FL: ShieldedDataFlavor> Arbitrary for Action<FL>
-// FIXME: define the constraint in ShieldedDataFlavor?
+impl<Flavor: ShieldedDataFlavor> Arbitrary for Action<Flavor>
 where
-    <FL::EncryptedNote as Arbitrary>::Strategy: 'static,
+    <Flavor::EncryptedNote as Arbitrary>::Strategy: 'static,
 {
     type Parameters = ();
 
@@ -25,7 +24,7 @@ where
         (
             any::<note::Nullifier>(),
             any::<SpendAuthVerificationKeyBytes>(),
-            any::<FL::EncryptedNote>(),
+            any::<Flavor::EncryptedNote>(),
             any::<note::WrappedNoteKey>(),
         )
             .prop_map(|(nullifier, rk, enc_ciphertext, out_ciphertext)| Self {
@@ -59,15 +58,14 @@ impl Arbitrary for note::Nullifier {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl<FL: ShieldedDataFlavor + 'static> Arbitrary for AuthorizedAction<FL>
-// FIXME: define the constraint in ShieldedDataFlavor?
+impl<Flavor: ShieldedDataFlavor + 'static> Arbitrary for AuthorizedAction<Flavor>
 where
-    <FL::EncryptedNote as Arbitrary>::Strategy: 'static,
+    <Flavor::EncryptedNote as Arbitrary>::Strategy: 'static,
 {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        (any::<Action<FL>>(), any::<SpendAuthSignature>())
+        (any::<Action<Flavor>>(), any::<SpendAuthSignature>())
             .prop_map(|(action, spend_auth_sig)| Self {
                 action,
                 spend_auth_sig: spend_auth_sig.0,

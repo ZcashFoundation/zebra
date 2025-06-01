@@ -1,4 +1,4 @@
-//! Orchard ZSA burn related functionality.
+//! OrchardZSA burn related functionality.
 
 use std::io;
 
@@ -9,7 +9,6 @@ use orchard::{note::AssetBase, value::NoteValue};
 use zcash_primitives::transaction::components::orchard::{read_burn, write_burn};
 
 use crate::{
-    amount::Amount,
     orchard::ValueCommitment,
     serialization::{ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize},
 };
@@ -27,8 +26,7 @@ impl ZcashDeserialize for AssetBase {
     }
 }
 
-// FIXME: Define BurnItem (or, even Burn/NoBurn) in Orchard and reuse it here?
-/// Orchard ZSA burn item.
+/// OrchardZSA burn item.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BurnItem(AssetBase, NoteValue);
 
@@ -79,7 +77,6 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
     {
         let (asset_base_bytes, amount) = <([u8; 32], u64)>::deserialize(deserializer)?;
         Ok(BurnItem(
-            // FIXME: duplicates the body of AssetBase::zcash_deserialize?
             Option::from(AssetBase::from_bytes(&asset_base_bytes))
                 .ok_or_else(|| serde::de::Error::custom("Invalid orchard_zsa AssetBase"))?,
             NoteValue::from_raw(amount),
@@ -87,16 +84,29 @@ impl<'de> serde::Deserialize<'de> for BurnItem {
     }
 }
 
-/// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5` transactions.
-/// Useful for unifying ShieldedData serialization and deserialization implementations across various
-/// Orchard protocol variants (i.e. various transaction versions).
+/// A special marker type indicating the absence of a burn field in Orchard ShieldedData for `V5`
+/// transactions. It is unifying handling and serialization of ShieldedData across various Orchard
+/// protocol variants.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct NoBurn;
 
+impl From<&[(AssetBase, NoteValue)]> for NoBurn {
+    fn from(bundle_burn: &[(AssetBase, NoteValue)]) -> Self {
+        assert!(
+            bundle_burn.is_empty(),
+            "Burn must be empty for OrchardVanilla"
+        );
+        Self
+    }
+}
+
 impl From<NoBurn> for ValueCommitment {
     fn from(_burn: NoBurn) -> ValueCommitment {
-        // FIXME: is there a simpler way to get zero ValueCommitment?
-        ValueCommitment::new(pallas::Scalar::zero(), Amount::zero())
+        ValueCommitment::new(
+            pallas::Scalar::zero(),
+            NoteValue::from_raw(0).into(),
+            AssetBase::native(),
+        )
     }
 }
 
@@ -118,7 +128,7 @@ impl ZcashDeserialize for NoBurn {
     }
 }
 
-/// Orchard ZSA burn items (assets intended for burning)
+/// OrchardZSA burn items.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Burn(Vec<BurnItem>);
 
@@ -128,13 +138,24 @@ impl From<Vec<BurnItem>> for Burn {
     }
 }
 
-// FIXME: consider conversion from reference to Burn instead, to avoid using `clone` when it's called
+impl From<&[(AssetBase, NoteValue)]> for Burn {
+    fn from(bundle_burn: &[(AssetBase, NoteValue)]) -> Self {
+        Self(
+            bundle_burn
+                .iter()
+                .map(|bundle_burn_item| BurnItem::from(*bundle_burn_item))
+                .collect(),
+        )
+    }
+}
+
 impl From<Burn> for ValueCommitment {
     fn from(burn: Burn) -> ValueCommitment {
         burn.0
             .into_iter()
             .map(|BurnItem(asset, amount)| {
-                ValueCommitment::with_asset(pallas::Scalar::zero(), amount, &asset)
+                // The trapdoor for the burn which is public is always zero.
+                ValueCommitment::new(pallas::Scalar::zero(), amount.into(), asset)
             })
             .sum()
     }

@@ -43,10 +43,9 @@ impl<'a> TxIdBuilder<'a> {
         Ok(Hash(hash_writer.finish()))
     }
 
-    // FIXME: fix spec refs below for V6
     /// Compute the Transaction ID for transactions V5 to V6.
     /// In this case it's the hash of a tree of hashes of specific parts of the
-    /// transaction, as specified in ZIP-244 and ZIP-225.
+    /// transaction, as specified in ZIP-244 and ZIP-225 for Txv5 and ZIP-246 for TxV6.
     fn txid_v5_to_v6(self) -> Result<Hash, io::Error> {
         // The v5 txid (from ZIP-244) is computed using librustzcash. Convert the zebra
         // transaction to a librustzcash transaction.

@@ -14,7 +14,11 @@ use halo2::{
 use lazy_static::lazy_static;
 use rand_core::{CryptoRng, RngCore};
 
-use orchard::{note::AssetBase, value::NoteValue};
+#[cfg(feature = "tx-v6")]
+use orchard::{
+    note::AssetBase,
+    value::{ValueCommitTrapdoor, ValueSum},
+};
 
 use crate::{
     amount::Amount,
@@ -232,13 +236,27 @@ impl ValueCommitment {
     /// Generate a new _ValueCommitment_.
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
+    #[allow(clippy::unwrap_in_result)]
     pub fn randomized<T>(csprng: &mut T, value: Amount) -> Result<Self, RandError>
     where
         T: RngCore + CryptoRng,
     {
         let rcv = generate_trapdoor(csprng)?;
 
-        Ok(Self::new(rcv, value))
+        #[cfg(feature = "tx-v6")]
+        let vc = Self::new(
+            rcv,
+            // TODO: Make the `ValueSum::from_raw` function public in the `orchard` crate
+            // and use `ValueSum::from_raw(value.into())` instead of the next line.
+            // Remove `#[allow(clippy::unwrap_in_result)]` after doing so.
+            (ValueSum::default() + i64::from(value)).unwrap(),
+            AssetBase::native(),
+        );
+
+        #[cfg(not(feature = "tx-v6"))]
+        let vc = Self::new(rcv, value);
+
+        Ok(vc)
     }
 
     /// Generate a new `ValueCommitment` from an existing `rcv on a `value`.
@@ -246,7 +264,7 @@ impl ValueCommitment {
     /// ValueCommit^Orchard(v) :=
     ///
     /// <https://zips.z.cash/protocol/nu5.pdf#concretehomomorphiccommit>
-    #[allow(non_snake_case)]
+    #[cfg(not(feature = "tx-v6"))]
     pub fn new(rcv: pallas::Scalar, value: Amount) -> Self {
         let v = pallas::Scalar::from(value);
         Self::from(*V * v + *R * rcv)
@@ -254,11 +272,20 @@ impl ValueCommitment {
 
     /// Generate a new `ValueCommitment` from an existing `rcv on a `value` (ZSA version).
     #[cfg(feature = "tx-v6")]
-    #[allow(non_snake_case)]
-    pub fn with_asset(rcv: pallas::Scalar, value: NoteValue, asset: &AssetBase) -> Self {
-        let v = pallas::Scalar::from(value.inner());
-        let V_zsa = asset.cv_base();
-        Self::from(V_zsa * v + *R * rcv)
+    pub fn new(rcv: pallas::Scalar, value: ValueSum, asset: AssetBase) -> Self {
+        // TODO: Add `pub` methods to `ValueCommitTrapdoor` and `ValueCommitment` in `orchard`
+        // to simplify type conversions when calling `orchard::value::ValueCommitment::derive`.
+        Self(
+            pallas::Affine::from_bytes(
+                &orchard::value::ValueCommitment::derive(
+                    value,
+                    ValueCommitTrapdoor::from_bytes(rcv.to_repr()).unwrap(),
+                    asset,
+                )
+                .to_bytes(),
+            )
+            .unwrap(),
+        )
     }
 }
 

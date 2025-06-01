@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use orchard::issuance::IssueAction;
+use orchard::issuance::{compute_asset_desc_hash, IssueAction};
 pub use orchard::note::AssetBase;
 
 use crate::{serialization::ZcashSerialize, transaction::Transaction};
@@ -403,8 +403,10 @@ impl RandomAssetBase for AssetBase {
         )
         .unwrap();
         let ik = orchard::keys::IssuanceValidatingKey::from(&isk);
-        let asset_descr = b"zsa_asset".to_vec();
-        AssetBase::derive(&ik, &asset_descr)
+        let asset_desc = b"zsa_asset".to_vec();
+        let asset_desc_hash =
+            compute_asset_desc_hash(&asset_desc).expect("asset descriptor hashing should succeed");
+        AssetBase::derive(&ik, &asset_desc_hash)
             .zcash_serialize_to_vec()
             .map(hex::encode)
             .expect("random asset base should serialize")

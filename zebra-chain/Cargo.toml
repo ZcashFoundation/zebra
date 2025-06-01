@@ -15,8 +15,7 @@ keywords = ["zebra", "zcash"]
 categories = ["asynchronous", "cryptography::cryptocurrencies", "encoding"]
 
 [features]
-#default = []
-default = ["tx-v6"]
+default = []
 
 # Production features that activate extra functionality
 

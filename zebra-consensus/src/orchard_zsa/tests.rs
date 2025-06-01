@@ -1,4 +1,16 @@
-// FIXME: consider merging it with router/tests.rs
+//! Simulates a full Zebra node’s block‐processing pipeline on a predefined Orchard/ZSA workflow.
+//!
+//! This integration test reads a sequence of serialized regtest blocks (including Orchard burns
+//! and ZSA issuance), feeds them through the node’s deserialization, consensus router, and state
+//! service exactly as if they arrived from the network, and verifies that each block is accepted
+//! (or fails at the injected point).
+//!
+//! In a future PR, we will add tracking and verification of issuance/burn state changes so that
+//! the test can also assert that on-chain asset state (total supply and finalization flags)
+//! matches the expected values computed in memory.
+//!
+//! In short, it demonstrates end-to-end handling of Orchard asset burns and ZSA issuance through
+//! consensus (with state verification to follow in the next PR).
 
 use std::{
     collections::{hash_map, HashMap},
@@ -23,7 +35,7 @@ use zebra_state::{ReadRequest, ReadResponse, ReadStateService};
 
 use zebra_test::{
     transcript::{ExpectedTranscriptError, Transcript},
-    vectors::ORCHARD_ZSA_WORKFLOW_BLOCKS,
+    vectors::ORCHARD_WORKFLOW_BLOCKS_ZSA,
 };
 
 use crate::{block::Request, Config};
@@ -161,7 +173,7 @@ async fn check_zsa_workflow() -> Result<(), Report> {
         crate::router::init(Config::default(), &network, state_service.clone()).await;
 
     let transcript_data =
-        create_transcript_data(ORCHARD_ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();
+        create_transcript_data(ORCHARD_WORKFLOW_BLOCKS_ZSA.iter()).collect::<Vec<_>>();
 
     let asset_records =
         build_asset_records(&transcript_data).expect("should calculate asset_records");
