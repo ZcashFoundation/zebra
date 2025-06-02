@@ -6,6 +6,22 @@
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
 
+// # Developing this module
+//
+// If RPCs are added or changed, ensure the following:
+//
+// - Make requests are buildable and responses readable (up to each leaf
+//   component)
+//   - Use `derive(Getters, new)` to help with that. Make sure you mark `Copy`
+//     fields with `#[getter(copy)]` to avoid unnecessary references. It's easy
+//     not to forget about that - in `serialization_tests.rs`, any Copy field
+//     being returned by reference will require using `*` to dereference it; if
+//     you notice that happening then you forgot to mark it.
+//   - If a field is added, use `#[new(...)]` so that it's not added to the
+//     constructor. If that is unavoidable, then it will require a major
+//     version bump.
+// - Add tests to `serialization_tests.rs` to ensure the above
+
 use std::{
     cmp,
     collections::{HashMap, HashSet},
