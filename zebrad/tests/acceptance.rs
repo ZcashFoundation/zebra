@@ -146,6 +146,8 @@
 //!
 //! ```sh
 //! export TMPDIR=/path/to/disk/directory
+//!
+//! /
 //! ```
 
 mod common;
