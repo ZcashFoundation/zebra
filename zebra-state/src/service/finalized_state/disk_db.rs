@@ -1014,6 +1014,7 @@ impl DiskDb {
     /// used by the current db. If successful, it also deletes the db version file.
     ///
     /// Returns the old disk version if one existed and the db directory was renamed, or None otherwise.
+    // TODO: Update this function to rename older major db format version to the current version (#9565).
     #[allow(clippy::unwrap_in_result)]
     pub(crate) fn try_reusing_previous_db_after_major_upgrade(
         restorable_db_versions: &[u64],

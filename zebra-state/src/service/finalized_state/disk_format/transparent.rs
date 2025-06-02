@@ -230,7 +230,7 @@ impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
     /// the first [`transparent::Output`] sent to an address.
     ///
     /// The returned value has a zero initial balance and received balance.
-    pub fn new(first_output: OutputLocation) -> Self {
+    fn new(first_output: OutputLocation) -> Self {
         Self {
             balance: Amount::zero(),
             received: 0,
