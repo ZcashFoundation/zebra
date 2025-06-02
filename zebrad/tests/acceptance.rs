@@ -3127,12 +3127,12 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
-        let GetBlockHashResponse(best_block_hash) = rpc_client
+        let best_block_hash: GetBlockHashResponse = rpc_client
             .json_result_from_call("getbestblockhash", "[]")
             .await
             .map_err(|err| eyre!(err))?;
 
-        if block_hash == best_block_hash {
+        if block_hash == best_block_hash.hash() {
             break;
         }
     }

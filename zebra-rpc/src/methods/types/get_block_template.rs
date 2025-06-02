@@ -41,12 +41,9 @@ use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
     config,
-    methods::{
-        types::{
-            default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
-            transaction::TransactionTemplate,
-        },
-        GetBlockHashResponse,
+    methods::types::{
+        default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
+        transaction::TransactionTemplate,
     },
     server::error::OkOrError,
 };
@@ -88,8 +85,9 @@ pub struct TemplateResponse {
 
     /// The hash of the previous block.
     #[serde(rename = "previousblockhash")]
+    #[serde(with = "hex")]
     #[getter(copy)]
-    pub(crate) previous_block_hash: GetBlockHashResponse,
+    pub(crate) previous_block_hash: block::Hash,
 
     /// The block commitment for the new block's header.
     ///
@@ -359,7 +357,7 @@ impl TemplateResponse {
 
             version: ZCASH_BLOCK_VERSION,
 
-            previous_block_hash: GetBlockHashResponse(chain_tip_and_local_time.tip_hash),
+            previous_block_hash: chain_tip_and_local_time.tip_hash,
             block_commitments_hash: default_roots.block_commitments_hash,
             light_client_root_hash: default_roots.block_commitments_hash,
             final_sapling_root_hash: default_roots.block_commitments_hash,

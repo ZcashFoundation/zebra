@@ -249,7 +249,7 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
-                hash: GetBlockHashResponse(block.hash()),
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -273,8 +273,8 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHashResponse(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHashResponse(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
             }))
         );
@@ -293,7 +293,7 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
-                hash: GetBlockHashResponse(block.hash()),
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -317,8 +317,8 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHashResponse(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHashResponse(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
             }))
         );
@@ -356,7 +356,7 @@ async fn rpc_getblock() {
                 next_block_hash,
                 solution,
             } = &**obj;
-            assert_eq!(hash, &GetBlockHashResponse(block.hash()));
+            assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
@@ -381,14 +381,8 @@ async fn rpc_getblock() {
                         .relative_to_network(&Mainnet)
                 )
             );
-            assert_eq!(
-                previous_block_hash,
-                &Some(GetBlockHashResponse(block.header.previous_block_hash))
-            );
-            assert_eq!(
-                next_block_hash,
-                &blocks.get(i + 1).map(|b| GetBlockHashResponse(b.hash()))
-            );
+            assert_eq!(previous_block_hash, &Some(block.header.previous_block_hash));
+            assert_eq!(next_block_hash, &blocks.get(i + 1).map(|b| b.hash()));
             assert_eq!(solution, &Some(block.header.solution));
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
@@ -444,7 +438,7 @@ async fn rpc_getblock() {
                 next_block_hash,
                 solution,
             } = &**obj;
-            assert_eq!(hash, &GetBlockHashResponse(block.hash()));
+            assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
@@ -469,14 +463,8 @@ async fn rpc_getblock() {
                         .relative_to_network(&Mainnet)
                 )
             );
-            assert_eq!(
-                previous_block_hash,
-                &Some(GetBlockHashResponse(block.header.previous_block_hash))
-            );
-            assert_eq!(
-                next_block_hash,
-                &blocks.get(i + 1).map(|b| GetBlockHashResponse(b.hash()))
-            );
+            assert_eq!(previous_block_hash, &Some(block.header.previous_block_hash));
+            assert_eq!(next_block_hash, &blocks.get(i + 1).map(|b| b.hash()));
             assert_eq!(solution, &Some(block.header.solution));
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
@@ -513,7 +501,7 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
-                hash: GetBlockHashResponse(block.hash()),
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -537,8 +525,8 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHashResponse(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHashResponse(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
             }))
         );
@@ -557,7 +545,7 @@ async fn rpc_getblock() {
         assert_eq!(
             get_block,
             GetBlockResponse::Object(Box::new(BlockObject {
-                hash: GetBlockHashResponse(block.hash()),
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -581,8 +569,8 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHashResponse(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHashResponse(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
             }))
         );
@@ -776,7 +764,7 @@ async fn rpc_getblockheader() {
         };
 
         let expected_result = GetBlockHeaderResponse::Object(Box::new(BlockHeaderObject {
-            hash: GetBlockHashResponse(hash),
+            hash,
             confirmations: 11 - i as i64,
             height,
             version: 4,
@@ -792,8 +780,8 @@ async fn rpc_getblockheader() {
                 .header
                 .difficulty_threshold
                 .relative_to_network(&Mainnet),
-            previous_block_hash: GetBlockHashResponse(block.header.previous_block_hash),
-            next_block_hash: blocks.get(i + 1).map(|b| GetBlockHashResponse(b.hash())),
+            previous_block_hash: block.header.previous_block_hash,
+            next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
         }));
 
         for hash_or_height in [HashOrHeight::from(Height(i as u32)), block.hash().into()] {

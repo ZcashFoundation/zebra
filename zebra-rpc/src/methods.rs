@@ -1198,7 +1198,7 @@ where
             //
             // We look up by block hash so the hash, transaction IDs, and confirmations
             // are consistent.
-            let hash_or_height = hash.0.into();
+            let hash_or_height = hash.into();
             let requests = vec![
                 // Get transaction IDs from the transaction index by block hash
                 //
@@ -1411,7 +1411,7 @@ where
             };
 
             let block_header = BlockHeaderObject {
-                hash: GetBlockHashResponse(hash),
+                hash,
                 confirmations,
                 height,
                 version: header.version,
@@ -1424,8 +1424,8 @@ where
                 solution: header.solution,
                 bits: header.difficulty_threshold,
                 difficulty,
-                previous_block_hash: GetBlockHashResponse(header.previous_block_hash),
-                next_block_hash: next_block_hash.map(GetBlockHashResponse),
+                previous_block_hash: header.previous_block_hash,
+                next_block_hash,
             };
 
             GetBlockHeaderResponse::Object(Box::new(block_header))
@@ -2647,7 +2647,7 @@ where
         ))
     }
 
-    async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHashResponse>> {
+    async fn generate(&self, num_blocks: u32) -> Result<Vec<Hash>> {
         let rpc = self.clone();
         let network = self.network.clone();
 
@@ -3245,7 +3245,7 @@ pub use self::GetBlockResponse as GetBlock;
 impl Default for GetBlockResponse {
     fn default() -> Self {
         GetBlockResponse::Object(Box::new(BlockObject {
-            hash: GetBlockHashResponse::default(),
+            hash: block::Hash([0; 32]),
             confirmations: 0,
             height: None,
             time: None,
@@ -3273,7 +3273,8 @@ impl Default for GetBlockResponse {
 pub struct BlockObject {
     /// The hash of the requested block.
     #[getter(copy)]
-    hash: GetBlockHashResponse,
+    #[serde(with = "hex")]
+    hash: block::Hash,
 
     /// The number of confirmations of this block in the best chain,
     /// or -1 if it is not in the best chain.
@@ -3368,13 +3369,15 @@ pub struct BlockObject {
 
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash", skip_serializing_if = "Option::is_none")]
+    #[serde(with = "opthex")]
     #[getter(copy)]
-    previous_block_hash: Option<GetBlockHashResponse>,
+    previous_block_hash: Option<block::Hash>,
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
+    #[serde(with = "opthex")]
     #[getter(copy)]
-    next_block_hash: Option<GetBlockHashResponse>,
+    next_block_hash: Option<block::Hash>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -3411,8 +3414,9 @@ pub use self::GetBlockHeaderResponse as GetBlockHeader;
 /// See the notes for the [`RpcServer::get_block_header`] method.
 pub struct BlockHeaderObject {
     /// The hash of the requested block.
+    #[serde(with = "hex")]
     #[getter(copy)]
-    hash: GetBlockHashResponse,
+    hash: block::Hash,
 
     /// The number of confirmations of this block in the best chain,
     /// or -1 if it is not in the best chain.
@@ -3470,13 +3474,15 @@ pub struct BlockHeaderObject {
 
     /// The previous block hash of the requested block header.
     #[serde(rename = "previousblockhash")]
+    #[serde(with = "hex")]
     #[getter(copy)]
-    previous_block_hash: GetBlockHashResponse,
+    previous_block_hash: block::Hash,
 
     /// The next block hash after the requested block header.
     #[serde(rename = "nextblockhash", skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    next_block_hash: Option<GetBlockHashResponse>,
+    #[serde(with = "opthex")]
+    next_block_hash: Option<block::Hash>,
 }
 
 #[deprecated(note = "Use `BlockHeaderObject` instead")]
@@ -3493,7 +3499,7 @@ impl Default for BlockHeaderObject {
         let difficulty: ExpandedDifficulty = zebra_chain::work::difficulty::U256::one().into();
 
         BlockHeaderObject {
-            hash: GetBlockHashResponse::default(),
+            hash: block::Hash([0; 32]),
             confirmations: 0,
             height: Height::MIN,
             version: 4,
@@ -3519,10 +3525,25 @@ impl Default for BlockHeaderObject {
 /// Also see the notes for the [`RpcServer::get_best_block_hash`] and `get_block_hash` methods.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 #[serde(transparent)]
-pub struct GetBlockHashResponse(#[serde(with = "hex")] pub block::Hash);
+pub struct GetBlockHashResponse(#[serde(with = "hex")] pub(crate) block::Hash);
+
+impl GetBlockHashResponse {
+    /// Constructs a new [`GetBlockHashResponse`] from a block hash.
+    pub fn new(hash: block::Hash) -> Self {
+        GetBlockHashResponse(hash)
+    }
+
+    /// Returns the contents of [`GetBlockHashResponse`].
+    pub fn hash(&self) -> block::Hash {
+        self.0
+    }
+}
 
 #[deprecated(note = "Use `GetBlockHashResponse` instead")]
 pub use self::GetBlockHashResponse as GetBlockHash;
+
+/// A block hash used by this crate that encodes as hex by default.
+pub type Hash = GetBlockHashResponse;
 
 /// Response to a `getbestblockheightandhash` RPC request.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]

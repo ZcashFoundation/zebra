@@ -35,7 +35,7 @@ use zebra_rpc::methods::{
     GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockChainInfoResponse,
     GetBlockHashResponse, GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
     GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetInfoResponse,
-    GetMiningInfoResponse, GetPeerInfoResponse, GetRawTransactionResponse,
+    GetMiningInfoResponse, GetPeerInfoResponse, GetRawTransactionResponse, Hash,
     SendRawTransactionResponse, SubmitBlockError, SubmitBlockResponse, Utxo,
     ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
 };
@@ -202,8 +202,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         panic!("Expected GetBlockResponse::Block");
     };
     let height = block.height();
-    // TODO: don't use GetBlockHash?
-    let hash = block.hash().0 .0;
+    let hash = block.hash().0;
     let confirmations = block.confirmations();
     let size = block.size();
     let version = block.version();
@@ -229,7 +228,6 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: should we expose the u32 value?
     let bits = block.bits().map(|d| d.bytes_in_display_order());
     let difficulty = block.difficulty();
-    // TODO: rename GetBlockTrees?
     let trees = block.trees();
     let trees_sapling = trees.sapling();
     let trees_orchard = trees.orchard();
@@ -239,7 +237,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let next_block_hash = block.next_block_hash();
 
     let new_obj = GetBlockResponse::Object(Box::new(BlockObject::new(
-        GetBlockHashResponse(zebra_chain::block::Hash(hash)),
+        zebra_chain::block::Hash(hash),
         confirmations,
         size,
         height,
@@ -839,10 +837,9 @@ fn test_get_block_hash() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#""0000000001695b61dd5c82ae33a326126d6153d1641a3a1759d3f687ea377148""#;
     let obj: GetBlockHashResponse = serde_json::from_str(json)?;
 
-    // TODO: use getter and new()?
-    let hash = obj.0;
+    let hash = obj.hash();
 
-    let new_obj = GetBlockHashResponse(hash);
+    let new_obj = GetBlockHashResponse::new(hash);
 
     assert_eq!(obj, new_obj);
 
@@ -877,8 +874,7 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
 
     let capabilities = template.capabilities().clone();
     let version = template.version();
-    // TODO: use just hash
-    let previous_block_hash = template.previous_block_hash().0 .0;
+    let previous_block_hash = template.previous_block_hash().0;
     let block_commitments_hash: [u8; 32] = template.block_commitments_hash().into();
     let light_client_root_hash: [u8; 32] = template.light_client_root_hash().into();
     let final_sapling_root_hash: [u8; 32] = template.final_sapling_root_hash().into();
@@ -936,7 +932,7 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
     let new_obj = GetBlockTemplateResponse::TemplateMode(Box::new(TemplateResponse::new(
         capabilities,
         version,
-        GetBlockHashResponse(previous_block_hash.into()),
+        previous_block_hash.into(),
         block_commitments_hash.into(),
         light_client_root_hash.into(),
         final_sapling_root_hash.into(),
@@ -1182,10 +1178,10 @@ fn test_generate() -> Result<(), Box<dyn std::error::Error>> {
   "0000000001695b61dd5c82ae33a326126d6153d1641a3a1759d3f687ea377149"
 ]
 "#;
-    let obj: Vec<GetBlockHashResponse> = serde_json::from_str(json)?;
-    let hash0 = obj[0].0;
-    let hash1 = obj[1].0;
-    let new_obj = vec![GetBlockHashResponse(hash0), GetBlockHashResponse(hash1)];
+    let obj: Vec<Hash> = serde_json::from_str(json)?;
+    let hash0 = obj[0].hash();
+    let hash1 = obj[1].hash();
+    let new_obj = vec![Hash::new(hash0), Hash::new(hash1)];
     assert_eq!(obj, new_obj);
 
     Ok(())

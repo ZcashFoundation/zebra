@@ -12,12 +12,9 @@ use zebra_chain::{
 };
 use zebra_node_services::BoxError;
 
-use crate::methods::{
-    types::{
-        default_roots::DefaultRoots,
-        get_block_template::{Response, TemplateResponse},
-    },
-    GetBlockHashResponse,
+use crate::methods::types::{
+    default_roots::DefaultRoots,
+    get_block_template::{Response, TemplateResponse},
 };
 
 /// Response to a `getblocktemplate` RPC request in proposal mode.
@@ -178,7 +175,7 @@ pub fn proposal_block_from_template(
     let TemplateResponse {
         version,
         height,
-        previous_block_hash: GetBlockHashResponse(previous_block_hash),
+        previous_block_hash,
         default_roots:
             DefaultRoots {
                 merkle_root,

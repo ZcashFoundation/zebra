@@ -255,7 +255,7 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Pass the correct arguments, even if Zebra currently ignores them.
-    let parameters = get_block_template::GetBlockTemplateRequest::new(
+    let mut parameters = get_block_template::GetBlockTemplateRequest::new(
         Template,
         None,
         vec![LongPoll, CoinbaseTxn],
@@ -295,7 +295,7 @@ where
         );
 
         // Tell the next get_block_template() call to wait until the template has changed.
-        let parameters = get_block_template::GetBlockTemplateRequest::new(
+        parameters = get_block_template::GetBlockTemplateRequest::new(
             Template,
             None,
             vec![LongPoll, CoinbaseTxn],
