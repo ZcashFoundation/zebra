@@ -28,9 +28,11 @@ use crate::service::non_finalized_state::Chain;
 
 pub(crate) mod anchors;
 pub(crate) mod difficulty;
-pub(crate) mod issuance;
 pub(crate) mod nullifier;
 pub(crate) mod utxo;
+
+#[cfg(feature = "tx-v6")]
+pub(crate) mod issuance;
 
 pub use utxo::transparent_coinbase_spend;
 
