@@ -8,7 +8,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
 use syn::LitStr;
 
-use zebra_rpc::methods::{trees::GetTreestateResponse, *};
+use zebra_rpc::methods::*;
 
 use types::{get_mining_info, submit_block, subsidy, validate_address, z_validate_address};
 

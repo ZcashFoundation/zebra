@@ -48,25 +48,21 @@ use zebra_chain::{
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
-    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
-    subtree::NoteCommitmentSubtreeIndex,
+    serialization::ZcashDeserializeInto,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
     work::{
-        difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
+        difficulty::{ParameterDifficulty, U256},
         equihash::Solution,
     },
 };
 use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
 use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{
-    HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
-};
+use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
 
 use crate::{
     config,
-    methods::trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData},
     queue::Queue,
     server::{
         self,
@@ -77,30 +73,53 @@ use crate::{
 use types::{
     get_block_template::{
         self, constants::MEMPOOL_LONG_POLL_INTERVAL, proposal::proposal_block_from_template,
-        GetBlockTemplateHandler, TemplateResponse, ZCASHD_FUNDING_STREAM_ORDER,
+        GetBlockTemplateHandler, ZCASHD_FUNDING_STREAM_ORDER,
     },
     get_blockchain_info, get_mining_info,
-    get_raw_mempool::{self, GetRawMempoolResponse},
+    get_raw_mempool::{self},
     long_poll::LongPollInput,
-    peer_info::PeerInfo,
-    submit_block,
-    subsidy::GetBlockSubsidyResponse,
-    transaction::TransactionObject,
-    unified_address, validate_address, z_validate_address,
+    submit_block, unified_address, validate_address, z_validate_address,
 };
 
 pub mod hex_data;
 pub mod trees;
 pub mod types;
 
-pub use types::get_block_template::Response as GetBlockTemplateResponse;
-pub use types::get_mining_info::Response as GetMiningInfoResponse;
-pub use types::peer_info::GetPeerInfoResponse;
-pub use types::submit_block::ErrorResponse as SubmitBlockError;
-pub use types::submit_block::Response as SubmitBlockResponse;
-pub use types::unified_address::Response as ZListUnifiedReceiversResponse;
-pub use types::validate_address::Response as ValidateAddressResponse;
-pub use types::z_validate_address::Response as ZValidateAddressResponse;
+// Reexport types to build the API. We want to flatten the module substructure
+// which is split mostly to keep file sizes small. Additionally, we re-export
+// types from other crates which are exposed in the API.
+
+pub use trees::{
+    Commitments, GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData, Treestate,
+};
+pub use types::{
+    default_roots::DefaultRoots,
+    get_block_template::{
+        GetBlockTemplateRequest, GetBlockTemplateRequestMode, Response as GetBlockTemplateResponse,
+        TemplateResponse, TimeSource,
+    },
+    get_mining_info::Response as GetMiningInfoResponse,
+    get_raw_mempool::GetRawMempoolResponse,
+    get_raw_mempool::MempoolObject,
+    peer_info::{GetPeerInfoResponse, PeerInfo},
+    submit_block::{ErrorResponse as SubmitBlockError, Response as SubmitBlockResponse},
+    subsidy::{BlockSubsidy, FundingStream, GetBlockSubsidyResponse},
+    transaction::{
+        Input, Orchard, OrchardAction, Output, ScriptPubKey, ScriptSig, ShieldedOutput,
+        ShieldedSpend, TransactionObject, TransactionTemplate,
+    },
+    unified_address::Response as ZListUnifiedReceiversResponse,
+    validate_address::Response as ValidateAddressResponse,
+    z_validate_address::Response as ZValidateAddressResponse,
+};
+pub use zebra_chain::{
+    sapling::NotSmallOrderValueCommitment,
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
+    transparent::Script,
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+};
+pub use zebra_state::OutputIndex;
 
 #[cfg(test)]
 mod tests;
@@ -3512,8 +3531,8 @@ impl Default for BlockHeaderObject {
             solution: Solution::for_proposal(),
             bits: difficulty.to_compact(),
             difficulty: 1.0,
-            previous_block_hash: Default::default(),
-            next_block_hash: Default::default(),
+            previous_block_hash: block::Hash([0; 32]),
+            next_block_hash: Some(block::Hash([0; 32])),
         }
     }
 }

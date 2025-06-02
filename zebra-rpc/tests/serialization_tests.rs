@@ -13,33 +13,22 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_chain::{
-    sapling::NotSmallOrderValueCommitment,
-    serialization::{ZcashDeserialize, ZcashSerialize},
-    subtree::NoteCommitmentSubtreeIndex,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
-};
 use zebra_rpc::methods::{
-    trees::{
-        Commitments, GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData, Treestate,
-    },
-    types::{
-        default_roots::DefaultRoots,
-        get_block_template::{self, TemplateResponse},
-        get_raw_mempool::GetRawMempoolResponse,
-        peer_info::PeerInfo,
-        subsidy::{FundingStream, GetBlockSubsidyResponse},
-        transaction::{ScriptPubKey, ScriptSig, TransactionObject, TransactionTemplate},
-    },
-    BlockHeaderObject, BlockObject, GetAddressBalanceRequest, GetAddressBalanceResponse,
+    BlockHeaderObject, BlockObject, Commitments, CompactDifficulty, DefaultRoots,
+    ExpandedDifficulty, FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse,
     GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockChainInfoResponse,
     GetBlockHashResponse, GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
+    GetBlockSubsidyResponse, GetBlockTemplateRequest, GetBlockTemplateRequestMode,
     GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetInfoResponse,
-    GetMiningInfoResponse, GetPeerInfoResponse, GetRawTransactionResponse, Hash,
-    SendRawTransactionResponse, SubmitBlockError, SubmitBlockResponse, Utxo,
+    GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
+    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject,
+    NotSmallOrderValueCommitment, NoteCommitmentSubtreeIndex, Orchard, OrchardAction, Output,
+    OutputIndex, PeerInfo, Script, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
+    ShieldedOutput, ShieldedSpend, SubmitBlockError, SubmitBlockResponse, SubtreeRpcData,
+    TemplateResponse, TransactionObject, TransactionTemplate, Treestate, Utxo,
     ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
+    ZcashDeserialize, ZcashSerialize,
 };
-use zebra_state::OutputIndex;
 
 #[test]
 fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
@@ -497,7 +486,7 @@ fn test_get_raw_mempool_true() -> Result<(), Box<dyn std::error::Error>> {
 
             (
                 k.clone(),
-                zebra_rpc::methods::types::get_raw_mempool::MempoolObject::new(
+                MempoolObject::new(
                     size,
                     fee.try_into().expect("must work since it was just read"),
                     modified_fee
@@ -614,13 +603,11 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         .inputs()
         .iter()
         .map(|input| match input {
-            zebra_rpc::methods::types::transaction::Input::Coinbase { coinbase, sequence } => {
-                zebra_rpc::methods::types::transaction::Input::Coinbase {
-                    coinbase: coinbase.clone(),
-                    sequence: *sequence,
-                }
-            }
-            zebra_rpc::methods::types::transaction::Input::NonCoinbase {
+            Input::Coinbase { coinbase, sequence } => Input::Coinbase {
+                coinbase: coinbase.clone(),
+                sequence: *sequence,
+            },
+            Input::NonCoinbase {
                 txid,
                 vout,
                 script_sig,
@@ -631,7 +618,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 let asm = script_sig.asm().clone();
                 let hex = script_sig.hex().as_raw_bytes().to_vec();
-                zebra_rpc::methods::types::transaction::Input::NonCoinbase {
+                Input::NonCoinbase {
                     txid: txid.clone(),
                     vout: *vout,
                     script_sig: ScriptSig::new(asm, zebra_chain::transparent::Script::new(&hex)),
@@ -656,17 +643,11 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let req_sigs = script_pubkey.req_sigs();
             let r#type = script_pubkey.r#type().clone();
             let addresses = script_pubkey.addresses().clone();
-            zebra_rpc::methods::types::transaction::Output::new(
+            Output::new(
                 value,
                 value_zat,
                 n,
-                ScriptPubKey::new(
-                    asm,
-                    zebra_chain::transparent::Script::new(&hex),
-                    req_sigs,
-                    r#type,
-                    addresses,
-                ),
+                ScriptPubKey::new(asm, Script::new(&hex), req_sigs, r#type, addresses),
             )
         })
         .collect::<Vec<_>>();
@@ -681,7 +662,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let rk = spend.rk();
             let proof = spend.proof();
             let spend_auth_sig = spend.spend_auth_sig();
-            zebra_rpc::methods::types::transaction::ShieldedSpend::new(
+            ShieldedSpend::new(
                 NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
                     .expect("was just serialized"),
                 anchor,
@@ -702,7 +683,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let enc_ciphertext = output.enc_ciphertext();
             let out_ciphertext = output.out_ciphertext();
             let proof = output.proof();
-            zebra_rpc::methods::types::transaction::ShieldedOutput::new(
+            ShieldedOutput::new(
                 NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
                     .expect("was just serialized"),
                 cm_u,
@@ -726,7 +707,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
                 let enc_ciphertext = action.enc_ciphertext();
                 let spend_auth_sig = action.spend_auth_sig();
                 let out_ciphertext = action.out_ciphertext();
-                zebra_rpc::methods::types::transaction::OrchardAction::new(
+                OrchardAction::new(
                     cv,
                     nullifier,
                     rk,
@@ -740,11 +721,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             .collect();
         let value_balance = bundle.value_balance();
         let value_balance_zat = bundle.value_balance_zat();
-        zebra_rpc::methods::types::transaction::Orchard::new(
-            actions,
-            value_balance,
-            value_balance_zat,
-        )
+        Orchard::new(actions, value_balance, value_balance_zat)
     });
     let value_balance = tx.value_balance();
     let value_balance_zat = tx.value_balance_zat();
@@ -850,8 +827,8 @@ fn test_get_block_hash() -> Result<(), Box<dyn std::error::Error>> {
 fn test_get_block_template_request() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#"{"mode":"template"}"#;
 
-    let new_obj = get_block_template::parameters::GetBlockTemplateRequest::new(
-        get_block_template::parameters::GetBlockTemplateRequestMode::Template,
+    let new_obj = GetBlockTemplateRequest::new(
+        GetBlockTemplateRequestMode::Template,
         None,
         vec![],
         None,

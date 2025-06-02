@@ -4,7 +4,7 @@
 
 use structopt::StructOpt;
 
-use zebra_rpc::methods::types::get_block_template::TimeSource;
+use zebra_rpc::methods::TimeSource;
 
 /// block-template-to-proposal arguments
 #[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
