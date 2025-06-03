@@ -3,7 +3,7 @@
 
 use std::{
     fmt,
-    net::{Ipv4Addr, SocketAddr},
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr},
     ops::{Deref, DerefMut},
     str::FromStr,
 };
@@ -75,5 +75,11 @@ impl PeerSocketAddr {
     /// be printed and logged.
     pub fn remove_socket_addr_privacy(&self) -> SocketAddr {
         **self
+    }
+
+    /// Returns true if the inner [`SocketAddr`]'s IP address is `127.0.0.1` or `::1` the localhost IP.
+    pub fn is_localhost(&self) -> bool {
+        let ip = self.0.ip();
+        ip == Ipv4Addr::LOCALHOST || ip == Ipv6Addr::LOCALHOST
     }
 }
