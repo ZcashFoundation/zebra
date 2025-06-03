@@ -149,10 +149,22 @@ tracing-subscriber = "0.3.19"
 tracing-test = "0.2.4"
 uint = "0.10"
 vergen-git2 = { version = "1.0", default-features = false }
-wagyu-zcash-parameters = "0.2"
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.2"
+
+[patch.crates-io]
+sapling-crypto = { path = "../sapling-crypto" }
+
+zcash_primitives = { path = "../librustzcash/zcash_primitives" }
+zcash_address = { path = "../librustzcash/components/zcash_address" }
+zcash_client_backend = { path = "../librustzcash/zcash_client_backend" }
+zcash_encoding = { path = "../librustzcash/components/zcash_encoding" }
+zcash_history = { path = "../librustzcash/zcash_history" }
+zcash_keys = { path = "../librustzcash/zcash_keys" }
+zcash_proofs = { path = "../librustzcash/zcash_proofs" }
+zcash_transparent = { path = "../librustzcash/zcash_transparent" }
+zcash_protocol = { path = "../librustzcash/components/zcash_protocol" }
 
 [workspace.metadata.release]
 
@@ -222,4 +234,3 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
-
