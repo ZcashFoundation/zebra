@@ -56,7 +56,7 @@ use zebra_consensus::{
     block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
     ParameterCheckpoint, RouterError,
 };
-use zebra_network::address_book_peers::AddressBookPeers;
+use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
@@ -583,6 +583,10 @@ pub trait Rpc {
     /// method: post
     /// tags: generating
     async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>>;
+
+    #[method(name = "addnode")]
+    /// Adds a peer address to the address book, if it is not already present.
+    async fn add_node(&self, addr: PeerSocketAddr) -> Result<()>;
 }
 
 /// RPC method implementations.
@@ -2662,6 +2666,15 @@ where
         }
 
         Ok(block_hashes)
+    }
+
+    async fn add_node(&self, addr: PeerSocketAddr) -> Result<()> {
+        let mut address_book = self.address_book.clone();
+        if address_book.add_peer(addr) {
+            Ok(())
+        } else {
+            Err("peer address was already present in the address book").map_error(0)
+        }
     }
 }
 
