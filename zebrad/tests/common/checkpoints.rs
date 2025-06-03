@@ -101,7 +101,7 @@ pub async fn run(network: Network) -> Result<()> {
         //
         // TODO: if the upgrade *is* slower than the RPC server spawn, we do nothing
         // This might not work in future database upgrades, but works for the
-        // current one (26.1.0) where this `if` was introduced.
+        // current one (27.0.0) where this `if` was introduced.
         if !DATABASE_FORMAT_UPGRADE_IS_SLOWER_THAN_RPC_SPAWN {
             wait_for_state_version_upgrade(
                 &mut zebrad,

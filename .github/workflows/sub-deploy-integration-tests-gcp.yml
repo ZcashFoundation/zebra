@@ -128,7 +128,7 @@ jobs:
     runs-on: zfnd-runners
     needs: [ get-disk-name ]
     if: ${{ !cancelled() && !failure() }}
-    timeout-minutes: ${{ inputs.is_long_test && 7200 || 300 }}
+    timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
       cached_disk_name: ${{ needs.get-disk-name.outputs.cached_disk_name }}
       state_version: ${{ needs.get-disk-name.outputs.state_version }}

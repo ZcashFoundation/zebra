@@ -55,7 +55,7 @@ const DATABASE_FORMAT_VERSION: u64 = 27;
 /// - adding new column families,
 /// - changing the format of a column family in a compatible way, or
 /// - breaking changes with compatibility code in all supported Zebra versions.
-const DATABASE_FORMAT_MINOR_VERSION: u64 = 1;
+const DATABASE_FORMAT_MINOR_VERSION: u64 = 0;
 
 /// The database format patch version, incremented each time the on-disk database format has a
 /// significant format compatibility fix.

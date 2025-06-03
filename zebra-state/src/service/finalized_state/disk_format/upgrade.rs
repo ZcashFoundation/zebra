@@ -16,14 +16,12 @@ use zebra_chain::{
         task::{CheckForPanics, WaitForPanics},
         CodeTimer,
     },
-    parameters::Network,
 };
 
 use DbFormatChange::*;
 
 use crate::service::finalized_state::ZebraDb;
 
-pub(crate) mod add_block_info;
 pub(crate) mod add_subtrees;
 pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
@@ -91,7 +89,6 @@ pub trait DiskFormatUpgrade {
 
 fn format_upgrades(
     min_version: Option<Version>,
-    network: Network,
 ) -> impl DoubleEndedIterator<Item = Box<dyn DiskFormatUpgrade>> {
     let min_version = move || min_version.clone().unwrap_or(Version::new(0, 0, 0));
 
@@ -493,7 +490,12 @@ impl DbFormatChange {
         //   (unless a future upgrade breaks these format checks)
         // - re-opening the current version should be valid, regardless of whether the upgrade
         //   or new block code created the format (or any combination).
-        Self::format_validity_checks_detailed(db, cancel_receiver)?.unwrap();
+        Self::format_validity_checks_detailed(db, cancel_receiver)?.unwrap_or_else(|_| {
+            panic!(
+                "unexpected invalid database format: delete and re-sync the database at '{:?}'",
+                db.path()
+            )
+        });
 
         let inital_disk_version = self
             .initial_disk_version()
@@ -557,7 +559,7 @@ impl DbFormatChange {
         };
 
         // Apply or validate format upgrades
-        for upgrade in format_upgrades(Some(older_disk_version.clone()), db.network()) {
+        for upgrade in format_upgrades(Some(older_disk_version.clone())) {
             if upgrade.needs_migration() {
                 let timer = CodeTimer::start();
 
@@ -627,7 +629,7 @@ impl DbFormatChange {
         // Do the quick checks first, so we don't have to do this in every detailed check.
         results.push(Self::format_validity_checks_quick(db));
 
-        for upgrade in format_upgrades(None, db.network()) {
+        for upgrade in format_upgrades(None) {
             results.push(upgrade.validate(db, cancel_receiver)?);
         }
 
@@ -848,8 +850,7 @@ impl Drop for DbFormatChangeThreadHandle {
 #[test]
 fn format_upgrades_are_in_version_order() {
     let mut last_version = Version::new(0, 0, 0);
-    // The particular network shouldn't matter for the test; use Mainnet
-    for upgrade in format_upgrades(None, Network::Mainnet) {
+    for upgrade in format_upgrades(None) {
         assert!(upgrade.version() > last_version);
         last_version = upgrade.version();
     }
