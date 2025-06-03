@@ -71,6 +71,24 @@ pub struct ExtractedNoteCommitment {
     bytes: [u8; 32],
 }
 
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "sapling_crypto::note::ExtractedNoteCommitment")]
+pub struct SaplingExtractedNoteCommitment {
+    #[serde(getter = "temp_sapling_convert_fn")]
+    bytes: [u8; 32],
+}
+
+impl From<SaplingExtractedNoteCommitment> for sapling_crypto::note::ExtractedNoteCommitment {
+    fn from(local: SaplingExtractedNoteCommitment) -> Self {
+        sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&local.bytes).unwrap()
+    }
+}
+
+// TODO: Replace this with something reasonable like a method.
+fn temp_sapling_convert_fn(cm_u: &sapling_crypto::note::ExtractedNoteCommitment) -> [u8; 32] {
+    cm_u.to_bytes()
+}
+
 // TODO: Replace this with something reasonable like a method.
 fn temp_convert_fn(cm_x: &orchard::note::ExtractedNoteCommitment) -> [u8; 32] {
     cm_x.to_bytes()
