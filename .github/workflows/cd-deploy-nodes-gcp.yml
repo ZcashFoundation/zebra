@@ -160,6 +160,7 @@ jobs:
   build:
     name: Build CD Docker
     uses: ./.github/workflows/sub-build-docker-image.yml
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
