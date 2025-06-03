@@ -15,7 +15,8 @@ use tracing::Span;
 use zebra_chain::{common::default_cache_dir, parameters::Network};
 
 use crate::{
-    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, RESTORABLE_DB_VERSIONS, STATE_DATABASE_KIND},
+    constants::{DATABASE_FORMAT_VERSION_FILE_NAME, STATE_DATABASE_KIND},
+    service::finalized_state::restorable_db_versions,
     state_database_format_version_in_code, BoxError,
 };
 
@@ -314,7 +315,7 @@ fn check_and_delete_database(
     }
 
     // Don't delete databases that can be reused.
-    if RESTORABLE_DB_VERSIONS
+    if restorable_db_versions()
         .iter()
         .map(|v| v - 1)
         .any(|v| v == dir_major_version)
@@ -398,7 +399,7 @@ pub fn state_database_format_version_on_disk(
 ///
 /// If there is no existing on-disk database, returns `Ok(None)`.
 ///
-/// This is the format of the data on disk, the minor and patch versions
+/// This is the format of the data on disk, the version
 /// implemented by the running Zebra code can be different.
 pub fn database_format_version_on_disk(
     config: &Config,
@@ -431,7 +432,16 @@ pub(crate) fn database_format_version_at_path(
 
     // The database has a version file on disk
     if let Some(version) = disk_version_file {
-        return Ok(Some(format!("{major_version}.{version}").parse()?));
+        return Ok(Some(
+            version
+                .parse()
+                // Try to parse the previous format of the disk version file if it cannot be parsed as a `Version` directly.
+                .or_else(|err| {
+                    format!("{major_version}.{version}")
+                        .parse()
+                        .map_err(|err2| format!("failed to parse format version: {err}, {err2}"))
+                })?,
+        ));
     }
 
     // There's no version file on disk, so we need to guess the version
@@ -472,13 +482,19 @@ pub(crate) mod hidden {
         changed_version: &Version,
         network: &Network,
     ) -> Result<(), BoxError> {
-        write_database_format_version_to_disk(config, STATE_DATABASE_KIND, changed_version, network)
+        write_database_format_version_to_disk(
+            config,
+            STATE_DATABASE_KIND,
+            state_database_format_version_in_code().major,
+            changed_version,
+            network,
+        )
     }
 
     /// Writes `changed_version` to the on-disk database after the format is changed.
     /// (Or a new database is created.)
     ///
-    /// The database path is based on its kind, `changed_version.major`, and network.
+    /// The database path is based on its kind, `major_version_in_code`, and network.
     ///
     /// # Correctness
     ///
@@ -495,20 +511,16 @@ pub(crate) mod hidden {
     pub fn write_database_format_version_to_disk(
         config: &Config,
         db_kind: impl AsRef<str>,
+        major_version_in_code: u64,
         changed_version: &Version,
         network: &Network,
     ) -> Result<(), BoxError> {
-        let version_path = config.version_file_path(db_kind, changed_version.major, network);
-
-        let mut version = format!("{}.{}", changed_version.minor, changed_version.patch);
-
-        if !changed_version.build.is_empty() {
-            version.push_str(&format!("+{}", changed_version.build));
-        }
-
         // Write the version file atomically so the cache is not corrupted if Zebra shuts down or
         // crashes.
-        atomic_write(version_path, version.as_bytes())??;
+        atomic_write(
+            config.version_file_path(db_kind, major_version_in_code, network),
+            changed_version.to_string().as_bytes(),
+        )??;
 
         Ok(())
     }

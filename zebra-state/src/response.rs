@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
+    block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -164,6 +165,10 @@ pub enum ReadResponse {
         value_balance: ValueBalance<NonNegative>,
     },
 
+    /// Response to [`ReadRequest::BlockInfo`] with
+    /// the block info after the specified block.
+    BlockInfo(Option<BlockInfo>),
+
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
 
@@ -238,8 +243,14 @@ pub enum ReadResponse {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
-    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
-    AddressBalance(Amount<NonNegative>),
+    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
+    /// and the total received funds, including change.
+    AddressBalance {
+        /// The total balance of the addresses.
+        balance: Amount<NonNegative>,
+        /// The total received funds in zatoshis, including change.
+        received: u64,
+    },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]
     /// with the obtained transaction ids, in the order they appear in blocks.
@@ -354,12 +365,13 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
+            | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)
             | ReadResponse::OrchardSubtrees(_)
-            | ReadResponse::AddressBalance(_)
+            | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_) => {
