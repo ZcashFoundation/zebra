@@ -23,7 +23,7 @@ resolver = "2"
 
 [workspace.dependencies]
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
-orchard = {path = "../orchard"}
+orchard = "0.11.0"
 sapling-crypto = "0.5.0"
 zcash_address = "0.7.0"
 zcash_client_backend = "0.18"
@@ -153,6 +153,9 @@ x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.2.0"
 
+[patch.crates-io]
+sapling-crypto = { git = "https://github.com/zcash/sapling-crypto.git", branch = "pub-note-commitment-api" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
@@ -221,4 +224,6 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+
 

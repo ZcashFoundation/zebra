@@ -27,8 +27,8 @@ pub struct Output {
     /// A value commitment to the value of the input note.
     pub cv: commitment::NotSmallOrderValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::Fq")]
-    pub cm_u: jubjub::Fq,
+    #[serde(with = "serde_helpers::SaplingExtractedNoteCommitment")]
+    pub cm_u: sapling_crypto::note::ExtractedNoteCommitment,
     /// An encoding of an ephemeral Jubjub public key.
     pub ephemeral_key: keys::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.

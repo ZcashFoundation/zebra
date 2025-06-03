@@ -2976,39 +2976,6 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.11.0"
-dependencies = [
- "aes",
- "bitvec",
- "blake2b_simd",
- "core2",
- "ff",
- "fpe",
- "getset",
- "group",
- "halo2_gadgets",
- "halo2_poseidon",
- "halo2_proofs",
- "hex",
- "incrementalmerkletree",
- "lazy_static",
- "memuse",
- "nonempty",
- "pasta_curves",
- "rand 0.8.5",
- "reddsa",
- "serde",
- "sinsemilla",
- "subtle",
- "tracing",
- "visibility",
- "zcash_note_encryption",
- "zcash_spec",
- "zip32",
-]
-
-[[package]]
-name = "orchard"
-version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b1ef66fcf99348242a20d582d7434da381a867df8dc155b3a980eca767c56137"
 dependencies = [
@@ -4124,8 +4091,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d3c081c83f1dc87403d9d71a06f52301c0aa9ea4c17da2a3435bbf493ffba4"
+source = "git+https://github.com/zcash/sapling-crypto.git?branch=pub-note-commitment-api#1d0256917e37349c55851a35f196deda9417f058"
 dependencies = [
  "aes",
  "bellman",
@@ -6219,7 +6185,7 @@ dependencies = [
  "jubjub",
  "memuse",
  "nonempty",
- "orchard 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "orchard",
  "rand 0.8.5",
  "rand_core 0.6.4",
  "redjubjub",
@@ -6343,7 +6309,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "num-integer",
- "orchard 0.11.0",
+ "orchard",
  "primitive-types",
  "proptest",
  "proptest-derive",
@@ -6401,7 +6367,7 @@ dependencies = [
  "metrics",
  "num-integer",
  "once_cell",
- "orchard 0.11.0",
+ "orchard",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
