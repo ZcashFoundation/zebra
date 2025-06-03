@@ -3,9 +3,9 @@
 # This script finds a cached Google Cloud Compute image based on specific criteria.
 #
 # If there are multiple disks:
-# - if `PREFER_MAIN_CACHED_STATE` is "true", then select an image from the `main` branch, else
-# - try to find a cached disk image from the current branch (or PR), else
-# - try to find an image from any branch.
+# - try to find a cached disk image from the current branch (or PR),
+# - if no image was found, try to find an image from the `main` branch,
+# - if no image was found, try to find an image from any branch.
 #
 # Within each of these categories:
 # - prefer newer images to older images
@@ -47,12 +47,10 @@ if [[ -n "${DISK_PREFIX}" && -n "${DISK_SUFFIX}" ]]; then
     echo "Finding a ${DISK_PREFIX}-${DISK_SUFFIX} disk image for ${NETWORK}..."
     CACHED_DISK_NAME=""
 
-    # Try to find an image based on the `main` branch if that branch is preferred.
-    if [[ "${PREFER_MAIN_CACHED_STATE}" == "true" ]]; then
-        CACHED_DISK_NAME=$(find_cached_disk_image "main-[0-9a-f]+" "main branch")
-    fi
-    # If no image was found, try to find one from the current branch (or PR).
-    CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image ".+-${GITHUB_REF}" "branch")}
+    # Try to find one from the current branch (or PR).
+    CACHED_DISK_NAME=$(find_cached_disk_image ".+-${GITHUB_REF}" "branch")
+    # If no image was found, try to find an image based on the `main` branch.
+    CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image "main-[0-9a-f]+" "main branch")}
     # If we still have no image, try to find one from any branch.
     CACHED_DISK_NAME=${CACHED_DISK_NAME:-$(find_cached_disk_image ".+-[0-9a-f]+" "any branch")}
 
