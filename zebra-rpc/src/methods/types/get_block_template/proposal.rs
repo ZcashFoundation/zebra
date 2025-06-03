@@ -164,7 +164,7 @@ impl FromStr for TimeSource {
     }
 }
 
-/// Returns a block proposal generated from a [`GetBlockTemplate`] RPC response.
+/// Returns a block proposal generated from a [`TemplateResponse`] RPC response.
 ///
 /// If `time_source` is not supplied, uses the current time from the template.
 pub fn proposal_block_from_template(

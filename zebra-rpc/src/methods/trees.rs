@@ -91,7 +91,7 @@ pub struct GetTreestateResponse {
 pub use GetTreestateResponse as GetTreeState;
 
 impl GetTreestateResponse {
-    /// Constructs [`GetTreestate`] from its constituent parts.
+    /// Constructs [`Treestate`] from its constituent parts.
     pub fn from_parts(
         hash: Hash,
         height: Height,
