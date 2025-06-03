@@ -1741,20 +1741,20 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let balance = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
+                        let (balance, received) = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
                                 read::transparent_balance(
                                     non_finalized_state.best_chain().cloned(),
                                     &state.db,
                                     addresses,
                                 )
-                            },
-                        )?;
+                            })?;
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
 
-                        Ok(ReadResponse::AddressBalance(balance))
+                        Ok(ReadResponse::AddressBalance { balance, received })
                     })
                 })
                 .wait_for_panics()

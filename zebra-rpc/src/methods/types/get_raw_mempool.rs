@@ -1,12 +1,10 @@
 //! Types used in `getrawmempool` RPC method.
 
-use std::collections::HashMap;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use hex::ToHex as _;
 
-use zebra_chain::transaction::VerifiedUnminedTx;
-use zebra_chain::{amount::NonNegative, block::Height};
+use zebra_chain::{amount::NonNegative, block::Height, transaction::VerifiedUnminedTx};
 use zebra_node_services::mempool::TransactionDependencies;
 
 use super::zec::Zec;
@@ -14,7 +12,7 @@ use super::zec::Zec;
 /// Response to a `getrawmempool` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_mempool` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum GetRawMempool {
     /// The transaction IDs, as hex strings (verbose=0)
@@ -26,7 +24,7 @@ pub enum GetRawMempool {
 
 /// A mempool transaction details object as returned by `getrawmempool` in
 /// verbose mode.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MempoolObject {
     /// Transaction size in bytes.
     pub(crate) size: u64,

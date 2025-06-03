@@ -4,6 +4,7 @@ use std::{borrow::Borrow, io};
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use chrono::{TimeZone, Utc};
+use hex::{FromHex, FromHexError};
 
 use crate::{
     block::{header::ZCASH_BLOCK_VERSION, merkle, Block, CountedHeader, Hash, Header},
@@ -63,7 +64,7 @@ fn check_version(version: u32) -> Result<(), &'static str> {
 impl ZcashSerialize for Header {
     #[allow(clippy::unwrap_in_result)]
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        check_version(self.version).map_err(|msg| io::Error::new(io::ErrorKind::Other, msg))?;
+        check_version(self.version).map_err(io::Error::other)?;
 
         writer.write_u32::<LittleEndian>(self.version)?;
         self.previous_block_hash.zcash_serialize(&mut writer)?;
@@ -192,5 +193,14 @@ impl AsRef<[u8]> for SerializedBlock {
 impl From<Vec<u8>> for SerializedBlock {
     fn from(bytes: Vec<u8>) -> Self {
         Self { bytes }
+    }
+}
+
+impl FromHex for SerializedBlock {
+    type Error = FromHexError;
+
+    fn from_hex<T: AsRef<[u8]>>(hex: T) -> Result<Self, Self::Error> {
+        let bytes = Vec::from_hex(hex)?;
+        Ok(SerializedBlock { bytes })
     }
 }

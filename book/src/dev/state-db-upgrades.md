@@ -305,7 +305,7 @@ We use the following rocksdb column families:
 | `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Create  |
 | `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Create  |
 | *Transparent*                      |                        |                               |         |
-| `balance_by_transparent_addr`      | `transparent::Address` | `Amount \|\| AddressLocation` | Update  |
+| `balance_by_transparent_addr`      | `transparent::Address` | `AddressBalanceLocation`      | Update  |
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
@@ -354,6 +354,7 @@ Block and Transaction Data:
 - `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
 - `TransactionCount`: same as `TransactionIndex`
 - `TransactionLocation`: `Height \|\| TransactionIndex`
+- `AddressBalanceLocation`: `Amount \|\| u64 \|\| AddressLocation`
 - `OutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
 - transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
 - `OutputLocation`: `TransactionLocation \|\| OutputIndex`

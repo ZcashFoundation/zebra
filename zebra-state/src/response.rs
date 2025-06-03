@@ -243,8 +243,14 @@ pub enum ReadResponse {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
-    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
-    AddressBalance(Amount<NonNegative>),
+    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
+    /// and the total received funds, including change.
+    AddressBalance {
+        /// The total balance of the addresses.
+        balance: Amount<NonNegative>,
+        /// The total received funds in zatoshis, including change.
+        received: u64,
+    },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]
     /// with the obtained transaction ids, in the order they appear in blocks.
@@ -365,7 +371,7 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)
             | ReadResponse::OrchardSubtrees(_)
-            | ReadResponse::AddressBalance(_)
+            | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_) => {

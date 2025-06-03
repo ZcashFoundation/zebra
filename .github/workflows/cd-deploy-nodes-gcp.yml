@@ -46,11 +46,6 @@ on:
         options:
           - tip
           - checkpoint
-      prefer_main_cached_state:
-        default: false
-        description: "Prefer cached state from the main branch"
-        required: false
-        type: boolean
       need_cached_disk:
         default: true
         description: "Use a cached state disk"
@@ -157,7 +152,6 @@ jobs:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
       disk_suffix: ${{ inputs.cached_disk_type || 'tip' }}
-      prefer_main_cached_state: ${{ inputs.prefer_main_cached_state || (github.event_name == 'push' && github.ref_name == 'main' && true) || false }}
 
   # Each time this workflow is executed, a build will be triggered to create a new image
   # with the corresponding tags using information from Git
@@ -165,8 +159,8 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
-    needs: get-disk-name
     uses: ./.github/workflows/sub-build-docker-image.yml
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
@@ -272,17 +266,25 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.4
 
+      # Retrieves a static IP address for long-running nodes.
+      # This step runs only when triggered by a release or a manual workflow_dispatch event.
+      # - Exits immediately if any command fails.
+      # - Attempts to retrieve the static IP for the current network and region.
+      # - Sets the IP_ADDRESS environment variable.
       - name: Get static IP address for long-running nodes
-        # Now runs when triggered by a release or a manual workflow_dispatch event.
         if: ${{ github.event_name == 'release' || github.event_name == 'workflow_dispatch' }}
         run: |
-          set -e  # Exit immediately if a command exits with a non-zero status.
-          # Attempt to retrieve the static IP address for the network.
+          set -e
           echo "IP_ADDRESS=$(gcloud compute addresses describe zebra-${NETWORK} --region ${{ vars.GCP_REGION }} --format='value(address)')" >> "$GITHUB_ENV"
 
+      # Creates a GCP instance template with specific disk handling:
+      # - Releases: Uses a fixed disk name (e.g., "zebrad-cache-mainnet") and attempts to re-attach this existing
+      #   persistent disk to maintain node state. A new blank disk is created if not found. Dynamic cached images are NOT used.
+      # - Other Events (push/workflow_dispatch): Uses a unique disk name (branch/SHA). If a cached disk is requested
+      #   and found by 'get-disk-name', its image seeds the new disk. Errors if an expected cached disk isn't available.
       - name: Create instance template for ${{ matrix.network }}
         run: |
-          if [ "${{ github.event_name }}" == "release" ]; then
+          if [ ${{ github.event_name  == 'release' }} ]; then
             DISK_NAME="zebrad-cache-${NETWORK}"
           else
             DISK_NAME="zebrad-cache-${{ env.GITHUB_HEAD_REF_SLUG_URL || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}"
@@ -293,17 +295,21 @@ jobs:
             IP_FLAG=""
           fi
           DISK_PARAMS="name=${DISK_NAME},device-name=${DISK_NAME},size=400GB,type=pd-balanced"
-          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
+
+          if [ ${{ github.event_name  == 'release' }} ]; then
+            echo "Release event: Using disk ${DISK_NAME} without a dynamic cached image source."
+          elif [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
+            echo "Non-release event: Using cached disk image ${{ env.CACHED_DISK_NAME }} for disk ${DISK_NAME}."
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           elif [ ${{ !inputs.need_cached_disk && github.event_name == 'workflow_dispatch' }} ]; then
-           echo "No cached disk required"
+            echo "Workflow dispatch: No cached disk required by input for disk ${DISK_NAME}."
           else
-            echo "No cached disk found for ${{ matrix.network }} in main branch"
+            echo "Error: A cached disk was expected for disk ${{ matrix.network }} but is not available (event: ${{ github.event_name }}, CACHED_DISK_NAME: '${{ env.CACHED_DISK_NAME }}', inputs.need_cached_disk: '${{ inputs.need_cached_disk }}')."
             exit 1
           fi
 
           # Set log file based on input or default
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          if [ ${{ github.event_name  == 'workflow_dispatch' }} ]; then
             LOG_FILE="${{ inputs.log_file }}"
           else
             LOG_FILE="${{ vars.CD_LOG_FILE }}"
@@ -346,6 +352,19 @@ jobs:
           --initial-delay 30 \
           --region "${{ vars.GCP_REGION }}" \
           --size 1
+
+      # Configure stateful disk policy for release MIGs to ensure disk persistence.
+      # This policy tells the MIG to preserve the disk with the specified device-name
+      # when instances are recreated or deleted, and to reattach it.
+      - name: Configure stateful disk policy for release MIG
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          MIG_NAME="zebrad-${{ needs.versioning.outputs.major_version }}-${NETWORK}"
+          DEVICE_NAME_TO_PRESERVE="zebrad-cache-${NETWORK}"
+          echo "Applying stateful policy to MIG: ${MIG_NAME} for device: ${DEVICE_NAME_TO_PRESERVE}"
+          gcloud compute instance-groups managed set-stateful-policy "${MIG_NAME}" \
+            --region "${{ vars.GCP_REGION }}" \
+            --stateful-disk "device-name=${DEVICE_NAME_TO_PRESERVE},auto-delete=never"
 
       # Rolls out update to existing group using the new instance template
       - name: Update managed instance group for ${{ matrix.network }}

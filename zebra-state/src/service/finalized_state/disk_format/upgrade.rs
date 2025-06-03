@@ -25,6 +25,7 @@ use crate::service::finalized_state::ZebraDb;
 
 pub(crate) mod add_block_info;
 pub(crate) mod add_subtrees;
+pub(crate) mod block_info_and_address_received;
 pub(crate) mod cache_genesis_roots;
 pub(crate) mod fix_tree_key_type;
 pub(crate) mod no_migration;
@@ -80,12 +81,18 @@ pub trait DiskFormatUpgrade {
     fn needs_migration(&self) -> bool {
         true
     }
+
+    /// Returns true if the upgrade is a major upgrade that can reuse the cache in the previous major db format version.
+    fn is_reusable_major_upgrade(&self) -> bool {
+        let version = self.version();
+        version.minor == 0 && version.patch == 0
+    }
 }
 
 fn format_upgrades(
     min_version: Option<Version>,
     network: Network,
-) -> impl Iterator<Item = Box<dyn DiskFormatUpgrade>> {
+) -> impl DoubleEndedIterator<Item = Box<dyn DiskFormatUpgrade>> {
     let min_version = move || min_version.clone().unwrap_or(Version::new(0, 0, 0));
 
     // Note: Disk format upgrades must be run in order of database version.
@@ -93,12 +100,26 @@ fn format_upgrades(
         Box::new(prune_trees::PruneTrees),
         Box::new(add_subtrees::AddSubtrees),
         Box::new(tree_keys_and_caches_upgrade::FixTreeKeyTypeAndCacheGenesisRoots),
-        // Value balance upgrade
-        Box::new(no_migration::NoMigration::new(26, 0, 0)),
-        Box::new(add_block_info::AddBlockInfo::new(network)),
+        Box::new(no_migration::NoMigration::new(
+            "add value balance upgrade",
+            Version::new(26, 0, 0),
+        )),
+        Box::new(block_info_and_address_received::Upgrade),
     ] as [Box<dyn DiskFormatUpgrade>; 5])
         .into_iter()
         .filter(move |upgrade| upgrade.version() > min_version())
+}
+
+/// Returns a list of all the major db format versions that can restored from the
+/// previous major database format.
+pub fn restorable_db_versions() -> Vec<u64> {
+    format_upgrades(None)
+        .filter_map(|upgrade| {
+            upgrade
+                .is_reusable_major_upgrade()
+                .then_some(upgrade.version().major)
+        })
+        .collect()
 }
 
 /// The kind of database format change or validity check we're performing.

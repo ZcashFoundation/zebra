@@ -20,7 +20,10 @@ use std::{
 };
 
 use zebra_chain::{block, parallel::tree::NoteCommitmentTrees, parameters::Network};
-use zebra_db::{chain::BLOCK_INFO, transparent::TX_LOC_BY_SPENT_OUT_LOC};
+use zebra_db::{
+    chain::BLOCK_INFO,
+    transparent::{BALANCE_BY_TRANSPARENT_ADDR, TX_LOC_BY_SPENT_OUT_LOC},
+};
 
 use crate::{
     constants::{state_database_format_version_in_code, STATE_DATABASE_KIND},
@@ -61,6 +64,8 @@ pub use disk_format::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
 
+pub use disk_format::upgrade::restorable_db_versions;
+
 /// The column families supported by the running `zebra-state` database code.
 ///
 /// Existing column families that aren't listed here are preserved when the database is opened.
@@ -74,7 +79,7 @@ pub const STATE_COLUMN_FAMILIES_IN_CODE: &[&str] = &[
     "hash_by_tx_loc",
     "tx_loc_by_hash",
     // Transparent
-    "balance_by_transparent_addr",
+    BALANCE_BY_TRANSPARENT_ADDR,
     "tx_loc_by_transparent_addr_loc",
     "utxo_by_out_loc",
     "utxo_loc_by_transparent_addr_loc",

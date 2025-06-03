@@ -1339,7 +1339,8 @@ impl Chain {
             .flat_map(|address| self.partial_transparent_transfers.get(address))
     }
 
-    /// Returns the transparent balance change for `addresses` in this non-finalized chain.
+    /// Returns a tuple of the transparent balance change and the total received funds for
+    /// `addresses` in this non-finalized chain.
     ///
     /// If the balance doesn't change for any of the addresses, returns zero.
     ///
@@ -1352,15 +1353,16 @@ impl Chain {
     pub fn partial_transparent_balance_change(
         &self,
         addresses: &HashSet<transparent::Address>,
-    ) -> Amount<NegativeAllowed> {
-        let balance_change: Result<Amount<NegativeAllowed>, _> = self
-            .partial_transparent_indexes(addresses)
-            .map(|transfers| transfers.balance())
-            .sum();
+    ) -> (Amount<NegativeAllowed>, u64) {
+        let (balance, received) = self.partial_transparent_indexes(addresses).fold(
+            (Ok(Amount::zero()), 0),
+            |(balance, received), transfers| {
+                let balance = balance + transfers.balance();
+                (balance, received + transfers.received())
+            },
+        );
 
-        balance_change.expect(
-            "unexpected amount overflow: value balances are valid, so partial sum should be valid",
-        )
+        (balance.expect("unexpected amount overflow"), received)
     }
 
     /// Returns the transparent UTXO changes for `addresses` in this non-finalized chain.

@@ -8,8 +8,9 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
 use syn::LitStr;
 
-use types::{get_mining_info, submit_block, subsidy, validate_address, z_validate_address};
 use zebra_rpc::methods::{trees::GetTreestate, *};
+
+use types::{get_mining_info, submit_block, subsidy, validate_address, z_validate_address};
 
 // The API server
 const SERVER: &str = "http://localhost:8232";
