@@ -311,7 +311,7 @@ jobs:
               echo "Test failed: Success log pattern found BUT container exited with status 1.";
               exit 1;
             else
-              # Grep succeeded and exit status is 0 or non-1
+              # Grep succeeded and exit status is not 1
               echo "Test successful: Success log pattern found. Container exit status $EXIT_STATUS ignored (as it is not 1).";
               exit 0;
             fi
