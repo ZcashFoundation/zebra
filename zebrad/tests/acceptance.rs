@@ -2001,12 +2001,12 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
         // getblockchaininfo
         if test_type.needs_zebra_cached_state() {
             lightwalletd.expect_stdout_line_matches(
-                "Got sapling height 419200 block height [0-9]{7} chain main branchID [0-9a-f]{8}",
+                r#""msg":"Got sapling height 419200 block height [0-9]{7} chain main branchID [0-9a-f]{8}""#,
             )?;
         } else {
             // Timeout the test if we're somehow accidentally using a cached state in our temp dir
             lightwalletd.expect_stdout_line_matches(
-                "Got sapling height 419200 block height [0-9]{1,6} chain main branchID 00000000",
+                r#""msg":"Got sapling height 419200 block height [0-9]{1,6} chain main branchID 00000000""#,
             )?;
         }
 
