@@ -77,7 +77,7 @@ impl PeerSocketAddr {
         **self
     }
 
-    /// Returns true if the inner [`SocketAddr`]'s IP address is `127.0.0.1` or `::1` the localhost IP.
+    /// Returns true if the inner [`SocketAddr`]'s IP is the localhost IP.
     pub fn is_localhost(&self) -> bool {
         let ip = self.0.ip();
         ip == Ipv4Addr::LOCALHOST || ip == Ipv6Addr::LOCALHOST
