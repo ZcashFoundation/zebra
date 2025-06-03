@@ -25,7 +25,10 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
-    parameters::{subsidy::FundingStreamReceiver, Network},
+    parameters::{
+        subsidy::{FundingStreamReceiver, SubsidyError},
+        Network,
+    },
     transaction, transparent,
     work::equihash,
 };
@@ -227,7 +230,8 @@ where
                 .map_err(VerifyBlockError::Time)?;
             let coinbase_tx = check::coinbase_is_first(&block)?;
 
-            let expected_block_subsidy = subsidy::general::block_subsidy(height, &network)?;
+            let expected_block_subsidy =
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
 
             check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
 
@@ -304,7 +308,7 @@ where
             }
 
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
+            let expected_deferred_amount = zebra_chain::parameters::subsidy::funding_stream_values(
                 height,
                 &network,
                 expected_block_subsidy,

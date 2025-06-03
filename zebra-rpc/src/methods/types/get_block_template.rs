@@ -22,7 +22,10 @@ use zebra_chain::{
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{subsidy::FundingStreamReceiver, Network, NetworkKind, NetworkUpgrade},
+    parameters::{
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
+        Network, NetworkKind, NetworkUpgrade,
+    },
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::{
@@ -30,9 +33,7 @@ use zebra_chain::{
     },
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy, MAX_BLOCK_SIGOPS,
-};
+use zebra_consensus::{funding_stream_address, MAX_BLOCK_SIGOPS};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
