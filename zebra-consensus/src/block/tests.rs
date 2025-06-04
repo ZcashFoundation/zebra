@@ -17,7 +17,6 @@ use zebra_chain::{
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
 };
-use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
 use crate::transaction;
@@ -703,9 +702,7 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_single_transaction_block_many_inputs();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let cached_ffi_transaction =
-            Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
-        let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
+        let tx_sigop_count = zebra_script::legacy_sigop_count(&transaction);
         assert_eq!(tx_sigop_count, Ok(0));
         legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
     }
@@ -715,9 +712,7 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_multi_transaction_block();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let cached_ffi_transaction =
-            Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
-        let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
+        let tx_sigop_count = zebra_script::legacy_sigop_count(&transaction);
         assert_eq!(tx_sigop_count, Ok(1));
         legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
     }
@@ -738,10 +733,7 @@ fn legacy_sigops_count_for_historic_blocks() {
             .zcash_deserialize_into()
             .expect("block test vector is valid");
         for transaction in block.transactions {
-            let cached_ffi_transaction =
-                Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
-            legacy_sigop_count += cached_ffi_transaction
-                .legacy_sigop_count()
+            legacy_sigop_count += zebra_script::legacy_sigop_count(&transaction)
                 .expect("unexpected invalid sigop count");
         }
         // Test that historic blocks pass the sigops check.

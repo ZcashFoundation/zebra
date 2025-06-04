@@ -486,7 +486,11 @@ fn test_vec143_1() -> Result<()> {
 
     let transaction = ZIP143_1.zcash_deserialize_into::<Transaction>()?;
 
-    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Overwinter, &[]);
+    let hasher = SigHasher::new(
+        &transaction,
+        NetworkUpgrade::Overwinter,
+        Arc::new(Vec::new()),
+    );
 
     let hash = hasher.sighash(HashType::ALL, None);
     let expected = "a1f1a4e5cd9bd522322d661edd2af1bf2a7019cfab94ece18f4ba935b0a19073";
@@ -521,7 +525,7 @@ fn test_vec143_2() -> Result<()> {
     let hasher = SigHasher::new(
         &transaction,
         NetworkUpgrade::Overwinter,
-        &all_previous_outputs,
+        Arc::new(all_previous_outputs),
     );
 
     let hash = hasher.sighash(
@@ -549,7 +553,7 @@ fn test_vec243_1() -> Result<()> {
 
     let transaction = ZIP243_1.zcash_deserialize_into::<Transaction>()?;
 
-    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, &[]);
+    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, Arc::new(Vec::new()));
 
     let hash = hasher.sighash(HashType::ALL, None);
     let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
@@ -563,7 +567,8 @@ fn test_vec243_1() -> Result<()> {
     let _guard = span.enter();
     assert_eq!(expected, result);
 
-    let precomputed_tx_data = PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, &[]);
+    let precomputed_tx_data =
+        PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, Arc::new(Vec::new()));
     let alt_sighash =
         crate::primitives::zcash_primitives::sighash(&precomputed_tx_data, HashType::ALL, None);
     let result = hex::encode(alt_sighash);
@@ -587,7 +592,11 @@ fn test_vec243_2() -> Result<()> {
     };
     let all_previous_outputs = mock_pre_v5_output_list(output, input_ind);
 
-    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, &all_previous_outputs);
+    let hasher = SigHasher::new(
+        &transaction,
+        NetworkUpgrade::Sapling,
+        Arc::new(all_previous_outputs),
+    );
 
     let hash = hasher.sighash(
         HashType::NONE,
@@ -612,8 +621,11 @@ fn test_vec243_2() -> Result<()> {
     let index = input_ind;
     let all_previous_outputs = mock_pre_v5_output_list(prevout, input_ind);
 
-    let precomputed_tx_data =
-        PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, &all_previous_outputs);
+    let precomputed_tx_data = PrecomputedTxData::new(
+        &transaction,
+        NetworkUpgrade::Sapling,
+        Arc::new(all_previous_outputs),
+    );
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &precomputed_tx_data,
         HashType::NONE,
@@ -641,7 +653,11 @@ fn test_vec243_3() -> Result<()> {
         lock_script: lock_script.clone(),
     }];
 
-    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, &all_previous_outputs);
+    let hasher = SigHasher::new(
+        &transaction,
+        NetworkUpgrade::Sapling,
+        Arc::new(all_previous_outputs),
+    );
 
     let hash = hasher.sighash(
         HashType::ALL,
@@ -667,9 +683,12 @@ fn test_vec243_3() -> Result<()> {
     };
     let index = input_ind;
 
-    let all_previous_outputs = &[prevout];
-    let precomputed_tx_data =
-        PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, all_previous_outputs);
+    let all_previous_outputs = vec![prevout];
+    let precomputed_tx_data = PrecomputedTxData::new(
+        &transaction,
+        NetworkUpgrade::Sapling,
+        Arc::new(all_previous_outputs),
+    );
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &precomputed_tx_data,
         HashType::ALL,
@@ -704,7 +723,7 @@ fn zip143_sighash() -> Result<()> {
         let result = hex::encode(transaction.sighash(
             NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
             HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-            &all_previous_outputs,
+            Arc::new(all_previous_outputs),
             input_index.map(|input_index| {
                 (
                     input_index,
@@ -742,7 +761,7 @@ fn zip243_sighash() -> Result<()> {
         let result = hex::encode(transaction.sighash(
             NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
             HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-            &all_previous_outputs,
+            Arc::new(all_previous_outputs),
             input_index.map(|input_index| {
                 (
                     input_index,
@@ -764,20 +783,21 @@ fn zip244_sighash() -> Result<()> {
     for (i, test) in zip0244::TEST_VECTORS.iter().enumerate() {
         let transaction = test.tx.zcash_deserialize_into::<Transaction>()?;
 
-        let all_previous_outputs: Vec<_> = test
-            .amounts
-            .iter()
-            .zip(test.script_pubkeys.iter())
-            .map(|(amount, script_pubkey)| transparent::Output {
-                value: (*amount).try_into().unwrap(),
-                lock_script: transparent::Script::new(script_pubkey.as_ref()),
-            })
-            .collect();
+        let all_previous_outputs: Arc<Vec<_>> = Arc::new(
+            test.amounts
+                .iter()
+                .zip(test.script_pubkeys.iter())
+                .map(|(amount, script_pubkey)| transparent::Output {
+                    value: (*amount).try_into().unwrap(),
+                    lock_script: transparent::Script::new(script_pubkey.as_ref()),
+                })
+                .collect(),
+        );
 
         let result = hex::encode(transaction.sighash(
             NetworkUpgrade::Nu5,
             HashType::ALL,
-            &all_previous_outputs,
+            all_previous_outputs.clone(),
             None,
         ));
         let expected = hex::encode(test.sighash_shielded);
@@ -788,7 +808,7 @@ fn zip244_sighash() -> Result<()> {
                 transaction.sighash(
                     NetworkUpgrade::Nu5,
                     HashType::ALL,
-                    &all_previous_outputs,
+                    all_previous_outputs,
                     test.transparent_input
                         .map(|idx| (idx as _, test.script_pubkeys[idx as usize].clone())),
                 ),
@@ -820,23 +840,29 @@ fn consensus_branch_id() {
 
             tx.to_librustzcash(tx_nu)
                 .expect("tx is convertible under tx nu");
-            PrecomputedTxData::new(&tx, tx_nu, &[]);
-            sighash::SigHasher::new(&tx, tx_nu, &[]);
-            tx.sighash(tx_nu, HashType::ALL, &[], None);
+            PrecomputedTxData::new(&tx, tx_nu, Arc::new(Vec::new()));
+            sighash::SigHasher::new(&tx, tx_nu, Arc::new(Vec::new()));
+            tx.sighash(tx_nu, HashType::ALL, Arc::new(Vec::new()), None);
 
             // All computations should fail under an nu other than the tx one.
 
             tx.to_librustzcash(any_other_nu)
                 .expect_err("tx is not convertible under nu other than the tx one");
 
-            std::panic::catch_unwind(|| PrecomputedTxData::new(&tx, any_other_nu, &[]))
-                .expect_err("precomputing tx sighash data panics under nu other than the tx one");
+            std::panic::catch_unwind(|| {
+                PrecomputedTxData::new(&tx, any_other_nu, Arc::new(Vec::new()))
+            })
+            .expect_err("precomputing tx sighash data panics under nu other than the tx one");
 
-            std::panic::catch_unwind(|| sighash::SigHasher::new(&tx, any_other_nu, &[]))
-                .expect_err("creating the sighasher panics under nu other than the tx one");
+            std::panic::catch_unwind(|| {
+                sighash::SigHasher::new(&tx, any_other_nu, Arc::new(Vec::new()))
+            })
+            .expect_err("creating the sighasher panics under nu other than the tx one");
 
-            std::panic::catch_unwind(|| tx.sighash(any_other_nu, HashType::ALL, &[], None))
-                .expect_err("the sighash computation panics under nu other than the tx one");
+            std::panic::catch_unwind(|| {
+                tx.sighash(any_other_nu, HashType::ALL, Arc::new(Vec::new()), None)
+            })
+            .expect_err("the sighash computation panics under nu other than the tx one");
         }
     }
 }
@@ -872,7 +898,7 @@ fn binding_signatures() {
                         ..
                     } => {
                         if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            let sighash = tx.sighash(nu, HashType::ALL, &[], None);
+                            let sighash = tx.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),
@@ -901,7 +927,7 @@ fn binding_signatures() {
                                 continue;
                             }
 
-                            let sighash = tx.sighash(nu, HashType::ALL, &[], None);
+                            let sighash = tx.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),
@@ -931,7 +957,7 @@ fn binding_signatures() {
                                 continue;
                             }
 
-                            let sighash = tx.sighash(nu, HashType::ALL, &[], None);
+                            let sighash = tx.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),

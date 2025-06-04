@@ -1,7 +1,7 @@
 //! Contains code that interfaces with the zcash_primitives crate from
 //! librustzcash.
 
-use std::{io, ops::Deref};
+use std::{io, ops::Deref, sync::Arc};
 
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
 use zcash_protocol::value::BalanceError;
@@ -19,17 +19,17 @@ use crate::{
 // Used by boilerplate code below.
 
 #[derive(Clone, Debug)]
-struct TransparentAuth<'a> {
-    all_prev_outputs: &'a [transparent::Output],
+struct TransparentAuth {
+    all_prev_outputs: Arc<Vec<transparent::Output>>,
 }
 
-impl zcash_transparent::bundle::Authorization for TransparentAuth<'_> {
+impl zcash_transparent::bundle::Authorization for TransparentAuth {
     type ScriptSig = zcash_primitives::legacy::Script;
 }
 
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
-impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
+impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth {
     fn input_amounts(&self) -> Vec<zcash_protocol::value::Zatoshis> {
         self.all_prev_outputs
             .iter()
@@ -56,13 +56,12 @@ impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAu
 // to compute sighash.
 // TODO: remove/change if they improve the API to not require this.
 
-struct MapTransparent<'a> {
-    auth: TransparentAuth<'a>,
+struct MapTransparent {
+    auth: TransparentAuth,
 }
 
-impl<'a>
-    zcash_transparent::bundle::MapAuth<zcash_transparent::bundle::Authorized, TransparentAuth<'a>>
-    for MapTransparent<'a>
+impl zcash_transparent::bundle::MapAuth<zcash_transparent::bundle::Authorized, TransparentAuth>
+    for MapTransparent
 {
     fn map_script_sig(
         &self,
@@ -71,7 +70,7 @@ impl<'a>
         s
     }
 
-    fn map_authorization(&self, _: zcash_transparent::bundle::Authorized) -> TransparentAuth<'a> {
+    fn map_authorization(&self, _: zcash_transparent::bundle::Authorized) -> TransparentAuth {
         // TODO: This map should consume self, so we can move self.auth
         self.auth.clone()
     }
@@ -133,12 +132,10 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
 }
 
 #[derive(Debug)]
-struct PrecomputedAuth<'a> {
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
+struct PrecomputedAuth {}
 
-impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
-    type TransparentAuth = TransparentAuth<'a>;
+impl zp_tx::Authorization for PrecomputedAuth {
+    type TransparentAuth = TransparentAuth;
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 }
@@ -197,13 +194,13 @@ impl From<Script> for zcash_primitives::legacy::Script {
 
 /// Precomputed data used for sighash or txid computation.
 #[derive(Debug)]
-pub(crate) struct PrecomputedTxData<'a> {
-    tx_data: zp_tx::TransactionData<PrecomputedAuth<'a>>,
+pub(crate) struct PrecomputedTxData {
+    tx_data: zp_tx::TransactionData<PrecomputedAuth>,
     txid_parts: TxDigests<blake2b_simd::Hash>,
-    all_previous_outputs: &'a [transparent::Output],
+    all_previous_outputs: Arc<Vec<transparent::Output>>,
 }
 
-impl<'a> PrecomputedTxData<'a> {
+impl PrecomputedTxData {
     /// Computes the data used for sighash or txid computation.
     ///
     /// # Inputs
@@ -238,10 +235,10 @@ impl<'a> PrecomputedTxData<'a> {
     /// [ZIP-252]: <https://zips.z.cash/zip-0252>
     /// [ZIP-253]: <https://zips.z.cash/zip-0253>
     pub(crate) fn new(
-        tx: &'a Transaction,
+        tx: &Transaction,
         nu: NetworkUpgrade,
-        all_previous_outputs: &'a [transparent::Output],
-    ) -> PrecomputedTxData<'a> {
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
+    ) -> PrecomputedTxData {
         let tx = tx
             .to_librustzcash(nu)
             .expect("`zcash_primitives` and Zebra tx formats must be compatible");
@@ -250,7 +247,7 @@ impl<'a> PrecomputedTxData<'a> {
 
         let f_transparent = MapTransparent {
             auth: TransparentAuth {
-                all_prev_outputs: all_previous_outputs,
+                all_prev_outputs: all_previous_outputs.clone(),
             },
         };
 

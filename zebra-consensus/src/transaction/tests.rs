@@ -1791,7 +1791,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_inside_joinsplit_is_rejected
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(nu, HashType::ALL, &[], None);
+        let sighash = transaction.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
 
         match &mut transaction {
             Transaction::V4 {
@@ -1864,7 +1864,7 @@ fn v4_transaction_with_conflicting_sprout_nullifier_across_joinsplits_is_rejecte
         };
 
         // Sign the transaction
-        let sighash = transaction.sighash(nu, HashType::ALL, &[], None);
+        let sighash = transaction.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
 
         match &mut transaction {
             Transaction::V4 {
