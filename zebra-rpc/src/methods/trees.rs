@@ -35,9 +35,6 @@ pub struct GetSubtreesByIndexResponse {
     pub(crate) subtrees: Vec<SubtreeRpcData>,
 }
 
-#[deprecated(note = "Use `GetSubtreesByIndexResponse` instead.")]
-pub use GetSubtreesByIndexResponse as GetSubtrees;
-
 impl Default for GetSubtreesByIndexResponse {
     fn default() -> Self {
         Self {
@@ -86,9 +83,6 @@ pub struct GetTreestateResponse {
     /// A treestate containing an Orchard note commitment tree, hex-encoded.
     orchard: Treestate,
 }
-
-#[deprecated(note = "Use `GetTreestateResponse` instead.")]
-pub use GetTreestateResponse as GetTreeState;
 
 impl GetTreestateResponse {
     /// Constructs [`Treestate`] from its constituent parts.

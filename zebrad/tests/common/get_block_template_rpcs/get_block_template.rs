@@ -15,9 +15,9 @@ use zebra_chain::{
     serialization::ZcashSerialize,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::types::get_block_template::{
-    proposal::proposal_block_from_template, GetBlockTemplateRequest, ProposalResponse,
-    TemplateResponse, TimeSource,
+use zebra_rpc::{
+    client::types::{GetBlockTemplateParameters, ProposalResponse, TemplateResponse, TimeSource},
+    proposal_block_from_template,
 };
 
 use crate::common::{
@@ -175,7 +175,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
             loop {
                 let long_poll_request = async {
                     let long_poll_json_params =
-                        serde_json::to_string(&vec![GetBlockTemplateRequest::new(
+                        serde_json::to_string(&vec![GetBlockTemplateParameters::new(
                             Default::default(),
                             Default::default(),
                             Default::default(),

@@ -173,18 +173,15 @@ use zebra_chain::{
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    methods::{
-        types::{
-            get_block_template::{
-                self, fetch_state_tip_and_local_time, generate_coinbase_and_roots,
-                proposal::proposal_block_from_template, GetBlockTemplateRequestMode,
-                TemplateResponse,
-            },
-            submit_block::{self, SubmitBlockChannel},
-        },
-        RpcImpl, RpcServer,
+    client::types::{
+        GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
+        SubmitBlockErrorResponse, SubmitBlockResponse, TemplateResponse,
     },
+    fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+    methods::{RpcImpl, RpcServer},
+    proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
+    SubmitBlockChannel,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 use zebra_test::{
@@ -3259,7 +3256,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
     use zebra_node_services::mempool;
-    use zebra_rpc::methods::hex_data::HexData;
+    use zebra_rpc::client::types::HexData;
     use zebra_test::mock_service::MockService;
 
     let _init_guard = zebra_test::init();
@@ -3355,7 +3352,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let block_template_fut = rpc.get_block_template(None);
     let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
     let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
-    let get_block_template::Response::TemplateMode(block_template) =
+    let GetBlockTemplateResponse::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -3367,8 +3364,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
     // Check that the block template is a valid block proposal
-    let get_block_template::Response::ProposalMode(block_proposal_result) = rpc
-        .get_block_template(Some(get_block_template::GetBlockTemplateRequest::new(
+    let GetBlockTemplateResponse::ProposalMode(block_proposal_result) = rpc
+        .get_block_template(Some(GetBlockTemplateParameters::new(
             GetBlockTemplateRequestMode::Proposal,
             Some(hex_proposal_block),
             Default::default(),
@@ -3394,7 +3391,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::Accepted,
+        SubmitBlockResponse::Accepted,
         "valid block should be accepted"
     );
 
@@ -3434,7 +3431,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let block_template_fut = rpc.get_block_template(None);
     let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
     let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
-    let get_block_template::Response::TemplateMode(block_template) =
+    let GetBlockTemplateResponse::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -3501,7 +3498,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Rejected),
         "invalid block with excessive coinbase output value should be rejected"
     );
 
@@ -3559,7 +3556,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Rejected),
         "invalid block with insufficient coinbase output value should be rejected"
     );
 
@@ -3572,7 +3569,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::Accepted,
+        SubmitBlockResponse::Accepted,
         "valid block should be accepted"
     );
 

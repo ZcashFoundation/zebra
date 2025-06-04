@@ -23,8 +23,8 @@ use zebra_chain::{
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
 
-use crate::methods::{
-    get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
+use crate::methods::types::{
+    get_block_template::generate_coinbase_transaction, transaction::TransactionTemplate,
 };
 
 #[cfg(test)]

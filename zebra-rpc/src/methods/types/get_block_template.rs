@@ -48,19 +48,21 @@ use crate::{
     server::error::OkOrError,
 };
 
-pub use constants::{
-    CAPABILITIES_FIELD, DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
-    MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, MEMPOOL_LONG_POLL_INTERVAL, MUTABLE_FIELD,
-    NONCE_RANGE_FIELD, NOT_SYNCED_ERROR_CODE, ZCASHD_FUNDING_STREAM_ORDER,
+use constants::{
+    CAPABILITIES_FIELD, MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, MUTABLE_FIELD,
+    NONCE_RANGE_FIELD, NOT_SYNCED_ERROR_CODE,
 };
-pub use parameters::{GetBlockTemplateRequest, GetBlockTemplateRequestMode};
+pub use parameters::{
+    GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+};
 pub use proposal::{ProposalResponse, TimeSource};
 
 /// An alias to indicate that a usize value represents the depth of in-block dependencies of a
 /// transaction.
 ///
 /// See the `dependencies_depth()` function in [`zip317`] for more details.
-pub type InBlockTxDependenciesDepth = usize;
+#[cfg(test)]
+type InBlockTxDependenciesDepth = usize;
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 ///
@@ -211,9 +213,6 @@ pub struct TemplateResponse {
     #[getter(copy)]
     pub(crate) submit_old: Option<bool>,
 }
-
-#[deprecated(note = "Use `TemplateResponse` instead")]
-pub use self::TemplateResponse as GetBlockTemplate;
 
 impl fmt::Debug for TemplateResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -397,7 +396,7 @@ impl TemplateResponse {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 /// A `getblocktemplate` RPC response.
-pub enum Response {
+pub enum GetBlockTemplateResponse {
     /// `getblocktemplate` RPC request in template mode.
     TemplateMode(Box<TemplateResponse>),
 
@@ -405,20 +404,20 @@ pub enum Response {
     ProposalMode(ProposalResponse),
 }
 
-impl Response {
+impl GetBlockTemplateResponse {
     /// Returns the inner template, if the response is in template mode.
     pub fn try_into_template(self) -> Option<TemplateResponse> {
         match self {
-            Response::TemplateMode(template) => Some(*template),
-            Response::ProposalMode(_) => None,
+            Self::TemplateMode(template) => Some(*template),
+            Self::ProposalMode(_) => None,
         }
     }
 
     /// Returns the inner proposal, if the response is in proposal mode.
     pub fn try_into_proposal(self) -> Option<ProposalResponse> {
         match self {
-            Response::TemplateMode(_) => None,
-            Response::ProposalMode(proposal) => Some(proposal),
+            Self::TemplateMode(_) => None,
+            Self::ProposalMode(proposal) => Some(proposal),
         }
     }
 }
@@ -592,24 +591,24 @@ where
 /// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
 ///
 /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
-pub fn check_parameters(parameters: &Option<GetBlockTemplateRequest>) -> RpcResult<()> {
+pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcResult<()> {
     let Some(parameters) = parameters else {
         return Ok(());
     };
 
     match parameters {
-        GetBlockTemplateRequest {
+        GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Template,
             data: None,
             ..
         }
-        | GetBlockTemplateRequest {
+        | GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(_),
             ..
         } => Ok(()),
 
-        GetBlockTemplateRequest {
+        GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: None,
             ..
@@ -620,7 +619,7 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateRequest>) -> RpcResu
             None,
         )),
 
-        GetBlockTemplateRequest {
+        GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Template,
             data: Some(_),
             ..
@@ -645,14 +644,14 @@ pub fn check_miner_address(
 /// Attempts to validate block proposal against all of the server's
 /// usual acceptance rules (except proof-of-work).
 ///
-/// Returns a `getblocktemplate` [`Response`].
+/// Returns a [`GetBlockTemplateResponse`].
 pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
     block_proposal_bytes: Vec<u8>,
     network: Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
-) -> RpcResult<Response>
+) -> RpcResult<GetBlockTemplateResponse>
 where
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone

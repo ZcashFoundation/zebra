@@ -5,22 +5,31 @@
 //!
 //! Some parts of the `zcashd` RPC documentation are outdated.
 //! So this implementation follows the `zcashd` server and `lightwalletd` client implementations.
-
-// # Developing this module
-//
-// If RPCs are added or changed, ensure the following:
-//
-// - Make requests are buildable and responses readable (up to each leaf
-//   component)
-//   - Use `derive(Getters, new)` to help with that. Make sure you mark `Copy`
-//     fields with `#[getter(copy)]` to avoid unnecessary references. It's easy
-//     not to forget about that - in `serialization_tests.rs`, any Copy field
-//     being returned by reference will require using `*` to dereference it; if
-//     you notice that happening then you forgot to mark it.
-//   - If a field is added, use `#[new(...)]` so that it's not added to the
-//     constructor. If that is unavoidable, then it will require a major
-//     version bump.
-// - Add tests to `serialization_tests.rs` to ensure the above
+//!
+//! # Developing this module
+//!
+//! If RPCs are added or changed, ensure the following:
+//!
+//! - Request types can be instantiated from dependant crates, and
+//!   response types are fully-readable (up to each leaf component), meaning
+//!   every field on response types can be read, and any types used in response
+//!   types has an appropriate API for either directly accessing their fields, or
+//!   has an appropriate API for accessing any relevant data.
+//!
+//!   This should be achieved, wherever possible, by:
+//!   - Using `derive(Getters, new)` to keep new code succinct and consistent.
+//!     Ensure that fields on response types that implement `Copy` are tagged
+//!     with `#[getter(copy)]` field attributes to avoid unnecessary references.
+//!     This should be easily noticeable in the `serialization_tests` test crate, where
+//!     any fields implementing `Copy` but not tagged with `#[getter(Copy)]` will
+//!     be returned by reference, and will require dereferencing with the dereference
+//!     operator, `*`. If a value returned by a getter method requires dereferencing,
+//!     the associated field in the response type should likely be tagged with `#[getter(Copy)]`.
+//!   - If a field is added, use `#[new(...)]` so that it's not added to the
+//!     constructor. If that is unavoidable, then it will require a major
+//!     version bump.
+//!
+//! - A test has been added to the `serialization_tests` test crate to ensure the above.
 
 use std::{
     cmp,
@@ -36,7 +45,6 @@ use derive_getters::Getters;
 use derive_new::new;
 use futures::{future::OptionFuture, stream::FuturesOrdered, StreamExt, TryFutureExt};
 use hex::{FromHex, ToHex};
-use hex_data::HexData;
 use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
@@ -65,8 +73,11 @@ use zebra_chain::{
     },
     primitives,
     serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
     work::{
         difficulty::{ParameterDifficulty, U256},
         equihash::Solution,
@@ -75,7 +86,9 @@ use zebra_chain::{
 use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
 use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
+use zebra_state::{
+    HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
+};
 
 use crate::{
     config,
@@ -86,56 +99,33 @@ use crate::{
     },
 };
 
+pub(crate) mod hex_data;
+pub(crate) mod trees;
+pub(crate) mod types;
+
+use hex_data::HexData;
+use trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData};
 use types::{
     get_block_template::{
-        self, constants::MEMPOOL_LONG_POLL_INTERVAL, proposal::proposal_block_from_template,
-        GetBlockTemplateHandler, ZCASHD_FUNDING_STREAM_ORDER,
-    },
-    get_blockchain_info, get_mining_info,
-    get_raw_mempool::{self},
-    long_poll::LongPollInput,
-    submit_block, unified_address, validate_address, z_validate_address,
-};
-
-pub mod hex_data;
-pub mod trees;
-pub mod types;
-
-// Reexport types to build the API. We want to flatten the module substructure
-// which is split mostly to keep file sizes small. Additionally, we re-export
-// types from other crates which are exposed in the API.
-
-pub use trees::{
-    Commitments, GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData, Treestate,
-};
-pub use types::{
-    default_roots::DefaultRoots,
-    get_block_template::{
-        GetBlockTemplateRequest, GetBlockTemplateRequestMode, Response as GetBlockTemplateResponse,
+        constants::{
+            DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL,
+            ZCASHD_FUNDING_STREAM_ORDER,
+        },
+        proposal::proposal_block_from_template,
+        GetBlockTemplateHandler, GetBlockTemplateParameters, GetBlockTemplateResponse,
         TemplateResponse, TimeSource,
     },
-    get_mining_info::Response as GetMiningInfoResponse,
-    get_raw_mempool::GetRawMempoolResponse,
-    get_raw_mempool::MempoolObject,
-    peer_info::{GetPeerInfoResponse, PeerInfo},
-    submit_block::{ErrorResponse as SubmitBlockError, Response as SubmitBlockResponse},
-    subsidy::{BlockSubsidy, FundingStream, GetBlockSubsidyResponse},
-    transaction::{
-        Input, Orchard, OrchardAction, Output, ScriptPubKey, ScriptSig, ShieldedOutput,
-        ShieldedSpend, TransactionObject, TransactionTemplate,
-    },
-    unified_address::Response as ZListUnifiedReceiversResponse,
-    validate_address::Response as ValidateAddressResponse,
-    z_validate_address::Response as ZValidateAddressResponse,
+    get_blockchain_info, get_mining_info,
+    get_raw_mempool::{self, GetRawMempoolResponse},
+    long_poll::LongPollInput,
+    peer_info::PeerInfo,
+    submit_block::{SubmitBlockErrorResponse, SubmitBlockParameters, SubmitBlockResponse},
+    subsidy::GetBlockSubsidyResponse,
+    transaction::TransactionObject,
+    unified_address::ZListUnifiedReceiversResponse,
+    validate_address::ValidateAddressResponse,
+    z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
 };
-pub use zebra_chain::{
-    sapling::NotSmallOrderValueCommitment,
-    serialization::{ZcashDeserialize, ZcashSerialize},
-    subtree::NoteCommitmentSubtreeIndex,
-    transparent::Script,
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
-};
-pub use zebra_state::OutputIndex;
 
 #[cfg(test)]
 mod tests;
@@ -477,8 +467,8 @@ pub trait Rpc {
     #[method(name = "getblocktemplate")]
     async fn get_block_template(
         &self,
-        parameters: Option<get_block_template::parameters::GetBlockTemplateRequest>,
-    ) -> Result<get_block_template::Response>;
+        parameters: Option<GetBlockTemplateParameters>,
+    ) -> Result<GetBlockTemplateResponse>;
 
     /// Submits block to the node to be validated and committed.
     /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
@@ -499,8 +489,8 @@ pub trait Rpc {
     async fn submit_block(
         &self,
         hex_data: HexData,
-        _parameters: Option<submit_block::JsonParameters>,
-    ) -> Result<submit_block::Response>;
+        _parameters: Option<SubmitBlockParameters>,
+    ) -> Result<SubmitBlockResponse>;
 
     /// Returns mining-related information.
     ///
@@ -561,7 +551,7 @@ pub trait Rpc {
     ///
     /// - `address`: (string, required) The zcash address to validate.
     #[method(name = "validateaddress")]
-    async fn validate_address(&self, address: String) -> Result<validate_address::Response>;
+    async fn validate_address(&self, address: String) -> Result<ValidateAddressResponse>;
 
     /// Checks if a zcash address of type P2PKH, P2SH, TEX, SAPLING or UNIFIED is valid.
     /// Returns information about the given address if valid.
@@ -578,7 +568,7 @@ pub trait Rpc {
     ///
     /// - No notes
     #[method(name = "z_validateaddress")]
-    async fn z_validate_address(&self, address: String) -> Result<z_validate_address::Response>;
+    async fn z_validate_address(&self, address: String) -> Result<ZValidateAddressResponse>;
 
     /// Returns the block subsidy reward of the block at `height`, taking into account the mining slow start.
     /// Returns an error if `height` is less than the height of the first halving for the current network.
@@ -619,7 +609,10 @@ pub trait Rpc {
     ///
     /// - No notes
     #[method(name = "z_listunifiedreceivers")]
-    async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response>;
+    async fn z_list_unified_receivers(
+        &self,
+        address: String,
+    ) -> Result<ZListUnifiedReceiversResponse>;
 
     #[method(name = "generate")]
     /// Mine blocks immediately. Returns the block hashes of the generated blocks.
@@ -1971,8 +1964,14 @@ where
 
     async fn get_block_template(
         &self,
-        parameters: Option<get_block_template::GetBlockTemplateRequest>,
-    ) -> Result<get_block_template::Response> {
+        parameters: Option<GetBlockTemplateParameters>,
+    ) -> Result<GetBlockTemplateResponse> {
+        use types::get_block_template::{
+            check_miner_address, check_parameters, check_synced_to_tip, fetch_mempool_transactions,
+            fetch_state_tip_and_local_time, validate_block_proposal,
+            zip317::select_mempool_transactions,
+        };
+
         // Clone Configs
         let network = self.network.clone();
         let miner_address = self.gbt.miner_address();
@@ -1987,9 +1986,9 @@ where
 
         if let Some(HexData(block_proposal_bytes)) = parameters
             .as_ref()
-            .and_then(get_block_template::GetBlockTemplateRequest::block_proposal_data)
+            .and_then(GetBlockTemplateParameters::block_proposal_data)
         {
-            return get_block_template::validate_block_proposal(
+            return validate_block_proposal(
                 self.gbt.block_verifier_router(),
                 block_proposal_bytes,
                 network,
@@ -2000,7 +1999,7 @@ where
         }
 
         // To implement long polling correctly, we split this RPC into multiple phases.
-        get_block_template::check_parameters(&parameters)?;
+        check_parameters(&parameters)?;
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
@@ -2008,7 +2007,7 @@ where
 
         // Check config and parameters.
         // These checks always have the same result during long polling.
-        let miner_address = get_block_template::check_miner_address(miner_address)?;
+        let miner_address = check_miner_address(miner_address)?;
 
         // - Checks and fetches that can change during long polling
         //
@@ -2029,11 +2028,7 @@ where
             //
             // Optional TODO:
             // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-            get_block_template::check_synced_to_tip(
-                &network,
-                latest_chain_tip.clone(),
-                sync_status.clone(),
-            )?;
+            check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
             // TODO: return an error if we have no peers, like `zcashd` does,
             //       and add a developer config that mines regardless of how many peers we have.
             // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
@@ -2055,7 +2050,7 @@ where
                 max_time,
                 cur_time,
                 ..
-            } = get_block_template::fetch_state_tip_and_local_time(state.clone()).await?;
+            } = fetch_state_tip_and_local_time(state.clone()).await?;
 
             // Fetch the mempool data for the block template:
             // - if the mempool transactions change, we might return from long polling.
@@ -2068,7 +2063,7 @@ where
             // Optional TODO:
             // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
             let Some((mempool_txs, mempool_tx_deps)) =
-                get_block_template::fetch_mempool_transactions(mempool.clone(), tip_hash)
+                fetch_mempool_transactions(mempool.clone(), tip_hash)
                     .await?
                     // If the mempool and state responses are out of sync:
                     // - if we are not long polling, omit mempool transactions from the template,
@@ -2263,7 +2258,7 @@ where
         );
 
         // Randomly select some mempool transactions.
-        let mempool_txs = get_block_template::zip317::select_mempool_transactions(
+        let mempool_txs = select_mempool_transactions(
             &network,
             next_block_height,
             &miner_address,
@@ -2300,8 +2295,8 @@ where
     async fn submit_block(
         &self,
         HexData(block_bytes): HexData,
-        _parameters: Option<submit_block::JsonParameters>,
-    ) -> Result<submit_block::Response> {
+        _parameters: Option<SubmitBlockParameters>,
+    ) -> Result<SubmitBlockResponse> {
         let mut block_verifier_router = self.gbt.block_verifier_router();
 
         let block: Block = match block_bytes.zcash_deserialize_into() {
@@ -2312,7 +2307,7 @@ where
                     "submit block failed: block bytes could not be deserialized into a structurally valid block"
                 );
 
-                return Ok(submit_block::ErrorResponse::Rejected.into());
+                return Ok(SubmitBlockErrorResponse::Rejected.into());
             }
         };
 
@@ -2342,7 +2337,7 @@ where
                     .advertise_mined_block(hash, height)
                     .map_error_with_prefix(0, "failed to send mined block")?;
 
-                return Ok(submit_block::Response::Accepted);
+                return Ok(SubmitBlockResponse::Accepted);
             }
 
             // Turns BoxError into Result<VerifyChainError, BoxError>,
@@ -2364,7 +2359,7 @@ where
         };
 
         let response = match chain_error {
-            Ok(source) if source.is_duplicate_request() => submit_block::ErrorResponse::Duplicate,
+            Ok(source) if source.is_duplicate_request() => SubmitBlockErrorResponse::Duplicate,
 
             // Currently, these match arms return Reject for the older duplicate in a queue,
             // but queued duplicates should be DuplicateInconclusive.
@@ -2381,11 +2376,11 @@ where
             // Checking the download queues and BlockVerifierRouter buffer for duplicates
             // might require architectural changes to Zebra, so we should only do it
             // if mining pools really need it.
-            Ok(_verify_chain_error) => submit_block::ErrorResponse::Rejected,
+            Ok(_verify_chain_error) => SubmitBlockErrorResponse::Rejected,
 
             // This match arm is currently unreachable, but if future changes add extra error types,
             // we want to turn them into `Rejected`.
-            Err(_unknown_error_type) => submit_block::ErrorResponse::Rejected,
+            Err(_unknown_error_type) => SubmitBlockErrorResponse::Rejected,
         };
 
         Ok(response.into())
@@ -2436,8 +2431,7 @@ where
         height: Option<i32>,
     ) -> Result<u64> {
         // Default number of blocks is 120 if not supplied.
-        let mut num_blocks =
-            num_blocks.unwrap_or(get_block_template::DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
+        let mut num_blocks = num_blocks.unwrap_or(DEFAULT_SOLUTION_RATE_WINDOW_SIZE);
         // But if it is 0 or negative, it uses the proof of work averaging window.
         if num_blocks < 1 {
             num_blocks = i32::try_from(POW_AVERAGING_WINDOW).expect("fits in i32");
@@ -2480,28 +2474,28 @@ where
             .collect())
     }
 
-    async fn validate_address(&self, raw_address: String) -> Result<validate_address::Response> {
+    async fn validate_address(&self, raw_address: String) -> Result<ValidateAddressResponse> {
         let network = self.network.clone();
 
         let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
-            return Ok(validate_address::Response::invalid());
+            return Ok(ValidateAddressResponse::invalid());
         };
 
         let address = match address.convert::<primitives::Address>() {
             Ok(address) => address,
             Err(err) => {
                 tracing::debug!(?err, "conversion error");
-                return Ok(validate_address::Response::invalid());
+                return Ok(ValidateAddressResponse::invalid());
             }
         };
 
         // we want to match zcashd's behaviour
         if !address.is_transparent() {
-            return Ok(validate_address::Response::invalid());
+            return Ok(ValidateAddressResponse::invalid());
         }
 
         if address.network() == network.kind() {
-            Ok(validate_address::Response {
+            Ok(ValidateAddressResponse {
                 address: Some(raw_address),
                 is_valid: true,
                 is_script: Some(address.is_script_hash()),
@@ -2513,33 +2507,30 @@ where
                 "invalid address in validateaddress RPC: Zebra's configured network must match address network"
             );
 
-            Ok(validate_address::Response::invalid())
+            Ok(ValidateAddressResponse::invalid())
         }
     }
 
-    async fn z_validate_address(
-        &self,
-        raw_address: String,
-    ) -> Result<z_validate_address::Response> {
+    async fn z_validate_address(&self, raw_address: String) -> Result<ZValidateAddressResponse> {
         let network = self.network.clone();
 
         let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
-            return Ok(z_validate_address::Response::invalid());
+            return Ok(ZValidateAddressResponse::invalid());
         };
 
         let address = match address.convert::<primitives::Address>() {
             Ok(address) => address,
             Err(err) => {
                 tracing::debug!(?err, "conversion error");
-                return Ok(z_validate_address::Response::invalid());
+                return Ok(ZValidateAddressResponse::invalid());
             }
         };
 
         if address.network() == network.kind() {
-            Ok(z_validate_address::Response {
+            Ok(ZValidateAddressResponse {
                 is_valid: true,
                 address: Some(raw_address),
-                address_type: Some(z_validate_address::AddressType::from(&address)),
+                address_type: Some(ZValidateAddressType::from(&address)),
                 is_mine: Some(false),
             })
         } else {
@@ -2551,7 +2542,7 @@ where
                 network
             );
 
-            Ok(z_validate_address::Response::invalid())
+            Ok(ZValidateAddressResponse::invalid())
         }
     }
 
@@ -2637,7 +2628,10 @@ where
         chain_tip_difficulty(self.network.clone(), self.state.clone(), false).await
     }
 
-    async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response> {
+    async fn z_list_unified_receivers(
+        &self,
+        address: String,
+    ) -> Result<ZListUnifiedReceiversResponse> {
         use zcash_address::unified::Container;
 
         let (network, unified_address): (
@@ -2679,7 +2673,7 @@ where
             }
         }
 
-        Ok(unified_address::Response::new(
+        Ok(ZListUnifiedReceiversResponse::new(
             orchard, sapling, p2pkh, p2sh,
         ))
     }
@@ -2703,7 +2697,7 @@ where
                 .await
                 .map_error(server::error::LegacyCode::default())?;
 
-            let get_block_template::Response::TemplateMode(block_template) = block_template else {
+            let GetBlockTemplateResponse::TemplateMode(block_template) = block_template else {
                 return Err(ErrorObject::borrowed(
                     0,
                     "error generating block template",
@@ -2713,7 +2707,7 @@ where
 
             let proposal_block = proposal_block_from_template(
                 &block_template,
-                get_block_template::TimeSource::CurTime,
+                TimeSource::CurTime,
                 NetworkUpgrade::current(&network, Height(block_template.height)),
             )
             .map_error(server::error::LegacyCode::default())?;

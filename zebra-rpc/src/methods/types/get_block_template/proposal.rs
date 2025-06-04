@@ -14,7 +14,7 @@ use zebra_node_services::BoxError;
 
 use crate::methods::types::{
     default_roots::DefaultRoots,
-    get_block_template::{Response, TemplateResponse},
+    get_block_template::{GetBlockTemplateResponse, TemplateResponse},
 };
 
 /// Response to a `getblocktemplate` RPC request in proposal mode.
@@ -63,13 +63,13 @@ impl ProposalResponse {
     }
 }
 
-impl From<ProposalResponse> for Response {
+impl From<ProposalResponse> for GetBlockTemplateResponse {
     fn from(proposal_response: ProposalResponse) -> Self {
         Self::ProposalMode(proposal_response)
     }
 }
 
-impl From<TemplateResponse> for Response {
+impl From<TemplateResponse> for GetBlockTemplateResponse {
     fn from(template: TemplateResponse) -> Self {
         Self::TemplateMode(Box::new(template))
     }

@@ -13,18 +13,18 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_rpc::methods::{
+use zebra_rpc::client::types::{
     BlockHeaderObject, BlockObject, Commitments, CompactDifficulty, DefaultRoots,
     ExpandedDifficulty, FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse,
     GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockChainInfoResponse,
     GetBlockHashResponse, GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
-    GetBlockSubsidyResponse, GetBlockTemplateRequest, GetBlockTemplateRequestMode,
+    GetBlockSubsidyResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
     GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetInfoResponse,
     GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
     GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject,
     NotSmallOrderValueCommitment, NoteCommitmentSubtreeIndex, Orchard, OrchardAction, Output,
     OutputIndex, PeerInfo, Script, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
-    ShieldedOutput, ShieldedSpend, SubmitBlockError, SubmitBlockResponse, SubtreeRpcData,
+    ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
     TemplateResponse, TransactionObject, TransactionTemplate, Treestate, Utxo,
     ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
     ZcashDeserialize, ZcashSerialize,
@@ -827,7 +827,7 @@ fn test_get_block_hash() -> Result<(), Box<dyn std::error::Error>> {
 fn test_get_block_template_request() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#"{"mode":"template"}"#;
 
-    let new_obj = GetBlockTemplateRequest::new(
+    let new_obj = GetBlockTemplateParameters::new(
         GetBlockTemplateRequestMode::Template,
         None,
         vec![],
@@ -942,7 +942,7 @@ fn test_submit_block() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(
         obj,
-        SubmitBlockResponse::ErrorResponse(SubmitBlockError::Duplicate)
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Duplicate)
     );
 
     Ok(())

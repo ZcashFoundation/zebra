@@ -4,7 +4,7 @@ use color_eyre::eyre::{eyre, Context, Result};
 
 use zebra_chain::parameters::Network;
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::types::peer_info::PeerInfo;
+use zebra_rpc::client::types::PeerInfo;
 
 use crate::common::{
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
