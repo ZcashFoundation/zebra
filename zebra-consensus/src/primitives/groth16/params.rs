@@ -13,7 +13,7 @@ lazy_static::lazy_static! {
     /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
     ///
     /// This static is accessed when Zebra needs to use these parameters for verification.
-    pub static ref GROTH16_PARAMETERS: Groth16Parameters = Groth16Parameters::new(&PROVER_PARAMS);
+    pub static ref GROTH16_PARAMETERS: Groth16Parameters = Groth16Parameters::new(PROVER_PARAMS.clone());
 }
 
 /// Groth16 Zero-Knowledge Proof parameters for the Sapling and Sprout circuits.
@@ -42,7 +42,7 @@ pub struct SproutParameters {
 
 impl Groth16Parameters {
     /// Loads the Groth16 parameters for Sapling and Sprout circuits.
-    fn new(prover_params: &LocalTxProver) -> Groth16Parameters {
+    fn new(prover_params: LocalTxProver) -> Groth16Parameters {
         let sprout_vk = VerifyingKey::<Bls12>::read(&include_bytes!("sprout-groth16.vk")[..])
             .expect("should be able to read and parse Sprout verification key");
 
