@@ -26,7 +26,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
-        Network, NetworkKind, NetworkUpgrade,
+        Network, NetworkUpgrade,
     },
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
