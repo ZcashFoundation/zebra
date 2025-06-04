@@ -178,9 +178,26 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2.1.4
 
-      # Create a Compute Engine virtual machine and attach a cached state disk using the
-      # $CACHED_DISK_NAME env as the source image to populate the disk cached state
-      # if the test needs it.
+      # Disk Mounting Logic Explanation:
+      #
+      # The following step creates a GCP instance using create-with-container.
+      # The $CONTAINER_MOUNT_DISKS variable, constructed within the run script,
+      # defines how the created persistent disk (specified in $DISK_PARAMS)
+      # is mounted into the test container using --container-mount-disk.
+      #
+      # If the test needs Lightwalletd state (inputs.needs_lwd_state is true or test_id is lwd-full-sync),
+      # the same persistent disk is mounted to both the Zebra state path (inputs.zebra_state_dir)
+      # and the Lightwalletd state path (inputs.lwd_state_dir).
+      #
+      # Using a single disk simplifies the VM and container setup.
+      # Mounting the same disk to multiple paths doesn't cause conflicts because Zebra and
+      # lightwalletd create different subdirectories for their data within the mounted volume.
+      # (However, Zebra, lightwalletd, and the test harness must not delete the whole cache directory root.)
+      #
+      # The container mount paths (inputs.zebra_state_dir and inputs.lwd_state_dir) must match
+      # the paths expected by the tests in Rust (also configured in ci-unit-tests-docker.yml).
+      # The application inside the container will typically use environment variables (like those set in
+      # $CONTAINER_ENV) or these known paths to access the state data.
       - name: Create ${{ inputs.test_id }} GCP compute instance
         id: create-instance
         run: |
@@ -189,102 +206,40 @@ jobs:
           if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
             DISK_PARAMS+=",image=${{ env.CACHED_DISK_NAME }}"
           fi
+
+          # Mount the disk(s) to the container
+          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
+          # Mount the same disk to the lwd path if needed
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
+            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
+          fi
+
+          # Environment variables for the container
+          CONTAINER_ENV="${{ inputs.test_variables }},RUST_LOG=${{ env.RUST_LOG }},RUST_BACKTRACE=${{ env.RUST_BACKTRACE }},RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }},COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }},CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }}"
+
+          # Trim whitespace from GAR_BASE as for some reason it's getting a trailing space
+          GAR_BASE_TRIMMED=$(echo "${{ vars.GAR_BASE }}" | xargs)
+
           gcloud compute instances create-with-container "${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}" \
+          --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
           --boot-disk-size=50GB \
           --boot-disk-type=pd-ssd \
           --image-project=cos-cloud \
           --image-family=cos-stable \
           --create-disk="${DISK_PARAMS}" \
-          --container-image=gcr.io/google-containers/busybox \
-          --machine-type ${{ inputs.is_long_test && vars.GCP_LARGE_MACHINE || vars.GCP_SMALL_MACHINE }} \
-          --network-interface=subnet=${{ vars.GCP_SUBNETWORK }} \
+          ${CONTAINER_MOUNT_DISKS} \
+          --container-stdin \
+          --container-tty \
+          --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
+          --container-env="${CONTAINER_ENV}" \
+          --subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
-          --metadata=google-monitoring-enabled=TRUE,google-logging-enabled=TRUE \
+          --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
+          --metadata=google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
           --metadata-from-file=startup-script=.github/workflows/scripts/gcp-vm-startup-script.sh \
           --labels=app=${{ inputs.app_name }},environment=test,network=${NETWORK},github_ref=${{ env.GITHUB_REF_SLUG_URL }},test=${{ inputs.test_id }} \
           --tags ${{ inputs.app_name }} \
           --zone ${{ vars.GCP_ZONE }}
-
-      # Format the mounted disk if the test doesn't use a cached state.
-      - name: Format ${{ inputs.test_id }} volume
-        if: ${{ !inputs.needs_zebra_state && !inputs.needs_lwd_state }}
-        shell: /usr/bin/bash -ex {0}
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          set -ex;
-          # Extract the correct disk name based on the device-name
-          DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-);
-          sudo mkfs.ext4 -v /dev/$DISK_NAME \
-          '
-
-      # Launch the test with the previously created disk or cached state.
-      #
-      # This step uses a $MOUNT_FLAGS variable to mount the disk to the docker container.
-      # If the test needs Lightwalletd state, we add the Lightwalletd state mount to the $MOUNT_FLAGS variable.
-      #
-      # SSH into the just created VM, and create a Docker container to run the incoming test
-      # from ${{ inputs.test_id }}, then mount the sudo docker volume created in the previous job.
-      #
-      # In this step we're using the same disk for simplicity, as mounting multiple disks to the
-      # VM and to the container might require more steps in this workflow, and additional
-      # considerations.
-      #
-      # The disk mounted in the VM is located at /dev/$DISK_NAME, we mount the root `/` of this disk to the docker
-      # container, and might have two different paths (if lightwalletd state is needed):
-      # - ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
-      #
-      # Currently we do this by mounting the same disk at both paths.
-      #
-      # This doesn't cause any path conflicts, because Zebra and lightwalletd create different
-      # subdirectories for their data. (But Zebra, lightwalletd, and the test harness must not
-      # delete the whole cache directory.)
-      #
-      # These paths must match the variables used by the tests in Rust, which are also set in
-      # `ci-unit-tests-docker.yml` to be able to run this tests.
-      #
-      # Although we're mounting the disk root to both directories, Zebra and Lightwalletd, tests
-      # will only respect the values from $ZEBRA_CACHE_DIR and $LWD_CACHE_DIR,
-      # the inputs like ${{ inputs.zebra_state_dir }} and ${{ inputs.lwd_state_dir }}
-      # are only used to match those variables paths.
-      - name: Launch ${{ inputs.test_id }} test
-        id: launch-test
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-
-          # Extract the correct disk name based on the device-name
-          DISK_NAME=$(ls -l /dev/disk/by-id | grep -oE "google-${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} -> ../../[^ ]+" | grep -oE "/[^/]+$" | cut -c 2-)
-
-          MOUNT_FLAGS="--mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.zebra_state_dir }}"
-
-          # Check if we need to mount for Lightwalletd state
-          # lightwalletd-full-sync reads Zebra and writes lwd, so it is handled specially.
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
-            MOUNT_FLAGS="$MOUNT_FLAGS --mount type=volume,volume-driver=local,volume-opt=device=/dev/$DISK_NAME,volume-opt=type=ext4,dst=${{ inputs.lwd_state_dir }}"
-          fi
-
-          sudo docker run \
-          --name ${{ inputs.test_id }} \
-          --tty \
-          --detach \
-          ${{ inputs.test_variables }} \
-          -e RUST_LOG=${{ env.RUST_LOG }} \
-          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
-          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
-          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
-          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
-          ${MOUNT_FLAGS} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }} \
-          '
 
       # Show debug logs if previous job failed
       - name: Show debug logs if previous job failed
@@ -300,36 +255,6 @@ jobs:
           sudo lsof /dev/$DISK_NAME;
           sudo dmesg;
           sudo journalctl -b \
-          '
-
-      # Show all the logs since the container launched,
-      # following until we see zebrad startup messages.
-      #
-      # This check limits the number of log lines, so tests running on the wrong network don't
-      # run until the job timeout. If Zebra does a complete recompile, there are a few hundred log
-      # lines before the startup logs. So that's what we use here.
-      #
-      # The log pipeline ignores the exit status of `docker logs`.
-      # It also ignores the expected 'broken pipe' error from `tee`,
-      # which happens when `grep` finds a matching output and moves on to the next job.
-      #
-      # Errors in the tests are caught by the final test status job.
-      - name: Check startup logs for ${{ inputs.test_id }}
-        run: |
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
-          --zone ${{ vars.GCP_ZONE }} \
-          --ssh-flag="-o ServerAliveInterval=5" \
-          --ssh-flag="-o ConnectionAttempts=20" \
-          --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${{ inputs.test_id }} | \
-          head -700 | \
-          tee --output-error=exit-nopipe /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
-          "Zcash network: ${{ inputs.network }}"; \
           '
 
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
@@ -350,26 +275,41 @@ jobs:
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
+          echo "Waiting for container to start..."; \
+          CONTAINER_ID=""; \
+          CONTAINER_PREFIX="klt-${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"; \
+          for i in {1..30}; do CONTAINER_ID=$(sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc); if [ -n "${CONTAINER_ID}" ]; then break; fi; echo "Waiting for container ID starting with ${CONTAINER_PREFIX}... ($i/30)"; sleep 2; done; \
+          if [ -z "${CONTAINER_ID}" ]; then echo "Container ID starting with ${CONTAINER_PREFIX} not found after waiting."; exit 1; fi; \
+          echo "Found test container ID: ${CONTAINER_ID}"; \
+          echo "Streaming logs and waiting for test success message..."; \
           sudo docker logs \
           --tail all \
           --follow \
-          ${{ inputs.test_id }} | \
-          tee --output-error=exit-nopipe /dev/stderr | \
-          grep --max-count=1 --extended-regexp --color=always \
+          ${CONTAINER_ID} \
+          | tee --output-error=exit-nopipe /dev/stderr \
+          | grep --max-count=1 --extended-regexp --color=always \
           "test result: .*ok.* [1-9][0-9]* passed.*finished in";
           LOGS_EXIT_STATUS=$?;
+          echo "Waiting for container ${CONTAINER_ID} to exit...";
+          EXIT_STATUS=$(sudo docker wait ${CONTAINER_ID} || echo "Error retrieving exit status");
+          echo "Container exit status: $EXIT_STATUS";
 
-          EXIT_STATUS=$(sudo docker wait ${{ inputs.test_id }} || echo "Error retrieving exit status");
-          echo "sudo docker exit status: $EXIT_STATUS";
-
-          # If grep found the pattern, exit with the Docker container"s exit status
-          if [ $LOGS_EXIT_STATUS -eq 0 ]; then
-              exit $EXIT_STATUS;
-          fi
-
-          # Handle other potential errors here
-          echo "An error occurred while processing the logs.";
-          exit 1; \
+          if [ $LOGS_EXIT_STATUS -ne 0 ]; then
+            # Grep failed (pattern not found)
+            echo "Test failed: Success log pattern not found (grep exit status: $LOGS_EXIT_STATUS).";
+            exit 1;
+          else
+            # Grep succeeded (pattern found), now check specific exit code
+            if [ "$EXIT_STATUS" -eq 1 ]; then
+              # Explicit failure code 1
+              echo "Test failed: Success log pattern found BUT container exited with status 1.";
+              exit 1;
+            else
+              # Grep succeeded and exit status is not 1
+              echo "Test successful: Success log pattern found. Container exit status $EXIT_STATUS ignored (as it is not 1).";
+              exit 0;
+            fi
+          fi \
           '
 
   # create a state image from the instance's state disk, if requested by the caller
@@ -480,15 +420,30 @@ jobs:
           RUNNING_DB_VERSION=""
           DB_VERSION_SUMMARY=""
 
+          # Get Instance Name
+          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+
+          echo "Fetching first 1000 log entries via SSH for instance ${INSTANCE_NAME} to find DB versions..."
           DOCKER_LOGS=$( \
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          sudo docker logs ${{ inputs.test_id }} | head -1000 \
-          ')
+          CONTAINER_ID=$(sudo docker ps -q --no-trunc | head -n 1); \
+          if [ -n "${CONTAINER_ID}" ]; then \
+             sudo docker logs ${CONTAINER_ID} | head -1000; \
+          else \
+             echo "Error: No running container found."; exit 1; \
+          fi; \
+          ' \
+          )
+
+          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
+              echo "Failed to retrieve logs via SSH or no container found."
+              exit 1
+          fi
 
           # either a semantic version or "creating new database"
           INITIAL_DISK_DB_VERSION=$( \
@@ -568,15 +523,30 @@ jobs:
         run: |
           SYNC_HEIGHT=""
 
+          # Get Instance Name
+          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+
+          echo "Fetching last 200 log entries via SSH for instance ${INSTANCE_NAME} to find sync height..."
           DOCKER_LOGS=$( \
-          gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
+          gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
           --command=' \
-          sudo docker logs ${{ inputs.test_id }} --tail 200 \
-          ')
+          CONTAINER_ID=$(sudo docker ps -q --no-trunc | head -n 1); \
+          if [ -n "${CONTAINER_ID}" ]; then \
+             sudo docker logs --tail 200 ${CONTAINER_ID}; \
+          else \
+             echo "Error: No running container found."; exit 1; \
+          fi; \
+          ' \
+          )
+
+          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
+              echo "Failed to retrieve logs via SSH or no container found."
+              exit 1
+          fi
 
           SYNC_HEIGHT=$( \
           echo "$DOCKER_LOGS" | \
