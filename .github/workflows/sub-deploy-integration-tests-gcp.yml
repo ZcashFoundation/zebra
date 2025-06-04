@@ -116,7 +116,7 @@ jobs:
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: ${{ inputs.needs_lwd_state && 'lwd-cache' || inputs.needs_zebra_state && 'zebrad-cache' }}
-      disk_suffix: ${{ inputs.disk_suffix }}
+      disk_suffix: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && inputs.disk_suffix || '' }}
       test_id: ${{ inputs.test_id }}
 
   # Show all the test logs, then follow the logs of the test we just launched, until it finishes.
@@ -127,11 +127,11 @@ jobs:
     name: Run ${{ inputs.test_id }} test
     runs-on: zfnd-runners
     needs: [ get-disk-name ]
-    if: ${{ !cancelled() && !failure() }}
+    if: ${{ !cancelled() && !failure() && (needs.get-disk-name.result == 'success' || needs.get-disk-name.result == 'skipped') }}
     timeout-minutes: ${{ inputs.is_long_test && 7200 || 180 }}
     outputs:
-      cached_disk_name: ${{ needs.get-disk-name.outputs.cached_disk_name }}
-      state_version: ${{ needs.get-disk-name.outputs.state_version }}
+      cached_disk_name: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
+      state_version: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.state_version || '' }}
     env:
       CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
     permissions:
@@ -659,14 +659,30 @@ jobs:
         run: |
           MINIMUM_UPDATE_HEIGHT=$((ORIGINAL_HEIGHT+CACHED_STATE_UPDATE_LIMIT))
           if [[ -z "$UPDATE_SUFFIX" ]] || [[ "$SYNC_HEIGHT" -gt "$MINIMUM_UPDATE_HEIGHT" ]] || [[ "${{ inputs.force_save_to_disk }}" == "true" ]]; then
+
+             # Use RUNNING_DB_VERSION for image naming (more reliable than STATE_VERSION)
+             # Extract just the major version number for the image name
+             IMAGE_VERSION_FOR_NAME=${RUNNING_DB_VERSION#v}  # Remove v prefix
+             IMAGE_VERSION_FOR_NAME=${IMAGE_VERSION_FOR_NAME%%-*}  # Keep only major version (before first dash)
+             
+             # Validate that we have a version number
+             if [[ -z $IMAGE_VERSION_FOR_NAME ]] || [[ ! $IMAGE_VERSION_FOR_NAME =~ ^[0-9]+$ ]]; then
+                 echo "ERROR: Invalid version extracted for image naming: $IMAGE_VERSION_FOR_NAME"
+                 echo "RUNNING_DB_VERSION was: $RUNNING_DB_VERSION"
+                 echo "STATE_VERSION was: ${{ env.STATE_VERSION }}"
+                 exit 1
+             fi
+             
+             echo "Using version $IMAGE_VERSION_FOR_NAME for image naming (from RUNNING_DB_VERSION: $RUNNING_DB_VERSION)"
+
              gcloud compute images create \
-              "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${{ env.STATE_VERSION }}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
+              "${{ inputs.disk_prefix }}-${SHORT_GITHUB_REF}-${{ env.GITHUB_SHA_SHORT }}-v${IMAGE_VERSION_FOR_NAME}-${NETWORK}-${{ inputs.disk_suffix }}${UPDATE_SUFFIX}-${TIME_SUFFIX}" \
               --force \
               --source-disk=${{ inputs.test_id }}-${{ env.GITHUB_SHA_SHORT }} \
               --source-disk-zone=${{ vars.GCP_ZONE }} \
               --storage-location=us \
               --description="Created from commit ${{ env.GITHUB_SHA_SHORT }} with height ${{ env.SYNC_HEIGHT }} and database format ${{ env.DB_VERSION_SUMMARY }}" \
-              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${{ env.STATE_VERSION }},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
+              --labels="height=${{ env.SYNC_HEIGHT }},purpose=${{ inputs.disk_prefix }},branch=${{ env.GITHUB_REF_SLUG_URL }},commit=${{ env.GITHUB_SHA_SHORT }},state-version=${IMAGE_VERSION_FOR_NAME},state-running-version=${RUNNING_DB_VERSION},initial-state-disk-version=${INITIAL_DISK_DB_VERSION},network=${NETWORK},target-height-kind=${{ inputs.disk_suffix }},update-flag=${UPDATE_SUFFIX},force-save=${{ inputs.force_save_to_disk }},updated-from-height=${ORIGINAL_HEIGHT},updated-from-disk=${ORIGINAL_DISK_NAME},test-id=${{ inputs.test_id }},app-name=${{ inputs.app_name }}"
           else
               echo "Skipped cached state update because the new sync height $SYNC_HEIGHT was less than $CACHED_STATE_UPDATE_LIMIT blocks above the original height $ORIGINAL_HEIGHT of $ORIGINAL_DISK_NAME"
           fi
