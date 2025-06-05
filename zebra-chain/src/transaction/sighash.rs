@@ -80,8 +80,8 @@ impl SigHasher {
     ///
     /// - If `trans` can't be converted to its `librustzcash` equivalent. This could happen, for
     ///   example, if `trans` contains the `nConsensusBranchId` field, and `nu` doesn't match it.
-    ///   More details [`PrecomputedTxData::new`].
-    /// - If `nu` doesn't contain a consensuranch id convertible to its `librustzcash`
+    ///   More details in [`PrecomputedTxData::new`].
+    /// - If `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
     ///   equivalent.
     pub fn new(
         trans: &Transaction,
