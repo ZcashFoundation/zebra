@@ -51,6 +51,7 @@ use crate::{
         CoinbaseSpendRestriction::{self, *},
     },
     value_balance::{ValueBalance, ValueBalanceError},
+    Error,
 };
 
 /// A Zcash transaction.
@@ -247,9 +248,9 @@ impl Transaction {
         hash_type: sighash::HashType,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
         input_index_script_code: Option<(usize, Vec<u8>)>,
-    ) -> SigHash {
-        sighash::SigHasher::new(self, nu, all_previous_outputs)
-            .sighash(hash_type, input_index_script_code)
+    ) -> Result<SigHash, Error> {
+        Ok(sighash::SigHasher::new(self, nu, all_previous_outputs)?
+            .sighash(hash_type, input_index_script_code))
     }
 
     /// Return a [`SigHasher`] for this transaction.
@@ -257,7 +258,7 @@ impl Transaction {
         &self,
         nu: NetworkUpgrade,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
-    ) -> sighash::SigHasher {
+    ) -> Result<sighash::SigHasher, Error> {
         sighash::SigHasher::new(self, nu, all_previous_outputs)
     }
 

@@ -7,7 +7,7 @@ use zcash_transparent::sighash::SighashType;
 use super::Transaction;
 
 use crate::parameters::NetworkUpgrade;
-use crate::transparent;
+use crate::{transparent, Error};
 
 use crate::primitives::zcash_primitives::{sighash, PrecomputedTxData};
 
@@ -87,10 +87,10 @@ impl SigHasher {
         trans: &Transaction,
         nu: NetworkUpgrade,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
-    ) -> Self {
-        SigHasher {
-            precomputed_tx_data: PrecomputedTxData::new(trans, nu, all_previous_outputs),
-        }
+    ) -> Result<Self, Error> {
+        Ok(SigHasher {
+            precomputed_tx_data: PrecomputedTxData::new(trans, nu, all_previous_outputs)?,
+        })
     }
 
     /// Calculate the sighash for the current transaction.

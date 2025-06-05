@@ -42,6 +42,10 @@ pub enum Error {
     TxCoinbase,
     /// unknown error from zcash_script: {0}
     Unknown(zcash_script_error_t),
+    /// transaction is invalid according to zebra_chain (not a zcash_script error)
+    //TODO: ideally this should be `#[from] zebra_chain::Error` but that does
+    //not implement Clone
+    TxInvalid,
 }
 
 impl fmt::Display for Error {
@@ -55,6 +59,7 @@ impl fmt::Display for Error {
                 "tx is a coinbase transaction and should not be verified".to_owned()
             }
             Error::Unknown(e) => format!("unknown error from zcash_script: {e}"),
+            Error::TxInvalid => "tx is invalid".to_owned(),
         })
     }
 }
@@ -132,13 +137,15 @@ impl CachedFfiTransaction {
         transaction: Arc<Transaction>,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
         nu: NetworkUpgrade,
-    ) -> Self {
-        let sighasher = transaction.sighasher(nu, all_previous_outputs.clone());
-        Self {
+    ) -> Result<Self, Error> {
+        let sighasher = transaction
+            .sighasher(nu, all_previous_outputs.clone())
+            .map_err(|_| Error::TxInvalid)?;
+        Ok(Self {
             transaction,
             all_previous_outputs,
             sighasher,
-        }
+        })
     }
 
     /// Returns the transparent inputs for this transaction.
@@ -304,7 +311,8 @@ mod tests {
         let input_index = 0;
 
         let previous_output = Arc::new(vec![output]);
-        let verifier = super::CachedFfiTransaction::new(transaction, previous_output, nu);
+        let verifier = super::CachedFfiTransaction::new(transaction, previous_output, nu)
+            .expect("network upgrade should be valid for tx");
         verifier.is_valid(input_index)?;
 
         Ok(())
@@ -351,7 +359,8 @@ mod tests {
             transaction,
             Arc::new(vec![output]),
             NetworkUpgrade::Blossom,
-        );
+        )
+        .expect("network upgrade should be valid for tx");
         verifier
             .is_valid(input_index)
             .expect_err("verification should fail");
@@ -376,7 +385,8 @@ mod tests {
             transaction,
             Arc::new(vec![output]),
             NetworkUpgrade::Blossom,
-        );
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
@@ -403,7 +413,8 @@ mod tests {
             transaction,
             Arc::new(vec![output]),
             NetworkUpgrade::Blossom,
-        );
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
@@ -432,7 +443,8 @@ mod tests {
             transaction,
             Arc::new(vec![output]),
             NetworkUpgrade::Blossom,
-        );
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
@@ -461,7 +473,8 @@ mod tests {
             transaction,
             Arc::new(vec![output]),
             NetworkUpgrade::Blossom,
-        );
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
@@ -494,7 +507,8 @@ mod tests {
             Arc::new(tx),
             Arc::new(vec![previous_output]),
             NetworkUpgrade::Nu5,
-        );
+        )
+        .expect("network upgrade should be valid for tx");
 
         verifier.is_valid(0)?;
 

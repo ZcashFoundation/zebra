@@ -12,6 +12,7 @@ use crate::{
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
+    Error,
 };
 
 // TODO: move copied and modified code to a separate module.
@@ -209,7 +210,7 @@ impl PrecomputedTxData {
     /// - `nu`: the network upgrade to which the transaction belongs.
     /// - `all_previous_outputs`: the transparent Output matching each transparent input in `tx`.
     ///
-    /// # Panics
+    /// # Errors
     ///
     /// - If `tx` can't be converted to its `librustzcash` equivalent.
     /// - If `nu` doesn't contain a consensus branch id convertible to its `librustzcash`
@@ -227,7 +228,7 @@ impl PrecomputedTxData {
     ///
     /// The check that ensures compliance with the two consensus rules stated above takes place in
     /// the [`Transaction::to_librustzcash`] method. If the check fails, the tx can't be converted
-    /// to its `librustzcash` equivalent, which leads to a panic. The check relies on the passed
+    /// to its `librustzcash` equivalent, which leads to an error. The check relies on the passed
     /// `nu` parameter, which uniquely represents a consensus branch id and can, therefore, be used
     /// as an equivalent to a consensus branch id. The desired `nu` is set either by the script or
     /// tx verifier in `zebra-consensus`.
@@ -238,10 +239,8 @@ impl PrecomputedTxData {
         tx: &Transaction,
         nu: NetworkUpgrade,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
-    ) -> PrecomputedTxData {
-        let tx = tx
-            .to_librustzcash(nu)
-            .expect("`zcash_primitives` and Zebra tx formats must be compatible");
+    ) -> Result<PrecomputedTxData, Error> {
+        let tx = tx.to_librustzcash(nu)?;
 
         let txid_parts = tx.deref().digest(zp_tx::txid::TxIdDigester);
 
@@ -255,11 +254,11 @@ impl PrecomputedTxData {
             tx.into_data()
                 .map_authorization(f_transparent, IdentityMap, IdentityMap);
 
-        PrecomputedTxData {
+        Ok(PrecomputedTxData {
             tx_data,
             txid_parts,
             all_previous_outputs,
-        }
+        })
     }
 }
 

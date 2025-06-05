@@ -490,7 +490,8 @@ fn test_vec143_1() -> Result<()> {
         &transaction,
         NetworkUpgrade::Overwinter,
         Arc::new(Vec::new()),
-    );
+    )
+    .expect("network upgrade is valid for tx");
 
     let hash = hasher.sighash(HashType::ALL, None);
     let expected = "a1f1a4e5cd9bd522322d661edd2af1bf2a7019cfab94ece18f4ba935b0a19073";
@@ -526,7 +527,8 @@ fn test_vec143_2() -> Result<()> {
         &transaction,
         NetworkUpgrade::Overwinter,
         Arc::new(all_previous_outputs),
-    );
+    )
+    .expect("network upgrade is valid for tx");
 
     let hash = hasher.sighash(
         HashType::SINGLE,
@@ -553,7 +555,8 @@ fn test_vec243_1() -> Result<()> {
 
     let transaction = ZIP243_1.zcash_deserialize_into::<Transaction>()?;
 
-    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, Arc::new(Vec::new()));
+    let hasher = SigHasher::new(&transaction, NetworkUpgrade::Sapling, Arc::new(Vec::new()))
+        .expect("network upgrade is valid for tx");
 
     let hash = hasher.sighash(HashType::ALL, None);
     let expected = "63d18534de5f2d1c9e169b73f9c783718adbef5c8a7d55b5e7a37affa1dd3ff3";
@@ -568,7 +571,8 @@ fn test_vec243_1() -> Result<()> {
     assert_eq!(expected, result);
 
     let precomputed_tx_data =
-        PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, Arc::new(Vec::new()));
+        PrecomputedTxData::new(&transaction, NetworkUpgrade::Sapling, Arc::new(Vec::new()))
+            .expect("network upgrade is valid for tx");
     let alt_sighash =
         crate::primitives::zcash_primitives::sighash(&precomputed_tx_data, HashType::ALL, None);
     let result = hex::encode(alt_sighash);
@@ -596,7 +600,8 @@ fn test_vec243_2() -> Result<()> {
         &transaction,
         NetworkUpgrade::Sapling,
         Arc::new(all_previous_outputs),
-    );
+    )
+    .expect("network upgrade is valid for tx");
 
     let hash = hasher.sighash(
         HashType::NONE,
@@ -625,7 +630,8 @@ fn test_vec243_2() -> Result<()> {
         &transaction,
         NetworkUpgrade::Sapling,
         Arc::new(all_previous_outputs),
-    );
+    )
+    .expect("network upgrade is valid for tx");
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &precomputed_tx_data,
         HashType::NONE,
@@ -657,7 +663,8 @@ fn test_vec243_3() -> Result<()> {
         &transaction,
         NetworkUpgrade::Sapling,
         Arc::new(all_previous_outputs),
-    );
+    )
+    .expect("network upgrade is valid for tx");
 
     let hash = hasher.sighash(
         HashType::ALL,
@@ -688,7 +695,8 @@ fn test_vec243_3() -> Result<()> {
         &transaction,
         NetworkUpgrade::Sapling,
         Arc::new(all_previous_outputs),
-    );
+    )
+    .expect("network upgrade is valid for tx");
     let alt_sighash = crate::primitives::zcash_primitives::sighash(
         &precomputed_tx_data,
         HashType::ALL,
@@ -720,17 +728,21 @@ fn zip143_sighash() -> Result<()> {
             Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
-        let result = hex::encode(transaction.sighash(
-            NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
-            HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-            Arc::new(all_previous_outputs),
-            input_index.map(|input_index| {
-                (
-                    input_index,
-                    output.unwrap().lock_script.as_raw_bytes().to_vec(),
+        let result = hex::encode(
+            transaction
+                .sighash(
+                    NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
+                    HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
+                    Arc::new(all_previous_outputs),
+                    input_index.map(|input_index| {
+                        (
+                            input_index,
+                            output.unwrap().lock_script.as_raw_bytes().to_vec(),
+                        )
+                    }),
                 )
-            }),
-        ));
+                .expect("network upgrade is valid for tx"),
+        );
         let expected = hex::encode(test.sighash);
         assert_eq!(expected, result, "test #{i}: sighash does not match");
     }
@@ -758,17 +770,21 @@ fn zip243_sighash() -> Result<()> {
             Some(output) => mock_pre_v5_output_list(output, input_index.unwrap()),
             None => vec![],
         };
-        let result = hex::encode(transaction.sighash(
-            NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
-            HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
-            Arc::new(all_previous_outputs),
-            input_index.map(|input_index| {
-                (
-                    input_index,
-                    output.unwrap().lock_script.as_raw_bytes().to_vec(),
+        let result = hex::encode(
+            transaction
+                .sighash(
+                    NetworkUpgrade::try_from(test.consensus_branch_id).expect("network upgrade"),
+                    HashType::from_bits(test.hash_type).expect("must be a valid HashType"),
+                    Arc::new(all_previous_outputs),
+                    input_index.map(|input_index| {
+                        (
+                            input_index,
+                            output.unwrap().lock_script.as_raw_bytes().to_vec(),
+                        )
+                    }),
                 )
-            }),
-        ));
+                .expect("network upgrade is valid for tx"),
+        );
         let expected = hex::encode(test.sighash);
         assert_eq!(expected, result, "test #{i}: sighash does not match");
     }
@@ -794,24 +810,30 @@ fn zip244_sighash() -> Result<()> {
                 .collect(),
         );
 
-        let result = hex::encode(transaction.sighash(
-            NetworkUpgrade::Nu5,
-            HashType::ALL,
-            all_previous_outputs.clone(),
-            None,
-        ));
+        let result = hex::encode(
+            transaction
+                .sighash(
+                    NetworkUpgrade::Nu5,
+                    HashType::ALL,
+                    all_previous_outputs.clone(),
+                    None,
+                )
+                .expect("network upgrade is valid for tx"),
+        );
         let expected = hex::encode(test.sighash_shielded);
         assert_eq!(expected, result, "test #{i}: sighash does not match");
 
         if let Some(sighash_all) = test.sighash_all {
             let result = hex::encode(
-                transaction.sighash(
-                    NetworkUpgrade::Nu5,
-                    HashType::ALL,
-                    all_previous_outputs,
-                    test.transparent_input
-                        .map(|idx| (idx as _, test.script_pubkeys[idx as usize].clone())),
-                ),
+                transaction
+                    .sighash(
+                        NetworkUpgrade::Nu5,
+                        HashType::ALL,
+                        all_previous_outputs,
+                        test.transparent_input
+                            .map(|idx| (idx as _, test.script_pubkeys[idx as usize].clone())),
+                    )
+                    .expect("network upgrade is valid for tx"),
             );
             let expected = hex::encode(sighash_all);
             assert_eq!(expected, result, "test #{i}: sighash does not match");
@@ -840,9 +862,12 @@ fn consensus_branch_id() {
 
             tx.to_librustzcash(tx_nu)
                 .expect("tx is convertible under tx nu");
-            PrecomputedTxData::new(&tx, tx_nu, Arc::new(Vec::new()));
-            sighash::SigHasher::new(&tx, tx_nu, Arc::new(Vec::new()));
-            tx.sighash(tx_nu, HashType::ALL, Arc::new(Vec::new()), None);
+            PrecomputedTxData::new(&tx, tx_nu, Arc::new(Vec::new()))
+                .expect("network upgrade is valid for tx");
+            sighash::SigHasher::new(&tx, tx_nu, Arc::new(Vec::new()))
+                .expect("network upgrade is valid for tx");
+            tx.sighash(tx_nu, HashType::ALL, Arc::new(Vec::new()), None)
+                .expect("network upgrade is valid for tx");
 
             // All computations should fail under an nu other than the tx one.
 
@@ -898,7 +923,9 @@ fn binding_signatures() {
                         ..
                     } => {
                         if let Some(sapling_shielded_data) = sapling_shielded_data {
-                            let sighash = tx.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
+                            let sighash = tx
+                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
+                                .expect("network upgrade is valid for tx");
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),
@@ -927,7 +954,9 @@ fn binding_signatures() {
                                 continue;
                             }
 
-                            let sighash = tx.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
+                            let sighash = tx
+                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
+                                .expect("network upgrade is valid for tx");
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),
@@ -957,7 +986,9 @@ fn binding_signatures() {
                                 continue;
                             }
 
-                            let sighash = tx.sighash(nu, HashType::ALL, Arc::new(Vec::new()), None);
+                            let sighash = tx
+                                .sighash(nu, HashType::ALL, Arc::new(Vec::new()), None)
+                                .expect("network upgrade is valid for tx");
 
                             let bvk = redjubjub::VerificationKey::try_from(
                                 sapling_shielded_data.binding_verification_key(),
