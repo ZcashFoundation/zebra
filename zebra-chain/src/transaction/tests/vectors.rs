@@ -875,15 +875,24 @@ fn consensus_branch_id() {
                 .expect_err("tx is not convertible under nu other than the tx one");
 
             let err = PrecomputedTxData::new(&tx, any_other_nu, Arc::new(Vec::new())).unwrap_err();
-            assert!(matches!(err, crate::Error::InvalidConsensusBranchId));
+            assert!(
+                matches!(err, crate::Error::InvalidConsensusBranchId),
+                "precomputing tx sighash data errors under nu other than the tx one"
+            );
 
             let err = sighash::SigHasher::new(&tx, any_other_nu, Arc::new(Vec::new())).unwrap_err();
-            assert!(matches!(err, crate::Error::InvalidConsensusBranchId));
+            assert!(
+                matches!(err, crate::Error::InvalidConsensusBranchId),
+                "creating the sighasher errors under nu other than the tx one"
+            );
 
             let err = tx
                 .sighash(any_other_nu, HashType::ALL, Arc::new(Vec::new()), None)
                 .unwrap_err();
-            assert!(matches!(err, crate::Error::InvalidConsensusBranchId));
+            assert!(
+                matches!(err, crate::Error::InvalidConsensusBranchId),
+                "the sighash computation errors under nu other than the tx one"
+            );
         }
     }
 }
