@@ -17,7 +17,7 @@ use zebra_chain::{
     sapling::NotSmallOrderValueCommitment,
     serialization::{ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
-    transparent::Script,
+    transparent::{OutputIndex, Script},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_rpc::client::{
@@ -34,7 +34,6 @@ use zebra_rpc::client::{
     TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
     ZListUnifiedReceiversResponse, ZValidateAddressResponse,
 };
-use zebra_state::OutputIndex;
 
 #[test]
 fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {

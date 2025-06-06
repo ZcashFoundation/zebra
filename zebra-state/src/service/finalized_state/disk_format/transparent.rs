@@ -14,7 +14,7 @@ use zebra_chain::{
     block::Height,
     parameters::NetworkKind,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transparent::{self, Address::*},
+    transparent::{self, Address::*, OutputIndex},
 };
 
 use crate::service::finalized_state::disk_format::{
@@ -24,9 +24,6 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
 
 /// Transparent balances are stored as an 8 byte integer on disk.
 pub const BALANCE_DISK_BYTES: usize = 8;
@@ -48,7 +45,7 @@ pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 /// Since Zebra only stores fully verified blocks on disk, blocks with larger indexes
 /// are rejected before reaching the database.
 pub const MAX_ON_DISK_OUTPUT_INDEX: OutputIndex =
-    OutputIndex((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
+    OutputIndex::from_index((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
 
 /// [`OutputLocation`]s are stored as a 3 byte height, 2 byte transaction index,
 /// and 3 byte output index on disk.
@@ -58,59 +55,6 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
     TRANSACTION_LOCATION_DISK_BYTES + OUTPUT_INDEX_DISK_BYTES;
 
 // Transparent types
-
-/// A transparent output's index in its transaction.
-// TODO: Move to zebra-chain.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub struct OutputIndex(u32);
-
-impl OutputIndex {
-    /// Create a transparent output index from the Zcash consensus integer type.
-    ///
-    /// `u32` is also the inner type.
-    pub fn from_index(output_index: u32) -> OutputIndex {
-        OutputIndex(output_index)
-    }
-
-    /// Returns this index as the inner type.
-    pub fn index(&self) -> u32 {
-        self.0
-    }
-
-    /// Create a transparent output index from `usize`.
-    #[allow(dead_code)]
-    pub fn from_usize(output_index: usize) -> OutputIndex {
-        OutputIndex(
-            output_index
-                .try_into()
-                .expect("the maximum valid index fits in the inner type"),
-        )
-    }
-
-    /// Return this index as `usize`.
-    #[allow(dead_code)]
-    pub fn as_usize(&self) -> usize {
-        self.0
-            .try_into()
-            .expect("the maximum valid index fits in usize")
-    }
-
-    /// Create a transparent output index from `u64`.
-    #[allow(dead_code)]
-    pub fn from_u64(output_index: u64) -> OutputIndex {
-        OutputIndex(
-            output_index
-                .try_into()
-                .expect("the maximum u64 index fits in the inner type"),
-        )
-    }
-
-    /// Return this index as `u64`.
-    #[allow(dead_code)]
-    pub fn as_u64(&self) -> u64 {
-        self.0.into()
-    }
-}
 
 /// A transparent output's location in the chain, by block height and transaction index.
 ///
@@ -472,7 +416,7 @@ impl AddressUnspentOutput {
         // even if it is in a later block or transaction.
         //
         // Consensus: the block size limit is 2MB, which is much lower than the index range.
-        self.unspent_output_location.output_index.0 += 1;
+        self.unspent_output_location.output_index += 1;
     }
 
     /// The location of the first [`transparent::Output`] sent to the address of this output.
@@ -708,14 +652,14 @@ impl IntoDisk for OutputIndex {
                 {
                     use zebra_chain::serialization::TrustedPreallocate;
                     assert!(
-                        u64::from(MAX_ON_DISK_OUTPUT_INDEX.0)
+                        u64::from(MAX_ON_DISK_OUTPUT_INDEX.index())
                             > zebra_chain::transparent::Output::max_allocation(),
                         "increased block size requires database output index format change",
                     );
                 }
 
                 truncate_zero_be_bytes(
-                    &MAX_ON_DISK_OUTPUT_INDEX.0.to_be_bytes(),
+                    &MAX_ON_DISK_OUTPUT_INDEX.index().to_be_bytes(),
                     OUTPUT_INDEX_DISK_BYTES,
                 )
                 .expect("max on disk output index is valid")

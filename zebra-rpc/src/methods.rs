@@ -72,23 +72,19 @@ use zebra_chain::{
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
-    serialization::ZcashDeserializeInto,
-    serialization::{ZcashDeserialize, ZcashSerialize},
+    serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
-    transparent::{self, Address},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    transparent::{self, Address, OutputIndex},
     work::{
-        difficulty::{ParameterDifficulty, U256},
+        difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
         equihash::Solution,
     },
 };
 use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
 use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_state::{
-    HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
-};
+use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
 
 use crate::{
     config,
