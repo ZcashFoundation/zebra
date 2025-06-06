@@ -1,17 +1,17 @@
 //! Errors for Zcash consensus-critical serialization.
 
-use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error};
+use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error, sync::Arc};
 
 use hex::FromHexError;
 use thiserror::Error;
 
 /// A serialization error.
 // TODO: refine error types -- better to use boxed errors?
-#[derive(Error, Debug)]
+#[derive(Clone, Error, Debug)]
 pub enum SerializationError {
     /// An io error that prevented deserialization
     #[error("io error: {0}")]
-    Io(#[from] io::Error),
+    Io(#[from] Arc<io::Error>),
 
     /// The data to be deserialized was malformed.
     // TODO: refine errors
@@ -59,5 +59,13 @@ impl From<crate::Error> for SerializationError {
             crate::Error::Conversion(e) => Self::Io(e),
             crate::Error::MissingNetworkUpgrade => Self::Parse("missing network upgrade"),
         }
+    }
+}
+
+/// Allow converting `io::Error` to `SerializationError`; we need this since we
+/// use `Arc<io::Error>` in `SerializationError::Io`.
+impl From<io::Error> for SerializationError {
+    fn from(value: io::Error) -> Self {
+        Arc::new(value).into()
     }
 }
