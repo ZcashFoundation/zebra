@@ -21,7 +21,8 @@ use color_eyre::eyre::Report;
 use tower::ServiceExt;
 
 use orchard::{
-    asset_record::AssetRecord, issuance::IssueAction, note::AssetBase, value::NoteValue,
+    asset_record::AssetRecord, issuance::IssueAction, keys::IssuanceValidatingKey, note::AssetBase,
+    value::NoteValue,
 };
 
 use zebra_chain::{
@@ -47,6 +48,7 @@ type TranscriptItem = (Request, Result<Hash, ExpectedTranscriptError>);
 #[derive(Debug)]
 enum AssetRecordsError {
     BurnAssetMissing,
+    EmptyActionNotFinalized,
     AmountOverflow,
     MissingRefNote,
     ModifyFinalized,
@@ -78,17 +80,38 @@ fn process_burns<'a, I: Iterator<Item = &'a BurnItem>>(
 /// Processes orchard issue actions, increasing asset supply.
 fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
     asset_records: &mut AssetRecords,
-    issue_actions: I,
+    ik: &IssuanceValidatingKey,
+    actions: I,
 ) -> Result<(), AssetRecordsError> {
-    for action in issue_actions {
+    for action in actions {
+        let action_asset = AssetBase::derive(ik, action.asset_desc_hash());
         let reference_note = action.get_reference_note();
         let is_finalized = action.is_finalized();
 
-        for note in action.notes() {
-            let amount = note.value();
+        let mut note_amounts = action.notes().into_iter().map(|note| {
+            if note.asset() == action_asset {
+                Ok(note.value())
+            } else {
+                Err(AssetRecordsError::BurnAssetMissing)
+            }
+        });
+
+        let first_note_amount = match note_amounts.next() {
+            Some(note_amount) => note_amount,
+            None => {
+                if is_finalized {
+                    Ok(NoteValue::from_raw(0))
+                } else {
+                    Err(AssetRecordsError::EmptyActionNotFinalized)
+                }
+            }
+        };
+
+        for amount_result in std::iter::once(first_note_amount).chain(note_amounts) {
+            let amount = amount_result?;
 
             // FIXME: check for issuance specific errors?
-            match asset_records.entry(note.asset()) {
+            match asset_records.entry(action_asset) {
                 hash_map::Entry::Occupied(mut entry) => {
                     let asset_record = entry.get_mut();
                     asset_record.amount =
@@ -119,15 +142,22 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
 ) -> Result<AssetRecords, AssetRecordsError> {
     blocks
         .into_iter()
-        .filter_map(|(request, _)| match request {
-            Request::Commit(block) => Some(&block.transactions),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            Request::CheckProposal(_) => None,
+        .filter_map(|(request, result)| match (request, result) {
+            (Request::Commit(block), Ok(_)) => Some(&block.transactions),
+            _ => None,
         })
         .flatten()
         .try_fold(HashMap::new(), |mut asset_records, tx| {
             process_burns(&mut asset_records, tx.orchard_burns())?;
-            process_issue_actions(&mut asset_records, tx.orchard_issue_actions())?;
+
+            if let Some(issue_data) = tx.orchard_issue_data() {
+                process_issue_actions(
+                    &mut asset_records,
+                    issue_data.inner().ik(),
+                    issue_data.actions(),
+                )?;
+            }
+
             Ok(asset_records)
         })
 }
@@ -142,7 +172,17 @@ fn create_transcript_data<'a, I: IntoIterator<Item = &'a Vec<u8>>>(
 
     std::iter::once(regtest_genesis_block())
         .chain(workflow_blocks)
-        .map(|block| (Request::Commit(block.clone()), Ok(block.hash())))
+        .enumerate()
+        .map(|(i, block)| {
+            (
+                Request::Commit(block.clone()),
+                if i == 5 {
+                    Err(ExpectedTranscriptError::Any)
+                } else {
+                    Ok(block.hash())
+                },
+            )
+        })
 }
 
 /// Queries the state service for the asset state of the given asset.
@@ -207,6 +247,7 @@ async fn check_zsa_workflow() -> Result<(), Report> {
 
         assert_eq!(
             asset_state.total_supply,
+            // FIXME: Fix it after chaning ValueSum to NoteValue in AssetSupply in orchard
             u64::try_from(i128::from(asset_record.amount))
                 .expect("asset supply amount should be within u64 range"),
             "Total supply mismatch for asset {:?}.",
