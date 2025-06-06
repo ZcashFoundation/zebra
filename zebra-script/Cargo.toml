@@ -14,6 +14,13 @@ keywords = ["zebra", "zcash"]
 # Must be one of <https://crates.io/category_slugs>
 categories = ["api-bindings", "cryptography::cryptocurrencies"]
 
+[features]
+default = []
+# Enable a C++/Rust comparison interpreter that runs both the original C++
+# implementation and the Rust implementation, and logs a warning if they don't
+# match.
+comparison-interpreter = []
+
 [dependencies]
 zcash_script = { workspace = true }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46" }
