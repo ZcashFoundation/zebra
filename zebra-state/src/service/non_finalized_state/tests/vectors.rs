@@ -258,7 +258,7 @@ fn invalidate_block_removes_block_and_descendants_from_chain_for_network(
         3
     );
 
-    state.invalidate_block(block2.hash());
+    let _ = state.invalidate_block(block2.hash());
 
     let post_invalidated_chain = state.best_chain().unwrap();
 
@@ -358,7 +358,7 @@ fn reconsider_block_inserts_block_and_descendants_into_chain_for_network(
     );
 
     // Invalidate block2 to update the invalidated_blocks NonFinalizedState
-    state.invalidate_block(block2.hash());
+    let _ = state.invalidate_block(block2.hash());
 
     // Perform checks to ensure the invalidated_block and descendants were added to the invalidated_block
     // state
