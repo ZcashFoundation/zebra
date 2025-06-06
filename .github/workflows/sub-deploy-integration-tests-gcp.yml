@@ -132,6 +132,7 @@ jobs:
     outputs:
       cached_disk_name: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
       state_version: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.state_version || '' }}
+      container_id: ${{ steps.find-container.outputs.CONTAINER_ID }}
     env:
       CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
     permissions:
@@ -232,6 +233,7 @@ jobs:
           --container-tty \
           --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
           --container-env="${CONTAINER_ENV}" \
+          --container-restart-policy=never \
           --subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
           --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
@@ -257,6 +259,36 @@ jobs:
           sudo journalctl -b \
           '
 
+      # Find the container ID and save it for use in subsequent steps
+      - name: Find container ID
+        id: find-container
+        run: |
+          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+          CONTAINER_PREFIX="klt-${INSTANCE_NAME}"
+
+          echo "Looking for container with prefix: ${CONTAINER_PREFIX}"
+
+          # Wait up to 60 seconds for container to start
+          for attempt in {1..30}; do
+            echo "Attempt ${attempt}/30: Checking for running container..."
+            CONTAINER_ID=$(gcloud compute ssh ${INSTANCE_NAME} \
+              --zone ${{ vars.GCP_ZONE }} \
+              --ssh-flag="-o ServerAliveInterval=5" \
+              --ssh-flag="-o ConnectionAttempts=20" \
+              --ssh-flag="-o ConnectTimeout=5" \
+              --command="sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc" 2>/dev/null || echo "")
+            if [ -n "${CONTAINER_ID}" ]; then
+              echo "Found running container: ${CONTAINER_ID}"
+              echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "No running container found yet, waiting 2 seconds..."
+            sleep 2
+          done
+
+          echo "Container not found after 60 seconds"
+          exit 1
+
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
       # Also shows all the test logs.
@@ -269,6 +301,7 @@ jobs:
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
         run: |
+          CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
@@ -424,20 +457,14 @@ jobs:
           INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching first 1000 log entries via SSH for instance ${INSTANCE_NAME} to find DB versions..."
+          CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          CONTAINER_ID=$(sudo docker ps -q --no-trunc | head -n 1); \
-          if [ -n "${CONTAINER_ID}" ]; then \
-             sudo docker logs ${CONTAINER_ID} | head -1000; \
-          else \
-             echo "Error: No running container found."; exit 1; \
-          fi; \
-          ' \
+          --command="sudo docker logs ${CONTAINER_ID} | head -1000" \
           )
 
           if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
@@ -527,20 +554,14 @@ jobs:
           INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching last 200 log entries via SSH for instance ${INSTANCE_NAME} to find sync height..."
+          CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          CONTAINER_ID=$(sudo docker ps -q --no-trunc | head -n 1); \
-          if [ -n "${CONTAINER_ID}" ]; then \
-             sudo docker logs --tail 200 ${CONTAINER_ID}; \
-          else \
-             echo "Error: No running container found."; exit 1; \
-          fi; \
-          ' \
+          --command="sudo docker logs --tail 200 ${CONTAINER_ID}" \
           )
 
           if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
