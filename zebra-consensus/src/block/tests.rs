@@ -702,9 +702,10 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_single_transaction_block_many_inputs();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let tx_sigop_count = zebra_script::legacy_sigop_count(&transaction);
-        assert_eq!(tx_sigop_count, Ok(0));
-        legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
+        let tx_sigop_count =
+            zebra_script::legacy_sigop_count(&transaction).expect("unexpected invalid sigop count");
+        assert_eq!(tx_sigop_count, 0);
+        legacy_sigop_count += tx_sigop_count;
     }
     // We know this block has no sigops.
     assert_eq!(legacy_sigop_count, 0);
@@ -712,9 +713,10 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_multi_transaction_block();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let tx_sigop_count = zebra_script::legacy_sigop_count(&transaction);
-        assert_eq!(tx_sigop_count, Ok(1));
-        legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
+        let tx_sigop_count =
+            zebra_script::legacy_sigop_count(&transaction).expect("unexpected invalid sigop count");
+        assert_eq!(tx_sigop_count, 1);
+        legacy_sigop_count += tx_sigop_count;
     }
     // Test that large blocks can actually fail the sigops check.
     assert!(legacy_sigop_count > MAX_BLOCK_SIGOPS);

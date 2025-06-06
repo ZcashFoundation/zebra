@@ -27,7 +27,7 @@ use zebra_chain::{
 };
 
 /// An Error type representing the error codes returned from zcash_script.
-#[derive(Copy, Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
     /// script verification failed
@@ -43,9 +43,7 @@ pub enum Error {
     /// unknown error from zcash_script: {0}
     Unknown(zcash_script_error_t),
     /// transaction is invalid according to zebra_chain (not a zcash_script error)
-    //TODO: ideally this should be `#[from] zebra_chain::Error` but that does
-    //not implement Clone
-    TxInvalid,
+    TxInvalid(#[from] zebra_chain::Error),
 }
 
 impl fmt::Display for Error {
@@ -59,7 +57,7 @@ impl fmt::Display for Error {
                 "tx is a coinbase transaction and should not be verified".to_owned()
             }
             Error::Unknown(e) => format!("unknown error from zcash_script: {e}"),
-            Error::TxInvalid => "tx is invalid".to_owned(),
+            Error::TxInvalid(e) => format!("tx is invalid: {e}"),
         })
     }
 }
@@ -138,9 +136,7 @@ impl CachedFfiTransaction {
         all_previous_outputs: Arc<Vec<transparent::Output>>,
         nu: NetworkUpgrade,
     ) -> Result<Self, Error> {
-        let sighasher = transaction
-            .sighasher(nu, all_previous_outputs.clone())
-            .map_err(|_| Error::TxInvalid)?;
+        let sighasher = transaction.sighasher(nu, all_previous_outputs.clone())?;
         Ok(Self {
             transaction,
             all_previous_outputs,
