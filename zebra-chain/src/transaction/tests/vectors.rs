@@ -874,20 +874,16 @@ fn consensus_branch_id() {
             tx.to_librustzcash(any_other_nu)
                 .expect_err("tx is not convertible under nu other than the tx one");
 
-            std::panic::catch_unwind(|| {
-                PrecomputedTxData::new(&tx, any_other_nu, Arc::new(Vec::new()))
-            })
-            .expect_err("precomputing tx sighash data panics under nu other than the tx one");
+            let err = PrecomputedTxData::new(&tx, any_other_nu, Arc::new(Vec::new())).unwrap_err();
+            assert!(matches!(err, crate::Error::InvalidConsensusBranchId));
 
-            std::panic::catch_unwind(|| {
-                sighash::SigHasher::new(&tx, any_other_nu, Arc::new(Vec::new()))
-            })
-            .expect_err("creating the sighasher panics under nu other than the tx one");
+            let err = sighash::SigHasher::new(&tx, any_other_nu, Arc::new(Vec::new())).unwrap_err();
+            assert!(matches!(err, crate::Error::InvalidConsensusBranchId));
 
-            std::panic::catch_unwind(|| {
-                tx.sighash(any_other_nu, HashType::ALL, Arc::new(Vec::new()), None)
-            })
-            .expect_err("the sighash computation panics under nu other than the tx one");
+            let err = tx
+                .sighash(any_other_nu, HashType::ALL, Arc::new(Vec::new()), None)
+                .unwrap_err();
+            assert!(matches!(err, crate::Error::InvalidConsensusBranchId));
         }
     }
 }
