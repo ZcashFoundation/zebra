@@ -445,7 +445,7 @@ jobs:
           INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching first 1000 log entries via SSH for instance ${INSTANCE_NAME} to find DB versions..."
-          CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
+          CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -455,8 +455,8 @@ jobs:
           --command="sudo docker logs ${CONTAINER_ID} | head -1000" \
           )
 
-          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
-              echo "Failed to retrieve logs via SSH or no container found."
+          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
+              echo "Failed to retrieve logs via SSH."
               exit 1
           fi
 
@@ -542,7 +542,7 @@ jobs:
           INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching last 200 log entries via SSH for instance ${INSTANCE_NAME} to find sync height..."
-          CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
+          CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
@@ -552,8 +552,8 @@ jobs:
           --command="sudo docker logs --tail 200 ${CONTAINER_ID}" \
           )
 
-          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
-              echo "Failed to retrieve logs via SSH or no container found."
+          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
+              echo "Failed to retrieve logs via SSH."
               exit 1
           fi
 
