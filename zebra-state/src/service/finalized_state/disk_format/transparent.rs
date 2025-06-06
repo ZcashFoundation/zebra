@@ -7,8 +7,6 @@
 
 use std::{cmp::max, fmt::Debug};
 
-use serde::{Deserialize, Serialize};
-
 use zebra_chain::{
     amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
     block::Height,
@@ -63,7 +61,7 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct OutputLocation {
     /// The location of the transparent input's transaction.
@@ -156,7 +154,7 @@ pub type AddressLocation = OutputLocation;
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize),
+    derive(Arbitrary, serde::Serialize, serde::Deserialize),
     serde(bound = "C: Constraint + Clone")
 )]
 pub struct AddressBalanceLocationInner<C: Constraint + Copy + std::fmt::Debug> {
@@ -307,7 +305,7 @@ impl std::ops::Add for AddressBalanceLocationChange {
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressBalanceLocation(AddressBalanceLocationInner<NonNegative>);
 
@@ -359,7 +357,7 @@ impl std::ops::Add for AddressBalanceLocation {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressUnspentOutput {
     /// The location of the first [`transparent::Output`] sent to the address in `output`.
@@ -457,7 +455,7 @@ impl AddressUnspentOutput {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressTransaction {
     /// The location of the first [`transparent::Output`] sent to the address in `output`.
