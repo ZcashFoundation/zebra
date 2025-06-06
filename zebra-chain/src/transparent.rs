@@ -1,6 +1,6 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
 
-use std::{collections::HashMap, fmt, iter};
+use std::{collections::HashMap, fmt, iter, ops::AddAssign};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -131,6 +131,7 @@ pub struct OutPoint {
 
     /// Identifies which UTXO from that transaction is referenced; the
     /// first output is 0, etc.
+    // TODO: Use OutputIndex here
     pub index: u32,
 }
 
@@ -442,5 +443,63 @@ impl Output {
     /// Returns None if the address type is not valid or unrecognized.
     pub fn address(&self, network: &Network) -> Option<Address> {
         zcash_primitives::transparent_output_address(self, network)
+    }
+}
+
+/// A transparent output's index in its transaction.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct OutputIndex(u32);
+
+impl OutputIndex {
+    /// Create a transparent output index from the Zcash consensus integer type.
+    ///
+    /// `u32` is also the inner type.
+    pub const fn from_index(output_index: u32) -> OutputIndex {
+        OutputIndex(output_index)
+    }
+
+    /// Returns this index as the inner type.
+    pub const fn index(&self) -> u32 {
+        self.0
+    }
+
+    /// Create a transparent output index from `usize`.
+    #[allow(dead_code)]
+    pub fn from_usize(output_index: usize) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum valid index fits in the inner type"),
+        )
+    }
+
+    /// Return this index as `usize`.
+    #[allow(dead_code)]
+    pub fn as_usize(&self) -> usize {
+        self.0
+            .try_into()
+            .expect("the maximum valid index fits in usize")
+    }
+
+    /// Create a transparent output index from `u64`.
+    #[allow(dead_code)]
+    pub fn from_u64(output_index: u64) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum u64 index fits in the inner type"),
+        )
+    }
+
+    /// Return this index as `u64`.
+    #[allow(dead_code)]
+    pub fn as_u64(&self) -> u64 {
+        self.0.into()
+    }
+}
+
+impl AddAssign<u32> for OutputIndex {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs
     }
 }

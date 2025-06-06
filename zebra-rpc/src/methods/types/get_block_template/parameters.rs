@@ -66,7 +66,7 @@ pub enum GetBlockTemplateCapability {
 #[derive(
     Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize, Default, Getters, new,
 )]
-pub struct GetBlockTemplateRequest {
+pub struct GetBlockTemplateParameters {
     /// Defines whether the RPC method should generate a block template or attempt to
     /// validate block data, checking against all of the server's usual acceptance rules
     /// (excluding the check for a valid proof-of-work).
@@ -101,10 +101,7 @@ pub struct GetBlockTemplateRequest {
     pub(crate) _work_id: Option<String>,
 }
 
-#[deprecated(note = "Use `GetBlockTemplateRequest` instead")]
-pub use self::GetBlockTemplateRequest as JsonParameters;
-
-impl GetBlockTemplateRequest {
+impl GetBlockTemplateParameters {
     /// Returns Some(data) with the block proposal hexdata if in `Proposal` mode and `data` is provided.
     pub fn block_proposal_data(&self) -> Option<HexData> {
         match self {

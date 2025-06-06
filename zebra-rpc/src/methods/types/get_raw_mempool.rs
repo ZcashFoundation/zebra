@@ -24,9 +24,6 @@ pub enum GetRawMempoolResponse {
     Verbose(HashMap<String, MempoolObject>),
 }
 
-#[deprecated(note = "Use `GetRawMempoolResponse` instead")]
-pub use GetRawMempoolResponse as GetRawMempool;
-
 /// A mempool transaction details object as returned by `getrawmempool` in
 /// verbose mode.
 #[allow(clippy::too_many_arguments)]

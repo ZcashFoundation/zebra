@@ -5,7 +5,7 @@ use derive_new::new;
 
 /// `z_listunifiedreceivers` response
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
-pub struct Response {
+pub struct ZListUnifiedReceiversResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     orchard: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -16,7 +16,7 @@ pub struct Response {
     p2sh: Option<String>,
 }
 
-impl Default for Response {
+impl Default for ZListUnifiedReceiversResponse {
     fn default() -> Self {
         Self {
             orchard: Some("orchard address if any".to_string()),

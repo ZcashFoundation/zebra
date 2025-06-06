@@ -13,21 +13,26 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_rpc::methods::{
-    BlockHeaderObject, BlockObject, Commitments, CompactDifficulty, DefaultRoots,
-    ExpandedDifficulty, FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse,
-    GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockChainInfoResponse,
-    GetBlockHashResponse, GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
-    GetBlockSubsidyResponse, GetBlockTemplateRequest, GetBlockTemplateRequestMode,
-    GetBlockTemplateResponse, GetBlockTransaction, GetBlockTrees, GetInfoResponse,
+use zebra_chain::{
+    sapling::NotSmallOrderValueCommitment,
+    serialization::{ZcashDeserialize, ZcashSerialize},
+    subtree::NoteCommitmentSubtreeIndex,
+    transparent::{OutputIndex, Script},
+    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+};
+use zebra_rpc::client::{
+    BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
+    FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
+    GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
+    GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockSubsidyResponse,
+    GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
+    GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
     GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
-    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject,
-    NotSmallOrderValueCommitment, NoteCommitmentSubtreeIndex, Orchard, OrchardAction, Output,
-    OutputIndex, PeerInfo, Script, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
-    ShieldedOutput, ShieldedSpend, SubmitBlockError, SubmitBlockResponse, SubtreeRpcData,
-    TemplateResponse, TransactionObject, TransactionTemplate, Treestate, Utxo,
-    ValidateAddressResponse, ZListUnifiedReceiversResponse, ZValidateAddressResponse,
-    ZcashDeserialize, ZcashSerialize,
+    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject, Orchard,
+    OrchardAction, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
+    ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
+    TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
+    ZListUnifiedReceiversResponse, ZValidateAddressResponse,
 };
 
 #[test]
@@ -87,7 +92,7 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let json = GET_BLOCKCHAIN_INFO_RESPONSE;
-    let obj: GetBlockChainInfoResponse = serde_json::from_str(json)?;
+    let obj: GetBlockchainInfoResponse = serde_json::from_str(json)?;
 
     let chain = obj.chain();
     let blocks = obj.blocks();
@@ -105,7 +110,7 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let upgrades = obj.upgrades();
     let consensus = obj.consensus();
 
-    let new_obj = GetBlockChainInfoResponse::new(
+    let new_obj = GetBlockchainInfoResponse::new(
         chain.clone(),
         blocks,
         best_block_hash,
@@ -827,7 +832,7 @@ fn test_get_block_hash() -> Result<(), Box<dyn std::error::Error>> {
 fn test_get_block_template_request() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#"{"mode":"template"}"#;
 
-    let new_obj = GetBlockTemplateRequest::new(
+    let new_obj = GetBlockTemplateParameters::new(
         GetBlockTemplateRequestMode::Template,
         None,
         vec![],
@@ -906,7 +911,7 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
     let max_time = template.max_time();
     let submit_old = template.submit_old();
 
-    let new_obj = GetBlockTemplateResponse::TemplateMode(Box::new(TemplateResponse::new(
+    let new_obj = GetBlockTemplateResponse::TemplateMode(Box::new(BlockTemplateResponse::new(
         capabilities,
         version,
         previous_block_hash.into(),
@@ -942,7 +947,7 @@ fn test_submit_block() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(
         obj,
-        SubmitBlockResponse::ErrorResponse(SubmitBlockError::Duplicate)
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Duplicate)
     );
 
     Ok(())

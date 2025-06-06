@@ -4,7 +4,7 @@
 
 use structopt::StructOpt;
 
-use zebra_rpc::methods::TimeSource;
+use zebra_rpc::client::BlockTemplateTimeSource;
 
 /// block-template-to-proposal arguments
 #[derive(Clone, Debug, Eq, PartialEq, StructOpt)]
@@ -14,7 +14,7 @@ pub struct Args {
     /// Clamped times are clamped to the template's [`mintime`, `maxtime`].
     /// Raw times are used unmodified: this can produce invalid proposals.
     #[structopt(default_value = "CurTime", short, long)]
-    pub time_source: TimeSource,
+    pub time_source: BlockTemplateTimeSource,
 
     /// The JSON block template.
     /// If this argument is not supplied, the template is read from standard input.

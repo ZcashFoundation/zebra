@@ -8,7 +8,7 @@ use zebra_chain::primitives::Address;
 #[derive(
     Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new,
 )]
-pub struct Response {
+pub struct ZValidateAddressResponse {
     /// Whether the address is valid.
     ///
     /// If not, this is the only property returned.
@@ -22,7 +22,7 @@ pub struct Response {
     /// The type of the address.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[getter(copy)]
-    pub(crate) address_type: Option<AddressType>,
+    pub(crate) address_type: Option<ZValidateAddressType>,
 
     /// Whether the address is yours or not.
     ///
@@ -33,7 +33,7 @@ pub struct Response {
     pub(crate) is_mine: Option<bool>,
 }
 
-impl Response {
+impl ZValidateAddressResponse {
     /// Creates an empty response with `isvalid` of false.
     pub fn invalid() -> Self {
         Self::default()
@@ -44,7 +44,7 @@ impl Response {
 /// <https://zcash.github.io/rpc/z_validateaddress.html>.
 #[derive(Copy, Clone, Debug, serde::Deserialize, serde::Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-pub enum AddressType {
+pub enum ZValidateAddressType {
     /// The `p2pkh` address type.
     P2pkh,
     /// The `p2sh` address type.
@@ -55,7 +55,7 @@ pub enum AddressType {
     Unified,
 }
 
-impl From<&Address> for AddressType {
+impl From<&Address> for ZValidateAddressType {
     fn from(address: &Address) -> Self {
         match address {
             Address::Transparent(_) => {

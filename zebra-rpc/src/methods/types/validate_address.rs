@@ -7,7 +7,7 @@ use derive_new::new;
 #[derive(
     Clone, Default, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new,
 )]
-pub struct Response {
+pub struct ValidateAddressResponse {
     /// Whether the address is valid.
     ///
     /// If not, this is the only property returned.
@@ -25,7 +25,7 @@ pub struct Response {
     pub(crate) is_script: Option<bool>,
 }
 
-impl Response {
+impl ValidateAddressResponse {
     /// Creates an empty response with `isvalid` of false.
     pub fn invalid() -> Self {
         Self::default()

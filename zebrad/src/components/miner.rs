@@ -28,18 +28,16 @@ use zebra_chain::{
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_rpc::{
-    config::mining::Config,
-    methods::{
-        hex_data::HexData,
-        types::get_block_template::{
-            self,
-            parameters::GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
-            proposal::proposal_block_from_template,
-            GetBlockTemplateRequestMode::Template,
-            TimeSource,
-        },
-        RpcImpl, RpcServer,
+    client::{
+        BlockTemplateTimeSource,
+        GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
+        GetBlockTemplateParameters,
+        GetBlockTemplateRequestMode::Template,
+        HexData,
     },
+    config::mining::Config,
+    methods::{RpcImpl, RpcServer},
+    proposal_block_from_template,
 };
 use zebra_state::WatchReceiver;
 
@@ -143,8 +141,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: change this to `config.internal_miner_threads` when internal miner feature is added back.
-    //       https://github.com/ZcashFoundation/zebra/issues/8183
+    // TODO: change this to `config.internal_miner_threads` once mining tasks are cancelled when the best tip changes (#8797)
     let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
@@ -255,13 +252,8 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Pass the correct arguments, even if Zebra currently ignores them.
-    let mut parameters = get_block_template::GetBlockTemplateRequest::new(
-        Template,
-        None,
-        vec![LongPoll, CoinbaseTxn],
-        None,
-        None,
-    );
+    let mut parameters =
+        GetBlockTemplateParameters::new(Template, None, vec![LongPoll, CoinbaseTxn], None, None);
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
@@ -295,7 +287,7 @@ where
         );
 
         // Tell the next get_block_template() call to wait until the template has changed.
-        parameters = get_block_template::GetBlockTemplateRequest::new(
+        parameters = GetBlockTemplateParameters::new(
             Template,
             None,
             vec![LongPoll, CoinbaseTxn],
@@ -305,7 +297,7 @@ where
 
         let block = proposal_block_from_template(
             &template,
-            TimeSource::CurTime,
+            BlockTemplateTimeSource::CurTime,
             NetworkUpgrade::current(&network, Height(template.height())),
         )
         .expect("unexpected invalid block template");

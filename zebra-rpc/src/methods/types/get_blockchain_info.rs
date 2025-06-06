@@ -12,7 +12,7 @@ use super::*;
 /// A value pool's balance in Zec and Zatoshis
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Balance {
+pub struct GetBlockchainInfoBalance {
     /// Name of the pool
     #[serde(skip_serializing_if = "String::is_empty", default)]
     id: String,
@@ -24,7 +24,7 @@ pub struct Balance {
     monitored: bool,
 }
 
-impl Balance {
+impl GetBlockchainInfoBalance {
     /// Returns a list of [`Balance`]s converted from the default [`ValueBalance`].
     pub fn zero_pools() -> [Self; 5] {
         Self::value_pools(Default::default())
@@ -81,7 +81,7 @@ impl Balance {
         Self::value_pools(value_balance)
             .into_iter()
             .reduce(|a, b| {
-                Balance::new(
+                GetBlockchainInfoBalance::new(
                     "",
                     (a.chain_value_zat + b.chain_value_zat)
                         .expect("sum of value balances should not overflow"),

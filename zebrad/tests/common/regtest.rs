@@ -17,15 +17,8 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    methods::{
-        hex_data::HexData,
-        types::{
-            get_block_template::{
-                proposal::proposal_block_from_template, TemplateResponse, TimeSource,
-            },
-            submit_block,
-        },
-    },
+    client::{BlockTemplateResponse, BlockTemplateTimeSource, HexData, SubmitBlockResponse},
+    proposal_block_from_template,
     server::{self, OPENED_RPC_ENDPOINT_MSG},
 };
 use zebra_test::args;
@@ -105,7 +98,7 @@ pub trait MiningRpcMethods {
 
 impl MiningRpcMethods for RpcRequestClient {
     async fn block_from_template(&self, nu5_activation_height: Height) -> Result<(Block, Height)> {
-        let block_template: TemplateResponse = self
+        let block_template: BlockTemplateResponse = self
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
@@ -119,7 +112,11 @@ impl MiningRpcMethods for RpcRequestClient {
         };
 
         Ok((
-            proposal_block_from_template(&block_template, TimeSource::default(), network_upgrade)?,
+            proposal_block_from_template(
+                &block_template,
+                BlockTemplateTimeSource::default(),
+                network_upgrade,
+            )?,
             height,
         ))
     }
@@ -127,14 +124,14 @@ impl MiningRpcMethods for RpcRequestClient {
     async fn submit_block(&self, block: Block) -> Result<()> {
         let block_data = hex::encode(block.zcash_serialize_to_vec()?);
 
-        let submit_block_response: submit_block::Response = self
+        let submit_block_response: SubmitBlockResponse = self
             .json_result_from_call("submitblock", format!(r#"["{block_data}"]"#))
             .await
             .map_err(|err| eyre!(err))?;
 
         match submit_block_response {
-            submit_block::Response::Accepted => Ok(()),
-            submit_block::Response::ErrorResponse(err) => {
+            SubmitBlockResponse::Accepted => Ok(()),
+            SubmitBlockResponse::ErrorResponse(err) => {
                 Err(eyre!("block submission failed: {err:?}"))
             }
         }
