@@ -17,7 +17,7 @@ use zebra_chain::{
     serialization::{DateTime32, ZcashSerialize},
 };
 use zebra_rpc::{
-    client::constants::LONG_POLL_ID_LENGTH, client::types::TemplateResponse,
+    client::{BlockTemplateResponse, LONG_POLL_ID_LENGTH},
     proposal_block_from_template,
 };
 use zebra_utils::init_tracing;
@@ -96,7 +96,7 @@ fn main() -> Result<()> {
     });
 
     // parse the modified json to template type
-    let template: TemplateResponse = serde_json::from_value(template)?;
+    let template: BlockTemplateResponse = serde_json::from_value(template)?;
 
     // generate proposal according to arguments
     let proposal = proposal_block_from_template(&template, time_source, NetworkUpgrade::Nu5)?;

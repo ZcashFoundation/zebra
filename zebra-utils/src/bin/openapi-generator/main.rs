@@ -8,7 +8,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
 use syn::LitStr;
 
-use zebra_rpc::client::types::*;
+use zebra_rpc::client::*;
 
 // The API server
 const SERVER: &str = "http://localhost:8232";
@@ -501,7 +501,7 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         // blockchain
         "getdifficulty" => default_property(type_, items.clone(), f64::default())?,
         "getblockchaininfo" => {
-            default_property(type_, items.clone(), GetBlockChainInfoResponse::default())?
+            default_property(type_, items.clone(), GetBlockchainInfoResponse::default())?
         }
         "getrawmempool" => default_property(type_, items.clone(), Vec::<String>::default())?,
         "getblockhash" => default_property(type_, items.clone(), GetBlockHashResponse::default())?,

@@ -173,9 +173,9 @@ use zebra_chain::{
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    client::types::{
-        GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
-        SubmitBlockErrorResponse, SubmitBlockResponse, TemplateResponse,
+    client::{
+        BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+        GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
     },
     fetch_state_tip_and_local_time, generate_coinbase_and_roots,
     methods::{RpcImpl, RpcServer},
@@ -3256,7 +3256,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
     use zebra_node_services::mempool;
-    use zebra_rpc::client::types::HexData;
+    use zebra_rpc::client::HexData;
     use zebra_test::mock_service::MockService;
 
     let _init_guard = zebra_test::init();
@@ -3463,7 +3463,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
     );
 
-    let block_template = TemplateResponse::new(
+    let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
         block_template.version(),
         block_template.previous_block_hash(),
@@ -3521,7 +3521,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
     );
 
-    let block_template = TemplateResponse::new(
+    let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
         block_template.version(),
         block_template.previous_block_hash(),

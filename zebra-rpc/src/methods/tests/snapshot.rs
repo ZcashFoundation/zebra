@@ -53,7 +53,6 @@ use crate::methods::{
     tests::utils::fake_history_tree,
     types::{
         get_block_template::GetBlockTemplateRequestMode,
-        get_mining_info,
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
         subsidy::GetBlockSubsidyResponse,
@@ -663,7 +662,7 @@ fn snapshot_rpc_getinfo(info: GetInfoResponse, settings: &insta::Settings) {
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockchaininfo(
     variant_suffix: &str,
-    info: GetBlockChainInfoResponse,
+    info: GetBlockchainInfoResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -837,10 +836,7 @@ fn snapshot_rpc_submit_block_invalid(
 }
 
 /// Snapshot `getmininginfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getmininginfo(
-    get_mining_info: get_mining_info::Response,
-    settings: &insta::Settings,
-) {
+fn snapshot_rpc_getmininginfo(get_mining_info: GetMiningInfoResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
 }
 

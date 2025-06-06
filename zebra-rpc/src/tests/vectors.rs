@@ -1,6 +1,6 @@
 //! Fixed Zebra RPC serialization test vectors.
 
-use crate::client::types::{GetBlockResponse, GetRawTransactionResponse, TransactionObject};
+use crate::client::{GetBlockResponse, GetRawTransactionResponse, TransactionObject};
 
 #[test]
 pub fn test_transaction_serialization() {

@@ -28,11 +28,12 @@ use zebra_chain::{
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_rpc::{
-    client::types::{
+    client::{
+        BlockTemplateTimeSource,
         GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
         GetBlockTemplateParameters,
         GetBlockTemplateRequestMode::Template,
-        HexData, TimeSource,
+        HexData,
     },
     config::mining::Config,
     methods::{RpcImpl, RpcServer},
@@ -140,8 +141,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: change this to `config.internal_miner_threads` when internal miner feature is added back.
-    //       https://github.com/ZcashFoundation/zebra/issues/8183
+    // TODO: change this to `config.internal_miner_threads` once mining tasks are cancelled when the best tip changes (#8797)
     let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
@@ -297,7 +297,7 @@ where
 
         let block = proposal_block_from_template(
             &template,
-            TimeSource::CurTime,
+            BlockTemplateTimeSource::CurTime,
             NetworkUpgrade::current(&network, Height(template.height())),
         )
         .expect("unexpected invalid block template");

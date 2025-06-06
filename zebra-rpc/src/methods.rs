@@ -10,7 +10,7 @@
 //!
 //! If RPCs are added or changed, ensure the following:
 //!
-//! - Request types can be instantiated from dependant crates, and
+//! - Request types can be instantiated from dependent crates, and
 //!   response types are fully-readable (up to each leaf component), meaning
 //!   every field on response types can be read, and any types used in response
 //!   types has an appropriate API for either directly accessing their fields, or
@@ -112,10 +112,11 @@ use types::{
             ZCASHD_FUNDING_STREAM_ORDER,
         },
         proposal::proposal_block_from_template,
-        GetBlockTemplateHandler, GetBlockTemplateParameters, GetBlockTemplateResponse,
-        TemplateResponse, TimeSource,
+        BlockTemplateResponse, BlockTemplateTimeSource, GetBlockTemplateHandler,
+        GetBlockTemplateParameters, GetBlockTemplateResponse,
     },
-    get_blockchain_info, get_mining_info,
+    get_blockchain_info::GetBlockchainInfoBalance,
+    get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
     long_poll::LongPollInput,
     peer_info::PeerInfo,
@@ -150,7 +151,7 @@ pub trait Rpc {
     #[method(name = "getinfo")]
     async fn get_info(&self) -> Result<GetInfoResponse>;
 
-    /// Returns blockchain state information, as a [`GetBlockChainInfo`] JSON struct.
+    /// Returns blockchain state information, as a [`GetBlockchainInfoResponse`] JSON struct.
     ///
     /// zcashd reference: [`getblockchaininfo`](https://zcash.github.io/rpc/getblockchaininfo.html)
     /// method: post
@@ -158,10 +159,10 @@ pub trait Rpc {
     ///
     /// # Notes
     ///
-    /// Some fields from the zcashd reference are missing from Zebra's [`GetBlockChainInfo`]. It only contains the fields
+    /// Some fields from the zcashd reference are missing from Zebra's [`GetBlockchainInfoResponse`]. It only contains the fields
     /// [required for lightwalletd support.](https://github.com/zcash/lightwalletd/blob/v0.4.9/common/common.go#L72-L89)
     #[method(name = "getblockchaininfo")]
-    async fn get_blockchain_info(&self) -> Result<GetBlockChainInfoResponse>;
+    async fn get_blockchain_info(&self) -> Result<GetBlockchainInfoResponse>;
 
     /// Returns the total balance of a provided `addresses` in an [`AddressBalance`] instance.
     ///
@@ -471,7 +472,7 @@ pub trait Rpc {
     ) -> Result<GetBlockTemplateResponse>;
 
     /// Submits block to the node to be validated and committed.
-    /// Returns the [`submit_block::Response`] for the operation, as a JSON string.
+    /// Returns the [`SubmitBlockResponse`] for the operation, as a JSON string.
     ///
     /// zcashd reference: [`submitblock`](https://zcash.github.io/rpc/submitblock.html)
     /// method: post
@@ -498,7 +499,7 @@ pub trait Rpc {
     /// method: post
     /// tags: mining
     #[method(name = "getmininginfo")]
-    async fn get_mining_info(&self) -> Result<get_mining_info::Response>;
+    async fn get_mining_info(&self) -> Result<GetMiningInfoResponse>;
 
     /// Returns the estimated network solutions per second based on the last `num_blocks` before
     /// `height`.
@@ -938,7 +939,7 @@ where
     }
 
     #[allow(clippy::unwrap_in_result)]
-    async fn get_blockchain_info(&self) -> Result<GetBlockChainInfoResponse> {
+    async fn get_blockchain_info(&self) -> Result<GetBlockchainInfoResponse> {
         let debug_force_finished_sync = self.debug_force_finished_sync;
         let network = &self.network;
 
@@ -1041,13 +1042,13 @@ where
             ),
         };
 
-        let response = GetBlockChainInfoResponse {
+        let response = GetBlockchainInfoResponse {
             chain: network.bip70_network_name(),
             blocks: tip_height,
             best_block_hash: tip_hash,
             estimated_height,
-            chain_supply: get_blockchain_info::Balance::chain_supply(value_balance),
-            value_pools: get_blockchain_info::Balance::value_pools(value_balance),
+            chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
+            value_pools: GetBlockchainInfoBalance::value_pools(value_balance),
             upgrades,
             consensus,
             headers: tip_height,
@@ -2278,7 +2279,7 @@ where
 
         // - After this point, the template only depends on the previously fetched data.
 
-        let response = TemplateResponse::new_internal(
+        let response = BlockTemplateResponse::new_internal(
             &network,
             &miner_address,
             &chain_tip_and_local_time,
@@ -2386,7 +2387,7 @@ where
         Ok(response.into())
     }
 
-    async fn get_mining_info(&self) -> Result<get_mining_info::Response> {
+    async fn get_mining_info(&self) -> Result<GetMiningInfoResponse> {
         let network = self.network.clone();
         let mut state = self.state.clone();
 
@@ -2416,7 +2417,7 @@ where
             };
         }
 
-        Ok(get_mining_info::Response::new_internal(
+        Ok(GetMiningInfoResponse::new_internal(
             tip_height,
             current_block_size,
             current_block_tx,
@@ -2707,7 +2708,7 @@ where
 
             let proposal_block = proposal_block_from_template(
                 &block_template,
-                TimeSource::CurTime,
+                BlockTemplateTimeSource::CurTime,
                 NetworkUpgrade::current(&network, Height(block_template.height)),
             )
             .map_error(server::error::LegacyCode::default())?;
@@ -2913,7 +2914,7 @@ impl GetInfoResponse {
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters)]
-pub struct GetBlockChainInfoResponse {
+pub struct GetBlockchainInfoResponse {
     /// Current network name as defined in BIP70 (main, test, regtest)
     chain: String,
 
@@ -2960,11 +2961,11 @@ pub struct GetBlockChainInfoResponse {
 
     /// Chain supply balance
     #[serde(rename = "chainSupply")]
-    chain_supply: get_blockchain_info::Balance,
+    chain_supply: GetBlockchainInfoBalance,
 
     /// Value pool balances
     #[serde(rename = "valuePools")]
-    value_pools: [get_blockchain_info::Balance; 5],
+    value_pools: [GetBlockchainInfoBalance; 5],
 
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
@@ -2974,18 +2975,15 @@ pub struct GetBlockChainInfoResponse {
     consensus: TipConsensusBranch,
 }
 
-#[deprecated(note = "Use `GetBlockChainInfoResponse` instead")]
-pub use self::GetBlockChainInfoResponse as GetBlockChainInfo;
-
-impl Default for GetBlockChainInfoResponse {
+impl Default for GetBlockchainInfoResponse {
     fn default() -> Self {
-        GetBlockChainInfoResponse {
+        Self {
             chain: "main".to_string(),
             blocks: Height(1),
             best_block_hash: block::Hash([0; 32]),
             estimated_height: Height(1),
-            chain_supply: get_blockchain_info::Balance::chain_supply(Default::default()),
-            value_pools: get_blockchain_info::Balance::zero_pools(),
+            chain_supply: GetBlockchainInfoBalance::chain_supply(Default::default()),
+            value_pools: GetBlockchainInfoBalance::zero_pools(),
             upgrades: IndexMap::new(),
             consensus: TipConsensusBranch {
                 chain_tip: ConsensusBranchIdHex(ConsensusBranchId::default()),
@@ -3002,8 +3000,8 @@ impl Default for GetBlockChainInfoResponse {
     }
 }
 
-impl GetBlockChainInfoResponse {
-    /// Creates a new [`GetBlockChainInfo`] instance.
+impl GetBlockchainInfoResponse {
+    /// Creates a new [`GetBlockchainInfoResponse`] instance.
     // We don't use derive(new) because the method already existed but the arguments
     // have a different order. No reason to unnecessarily break existing code.
     #[allow(clippy::too_many_arguments)]
@@ -3012,8 +3010,8 @@ impl GetBlockChainInfoResponse {
         blocks: Height,
         best_block_hash: block::Hash,
         estimated_height: Height,
-        chain_supply: get_blockchain_info::Balance,
-        value_pools: [get_blockchain_info::Balance; 5],
+        chain_supply: GetBlockchainInfoBalance,
+        value_pools: [GetBlockchainInfoBalance; 5],
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
         headers: Height,

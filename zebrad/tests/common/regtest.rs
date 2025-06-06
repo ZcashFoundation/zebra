@@ -17,7 +17,7 @@ use zebra_chain::{
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    client::types::{HexData, SubmitBlockResponse, TemplateResponse, TimeSource},
+    client::{BlockTemplateResponse, BlockTemplateTimeSource, HexData, SubmitBlockResponse},
     proposal_block_from_template,
     server::{self, OPENED_RPC_ENDPOINT_MSG},
 };
@@ -98,7 +98,7 @@ pub trait MiningRpcMethods {
 
 impl MiningRpcMethods for RpcRequestClient {
     async fn block_from_template(&self, nu5_activation_height: Height) -> Result<(Block, Height)> {
-        let block_template: TemplateResponse = self
+        let block_template: BlockTemplateResponse = self
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
@@ -112,7 +112,11 @@ impl MiningRpcMethods for RpcRequestClient {
         };
 
         Ok((
-            proposal_block_from_template(&block_template, TimeSource::default(), network_upgrade)?,
+            proposal_block_from_template(
+                &block_template,
+                BlockTemplateTimeSource::default(),
+                network_upgrade,
+            )?,
             height,
         ))
     }

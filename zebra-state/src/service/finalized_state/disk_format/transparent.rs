@@ -60,6 +60,7 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 // Transparent types
 
 /// A transparent output's index in its transaction.
+// TODO: Move to zebra-chain.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
 pub struct OutputIndex(u32);
 

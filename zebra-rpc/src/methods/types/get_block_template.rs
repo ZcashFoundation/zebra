@@ -55,7 +55,7 @@ use constants::{
 pub use parameters::{
     GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
 };
-pub use proposal::{ProposalResponse, TimeSource};
+pub use proposal::{BlockProposalResponse, BlockTemplateTimeSource};
 
 /// An alias to indicate that a usize value represents the depth of in-block dependencies of a
 /// transaction.
@@ -67,10 +67,10 @@ type InBlockTxDependenciesDepth = usize;
 /// A serialized `getblocktemplate` RPC response in template mode.
 ///
 /// This is the output of the `getblocktemplate` RPC in the default 'template' mode. See
-/// [`ProposalResponse`] for the output in 'proposal' mode.
+/// [`BlockProposalResponse`] for the output in 'proposal' mode.
 #[allow(clippy::too_many_arguments)]
 #[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
-pub struct TemplateResponse {
+pub struct BlockTemplateResponse {
     /// The getblocktemplate RPC capabilities supported by Zebra.
     ///
     /// At the moment, Zebra does not support any of the extra capabilities from the specification:
@@ -214,7 +214,7 @@ pub struct TemplateResponse {
     pub(crate) submit_old: Option<bool>,
 }
 
-impl fmt::Debug for TemplateResponse {
+impl fmt::Debug for BlockTemplateResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // A block with a lot of transactions can be extremely long in logs.
         let mut transactions_truncated = self.transactions.clone();
@@ -251,7 +251,7 @@ impl fmt::Debug for TemplateResponse {
     }
 }
 
-impl TemplateResponse {
+impl BlockTemplateResponse {
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
     pub fn all_capabilities() -> Vec<String> {
         CAPABILITIES_FIELD.iter().map(ToString::to_string).collect()
@@ -351,7 +351,7 @@ impl TemplateResponse {
             "creating template ... "
         );
 
-        TemplateResponse {
+        BlockTemplateResponse {
             capabilities,
 
             version: ZCASH_BLOCK_VERSION,
@@ -398,15 +398,15 @@ impl TemplateResponse {
 /// A `getblocktemplate` RPC response.
 pub enum GetBlockTemplateResponse {
     /// `getblocktemplate` RPC request in template mode.
-    TemplateMode(Box<TemplateResponse>),
+    TemplateMode(Box<BlockTemplateResponse>),
 
     /// `getblocktemplate` RPC request in proposal mode.
-    ProposalMode(ProposalResponse),
+    ProposalMode(BlockProposalResponse),
 }
 
 impl GetBlockTemplateResponse {
     /// Returns the inner template, if the response is in template mode.
-    pub fn try_into_template(self) -> Option<TemplateResponse> {
+    pub fn try_into_template(self) -> Option<BlockTemplateResponse> {
         match self {
             Self::TemplateMode(template) => Some(*template),
             Self::ProposalMode(_) => None,
@@ -414,7 +414,7 @@ impl GetBlockTemplateResponse {
     }
 
     /// Returns the inner proposal, if the response is in proposal mode.
-    pub fn try_into_proposal(self) -> Option<ProposalResponse> {
+    pub fn try_into_proposal(self) -> Option<BlockProposalResponse> {
         match self {
             Self::TemplateMode(_) => None,
             Self::ProposalMode(proposal) => Some(proposal),
@@ -671,9 +671,11 @@ where
                 "error response from block parser in CheckProposal request"
             );
 
-            return Ok(
-                ProposalResponse::rejected("invalid proposal format", parse_error.into()).into(),
-            );
+            return Ok(BlockProposalResponse::rejected(
+                "invalid proposal format",
+                parse_error.into(),
+            )
+            .into());
         }
     };
 
@@ -685,14 +687,14 @@ where
         .await;
 
     Ok(block_verifier_router_response
-        .map(|_hash| ProposalResponse::Valid)
+        .map(|_hash| BlockProposalResponse::Valid)
         .unwrap_or_else(|verify_chain_error| {
             tracing::info!(
                 ?verify_chain_error,
                 "error response from block_verifier_router in CheckProposal request"
             );
 
-            ProposalResponse::rejected("invalid proposal", verify_chain_error)
+            BlockProposalResponse::rejected("invalid proposal", verify_chain_error)
         })
         .into())
 }

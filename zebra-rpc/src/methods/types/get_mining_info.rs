@@ -8,7 +8,7 @@ use zebra_chain::parameters::Network;
 #[derive(
     Debug, Default, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new,
 )]
-pub struct Response {
+pub struct GetMiningInfoResponse {
     /// The current tip height.
     #[serde(rename = "blocks")]
     tip_height: u32,
@@ -36,7 +36,7 @@ pub struct Response {
     testnet: bool,
 }
 
-impl Response {
+impl GetMiningInfoResponse {
     /// Creates a new `getmininginfo` response
     pub(crate) fn new_internal(
         tip_height: u32,

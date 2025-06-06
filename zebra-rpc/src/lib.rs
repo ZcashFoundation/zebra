@@ -24,73 +24,48 @@ pub use methods::types::{
     submit_block::SubmitBlockChannel,
 };
 
-/// Types and constants needed by clients of Zebra's RPC server
+/// Types, constants, and functions needed by clients of Zebra's RPC server
 //
 // Re-exports types to build the API. We want to flatten the module substructure
 // which is split mostly to keep file sizes small. Additionally, we re-export
 // types from other crates which are exposed in the API.
 //
-// TODO:
-// - Consider exporting functions here as well
-// - Expand documentation?
-// - Move `hex_data` and `trees` modules to/under the `types` module and qualify type refs in `methods`?
+// TODO: Move `hex_data` and `trees` modules to/under the `types` module?
 pub mod client {
-    /// Types needed by clients of Zebra's RPC server
-    pub mod types {
-        pub use zebra_chain::{
-            sapling::NotSmallOrderValueCommitment,
-            serialization::{ZcashDeserialize, ZcashSerialize},
-            subtree::NoteCommitmentSubtreeIndex,
-            transparent::Script,
-            work::difficulty::{CompactDifficulty, ExpandedDifficulty},
-        };
-        pub use zebra_state::OutputIndex;
-
-        pub use crate::methods::{
-            hex_data::HexData,
-            trees::{
-                Commitments, GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData,
-                Treestate,
+    pub use crate::methods::{
+        hex_data::HexData,
+        trees::{
+            Commitments, GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData,
+            Treestate,
+        },
+        types::{
+            default_roots::DefaultRoots,
+            get_block_template::{
+                BlockProposalResponse, BlockTemplateResponse, BlockTemplateTimeSource,
+                GetBlockTemplateCapability, GetBlockTemplateParameters,
+                GetBlockTemplateRequestMode, GetBlockTemplateResponse,
             },
-            types::{
-                default_roots::DefaultRoots,
-                get_block_template::{
-                    GetBlockTemplateCapability, GetBlockTemplateParameters,
-                    GetBlockTemplateRequestMode, GetBlockTemplateResponse, ProposalResponse,
-                    TemplateResponse, TimeSource,
-                },
-                get_mining_info::Response as GetMiningInfoResponse,
-                get_raw_mempool::GetRawMempoolResponse,
-                get_raw_mempool::MempoolObject,
-                peer_info::{GetPeerInfoResponse, PeerInfo},
-                submit_block::{SubmitBlockErrorResponse, SubmitBlockResponse},
-                subsidy::{BlockSubsidy, FundingStream, GetBlockSubsidyResponse},
-                transaction::{
-                    Input, Orchard, OrchardAction, Output, ScriptPubKey, ScriptSig, ShieldedOutput,
-                    ShieldedSpend, TransactionObject, TransactionTemplate,
-                },
-                unified_address::ZListUnifiedReceiversResponse,
-                validate_address::ValidateAddressResponse,
-                z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
+            get_mining_info::GetMiningInfoResponse,
+            get_raw_mempool::{GetRawMempoolResponse, MempoolObject},
+            peer_info::{GetPeerInfoResponse, PeerInfo},
+            submit_block::{SubmitBlockErrorResponse, SubmitBlockResponse},
+            subsidy::{BlockSubsidy, FundingStream, GetBlockSubsidyResponse},
+            transaction::{
+                Input, Orchard, OrchardAction, Output, ScriptPubKey, ScriptSig, ShieldedOutput,
+                ShieldedSpend, TransactionObject, TransactionTemplate,
             },
-            BlockHeaderObject, BlockObject, GetAddressBalanceRequest, GetAddressBalanceResponse,
-            GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockChainInfoResponse,
-            GetBlockHashResponse, GetBlockHeaderResponse, GetBlockHeightAndHashResponse,
-            GetBlockResponse, GetBlockTransaction, GetBlockTrees, GetInfoResponse,
-            GetRawTransactionResponse, Hash, SendRawTransactionResponse, Utxo,
-        };
-
-        // TODO: Move other deprecated type names here.
-        #[deprecated(note = "Use `GetSubtreesByIndexResponse` instead.")]
-        pub use GetSubtreesByIndexResponse as GetSubtrees;
-
-        #[deprecated(note = "Use `GetTreestateResponse` instead.")]
-        pub use GetTreestateResponse as GetTreeState;
-    }
+            unified_address::ZListUnifiedReceiversResponse,
+            validate_address::ValidateAddressResponse,
+            z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
+        },
+        BlockHeaderObject, BlockObject, GetAddressBalanceRequest, GetAddressBalanceResponse,
+        GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockHashResponse,
+        GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
+        GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
+        GetRawTransactionResponse, Hash, SendRawTransactionResponse, Utxo,
+    };
 
     /// Constants needed by clients of Zebra's RPC server
     // TODO: Export all other constants?
-    pub mod constants {
-        pub use crate::methods::types::long_poll::LONG_POLL_ID_LENGTH;
-    }
+    pub use crate::methods::types::long_poll::LONG_POLL_ID_LENGTH;
 }
