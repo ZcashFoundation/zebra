@@ -310,12 +310,9 @@ jobs:
           --ssh-flag="-o ConnectTimeout=5" \
           --command="
           echo 'Streaming logs and waiting for test success message...';
-          sudo docker logs
-          --tail all
-          --follow
-          ${CONTAINER_ID}
-          | tee --output-error=exit-nopipe /dev/stderr
-          | grep --max-count=1 --extended-regexp --color=always
+          sudo docker logs --tail all --follow ${CONTAINER_ID} \
+          | tee --output-error=exit-nopipe /dev/stderr \
+          | grep --max-count=1 --extended-regexp --color=always \
           'test result: .*ok.* [1-9][0-9]* passed.*finished in';
           LOGS_EXIT_STATUS=\$?;
           echo 'Waiting for container ${CONTAINER_ID} to exit...';
