@@ -9,7 +9,7 @@ use std::{
 use zebra_chain::{
     block::Height,
     orchard, sapling, sprout,
-    transaction::{self, UnminedTx, VerifiedUnminedTx},
+    transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
 use zebra_node_services::mempool::TransactionDependencies;
@@ -243,20 +243,27 @@ impl VerifiedSet {
     /// Removes all transactions in the set that match the `predicate`.
     ///
     /// Returns the amount of transactions removed.
-    pub fn remove_all_that(&mut self, predicate: impl Fn(&VerifiedUnminedTx) -> bool) -> usize {
+    pub fn remove_all_that(
+        &mut self,
+        predicate: impl Fn(&VerifiedUnminedTx) -> bool,
+    ) -> HashSet<UnminedTxId> {
         let keys_to_remove: Vec<_> = self
             .transactions
             .iter()
             .filter_map(|(&tx_id, tx)| predicate(tx).then_some(tx_id))
             .collect();
 
-        let mut removed_count = 0;
+        let mut removed_transactions = HashSet::new();
 
         for key_to_remove in keys_to_remove {
-            removed_count += self.remove(&key_to_remove).len();
+            removed_transactions.extend(
+                self.remove(&key_to_remove)
+                    .into_iter()
+                    .map(|tx| tx.transaction.id),
+            );
         }
 
-        removed_count
+        removed_transactions
     }
 
     /// Accepts a transaction id for a transaction to remove from the verified set.
