@@ -36,7 +36,7 @@ use zebra_state::{ReadRequest, ReadResponse, ReadStateService};
 
 use zebra_test::{
     transcript::{ExpectedTranscriptError, Transcript},
-    vectors::ORCHARD_WORKFLOW_BLOCKS_ZSA,
+    vectors::{OrchardWorkflowBlock, ORCHARD_WORKFLOW_BLOCKS_ZSA},
 };
 
 use crate::{block::Request, Config};
@@ -163,23 +163,30 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
 }
 
 /// Creates transcript data from predefined workflow blocks.
-fn create_transcript_data<'a, I: IntoIterator<Item = &'a Vec<u8>>>(
+fn create_transcript_data<'a, I: IntoIterator<Item = &'a OrchardWorkflowBlock>>(
     serialized_blocks: I,
 ) -> impl Iterator<Item = TranscriptItem> + use<'a, I> {
-    let workflow_blocks = serialized_blocks.into_iter().map(|block_bytes| {
-        Arc::new(Block::zcash_deserialize(&block_bytes[..]).expect("block should deserialize"))
-    });
+    let workflow_blocks =
+        serialized_blocks
+            .into_iter()
+            .map(|OrchardWorkflowBlock { bytes, is_valid }| {
+                (
+                    Arc::new(
+                        Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"),
+                    ),
+                    *is_valid,
+                )
+            });
 
-    std::iter::once(regtest_genesis_block())
+    std::iter::once((regtest_genesis_block(), true))
         .chain(workflow_blocks)
-        .enumerate()
-        .map(|(i, block)| {
+        .map(|(block, is_valid)| {
             (
                 Request::Commit(block.clone()),
-                if i == 5 {
-                    Err(ExpectedTranscriptError::Any)
-                } else {
+                if is_valid {
                     Ok(block.hash())
+                } else {
+                    Err(ExpectedTranscriptError::Any)
                 },
             )
         })
@@ -202,7 +209,7 @@ async fn request_asset_state(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_zsa_workflow() -> Result<(), Report> {
+async fn check_orchard_zsa_workflow() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(Some(1), Some(1), Some(1));
