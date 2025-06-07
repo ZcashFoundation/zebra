@@ -5,8 +5,10 @@ use std::{fmt, str::FromStr, sync::Arc};
 use thiserror::Error;
 
 use crate::{
+    amount::{Amount, NonNegative},
     block::{self, Height},
     parameters::NetworkUpgrade,
+    transparent,
 };
 
 pub mod magic;
@@ -273,6 +275,54 @@ impl Network {
         super::NetworkUpgrade::Sapling
             .activation_height(self)
             .expect("Sapling activation height needs to be set")
+    }
+
+    /// Returns the expected total value of the sum of all NU6.1 one-time lockbox disbursement output values for this network at
+    /// the provided height.
+    pub fn lockbox_disbursement_total_amount(&self, height: Height) -> Amount<NonNegative> {
+        if Some(height) != NetworkUpgrade::Nu6_1.activation_height(self) {
+            return Amount::zero();
+        };
+
+        match self {
+            Self::Mainnet => subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENT_TOTAL_MAINNET,
+            Self::Testnet(params) if params.is_default_testnet() => {
+                subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENT_TOTAL_TESTNET
+            }
+            Self::Testnet(_params) => 0,
+        }
+        .try_into()
+        .expect("hard-coded value should be valid")
+    }
+
+    /// Returns the expected NU6.1 lockbox disbursement outputs for this network at the provided height.
+    pub fn lockbox_disbursement(
+        &self,
+        height: Height,
+    ) -> Vec<(transparent::Address, Amount<NonNegative>)> {
+        if Some(height) != NetworkUpgrade::Nu6_1.activation_height(self) {
+            return Vec::new();
+        };
+
+        let expected_lockbox_disbursements = match self {
+            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENT_MAINNET,
+            Self::Testnet(params) if params.is_default_testnet() => {
+                subsidy::NU6_1_LOCKBOX_DISBURSEMENT_TESTNET
+            }
+            Self::Testnet(_params) => return Vec::new(),
+        };
+
+        expected_lockbox_disbursements
+            .into_iter()
+            .map(|(addr, amount)| {
+                (
+                    addr.parse().expect("hard-coded address must deserialize"),
+                    amount
+                        .try_into()
+                        .expect("hard-coded values should be valid"),
+                )
+            })
+            .collect()
     }
 }
 
