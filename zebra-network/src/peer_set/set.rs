@@ -125,7 +125,7 @@ use tower::{
     Service,
 };
 
-use zebra_chain::chain_tip::ChainTip;
+use zebra_chain::{chain_tip::ChainTip, parameters::Network};
 
 use crate::{
     address_book::AddressMetrics,
@@ -250,6 +250,9 @@ where
     /// The configured maximum number of peers that can be in the
     /// peer set per IP, defaults to [`crate::constants::DEFAULT_MAX_CONNS_PER_IP`]
     max_conns_per_ip: usize,
+
+    /// The network of this peer set.
+    network: Network,
 }
 
 impl<D, C> Drop for PeerSet<D, C>
@@ -331,6 +334,8 @@ where
             address_metrics,
 
             max_conns_per_ip: max_conns_per_ip.unwrap_or(config.max_connections_per_ip),
+
+            network: config.network.clone(),
         }
     }
 
@@ -996,11 +1001,17 @@ where
     /// Given a number of ready peers calculate to how many of them Zebra will
     /// actually send the request to. Return this number.
     pub(crate) fn number_of_peers_to_broadcast(&self) -> usize {
-        // We are currently sending broadcast messages to a third of the total peers.
-        const PEER_FRACTION_TO_BROADCAST: usize = 3;
+        if self.network.is_regtest() {
+            // In regtest, we broadcast to all peers, so that we can test the
+            // peer set with a small number of peers.
+            self.ready_services.len()
+        } else {
+            // We are currently sending broadcast messages to a third of the total peers.
+            const PEER_FRACTION_TO_BROADCAST: usize = 3;
 
-        // Round up, so that if we have one ready peer, it gets the request.
-        div_ceil(self.ready_services.len(), PEER_FRACTION_TO_BROADCAST)
+            // Round up, so that if we have one ready peer, it gets the request.
+            div_ceil(self.ready_services.len(), PEER_FRACTION_TO_BROADCAST)
+        }
     }
 
     /// Returns the list of addresses in the peer set.

@@ -2,7 +2,7 @@
 
 use chrono::Utc;
 
-use crate::meta_addr::MetaAddr;
+use crate::{meta_addr::MetaAddr, PeerSocketAddr};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub mod mock;
@@ -14,4 +14,7 @@ pub use mock::MockAddressBookPeers;
 pub trait AddressBookPeers {
     /// Return an Vec of peers we've seen recently, in reconnection attempt order.
     fn recently_live_peers(&self, now: chrono::DateTime<Utc>) -> Vec<MetaAddr>;
+
+    /// Add a peer to the address book.
+    fn add_peer(&mut self, peer: PeerSocketAddr) -> bool;
 }
