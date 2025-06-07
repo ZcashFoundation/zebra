@@ -169,15 +169,22 @@ impl DiskFormatUpgrade for Upgrade {
             };
 
             // Get the deferred amount which is required to update the value pool.
-            let expected_deferred_amount = if height > network.slow_start_interval() {
+            let deferred_pool_balance_change = if height > network.slow_start_interval() {
                 // See [ZIP-1015](https://zips.z.cash/zip-1015).
-                funding_stream_values(
+                let deferred_pool_balance_change = funding_stream_values(
                     height,
                     &network,
                     block_subsidy(height, &network).unwrap_or_default(),
                 )
-                .unwrap_or_default()
+                .expect("should have valid funding stream values")
                 .remove(&FundingStreamReceiver::Deferred)
+                .unwrap_or_default()
+                .checked_sub(network.lockbox_disbursement_total_amount(height));
+
+                Some(
+                    deferred_pool_balance_change
+                        .expect("deferred pool balance change should be valid Amount"),
+                )
             } else {
                 None
             };
@@ -186,7 +193,7 @@ impl DiskFormatUpgrade for Upgrade {
             value_pool = value_pool
                 .add_chain_value_pool_change(
                     block
-                        .chain_value_pool_change(&utxos, expected_deferred_amount)
+                        .chain_value_pool_change(&utxos, deferred_pool_balance_change)
                         .unwrap_or_default(),
                 )
                 .expect("value pool change should not overflow");

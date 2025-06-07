@@ -918,7 +918,15 @@ pub fn standard_coinbase_outputs(
     let miner_reward =
         miner_reward.expect("reward calculations are valid for reasonable chain heights");
 
-    combine_coinbase_outputs(funding_streams, miner_address, miner_reward, like_zcashd)
+    let one_time_lockbox_disbursements = network.lockbox_disbursement(height);
+
+    combine_coinbase_outputs(
+        funding_streams,
+        one_time_lockbox_disbursements,
+        miner_address,
+        miner_reward,
+        like_zcashd,
+    )
 }
 
 /// Combine the miner reward and funding streams into a list of coinbase amounts and addresses.
@@ -927,6 +935,7 @@ pub fn standard_coinbase_outputs(
 /// in the `getblocktemplate` RPC.
 fn combine_coinbase_outputs(
     funding_streams: HashMap<FundingStreamReceiver, (Amount<NonNegative>, &transparent::Address)>,
+    lockbox_disbursements: Vec<(transparent::Address, Amount<NonNegative>)>,
     miner_address: &transparent::Address,
     miner_reward: Amount<NonNegative>,
     like_zcashd: bool,
@@ -938,10 +947,15 @@ fn combine_coinbase_outputs(
             .map(|(_receiver, (amount, address))| (amount, address))
             .collect();
 
+    let lockbox_disbursement_outputs = lockbox_disbursements
+        .into_iter()
+        .map(|(addr, amount)| (amount, addr.create_script_from_address()));
+
     let mut coinbase_outputs: Vec<(Amount<NonNegative>, transparent::Script)> =
         funding_streams_outputs
             .iter()
             .map(|(amount, address)| (*amount, address.create_script_from_address()))
+            .chain(lockbox_disbursement_outputs)
             .collect();
 
     // The HashMap returns funding streams in an arbitrary order,

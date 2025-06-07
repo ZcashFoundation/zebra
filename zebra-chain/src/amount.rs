@@ -77,6 +77,11 @@ impl<C> Amount<C> {
         self.0
     }
 
+    /// Checked subtraction. Computes self - rhs, returning None if overflow occurred.
+    pub fn checked_sub<C2: Constraint>(self, rhs: Amount<C2>) -> Option<Amount> {
+        self.0.checked_sub(rhs.0).and_then(|v| v.try_into().ok())
+    }
+
     /// To little endian byte array
     pub fn to_bytes(&self) -> [u8; 8] {
         let mut buf: [u8; 8] = [0; 8];

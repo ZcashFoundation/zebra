@@ -5,7 +5,7 @@ use std::{collections::HashSet, sync::Arc};
 use chrono::{DateTime, Utc};
 
 use zebra_chain::{
-    amount::{Amount, Error as AmountError, NonNegative},
+    amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block::{Block, Hash, Header, Height},
     parameters::{
         subsidy::{FundingStreamReceiver, SubsidyError},
@@ -144,14 +144,15 @@ pub fn equihash_solution_is_valid(header: &Header) -> Result<(), equihash::Error
     header.solution.check(header)
 }
 
-/// Returns `Ok(())` if the block subsidy in `block` is valid for `network`
+/// Returns `Ok()` with the deferred pool balance change of the coinbase transaction if
+/// the block subsidy in `block` is valid for `network`
 ///
 /// [3.9]: https://zips.z.cash/protocol/protocol.pdf#subsidyconcepts
 pub fn subsidy_is_valid(
     block: &Block,
     network: &Network,
     expected_block_subsidy: Amount<NonNegative>,
-) -> Result<(), BlockError> {
+) -> Result<Amount, BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
@@ -159,7 +160,7 @@ pub fn subsidy_is_valid(
     let Some(halving_div) = zebra_chain::parameters::subsidy::halving_divisor(height, network)
     else {
         // Far future halving, with no founders reward or funding streams
-        return Ok(());
+        return Ok(Amount::zero());
     };
 
     let canopy_activation_height = NetworkUpgrade::Canopy
@@ -184,13 +185,40 @@ pub fn subsidy_is_valid(
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         // funding stream amount values
-        let funding_streams = zebra_chain::parameters::subsidy::funding_stream_values(
+        let mut funding_streams = zebra_chain::parameters::subsidy::funding_stream_values(
             height,
             network,
             expected_block_subsidy,
         )
         // we always expect a funding stream hashmap response even if empty
         .map_err(|err| BlockError::Other(err.to_string()))?;
+
+        let has_expected_output = |address, expected_amount| {
+            subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
+                .iter()
+                .map(zebra_chain::transparent::Output::value)
+                .any(|value| value == expected_amount)
+        };
+
+        // The deferred pool contribution is checked in `miner_fees_are_valid()`
+        // See [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
+        let mut deferred_pool_balance_change = funding_streams
+            .remove(&FundingStreamReceiver::Deferred)
+            .unwrap_or_default()
+            .constrain::<NegativeAllowed>()
+            .expect("should be valid Amount");
+
+        // TODO: Add references to the one-time lockbox disbursement & community coinholder funding model ZIPs
+        let expected_one_time_lockbox_disbursements = network.lockbox_disbursement(height);
+        for (address, expected_amount) in &expected_one_time_lockbox_disbursements {
+            if !has_expected_output(address, *expected_amount) {
+                Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
+            }
+
+            deferred_pool_balance_change = deferred_pool_balance_change
+                .checked_sub(*expected_amount)
+                .expect("should be a valid Amount");
+        }
 
         // # Consensus
         //
@@ -201,12 +229,6 @@ pub fn subsidy_is_valid(
         //
         // https://zips.z.cash/protocol/protocol.pdf#fundingstreams
         for (receiver, expected_amount) in funding_streams {
-            if receiver == FundingStreamReceiver::Deferred {
-                // The deferred pool contribution is checked in `miner_fees_are_valid()`
-                // See [ZIP-1015](https://zips.z.cash/zip-1015) for more details.
-                continue;
-            }
-
             let address =
                 subsidy::funding_streams::funding_stream_address(height, network, receiver)
                     // funding stream receivers other than the deferred pool must have an address
@@ -216,20 +238,15 @@ pub fn subsidy_is_valid(
                         ))
                     })?;
 
-            let has_expected_output =
-                subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
-                    .iter()
-                    .map(zebra_chain::transparent::Output::value)
-                    .any(|value| value == expected_amount);
-
-            if !has_expected_output {
+            if !has_expected_output(address, expected_amount) {
                 Err(SubsidyError::FundingStreamNotFound)?;
             }
         }
-        Ok(())
+
+        Ok(deferred_pool_balance_change)
     } else {
         // Future halving, with no founders reward or funding streams
-        Ok(())
+        Ok(Amount::zero())
     }
 }
 
@@ -241,7 +258,7 @@ pub fn miner_fees_are_valid(
     height: Height,
     block_miner_fees: Amount<NonNegative>,
     expected_block_subsidy: Amount<NonNegative>,
-    expected_deferred_amount: Amount<NonNegative>,
+    expected_deferred_pool_balance_change: Amount,
     network: &Network,
 ) -> Result<(), BlockError> {
     let transparent_value_balance = zebra_chain::parameters::subsidy::output_amounts(coinbase_tx)
@@ -264,9 +281,10 @@ pub fn miner_fees_are_valid(
     //
     // The expected lockbox funding stream output of the coinbase transaction is also subtracted
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
-    let total_output_value = (transparent_value_balance - sapling_value_balance - orchard_value_balance
-        + expected_deferred_amount.constrain().expect("valid Amount with NonNegative constraint should be valid with NegativeAllowed constraint"))
-    .map_err(|_| SubsidyError::SumOverflow)?;
+    let total_output_value =
+        (transparent_value_balance - sapling_value_balance - orchard_value_balance
+            + expected_deferred_pool_balance_change)
+            .map_err(|_| SubsidyError::SumOverflow)?;
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 

@@ -7,7 +7,7 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::{Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed},
     block::{self, Block, HeightDiff},
     history_tree::HistoryTree,
     orchard,
@@ -251,8 +251,8 @@ pub struct SemanticallyVerifiedBlock {
     /// A precomputed list of the hashes of the transactions in this block,
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
-    /// This block's contribution to the deferred pool.
-    pub deferred_balance: Option<Amount<NonNegative>>,
+    /// This block's deferred pool value balance change.
+    pub deferred_pool_balance_change: Option<Amount>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -381,8 +381,8 @@ pub struct FinalizedBlock {
     pub(super) transaction_hashes: Arc<[transaction::Hash]>,
     /// The tresstate associated with the block.
     pub(super) treestate: Treestate,
-    /// This block's contribution to the deferred pool.
-    pub(super) deferred_balance: Option<Amount<NonNegative>>,
+    /// This block's deferred pool value balance change.
+    pub(super) deferred_pool_balance_change: Option<Amount>,
 }
 
 impl FinalizedBlock {
@@ -408,7 +408,7 @@ impl FinalizedBlock {
             new_outputs: block.new_outputs,
             transaction_hashes: block.transaction_hashes,
             treestate,
-            deferred_balance: block.deferred_balance,
+            deferred_pool_balance_change: block.deferred_pool_balance_change,
         }
     }
 }
@@ -481,7 +481,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_balance,
+            deferred_pool_balance_change,
         } = semantically_verified;
 
         // This is redundant for the non-finalized state,
@@ -499,7 +499,7 @@ impl ContextuallyVerifiedBlock {
             transaction_hashes,
             chain_value_pool_change: block.chain_value_pool_change(
                 &utxos_from_ordered_utxos(spent_outputs),
-                deferred_balance,
+                deferred_pool_balance_change,
             )?,
         })
     }
@@ -511,10 +511,10 @@ impl CheckpointVerifiedBlock {
     pub fn new(
         block: Arc<Block>,
         hash: Option<block::Hash>,
-        deferred_balance: Option<Amount<NonNegative>>,
+        deferred_pool_balance_change: Option<Amount>,
     ) -> Self {
         let mut block = Self::with_hash(block.clone(), hash.unwrap_or(block.hash()));
-        block.deferred_balance = deferred_balance;
+        block.deferred_pool_balance_change = deferred_pool_balance_change;
         block
     }
     /// Creates a block that's ready to be committed to the finalized state,
@@ -542,13 +542,16 @@ impl SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_balance: None,
+            deferred_pool_balance_change: None,
         }
     }
 
     /// Sets the deferred balance in the block.
-    pub fn with_deferred_balance(mut self, deferred_balance: Option<Amount<NonNegative>>) -> Self {
-        self.deferred_balance = deferred_balance;
+    pub fn with_deferred_pool_balance_change(
+        mut self,
+        deferred_pool_balance_change: Option<Amount>,
+    ) -> Self {
+        self.deferred_pool_balance_change = deferred_pool_balance_change;
         self
     }
 }
@@ -574,7 +577,7 @@ impl From<Arc<Block>> for SemanticallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_balance: None,
+            deferred_pool_balance_change: None,
         }
     }
 }
@@ -587,13 +590,7 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             height: valid.height,
             new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
-            deferred_balance: Some(
-                valid
-                    .chain_value_pool_change
-                    .deferred_amount()
-                    .constrain::<NonNegative>()
-                    .expect("deferred balance in a block must me non-negative"),
-            ),
+            deferred_pool_balance_change: Some(valid.chain_value_pool_change.deferred_amount()),
         }
     }
 }
@@ -606,7 +603,7 @@ impl From<FinalizedBlock> for SemanticallyVerifiedBlock {
             height: finalized.height,
             new_outputs: finalized.new_outputs,
             transaction_hashes: finalized.transaction_hashes,
-            deferred_balance: finalized.deferred_balance,
+            deferred_pool_balance_change: finalized.deferred_pool_balance_change,
         }
     }
 }

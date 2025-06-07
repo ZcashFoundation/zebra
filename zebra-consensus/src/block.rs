@@ -25,10 +25,7 @@ use tracing::Instrument;
 use zebra_chain::{
     amount::Amount,
     block,
-    parameters::{
-        subsidy::{FundingStreamReceiver, SubsidyError},
-        Network,
-    },
+    parameters::{subsidy::SubsidyError, Network},
     transaction, transparent,
     work::equihash,
 };
@@ -233,7 +230,9 @@ where
             let expected_block_subsidy =
                 zebra_chain::parameters::subsidy::block_subsidy(height, &network)?;
 
-            check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
+            // See [ZIP-1015](https://zips.z.cash/zip-1015).
+            let deferred_pool_balance_change =
+                check::subsidy_is_valid(&block, &network, expected_block_subsidy)?;
 
             // Now do the slower checks
 
@@ -307,16 +306,6 @@ where
                 })?;
             }
 
-            // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let expected_deferred_amount = zebra_chain::parameters::subsidy::funding_stream_values(
-                height,
-                &network,
-                expected_block_subsidy,
-            )
-            .expect("we always expect a funding stream hashmap response even if empty")
-            .remove(&FundingStreamReceiver::Deferred)
-            .unwrap_or_default();
-
             let block_miner_fees =
                 block_miner_fees.map_err(|amount_error| BlockError::SummingMinerFees {
                     height,
@@ -329,7 +318,7 @@ where
                 height,
                 block_miner_fees,
                 expected_block_subsidy,
-                expected_deferred_amount,
+                deferred_pool_balance_change,
                 &network,
             )?;
 
@@ -343,7 +332,7 @@ where
                 height,
                 new_outputs,
                 transaction_hashes,
-                deferred_balance: Some(expected_deferred_amount),
+                deferred_pool_balance_change: Some(deferred_pool_balance_change),
             };
 
             // Return early for proposal requests.
