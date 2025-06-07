@@ -819,6 +819,10 @@ impl AddressBookPeers for AddressBook {
             .cloned()
             .collect()
     }
+
+    fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
+        self.update(MetaAddr::new_initial_peer(peer)).is_some()
+    }
 }
 
 impl AddressBookPeers for Arc<Mutex<AddressBook>> {
@@ -826,6 +830,12 @@ impl AddressBookPeers for Arc<Mutex<AddressBook>> {
         self.lock()
             .expect("panic in a previous thread that was holding the mutex")
             .recently_live_peers(now)
+    }
+
+    fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
+        self.lock()
+            .expect("panic in a previous thread that was holding the mutex")
+            .add_peer(peer)
     }
 }
 
