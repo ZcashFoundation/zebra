@@ -948,7 +948,6 @@ pub async fn test_mining_rpcs<ReadState>(
             [0x7e; 20],
         )),
         extra_coinbase_data: None,
-        debug_like_zcashd: true,
         // TODO: Use default field values when optional features are enabled in tests #8183
         internal_miner: true,
     };

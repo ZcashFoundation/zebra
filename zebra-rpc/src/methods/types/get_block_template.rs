@@ -263,7 +263,6 @@ impl GetBlockTemplate {
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
-        like_zcashd: bool,
         extra_coinbase_data: Vec<u8>,
     ) -> Self {
         // Calculate the next block height.
@@ -293,18 +292,13 @@ impl GetBlockTemplate {
                 .map(|(min_tx_index, tx)| (min_tx_index, (&tx).into(), tx))
                 .collect();
 
-            if like_zcashd {
-                // Sort in serialized data order, excluding the length byte.
-                // `zcashd` sometimes seems to do this, but other times the order is arbitrary.
-                mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
-                    (*min_tx_index, tx_template.data.clone())
-                });
-            } else {
-                // Sort by hash, this is faster.
-                mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
-                    (*min_tx_index, tx_template.hash.bytes_in_display_order())
-                });
-            }
+            // `zcashd` sorts in serialized data order, excluding the length byte.
+            // It sometimes seems to do this, but other times the order is arbitrary.
+            // Sort by hash, this is faster.
+            mempool_txs_with_templates.sort_by_key(|(min_tx_index, tx_template, _tx)| {
+                (*min_tx_index, tx_template.hash.bytes_in_display_order())
+            });
+
             mempool_txs_with_templates
                 .into_iter()
                 .map(|(_, template, tx)| (template, tx))
@@ -320,7 +314,6 @@ impl GetBlockTemplate {
             miner_address,
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
-            like_zcashd,
             extra_coinbase_data,
         );
 
@@ -481,17 +474,10 @@ where
         const EXTRA_COINBASE_DATA_LIMIT: usize =
             MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
 
-        let debug_like_zcashd = conf.debug_like_zcashd;
-
         // Hex-decode to bytes if possible, otherwise UTF-8 encode to bytes.
-        let extra_coinbase_data = conf.extra_coinbase_data.unwrap_or_else(|| {
-            if debug_like_zcashd {
-                ""
-            } else {
-                EXTRA_ZEBRA_COINBASE_DATA
-            }
-            .to_string()
-        });
+        let extra_coinbase_data = conf
+            .extra_coinbase_data
+            .unwrap_or_else(|| EXTRA_ZEBRA_COINBASE_DATA.to_string());
         let extra_coinbase_data = hex::decode(&extra_coinbase_data)
             .unwrap_or_else(|_error| extra_coinbase_data.as_bytes().to_vec());
 
@@ -796,7 +782,6 @@ pub fn generate_coinbase_and_roots(
     miner_address: &Address,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
-    like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
     // Generate the coinbase transaction
@@ -806,7 +791,6 @@ pub fn generate_coinbase_and_roots(
         block_template_height,
         miner_address,
         miner_fee,
-        like_zcashd,
         extra_coinbase_data,
     );
 
@@ -838,17 +822,11 @@ pub fn generate_coinbase_transaction(
     height: Height,
     miner_address: &Address,
     miner_fee: Amount<NonNegative>,
-    like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> UnminedTx {
-    let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee, like_zcashd);
+    let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
 
-    if like_zcashd {
-        Transaction::new_v4_coinbase(network, height, outputs, like_zcashd, extra_coinbase_data)
-            .into()
-    } else {
-        Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
-    }
+    Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
 }
 
 /// Returns the total miner fee for `mempool_txs`.
@@ -874,7 +852,6 @@ pub fn standard_coinbase_outputs(
     height: Height,
     miner_address: &Address,
     miner_fee: Amount<NonNegative>,
-    like_zcashd: bool,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
     let expected_block_subsidy = block_subsidy(height, network).expect("valid block subsidy");
     let funding_streams = funding_stream_values(height, network, expected_block_subsidy)
@@ -922,22 +899,12 @@ pub fn standard_coinbase_outputs(
 
     // The HashMap returns funding streams in an arbitrary order,
     // but Zebra's snapshot tests expect the same order every time.
-    if like_zcashd {
-        // zcashd sorts outputs in serialized data order, excluding the length field
-        coinbase_outputs.sort_by_key(|(_amount, script)| script.clone());
 
-        // The miner reward is always the first output independent of the sort order
-        coinbase_outputs.insert(0, (miner_reward, script));
-    } else {
-        // Unlike zcashd, in Zebra the miner reward is part of the sorting
-        coinbase_outputs.push((miner_reward, script));
+    // zcashd sorts outputs in serialized data order, excluding the length field
+    coinbase_outputs.sort_by_key(|(_amount, script)| script.clone());
 
-        // Zebra sorts by amount then script.
-        //
-        // Since the sort is stable, equal amounts will remain sorted by script.
-        coinbase_outputs.sort_by_key(|(_amount, script)| script.clone());
-        coinbase_outputs.sort_by_key(|(amount, _script)| *amount);
-    }
+    // The miner reward is always the first output independent of the sort order
+    coinbase_outputs.insert(0, (miner_reward, script));
 
     coinbase_outputs
 }

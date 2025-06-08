@@ -3465,7 +3465,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &miner_address,
         &[],
         chain_history_root,
-        true,
         vec![],
     );
 
@@ -3508,7 +3507,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &miner_address,
         &[],
         chain_history_root,
-        true,
         vec![],
     );
 

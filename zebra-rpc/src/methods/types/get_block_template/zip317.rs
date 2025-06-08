@@ -60,7 +60,6 @@ pub fn select_mempool_transactions(
     miner_address: &Address,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
-    like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
@@ -69,7 +68,6 @@ pub fn select_mempool_transactions(
         network,
         next_block_height,
         miner_address,
-        like_zcashd,
         extra_coinbase_data,
     );
 
@@ -148,7 +146,6 @@ pub fn fake_coinbase_transaction(
     network: &Network,
     height: Height,
     miner_address: &Address,
-    like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> TransactionTemplate<NegativeOrZero> {
     // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
@@ -167,7 +164,6 @@ pub fn fake_coinbase_transaction(
         height,
         miner_address,
         miner_fee,
-        like_zcashd,
         extra_coinbase_data,
     );
 

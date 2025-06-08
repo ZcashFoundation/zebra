@@ -33,7 +33,6 @@ fn minimal_coinbase() -> Result<(), Box<dyn std::error::Error>> {
         Height(1),
         &Address::try_from_raw_transparent_p2pkh([0x42; 20]).unwrap(),
         Amount::zero(),
-        false,
         vec![],
     )
     .transaction
