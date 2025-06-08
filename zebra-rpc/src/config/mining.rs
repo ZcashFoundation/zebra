@@ -7,7 +7,7 @@ use zcash_address::ZcashAddress;
 
 /// Mining configuration section.
 #[serde_as]
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// Address for receiving miner subsidy and tx fees.
@@ -34,19 +34,6 @@ pub struct Config {
     /// The internal miner is off by default.
     #[serde(default)]
     pub internal_miner: bool,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            miner_address: None,
-            // For now, act like `zcashd` as much as possible.
-            // TODO: do we want to default to v5 transactions and Zebra coinbase data?
-            extra_coinbase_data: None,
-            debug_like_zcashd: true,
-            internal_miner: false,
-        }
-    }
 }
 
 impl Config {
