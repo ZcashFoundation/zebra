@@ -8,14 +8,14 @@ expression: block_template
   ],
   "version": 4,
   "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
-  "blockcommitmentshash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792",
-  "lightclientroothash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792",
-  "finalsaplingroothash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792",
+  "blockcommitmentshash": "1d445cc3e1f19f1d8613bb50f3152e4fd28c57bc5a98eb35dc96830d17368ebb",
+  "lightclientroothash": "1d445cc3e1f19f1d8613bb50f3152e4fd28c57bc5a98eb35dc96830d17368ebb",
+  "finalsaplingroothash": "1d445cc3e1f19f1d8613bb50f3152e4fd28c57bc5a98eb35dc96830d17368ebb",
   "defaultroots": {
     "merkleroot": "cbd3e93c92a3ea7150492a4aa2e5b72c336dce68c7605a599e28485832376bad",
     "chainhistoryroot": "03bc75f00c307a05aed2023819e18c2672cbe15fbd3200944997def141967387",
-    "authdataroot": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-    "blockcommitmentshash": "3b25791957f9383b6ce851d728a78309664d5d7a82ca87b6a9125a2f2c529792"
+    "authdataroot": "f4c27e3c53e6796a7ee285bbb991eab054f963c85a2795ab57b7c82922a7eb18",
+    "blockcommitmentshash": "1d445cc3e1f19f1d8613bb50f3152e4fd28c57bc5a98eb35dc96830d17368ebb"
   },
   "transactions": [],
   "coinbasetxn": {
