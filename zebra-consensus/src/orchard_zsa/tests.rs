@@ -88,7 +88,7 @@ fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
         let reference_note = action.get_reference_note();
         let is_finalized = action.is_finalized();
 
-        let mut note_amounts = action.notes().into_iter().map(|note| {
+        let mut note_amounts = action.notes().iter().map(|note| {
             if note.asset() == action_asset {
                 Ok(note.value())
             } else {
