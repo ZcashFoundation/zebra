@@ -405,7 +405,8 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                     ..
-                } => Self::verify_v5_transaction(
+                }
+                => Self::verify_v5_and_v6_transaction(
                     &req,
                     &network,
                     script_verifier,
@@ -413,6 +414,20 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
+                #[cfg(feature = "tx-v6")]
+                Transaction::V6 {
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => Self::verify_v5_and_v6_transaction(
+                    &req,
+                    &network,
+                    script_verifier,
+                    cached_ffi_transaction.clone(),
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                )?,
+
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
@@ -486,6 +501,25 @@ where
         .instrument(span)
         .boxed()
     }
+}
+
+trait OrchardTransaction {
+    const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade];
+}
+
+impl OrchardTransaction for orchard::OrchardVanilla {
+    // FIXME: is this a correct set of Nu values?
+    const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[
+        NetworkUpgrade::Nu5,
+        NetworkUpgrade::Nu6,
+        #[cfg(feature = "tx-v6")]
+        NetworkUpgrade::Nu7,
+    ];
+}
+
+#[cfg(feature = "tx-v6")]
+impl OrchardTransaction for orchard::OrchardZSA {
+    const SUPPORTED_NETWORK_UPGRADES: &'static [NetworkUpgrade] = &[NetworkUpgrade::Nu7];
 }
 
 impl<ZS> Verifier<ZS>
@@ -678,7 +712,8 @@ where
             | NetworkUpgrade::Heartwood
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
-            | NetworkUpgrade::Nu6 => Ok(()),
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu7 => Ok(()),
 
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
@@ -690,7 +725,7 @@ where
         }
     }
 
-    /// Verify a V5 transaction.
+    /// Verify a V5/V6 transaction.
     ///
     /// Returns a set of asynchronous checks that must all succeed for the transaction to be
     /// considered valid. These checks include:
@@ -710,18 +745,18 @@ where
     /// - the sapling shielded data of the transaction, if any
     /// - the orchard shielded data of the transaction, if any
     #[allow(clippy::unwrap_in_result)]
-    fn verify_v5_transaction(
+    fn verify_v5_and_v6_transaction<V: primitives::halo2::OrchardVerifier + OrchardTransaction>(
         request: &Request,
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<V>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let upgrade = request.upgrade(network);
 
-        Self::verify_v5_transaction_network_upgrade(&transaction, upgrade)?;
+        Self::verify_v5_and_v6_transaction_network_upgrade::<V>(&transaction, upgrade)?;
 
         let shielded_sighash = transaction.sighash(
             upgrade
@@ -748,13 +783,20 @@ where
         )?))
     }
 
-    /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
-    fn verify_v5_transaction_network_upgrade(
+    /// Verifies if a V5/V6 `transaction` is supported by `network_upgrade`.
+    fn verify_v5_and_v6_transaction_network_upgrade<
+        V: primitives::halo2::OrchardVerifier + OrchardTransaction,
+    >(
         transaction: &Transaction,
         network_upgrade: NetworkUpgrade,
     ) -> Result<(), TransactionError> {
-        match network_upgrade {
-            // Supports V5 transactions
+        if V::SUPPORTED_NETWORK_UPGRADES.contains(&network_upgrade) {
+            // FIXME: Extend this comment to include V6. Also, it may be confusing to
+            // mention version group IDs and other rules here since they aren’t actually
+            // checked. This function only verifies compatibility between the transaction
+            // version and the network upgrade.
+
+            // Supports V5/V6 transactions
             //
             // # Consensus
             //
@@ -766,19 +808,13 @@ where
             //
             // Note: Here we verify the transaction version number of the above rule, the group
             // id is checked in zebra-chain crate, in the transaction serialize.
-            NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 => Ok(()),
-
-            // Does not support V5 transactions
-            NetworkUpgrade::Genesis
-            | NetworkUpgrade::BeforeOverwinter
-            | NetworkUpgrade::Overwinter
-            | NetworkUpgrade::Sapling
-            | NetworkUpgrade::Blossom
-            | NetworkUpgrade::Heartwood
-            | NetworkUpgrade::Canopy => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            Ok(())
+        } else {
+            // Does not support V5/V6 transactions
+            Err(TransactionError::UnsupportedByNetworkUpgrade(
                 transaction.version(),
                 network_upgrade,
-            )),
+            ))
         }
     }
 
@@ -1012,8 +1048,8 @@ where
     }
 
     /// Verifies a transaction's Orchard shielded data.
-    fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+    fn verify_orchard_shielded_data<V: primitives::halo2::OrchardVerifier>(
+        orchard_shielded_data: &Option<orchard::ShieldedData<V>>,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();
@@ -1031,7 +1067,7 @@ where
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
             async_checks.push(
-                primitives::halo2::VERIFIER
+                V::get_verifier()
                     .clone()
                     .oneshot(primitives::halo2::Item::from(orchard_shielded_data)),
             );

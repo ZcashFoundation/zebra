@@ -1,0 +1,34 @@
+name: Basic checks
+
+#on: [push, pull_request]
+on: [push]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]
+
+    env:
+      # Use system-installed RocksDB library instead of building from scratch
+      ROCKSDB_LIB_DIR: /usr/lib
+      # Use system-installed Snappy library for compression in RocksDB
+      SNAPPY_LIB_DIR: /usr/lib/x86_64-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies on Ubuntu
+        #run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
+      - name: Run tests
+        run: cargo test --verbose
+      - name: Verify working directory is clean
+        run: git diff --exit-code
+      - name: Run doc check
+        run: cargo doc --all-features --document-private-items
+      - name: Run format check
+        run: cargo fmt -- --check
+      - name: Run clippy
+        run: cargo clippy --workspace --all-features --all-targets -- -D warnings

@@ -2,7 +2,7 @@
 //! from the transaction.
 use std::io;
 
-use super::{Hash, Transaction};
+use super::{tx_v5_and_v6, Hash, Transaction};
 use crate::serialization::{sha256d, ZcashSerialize};
 
 /// A Transaction ID builder. It computes the transaction ID by hashing
@@ -28,7 +28,7 @@ impl<'a> TxIdBuilder<'a> {
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
             | Transaction::V4 { .. } => self.txid_v1_to_v4(),
-            Transaction::V5 { .. } => self.txid_v5(),
+            tx_v5_and_v6! { .. } => self.txid_v5_to_v6(),
         }
     }
 
@@ -43,10 +43,10 @@ impl<'a> TxIdBuilder<'a> {
         Ok(Hash(hash_writer.finish()))
     }
 
-    /// Compute the Transaction ID for a V5 transaction in the given network upgrade.
+    /// Compute the Transaction ID for transactions V5 to V6.
     /// In this case it's the hash of a tree of hashes of specific parts of the
-    /// transaction, as specified in ZIP-244 and ZIP-225.
-    fn txid_v5(self) -> Result<Hash, io::Error> {
+    /// transaction, as specified in ZIP-244 and ZIP-225 for Txv5 and ZIP-246 for TxV6.
+    fn txid_v5_to_v6(self) -> Result<Hash, io::Error> {
         // The v5 txid (from ZIP-244) is computed using librustzcash. Convert the zebra
         // transaction to a librustzcash transaction.
         let alt_tx: zcash_primitives::transaction::Transaction = self.trans.try_into()?;
