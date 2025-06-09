@@ -620,8 +620,12 @@ where
             None
         };
 
+        let deferred_pool_balance_change = expected_deferred_amount
+            .unwrap_or_default()
+            .checked_sub(self.network.lockbox_disbursement_total_amount(height));
+
         // don't do precalculation until the block passes basic difficulty checks
-        let block = CheckpointVerifiedBlock::new(block, Some(hash), expected_deferred_amount);
+        let block = CheckpointVerifiedBlock::new(block, Some(hash), deferred_pool_balance_change);
 
         crate::block::check::merkle_root_validity(
             &self.network,

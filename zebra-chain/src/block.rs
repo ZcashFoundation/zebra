@@ -5,7 +5,7 @@ use std::{collections::HashMap, fmt, ops::Neg, sync::Arc};
 use halo2::pasta::pallas;
 
 use crate::{
-    amount::{Amount, NegativeAllowed, NonNegative},
+    amount::{Amount, NegativeAllowed},
     block::merkle::AuthDataRoot,
     fmt::DisplayToDebug,
     orchard,
@@ -224,7 +224,7 @@ impl Block {
     pub fn chain_value_pool_change(
         &self,
         utxos: &HashMap<transparent::OutPoint, transparent::Utxo>,
-        deferred_balance: Option<Amount<NonNegative>>,
+        deferred_pool_balance_change: Option<Amount>,
     ) -> Result<ValueBalance<NegativeAllowed>, ValueBalanceError> {
         Ok(*self
             .transactions
@@ -232,12 +232,10 @@ impl Block {
             .flat_map(|t| t.value_balance(utxos))
             .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?
             .neg()
-            .set_deferred_amount(
-                deferred_balance
-                    .unwrap_or(Amount::zero())
-                    .constrain::<NegativeAllowed>()
-                    .map_err(ValueBalanceError::Deferred)?,
-            ))
+            .set_deferred_amount(match deferred_pool_balance_change {
+                Some(amount) => amount,
+                None => Amount::zero(), // Explicitly handle the None case for clarity.
+            }))
     }
 
     /// Compute the root of the authorizing data Merkle tree,

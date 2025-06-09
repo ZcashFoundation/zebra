@@ -115,7 +115,7 @@ impl From<SemanticallyVerifiedBlock> for ChainTipBlock {
             height,
             new_outputs: _,
             transaction_hashes,
-            deferred_balance: _,
+            deferred_pool_balance_change: _,
         } = prepared;
 
         Self {
