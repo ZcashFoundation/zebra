@@ -63,10 +63,6 @@ pub trait ChainTip {
     /// Returns an error if Zebra is shutting down, or the state has permanently failed.
     ///
     /// See [`tokio::watch::Receiver::changed()`](https://docs.rs/tokio/latest/tokio/sync/watch/struct.Receiver.html#method.changed) for details.
-    //
-    // TODO:
-    // Use async_fn_in_trait or return_position_impl_trait_in_trait when one of them stabilises:
-    // https://github.com/rust-lang/rust/issues/91611
     fn best_tip_changed(
         &mut self,
     ) -> impl std::future::Future<Output = Result<(), BoxError>> + Send;
