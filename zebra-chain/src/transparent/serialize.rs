@@ -208,10 +208,7 @@ pub(crate) fn write_coinbase_height<W: io::Write>(
         // TODO: update this check based on the consensus rule changes in
         //       https://github.com/zcash/zips/issues/540
         if coinbase_data.0 != GENESIS_COINBASE_DATA {
-            return Err(io::Error::new(
-                io::ErrorKind::Other,
-                "invalid genesis coinbase data",
-            ));
+            return Err(io::Error::other("invalid genesis coinbase data"));
         }
     } else if let h @ 1..=16 = height.0 {
         w.write_u8(0x50 + (h as u8))?;

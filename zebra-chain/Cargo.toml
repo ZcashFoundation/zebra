@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.45"
+version = "1.0.0-beta.46"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Core Zcash data structures"
 license = "MIT OR Apache-2.0"
@@ -35,10 +35,7 @@ shielded-scan = [
 ]
 
 # Experimental internal miner support
-# TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
-#       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L38-L43
-#       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
-internal-miner = []
+internal-miner = ["equihash/solver"]
 
 # Experimental elasticsearch support
 elasticsearch = []
@@ -69,9 +66,6 @@ blake2s_simd = { workspace = true }
 bs58 = { workspace = true, features = ["check"] }
 byteorder = { workspace = true }
 
-# TODO: Internal miner feature functionality was removed at https://github.com/ZcashFoundation/zebra/issues/8180
-#       See what was removed at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-chain/Cargo.toml#L73-L85
-#       Restore support when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
 equihash = { workspace = true }
 
 group = { workspace = true }
@@ -89,9 +83,10 @@ secp256k1 = { workspace = true, features = ["serde"] }
 sha2 = { workspace = true, features = ["compress"] }
 uint = { workspace = true }
 x25519-dalek = { workspace = true, features = ["serde"] }
+bech32 = { workspace = true }
 
 # ECC deps
-halo2 = { package = "halo2_proofs", version = "0.3.0" }
+halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
 zcash_encoding.workspace = true
 zcash_history.workspace = true
@@ -101,6 +96,7 @@ sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent.workspace = true
+sinsemilla = { version = "0.1" }
 
 # Time
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
@@ -143,7 +139,7 @@ proptest-derive = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.45", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46", optional = true }
 
 [dev-dependencies]
 # Benchmarks
@@ -166,7 +162,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.45" }
+zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }
 
 [[bench]]
 name = "block"

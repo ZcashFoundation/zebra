@@ -20,9 +20,6 @@ on:
       disk_suffix:
         required: false
         type: string
-      prefer_main_cached_state:
-        required: false
-        type: boolean
       test_id:
         description: 'The test ID requiring the cached state disks'
         required: false
@@ -63,6 +60,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v5
+        with:
+          short-length: 7
 
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
@@ -86,12 +87,12 @@ jobs:
       # More info: https://cloud.google.com/compute/docs/naming-resources#resource-name-format
       #
       # Passes ${{ inputs.network }} to subsequent steps using $NETWORK env variable.
-      # Passes ${{ env.GITHUB_REF_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
+      # Passes ${{ env.GITHUB_REF_POINT_SLUG_URL }} to subsequent steps using $SHORT_GITHUB_REF env variable.
       - name: Format network name and branch name for disks
         run: |
           NETWORK_CAPS="${{ inputs.network }}"
           echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
-          LONG_GITHUB_REF="${{ env.GITHUB_REF_SLUG_URL }}"
+          LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
       # Check if there are cached state disks available for subsequent jobs to use.
@@ -102,7 +103,6 @@ jobs:
           NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
           DISK_PREFIX: ${{ inputs.disk_prefix }}
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
-          PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
           source ./.github/workflows/scripts/gcp-get-cached-disks.sh
           echo "state_version=${LOCAL_STATE_VERSION}" >> "${GITHUB_OUTPUT}"

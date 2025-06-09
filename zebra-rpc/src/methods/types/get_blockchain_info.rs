@@ -5,6 +5,8 @@ use zebra_chain::{
     value_balance::ValueBalance,
 };
 
+use zec::Zec;
+
 use super::*;
 
 /// A value pool's balance in Zec and Zatoshis

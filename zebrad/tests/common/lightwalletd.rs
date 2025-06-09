@@ -111,7 +111,7 @@ pub fn spawn_lightwalletd_for_rpc<S: AsRef<str> + std::fmt::Debug>(
         test_type.lightwalletd_failure_messages();
 
     let mut lightwalletd = lightwalletd_dir
-        .spawn_lightwalletd_child(lightwalletd_state_path, arguments)?
+        .spawn_lightwalletd_child(lightwalletd_state_path, test_type, arguments)?
         .with_timeout(test_type.lightwalletd_timeout())
         .with_failure_regex_iter(lightwalletd_failure_messages, lightwalletd_ignore_messages);
 
@@ -157,6 +157,8 @@ where
     /// as a child process in this test directory,
     /// potentially taking ownership of the tempdir for the duration of the child process.
     ///
+    /// Uses `test_type` to determine logging behavior for the state directory.
+    ///
     /// By default, launch a working test instance with logging, and avoid port conflicts.
     ///
     /// # Panics
@@ -165,6 +167,7 @@ where
     fn spawn_lightwalletd_child(
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        test_type: TestType,
         extra_args: Arguments,
     ) -> Result<TestChild<Self>>;
 
@@ -184,6 +187,7 @@ where
     fn spawn_lightwalletd_child(
         self,
         lightwalletd_state_path: impl Into<Option<PathBuf>>,
+        test_type: TestType,
         extra_args: Arguments,
     ) -> Result<TestChild<Self>> {
         let test_dir = self.as_ref().to_owned();
@@ -207,6 +211,35 @@ where
 
         // the lightwalletd cache directory
         if let Some(lightwalletd_state_path) = lightwalletd_state_path.into() {
+            tracing::info!(?lightwalletd_state_path, "using lightwalletd state path");
+
+            // Only log the directory size if it's expected to exist already.
+            // FullSyncFromGenesis creates this directory, so we skip logging for it.
+            if !matches!(test_type, TestType::FullSyncFromGenesis { .. }) {
+                let lwd_cache_dir_path = lightwalletd_state_path.join("db/main");
+                let lwd_cache_entries: Vec<_> = std::fs::read_dir(&lwd_cache_dir_path)
+                    .expect("unexpected failure reading lightwalletd cache dir")
+                    .collect();
+
+                let lwd_cache_dir_size = lwd_cache_entries.iter().fold(0, |acc, entry_result| {
+                    acc + entry_result
+                        .as_ref()
+                        .map(|entry| entry.metadata().map(|meta| meta.len()).unwrap_or(0))
+                        .unwrap_or(0)
+                });
+
+                tracing::info!("{lwd_cache_dir_size} bytes in lightwalletd cache dir");
+
+                for entry_result in &lwd_cache_entries {
+                    match entry_result {
+                        Ok(entry) => tracing::info!("{entry:?} entry in lightwalletd cache dir"),
+                        Err(e) => {
+                            tracing::warn!(?e, "error reading entry in lightwalletd cache dir")
+                        }
+                    }
+                }
+            }
+
             args.set_parameter(
                 "--data-dir",
                 lightwalletd_state_path
@@ -214,6 +247,7 @@ where
                     .expect("path is valid Unicode"),
             );
         } else {
+            tracing::info!("using lightwalletd empty state path");
             let empty_state_path = test_dir.join("lightwalletd_state");
 
             std::fs::create_dir(&empty_state_path)

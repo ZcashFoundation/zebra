@@ -137,6 +137,7 @@ where
             tokio::task::Builder::new()
                 .name(&format!("{} batch", batch_kind))
                 .spawn(worker.run().instrument(span))
+                .expect("panic on error to match tokio::spawn")
         };
         #[cfg(not(tokio_unstable))]
         let worker_handle = tokio::spawn(worker.run().instrument(span));

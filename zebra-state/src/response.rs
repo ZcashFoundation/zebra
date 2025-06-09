@@ -2,9 +2,12 @@
 
 use std::{collections::BTreeMap, sync::Arc};
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block::{self, Block},
+    block::{self, Block, ChainHistoryMmrRootHash},
+    block_info::BlockInfo,
     orchard, sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
@@ -119,15 +122,24 @@ pub struct MinedTx {
     /// The number of confirmations for this transaction
     /// (1 + depth of block the transaction was found in)
     pub confirmations: u32,
+
+    /// The time of the block where the transaction was mined.
+    pub block_time: DateTime<Utc>,
 }
 
 impl MinedTx {
     /// Creates a new [`MinedTx`]
-    pub fn new(tx: Arc<Transaction>, height: block::Height, confirmations: u32) -> Self {
+    pub fn new(
+        tx: Arc<Transaction>,
+        height: block::Height,
+        confirmations: u32,
+        block_time: DateTime<Utc>,
+    ) -> Self {
         Self {
             tx,
             height,
             confirmations,
+            block_time,
         }
     }
 }
@@ -152,6 +164,10 @@ pub enum ReadResponse {
         /// The value pool balance at the current best chain tip.
         value_balance: ValueBalance<NonNegative>,
     },
+
+    /// Response to [`ReadRequest::BlockInfo`] with
+    /// the block info after the specified block.
+    BlockInfo(Option<BlockInfo>),
 
     /// Response to [`ReadRequest::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
@@ -227,8 +243,14 @@ pub enum ReadResponse {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
-    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses.
-    AddressBalance(Amount<NonNegative>),
+    /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
+    /// and the total received funds, including change.
+    AddressBalance {
+        /// The total balance of the addresses.
+        balance: Amount<NonNegative>,
+        /// The total received funds in zatoshis, including change.
+        received: u64,
+    },
 
     /// Response to [`ReadRequest::TransactionIdsByAddresses`]
     /// with the obtained transaction ids, in the order they appear in blocks.
@@ -277,9 +299,9 @@ pub struct GetBlockTemplateChainInfo {
     /// Depends on the `tip_hash`.
     pub tip_height: block::Height,
 
-    /// The history tree of the current best chain.
+    /// The FlyClient chain history root as of the end of the chain tip block.
     /// Depends on the `tip_hash`.
-    pub history_tree: Arc<zebra_chain::history_tree::HistoryTree>,
+    pub chain_history_root: Option<ChainHistoryMmrRootHash>,
 
     // Data derived from the state tip and recent blocks, and the current local clock.
     //
@@ -343,12 +365,13 @@ impl TryFrom<ReadResponse> for Response {
 
             ReadResponse::UsageInfo(_)
             | ReadResponse::TipPoolValues { .. }
+            | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)
             | ReadResponse::OrchardSubtrees(_)
-            | ReadResponse::AddressBalance(_)
+            | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
             | ReadResponse::ChainInfo(_) => {

@@ -5,5 +5,11 @@ expression: treestate
 {
   "hash": "025579869bcf52a989337342f5f57a84f3a28b968f7d6a8307902b065a668d23",
   "height": 1,
-  "time": 1477674473
+  "time": 1477674473,
+  "sapling": {
+    "commitments": {}
+  },
+  "orchard": {
+    "commitments": {}
+  }
 }

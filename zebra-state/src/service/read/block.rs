@@ -14,8 +14,11 @@
 
 use std::sync::Arc;
 
+use chrono::{DateTime, Utc};
+
 use zebra_chain::{
     block::{self, Block, Height},
+    block_info::BlockInfo,
     serialization::ZcashSerialize as _,
     transaction::{self, Transaction},
     transparent::{self, Utxo},
@@ -105,7 +108,7 @@ fn transaction<C>(
     chain: Option<C>,
     db: &ZebraDb,
     hash: transaction::Hash,
-) -> Option<(Arc<Transaction>, Height)>
+) -> Option<(Arc<Transaction>, Height, DateTime<Utc>)>
 where
     C: AsRef<Chain>,
 {
@@ -119,7 +122,7 @@ where
             chain
                 .as_ref()
                 .transaction(hash)
-                .map(|(tx, height)| (tx.clone(), height))
+                .map(|(tx, height, time)| (tx.clone(), height, time))
         })
         .or_else(|| db.transaction(hash))
 }
@@ -140,10 +143,10 @@ where
     // can only add overlapping blocks, and hashes are unique.
     let chain = chain.as_ref();
 
-    let (tx, height) = transaction(chain, db, hash)?;
+    let (tx, height, time) = transaction(chain, db, hash)?;
     let confirmations = 1 + tip_height(chain, db)?.0 - height.0;
 
-    Some(MinedTx::new(tx, height, confirmations))
+    Some(MinedTx::new(tx, height, confirmations, time))
 }
 
 /// Returns the [`transaction::Hash`]es for the block with `hash_or_height`,
@@ -253,4 +256,25 @@ pub fn any_utxo(
     non_finalized_state
         .any_utxo(&outpoint)
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
+}
+
+/// Returns the [`BlockInfo`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn block_info<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<BlockInfo>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().block_info(hash_or_height))
+        .or_else(|| db.block_info(hash_or_height))
 }

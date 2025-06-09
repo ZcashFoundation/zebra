@@ -30,12 +30,15 @@ use zebra_node_services::mempool;
 use zebra_rpc::{
     config::mining::Config,
     methods::{
-        get_block_template_rpcs::get_block_template::{
-            self, proposal::TimeSource, proposal_block_from_template,
-            GetBlockTemplateCapability::*, GetBlockTemplateRequestMode::*,
-        },
         hex_data::HexData,
-        GetBlockTemplateRpcImpl, GetBlockTemplateRpcServer,
+        types::get_block_template::{
+            self,
+            parameters::GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
+            proposal::proposal_block_from_template,
+            GetBlockTemplateRequestMode::Template,
+            TimeSource,
+        },
+        RpcImpl, RpcServer,
     },
 };
 use zebra_state::WatchReceiver;
@@ -58,10 +61,10 @@ pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 /// mining thread.
 ///
 /// See [`run_mining_solver()`] for more details.
-pub fn spawn_init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+pub fn spawn_init<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>(
     network: &Network,
     config: &Config,
-    rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
+    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> JoinHandle<Result<(), Report>>
 // TODO: simplify or avoid repeating these generics (how?)
 where
@@ -109,7 +112,7 @@ where
 pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     network: Network,
     _config: Config,
-    rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
+    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -209,7 +212,7 @@ where
 }
 
 /// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
-#[instrument(skip(rpc, template_sender))]
+#[instrument(skip(rpc, template_sender, network))]
 pub async fn generate_block_templates<
     Mempool,
     State,
@@ -219,7 +222,7 @@ pub async fn generate_block_templates<
     AddressBook,
 >(
     network: Network,
-    rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
+    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
     template_sender: watch::Sender<Option<Arc<Block>>>,
 ) -> Result<(), Report>
 where
@@ -266,8 +269,9 @@ where
 
         // Wait for the chain to sync so we get a valid template.
         let Ok(template) = template else {
-            info!(
+            warn!(
                 ?BLOCK_TEMPLATE_WAIT_TIME,
+                ?template,
                 "waiting for a valid block template",
             );
 
@@ -329,7 +333,7 @@ where
 pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     solver_id: u8,
     mut template_receiver: WatchReceiver<Option<Arc<Block>>>,
-    rpc: GetBlockTemplateRpcImpl<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>,
+    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
 where
     Mempool: Service<

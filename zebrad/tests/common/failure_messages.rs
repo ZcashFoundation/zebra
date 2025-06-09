@@ -25,7 +25,7 @@ pub const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
     // Rust-specific panics
     "The application panicked",
     // RPC port errors
-    "Unable to start RPC server",
+    "Address already in use",
     // TODO: disable if this actually happens during test zebrad shutdown
     "Stopping RPC endpoint",
     // Missing RPCs in zebrad logs (this log is from PR #3860)
@@ -135,7 +135,7 @@ pub const ZEBRA_CHECKPOINTS_FAILURE_MESSAGES: &[&str] = &[
     // Rust-specific panics
     "The application panicked",
     // RPC port errors
-    "Unable to start RPC server",
+    "Address already in use",
     // RPC argument errors: parsing and data
     //
     // These logs are produced by jsonrpc_core inside Zebra,

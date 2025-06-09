@@ -156,7 +156,7 @@ The remaining consensus differences between Mainnet and Testnet could be made co
 ## Differences Between Custom Testnets and Regtest
 
 Zebra's Regtest network is a special case of a custom Testnet that:
-- Won't make peer connections[^fn4],
+- Won't make remote peer connections[^fn4],
 - Skips Proof-of-Work validation,
 - Uses a reserved network magic and network name,
 - Activates network upgrades up to and including Canopy at block height 1,
@@ -183,4 +183,4 @@ Zebra nodes on custom Testnets will also reject peer connections with nodes that
 
 [^fn3]: Configuring any of the Testnet parameters that are currently configurable except the network name will result in an incompatible custom Testnet, these are: the network magic, network upgrade activation heights, slow start interval, genesis hash, disabled Proof-of-Work and target difficulty limit.
 
-[^fn4]: Zebra won't make outbound peer connections on Regtest, but currently still listens for inbound peer connections, which will be rejected unless they use the Regtest network magic, and Zcash nodes using the Regtest network magic should not be making outbound peer connections. It may be updated to skip initialization of the peerset service altogether so that it won't listen for peer connections at all when support for isolated custom Testnets is added.
+[^fn4]: Zebra won't make remote outbound peer connections on Regtest, but currently still listens for remote inbound peer connections, which will be rejected unless they use the Regtest network magic, and Zcash nodes using the Regtest network magic should not be making outbound peer connections. It may be updated to skip initialization of the peerset service altogether so that it won't listen for peer connections at all when support for isolated custom Testnets is added.

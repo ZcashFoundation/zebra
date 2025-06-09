@@ -24,6 +24,6 @@ jobs:
     name: Build CD Docker / Build images
     # Only run on PRs from external repositories, skipping ZF branches and tags.
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "Skipping job on fork"'

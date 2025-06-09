@@ -8,7 +8,6 @@
 use std::time::Duration;
 
 use color_eyre::eyre::{eyre, Context, Result};
-
 use futures::FutureExt;
 
 use zebra_chain::{
@@ -16,11 +15,9 @@ use zebra_chain::{
     serialization::ZcashSerialize,
 };
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::get_block_template_rpcs::{
-    get_block_template::{
-        proposal::TimeSource, GetBlockTemplate, JsonParameters, ProposalResponse,
-    },
-    types::get_block_template::proposal_block_from_template,
+use zebra_rpc::methods::types::get_block_template::{
+    proposal::proposal_block_from_template, GetBlockTemplate, JsonParameters, ProposalResponse,
+    TimeSource,
 };
 
 use crate::common::{
@@ -258,7 +255,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
                 let _ = done_tx.send(()).await;
                 for (proposal_result, template, time_source) in proposal_results {
                     let proposal_result = proposal_result
-                        .expect("response should be success output with with a serialized `ProposalResponse`");
+                        .expect("response should be success output with a serialized `ProposalResponse`");
 
                     if let ProposalResponse::Rejected(reject_reason) = proposal_result {
                         tracing::info!(

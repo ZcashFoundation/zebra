@@ -35,13 +35,6 @@ on:
       features:
         required: false
         type: string
-      latest_tag:
-        required: false
-        type: boolean
-        default: false
-      tag_suffix:
-        required: false
-        type: string
       no_cache:
         description: "Disable the Docker cache for this build"
         required: false
@@ -96,28 +89,26 @@ jobs:
           images: |
             us-docker.pkg.dev/${{ vars.GCP_PROJECT }}/zebra/${{ inputs.image_name }}
             zfnd/${{ inputs.image_name }},enable=${{ github.event_name == 'release' && !github.event.release.prerelease }}
-          # appends inputs.tag_suffix to image tags/names
-          flavor: |
-            suffix=${{ inputs.tag_suffix }}
-            latest=${{ inputs.latest_tag }}
           # generate Docker tags based on the following events/attributes
           tags: |
             # These DockerHub release tags support the following use cases:
-            # - `latest`: always use the latest Zebra release when you pull or update
-            # - `v1.x.y` or `1.x.y`: always use the exact version, don't automatically upgrade
+            # - `latest`: Automatically points to the most recent Zebra release, ensuring users always get the latest stable version when pulling or updating.
+            # - `1.x.y`: Represents a specific semantic version (e.g., 1.2.3), allowing users to pin to an exact version for stability, preventing automatic upgrades.
             #
-            # `semver` adds a "latest" tag if `inputs.latest_tag` is `true`.
             type=semver,pattern={{version}}
-            type=ref,event=tag
-            # DockerHub release and CI tags.
-            # This tag makes sure tests are using exactly the right image, even when multiple PRs run at the same time.
-            type=sha,event=push
-            # These CI-only tags support CI on PRs, the main branch, and scheduled full syncs.
-            # These tags do not appear on DockerHub, because DockerHub images are only published on the release event.
+            # CI-only tags (not published to DockerHub, only in Google Artifact Registry):
+            # - `pr-xxx`: Tags images with the pull request number for CI tracking during PR workflows.
+            # - `branch-name`: Tags images with the branch name (e.g., `main`, `dev`) for CI builds on branch pushes.
+            # - `edge`: Tags the latest build on the default branch (e.g., `main`), used in CI to represent the cutting-edge version for testing.
+            # - `schedule`: Tags images built during scheduled workflows (e.g., nightly or periodic builds) for CI monitoring and testing.
             type=ref,event=pr
             type=ref,event=branch
             type=edge,enable={{is_default_branch}}
             type=schedule
+            # - `sha-xxxxxx`: Uses the commit SHA (shortened) to tag images for precise identification.
+            # Applied during pull requests and branch pushes to ensure CI tests use the exact image from the last commit.
+            type=sha,event=pr
+            type=sha,event=branch
 
       - name: Authenticate to Google Cloud
         id: auth

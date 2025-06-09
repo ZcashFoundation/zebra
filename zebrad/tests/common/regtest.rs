@@ -18,13 +18,13 @@ use zebra_chain::{
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     methods::{
-        get_block_template_rpcs::{
-            get_block_template::{
-                proposal::TimeSource, proposal_block_from_template, GetBlockTemplate,
-            },
-            types::submit_block,
-        },
         hex_data::HexData,
+        types::{
+            get_block_template::{
+                proposal::proposal_block_from_template, GetBlockTemplate, TimeSource,
+            },
+            submit_block,
+        },
     },
     server::{self, OPENED_RPC_ENDPOINT_MSG},
 };
@@ -42,7 +42,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
     info!("starting regtest submit_blocks test");
 
-    let network = Network::new_regtest(None, None);
+    let network = Network::new_regtest(Default::default());
     let mut config = os_assigned_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
 

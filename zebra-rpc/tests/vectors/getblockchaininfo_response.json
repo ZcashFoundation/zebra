@@ -1,0 +1,91 @@
+{
+    "chain": "main",
+    "blocks": 2932117,
+    "headers": 2932117,
+    "difficulty": 81052645.47600047,
+    "verificationprogress": 0.9999996589496057,
+    "chainwork": 0,
+    "pruned": false,
+    "size_on_disk": 268389432417,
+    "commitments": 0,
+    "bestblockhash": "00000000005f47661fb9db53214c1206ddb784de28af47b79e6232ff850349e3",
+    "estimatedheight": 2932118,
+    "chainSupply": {
+        "chainValue": 16071065.7905448,
+        "chainValueZat": 1607106579054480,
+        "monitored": true
+    },
+    "valuePools": [
+        {
+            "id": "transparent",
+            "chainValue": 13019486.6863425,
+            "chainValueZat": 1301948668634250,
+            "monitored": true
+        },
+        {
+            "id": "sprout",
+            "chainValue": 25789.7816951,
+            "chainValueZat": 2578978169510,
+            "monitored": true
+        },
+        {
+            "id": "sapling",
+            "chainValue": 827769.01149315,
+            "chainValueZat": 82776901149315,
+            "monitored": true
+        },
+        {
+            "id": "orchard",
+            "chainValue": 2159448.18601405,
+            "chainValueZat": 215944818601405,
+            "monitored": true
+        },
+        {
+            "id": "deferred",
+            "chainValue": 38572.125,
+            "chainValueZat": 3857212500000,
+            "monitored": true
+        }
+    ],
+    "upgrades": {
+        "5ba81b19": {
+            "name": "Overwinter",
+            "activationheight": 347500,
+            "status": "active"
+        },
+        "76b809bb": {
+            "name": "Sapling",
+            "activationheight": 419200,
+            "status": "active"
+        },
+        "2bb40e60": {
+            "name": "Blossom",
+            "activationheight": 653600,
+            "status": "active"
+        },
+        "f5b9230b": {
+            "name": "Heartwood",
+            "activationheight": 903000,
+            "status": "active"
+        },
+        "e9ff75a6": {
+            "name": "Canopy",
+            "activationheight": 1046400,
+            "status": "active"
+        },
+        "c2d6d0b4": {
+            "name": "NU5",
+            "activationheight": 1687104,
+            "status": "active"
+        },
+        "c8e71055": {
+            "name": "NU6",
+            "activationheight": 2726400,
+            "status": "active"
+        }
+    },
+    "consensus": {
+        "chaintip": "c8e71055",
+        "nextblock": "c8e71055"
+    }
+}

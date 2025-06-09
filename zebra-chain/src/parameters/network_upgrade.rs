@@ -15,7 +15,7 @@ use hex::{FromHex, ToHex};
 use proptest_derive::Arbitrary;
 
 /// A list of network upgrades in the order that they must be activated.
-const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
+const NETWORK_UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     Genesis,
     BeforeOverwinter,
     Overwinter,
@@ -25,6 +25,10 @@ const NETWORK_UPGRADES_IN_ORDER: [NetworkUpgrade; 9] = [
     Canopy,
     Nu5,
     Nu6,
+    #[cfg(any(test, feature = "zebra-test"))]
+    Nu6_1,
+    #[cfg(any(test, feature = "zebra-test"))]
+    Nu7,
 ];
 
 /// A Zcash network upgrade.
@@ -61,6 +65,12 @@ pub enum NetworkUpgrade {
     /// The Zcash protocol after the NU6 upgrade.
     #[serde(rename = "NU6")]
     Nu6,
+    /// The Zcash protocol after the NU6.1 upgrade.
+    #[serde(rename = "NU6.1")]
+    Nu6_1,
+    /// The Zcash protocol after the NU7 upgrade.
+    #[serde(rename = "NU7")]
+    Nu7,
 }
 
 impl TryFrom<u32> for NetworkUpgrade {
@@ -116,6 +126,8 @@ const FAKE_MAINNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(30), Canopy),
     (block::Height(35), Nu5),
     (block::Height(40), Nu6),
+    (block::Height(45), Nu6_1),
+    (block::Height(50), Nu7),
 ];
 
 /// Testnet network upgrade activation heights.
@@ -152,6 +164,8 @@ const FAKE_TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] = &[
     (block::Height(30), Canopy),
     (block::Height(35), Nu5),
     (block::Height(40), Nu6),
+    (block::Height(45), Nu6_1),
+    (block::Height(50), Nu7),
 ];
 
 /// The Consensus Branch Id, used to bind transactions and blocks to a
@@ -243,6 +257,10 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
+    #[cfg(any(test, feature = "zebra-test"))]
+    (Nu6_1, ConsensusBranchId(0x4dec4df0)),
+    #[cfg(any(test, feature = "zebra-test"))]
+    (Nu7, ConsensusBranchId(0x77190ad8)),
 ];
 
 /// The target block spacing before Blossom.
@@ -318,8 +336,8 @@ impl Network {
     /// in ascending height order.
     pub fn full_activation_list(&self) -> Vec<(block::Height, NetworkUpgrade)> {
         NETWORK_UPGRADES_IN_ORDER
-            .into_iter()
-            .map_while(|nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
+            .iter()
+            .map_while(|&nu| Some((NetworkUpgrade::activation_height(&nu, self)?, nu)))
             .collect()
     }
 }
@@ -431,7 +449,9 @@ impl NetworkUpgrade {
     pub fn target_spacing(&self) -> Duration {
         let spacing_seconds = match self {
             Genesis | BeforeOverwinter | Overwinter | Sapling => PRE_BLOSSOM_POW_TARGET_SPACING,
-            Blossom | Heartwood | Canopy | Nu5 | Nu6 => POST_BLOSSOM_POW_TARGET_SPACING.into(),
+            Blossom | Heartwood | Canopy | Nu5 | Nu6 | Nu6_1 | Nu7 => {
+                POST_BLOSSOM_POW_TARGET_SPACING.into()
+            }
         };
 
         Duration::seconds(spacing_seconds)
@@ -536,7 +556,7 @@ impl NetworkUpgrade {
 
     /// Returns an iterator over [`NetworkUpgrade`] variants.
     pub fn iter() -> impl DoubleEndedIterator<Item = NetworkUpgrade> {
-        NETWORK_UPGRADES_IN_ORDER.into_iter()
+        NETWORK_UPGRADES_IN_ORDER.iter().copied()
     }
 }
 
@@ -550,6 +570,7 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
+            // zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
         }
     }
 }
