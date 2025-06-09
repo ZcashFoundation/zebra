@@ -232,7 +232,10 @@ impl Block {
             .flat_map(|t| t.value_balance(utxos))
             .sum::<Result<ValueBalance<NegativeAllowed>, _>>()?
             .neg()
-            .set_deferred_amount(deferred_pool_balance_change.unwrap_or_default()))
+            .set_deferred_amount(match deferred_pool_balance_change {
+                Some(amount) => amount,
+                None => Amount::zero(), // Explicitly handle the None case for clarity.
+            }))
     }
 
     /// Compute the root of the authorizing data Merkle tree,
