@@ -5,15 +5,11 @@
 #![doc(html_root_url = "https://docs.rs/zebra_rpc")]
 
 pub mod config;
+pub mod indexer;
 pub mod methods;
 pub mod queue;
 pub mod server;
-
-#[cfg(feature = "indexer-rpcs")]
 pub mod sync;
-
-#[cfg(feature = "indexer-rpcs")]
-pub mod indexer;
 
 #[cfg(test)]
 mod tests;

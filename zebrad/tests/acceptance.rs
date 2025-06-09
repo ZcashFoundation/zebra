@@ -2969,7 +2969,6 @@ async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(feature = "indexer-rpcs")]
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;
 
