@@ -257,7 +257,7 @@ impl BlockTemplateResponse {
         CAPABILITIES_FIELD.iter().map(ToString::to_string).collect()
     }
 
-    /// Returns a new [`GetBlockTemplate`] struct, based on the supplied arguments and defaults.
+    /// Returns a new [`BlockTemplateResponse`] struct, based on the supplied arguments and defaults.
     ///
     /// The result of this method only depends on the supplied arguments and constants.
     ///
