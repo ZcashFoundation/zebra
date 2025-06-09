@@ -1,3 +1,7 @@
+// FIXME: Consider moving thesr tests to `zebra-consensus/src/router/tests.rs`, or creating a
+// `zebra-consensus/src/router/tests` directory and placing this module with a name
+// 'orchard_zsa` there.
+
 //! Simulates a full Zebra node’s block‐processing pipeline on a predefined Orchard/ZSA workflow.
 //!
 //! This integration test reads a sequence of serialized regtest blocks (including Orchard burns
