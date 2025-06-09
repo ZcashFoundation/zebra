@@ -52,13 +52,10 @@ use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
     types::{
-        get_block_template::{self, GetBlockTemplateRequestMode},
-        get_mining_info,
+        get_block_template::GetBlockTemplateRequestMode,
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
-        submit_block,
         subsidy::GetBlockSubsidyResponse,
-        unified_address, validate_address, z_validate_address,
     },
     GetBlockHashResponse,
 };
@@ -665,7 +662,7 @@ fn snapshot_rpc_getinfo(info: GetInfoResponse, settings: &insta::Settings) {
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockchaininfo(
     variant_suffix: &str,
-    info: GetBlockChainInfoResponse,
+    info: GetBlockchainInfoResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -810,7 +807,7 @@ fn snapshot_rpc_getblockhash_invalid(
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblocktemplate(
     variant: &'static str,
-    block_template: get_block_template::Response,
+    block_template: GetBlockTemplateResponse,
     coinbase_tx: Option<Transaction>,
     settings: &insta::Settings,
 ) {
@@ -830,7 +827,7 @@ fn snapshot_rpc_getblocktemplate(
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_submit_block_invalid(
-    submit_block_response: submit_block::Response,
+    submit_block_response: SubmitBlockResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -839,10 +836,7 @@ fn snapshot_rpc_submit_block_invalid(
 }
 
 /// Snapshot `getmininginfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getmininginfo(
-    get_mining_info: get_mining_info::Response,
-    settings: &insta::Settings,
-) {
+fn snapshot_rpc_getmininginfo(get_mining_info: GetMiningInfoResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
 }
 
@@ -870,7 +864,7 @@ fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Setti
 /// Snapshot `validateaddress` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_validateaddress(
     variant: &'static str,
-    validate_address: validate_address::Response,
+    validate_address: ValidateAddressResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -881,7 +875,7 @@ fn snapshot_rpc_validateaddress(
 /// Snapshot `z_validateaddress` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_z_validateaddress(
     variant: &'static str,
-    z_validate_address: z_validate_address::Response,
+    z_validate_address: ZValidateAddressResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -903,7 +897,7 @@ fn snapshot_rpc_getdifficulty_valid(
 /// Snapshot `snapshot_rpc_z_listunifiedreceivers` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_z_listunifiedreceivers(
     variant: &'static str,
-    response: unified_address::Response,
+    response: ZListUnifiedReceiversResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -1158,7 +1152,7 @@ pub async fn test_mining_rpcs<ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -1192,7 +1186,7 @@ pub async fn test_mining_rpcs<ReadState>(
     let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
     let get_block_template_fut = rpc_mock_state.get_block_template(
-        get_block_template::GetBlockTemplateRequest {
+        GetBlockTemplateParameters {
             long_poll_id: long_poll_id.into(),
             ..Default::default()
         }
@@ -1205,7 +1199,7 @@ pub async fn test_mining_rpcs<ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -1229,12 +1223,11 @@ pub async fn test_mining_rpcs<ReadState>(
 
     // `getblocktemplate` proposal mode variant
 
-    let get_block_template =
-        rpc_mock_state.get_block_template(Some(get_block_template::GetBlockTemplateRequest {
-            mode: GetBlockTemplateRequestMode::Proposal,
-            data: Some(HexData("".into())),
-            ..Default::default()
-        }));
+    let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
+        mode: GetBlockTemplateRequestMode::Proposal,
+        data: Some(HexData("".into())),
+        ..Default::default()
+    }));
 
     let get_block_template = get_block_template
         .await
@@ -1261,13 +1254,12 @@ pub async fn test_mining_rpcs<ReadState>(
         None,
     );
 
-    let get_block_template_fut = rpc_mock_state_verifier.get_block_template(Some(
-        get_block_template::GetBlockTemplateRequest {
+    let get_block_template_fut =
+        rpc_mock_state_verifier.get_block_template(Some(GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
             ..Default::default()
-        },
-    ));
+        }));
 
     let mock_block_verifier_router_request_handler = async move {
         mock_block_verifier_router

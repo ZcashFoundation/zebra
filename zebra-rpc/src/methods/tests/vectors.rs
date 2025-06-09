@@ -26,15 +26,17 @@ use zebra_state::{
 use zebra_test::mock_service::MockService;
 
 use crate::methods::{
-    get_block_template::constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
     hex_data::HexData,
     tests::utils::fake_history_tree,
+    types::get_block_template::{
+        constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
+        GetBlockTemplateRequestMode,
+    },
 };
 
 use super::super::*;
 
 use config::mining;
-use get_block_template::GetBlockTemplateRequestMode;
 use types::long_poll::LONG_POLL_ID_LENGTH;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -1894,7 +1896,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -1991,7 +1993,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     let get_block_template_sync_error = rpc
-        .get_block_template(Some(get_block_template::GetBlockTemplateRequest {
+        .get_block_template(Some(GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             ..Default::default()
         }))
@@ -2004,7 +2006,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     let get_block_template_sync_error = rpc
-        .get_block_template(Some(get_block_template::GetBlockTemplateRequest {
+        .get_block_template(Some(GetBlockTemplateParameters {
             data: Some(HexData("".into())),
             ..Default::default()
         }))
@@ -2018,7 +2020,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     // The long poll id is valid, so it returns a state error instead
     let get_block_template_sync_error = rpc
-        .get_block_template(Some(get_block_template::GetBlockTemplateRequest {
+        .get_block_template(Some(GetBlockTemplateParameters {
             // This must parse as a LongPollId.
             // It must be the correct length and have hex/decimal digits.
             long_poll_id: Some(
@@ -2077,7 +2079,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -2138,7 +2140,7 @@ async fn rpc_submitblock_errors() {
 
         assert_eq!(
             submit_block_response,
-            Ok(submit_block::ErrorResponse::Duplicate.into())
+            Ok(SubmitBlockErrorResponse::Duplicate.into())
         );
     }
 
@@ -2151,7 +2153,7 @@ async fn rpc_submitblock_errors() {
 
     assert_eq!(
         submit_block_response,
-        Ok(submit_block::ErrorResponse::Rejected.into())
+        Ok(SubmitBlockErrorResponse::Rejected.into())
     );
 
     mempool.expect_no_requests().await;
@@ -2210,7 +2212,7 @@ async fn rpc_validateaddress() {
 
     assert_eq!(
         validate_address,
-        validate_address::Response::invalid(),
+        ValidateAddressResponse::invalid(),
         "Testnet founder address should be invalid on Mainnet"
     );
 
@@ -2236,7 +2238,7 @@ async fn rpc_validateaddress() {
 
     assert_eq!(
         validate_address,
-        validate_address::Response::invalid(),
+        ValidateAddressResponse::invalid(),
         "Sapling address should be invalid on Mainnet"
     );
 }
@@ -2293,7 +2295,7 @@ async fn rpc_z_validateaddress() {
 
     assert_eq!(
         z_validate_address,
-        z_validate_address::Response::invalid(),
+        ZValidateAddressResponse::invalid(),
         "Testnet founder address should be invalid on Mainnet"
     );
 
@@ -2316,7 +2318,7 @@ async fn rpc_z_validateaddress() {
 
     assert_eq!(
         z_validate_address,
-        z_validate_address::Response::invalid(),
+        ZValidateAddressResponse::invalid(),
         "Sprout address should be invalid on Mainnet"
     );
 
