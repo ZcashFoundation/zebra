@@ -18,7 +18,7 @@ mod transaction_dependencies;
 
 pub use self::{
     gossip::Gossip,
-    mempool_change::{MempoolChange, MempoolChangeKind},
+    mempool_change::{MempoolChange, MempoolChangeKind, MempoolTxSubscriber},
     transaction_dependencies::TransactionDependencies,
 };
 

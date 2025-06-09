@@ -1139,7 +1139,7 @@ async fn setup(
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mut mempool_transaction_receiver) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber) = Mempool::new(
         &mempool::Config {
             tx_cost_limit,
             ..Default::default()
@@ -1153,7 +1153,7 @@ async fn setup(
         misbehavior_tx,
     );
 
-    let mempool_transaction_receiver2 = mempool_transaction_receiver.resubscribe();
+    let mut mempool_transaction_receiver = mempool_transaction_subscriber.subscribe();
     tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });
 
     if should_commit_genesis_block {
@@ -1186,6 +1186,6 @@ async fn setup(
         chain_tip_change,
         tx_verifier,
         recent_syncs,
-        mempool_transaction_receiver2,
+        mempool_transaction_subscriber.subscribe(),
     )
 }

@@ -6,7 +6,7 @@ use tokio::task::JoinHandle;
 use tonic::transport::{server::TcpIncoming, Server};
 use tower::BoxError;
 use zebra_chain::chain_tip::ChainTip;
-use zebra_node_services::mempool::MempoolChange;
+use zebra_node_services::mempool::MempoolTxSubscriber;
 
 use crate::{indexer::indexer_server::IndexerServer, server::OPENED_RPC_ENDPOINT_MSG};
 
@@ -28,7 +28,7 @@ where
 {
     _read_state: ReadStateService,
     pub(super) chain_tip_change: Tip,
-    pub(super) mempool_change: tokio::sync::broadcast::Receiver<MempoolChange>,
+    pub(super) mempool_change: MempoolTxSubscriber,
 }
 
 /// Initializes the indexer RPC server
@@ -37,7 +37,7 @@ pub async fn init<ReadStateService, Tip>(
     listen_addr: SocketAddr,
     _read_state: ReadStateService,
     chain_tip_change: Tip,
-    mempool_change: tokio::sync::broadcast::Receiver<MempoolChange>,
+    mempool_change: MempoolTxSubscriber,
 ) -> Result<(ServerTask, SocketAddr), BoxError>
 where
     ReadStateService: tower::Service<

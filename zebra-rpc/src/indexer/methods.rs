@@ -78,7 +78,7 @@ where
     ) -> Result<Response<Self::MempoolChangeStream>, Status> {
         let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
-        let mut mempool_change = self.mempool_change.resubscribe();
+        let mut mempool_change = self.mempool_change.subscribe();
 
         tokio::spawn(async move {
             // Notify the client of chain tip changes until the channel is closed

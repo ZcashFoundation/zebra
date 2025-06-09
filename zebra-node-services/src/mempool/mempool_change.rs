@@ -2,7 +2,25 @@
 
 use std::collections::HashSet;
 
+use tokio::sync::broadcast;
 use zebra_chain::transaction::UnminedTxId;
+
+/// A newtype around [`broadcast::Sender<MempoolChange>`] used to
+/// subscribe to the channel without an active receiver.
+#[derive(Clone, Debug)]
+pub struct MempoolTxSubscriber(broadcast::Sender<MempoolChange>);
+
+impl MempoolTxSubscriber {
+    /// Creates a new [`MempoolTxSubscriber`].
+    pub fn new(sender: broadcast::Sender<MempoolChange>) -> Self {
+        Self(sender)
+    }
+
+    /// Subscribes to the channel, returning a [`broadcast::Receiver`].
+    pub fn subscribe(&self) -> broadcast::Receiver<MempoolChange> {
+        self.0.subscribe()
+    }
+}
 
 /// Represents a kind of change in the mempool's verified set of transactions
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]

@@ -207,7 +207,7 @@ impl StartCmd {
         );
 
         info!("initializing mempool");
-        let (mempool, mempool_transaction_receiver) = Mempool::new(
+        let (mempool, mempool_transaction_subscriber) = Mempool::new(
             &config.mempool,
             peer_set.clone(),
             state.clone(),
@@ -281,7 +281,7 @@ impl StartCmd {
                     indexer_listen_addr,
                     read_only_state_service.clone(),
                     latest_chain_tip.clone(),
-                    mempool_transaction_receiver.resubscribe(),
+                    mempool_transaction_subscriber.clone(),
                 )
                 .await
                 .map_err(|err| eyre!(err))?;
@@ -315,8 +315,11 @@ impl StartCmd {
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set.clone())
-                .in_current_span(),
+            mempool::gossip_mempool_transaction_id(
+                mempool_transaction_subscriber.subscribe(),
+                peer_set.clone(),
+            )
+            .in_current_span(),
         );
 
         info!("spawning delete old databases task");

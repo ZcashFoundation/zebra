@@ -38,7 +38,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network::{self as zn, PeerSocketAddr};
-use zebra_node_services::mempool::{Gossip, MempoolChange, Request, Response};
+use zebra_node_services::mempool::{Gossip, MempoolChange, MempoolTxSubscriber, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -277,9 +277,10 @@ impl Mempool {
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
-    ) -> (Self, broadcast::Receiver<MempoolChange>) {
-        let (transaction_sender, transaction_receiver) =
+    ) -> (Self, MempoolTxSubscriber) {
+        let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
+        let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
 
         let mut service = Mempool {
             config: config.clone(),
@@ -307,7 +308,7 @@ impl Mempool {
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
         service.update_state(None);
 
-        (service, transaction_receiver)
+        (service, transaction_subscriber)
     }
 
     /// Is the mempool enabled by a debug config option?

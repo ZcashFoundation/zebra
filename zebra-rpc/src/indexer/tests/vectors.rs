@@ -3,14 +3,14 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use tokio::task::JoinHandle;
+use tokio::{sync::broadcast, task::JoinHandle};
 use tower::BoxError;
 use zebra_chain::{
     block::Height,
     chain_tip::mock::{MockChainTip, MockChainTipSender},
     transaction::{self, UnminedTxId},
 };
-use zebra_node_services::mempool::MempoolChange;
+use zebra_node_services::mempool::{MempoolChange, MempoolTxSubscriber};
 use zebra_test::{
     mock_service::MockService,
     prelude::color_eyre::{eyre::eyre, Result},
@@ -80,7 +80,7 @@ async fn start_server_and_get_client() -> Result<(
     JoinHandle<Result<(), BoxError>>,
     IndexerClient<tonic::transport::Channel>,
     MockChainTipSender,
-    tokio::sync::broadcast::Sender<MempoolChange>,
+    broadcast::Sender<MempoolChange>,
 )> {
     let listen_addr: std::net::SocketAddr = "127.0.0.1:0"
         .parse()
@@ -91,14 +91,13 @@ async fn start_server_and_get_client() -> Result<(
         .for_unit_tests();
 
     let (mock_chain_tip_change, mock_chain_tip_change_sender) = MockChainTip::new();
-    let (mempool_transaction_sender, mempool_transaction_receiver) =
-        tokio::sync::broadcast::channel(1);
-
+    let (mempool_transaction_sender, _) = tokio::sync::broadcast::channel(1);
+    let mempool_tx_subscriber = MempoolTxSubscriber::new(mempool_transaction_sender.clone());
     let (server_task, listen_addr) = indexer::server::init(
         listen_addr,
         mock_read_service,
         mock_chain_tip_change,
-        mempool_transaction_receiver,
+        mempool_tx_subscriber.clone(),
     )
     .await
     .map_err(|err| eyre!(err))?;

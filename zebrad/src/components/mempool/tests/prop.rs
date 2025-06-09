@@ -272,7 +272,7 @@ fn setup(
         ChainTipSender::new(None, network);
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mempool, mut transaction_receiver) = Mempool::new(
+    let (mempool, mempool_transaction_subscriber) = Mempool::new(
         &Config {
             tx_cost_limit: 160_000_000,
             ..Default::default()
@@ -286,6 +286,7 @@ fn setup(
         misbehavior_tx,
     );
 
+    let mut transaction_receiver = mempool_transaction_subscriber.subscribe();
     tokio::spawn(async move { while transaction_receiver.recv().await.is_ok() {} });
 
     // sends a fake chain tip so that the mempool can be enabled
