@@ -428,7 +428,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // - a request to get all mempool transactions will be made by `getrawmempool` behind the scenes.
     // - as we have the mempool mocked we need to expect a request and wait for a response,
     // which will be an empty mempool in this case.
-    // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
     let mempool_req = mempool
         .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
         .map(|responder| {
@@ -439,16 +438,29 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             });
         });
 
-    // make the api call
-    let get_raw_mempool = rpc.get_raw_mempool(None);
-    let (response, _) = futures::join!(get_raw_mempool, mempool_req);
-    let GetRawMempool::TxIds(get_raw_mempool) =
-        response.expect("We should have a GetRawTransaction struct")
-    else {
-        panic!("should return TxIds for non verbose");
-    };
+    let (rsp, _) = futures::join!(rpc.get_raw_mempool(Some(true)), mempool_req);
 
-    snapshot_rpc_getrawmempool(get_raw_mempool, &settings);
+    match rsp {
+        Ok(GetRawMempool::Verbose(rsp)) => {
+            settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool_verbose", rsp));
+        }
+        _ => panic!("getrawmempool RPC must return `GetRawMempool::Verbose`"),
+    }
+
+    let mempool_req = mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::TransactionIds))
+        .map(|responder| {
+            responder.respond(mempool::Response::TransactionIds(Default::default()));
+        });
+
+    let (rsp, _) = futures::join!(rpc.get_raw_mempool(Some(false)), mempool_req);
+
+    match rsp {
+        Ok(GetRawMempool::TxIds(ref rsp)) => {
+            settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", rsp));
+        }
+        _ => panic!("getrawmempool RPC must return `GetRawMempool::TxIds`"),
+    }
 
     // `getrawtransaction` verbosity=0
     //
@@ -747,11 +759,6 @@ fn snapshot_rpc_getblock_invalid(
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHash, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
-}
-
-/// Snapshot `getrawmempool` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
 }
 
 /// Snapshot valid `getaddressbalance` response, using `cargo insta` and JSON serialization.

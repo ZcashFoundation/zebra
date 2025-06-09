@@ -36,10 +36,6 @@ V5(
       value: 25000000,
       lock_script: Script("a91471e1df05024288a00802de81e08c437859586c8787"),
     ),
-    Output(
-      value: 250000000,
-      lock_script: Script("a914adadadadadadadadadadadadadadadadadadadad87"),
-    ),
   ],
   sapling_shielded_data: None,
   orchard_shielded_data: None,
