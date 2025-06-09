@@ -112,6 +112,7 @@ fn test_get_address_balance() -> Result<(), Box<dyn std::error::Error>> {
     let obj: AddressBalance = serde_json::from_str(json)?;
     let new_obj = AddressBalance {
         balance: obj.balance,
+        received: obj.received,
     };
 
     assert_eq!(obj, new_obj);

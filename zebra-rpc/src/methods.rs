@@ -3018,8 +3018,8 @@ pub struct AddressStrings {
 impl From<DAddressStrings> for AddressStrings {
     fn from(address_strings: DAddressStrings) -> Self {
         match address_strings {
-            DAddressStrings::Addresses(addresses) => AddressStrings { addresses },
-            DAddressStrings::Address(address) => AddressStrings {
+            DAddressStrings::Addresses { addresses } => AddressStrings { addresses },
+            DAddressStrings::Address { address } => AddressStrings {
                 addresses: vec![address],
             },
         }
@@ -3031,9 +3031,9 @@ impl From<DAddressStrings> for AddressStrings {
 #[serde(untagged)]
 enum DAddressStrings {
     /// A list of address strings.
-    Addresses(Vec<String>),
+    Addresses { addresses: Vec<String> },
     /// A single address string.
-    Address(String),
+    Address { address: String },
 }
 
 impl AddressStrings {
