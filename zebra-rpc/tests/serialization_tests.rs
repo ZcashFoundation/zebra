@@ -13,7 +13,7 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_chain::{
+use zebra_rpc::client::zebra_chain::{
     sapling::NotSmallOrderValueCommitment,
     serialization::{ZcashDeserialize, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,

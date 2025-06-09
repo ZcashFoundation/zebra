@@ -32,6 +32,8 @@ pub use methods::types::{
 //
 // TODO: Move `hex_data` and `trees` modules to/under the `types` module?
 pub mod client {
+    pub use zebra_chain;
+
     pub use crate::methods::{
         hex_data::HexData,
         trees::{
