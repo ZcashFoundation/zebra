@@ -821,6 +821,10 @@ impl AddressBookPeers for AddressBook {
     }
 
     fn add_peer(&mut self, peer: PeerSocketAddr) -> bool {
+        if self.get(peer).is_some() {
+            // Peer already exists in the address book, so we don't need to add it again.
+            return false;
+        }
         self.update(MetaAddr::new_initial_peer(peer)).is_some()
     }
 }
