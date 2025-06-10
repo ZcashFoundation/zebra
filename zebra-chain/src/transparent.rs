@@ -248,9 +248,8 @@ impl Input {
         Input::Coinbase {
             height,
             data: CoinbaseData(data),
-
-            // If the caller does not specify the sequence number,
-            // use a sequence number that activates the LockTime.
+            // If the caller does not specify the sequence number, use a sequence number that
+            // activates the LockTime.
             sequence: sequence.unwrap_or(0),
         }
     }
