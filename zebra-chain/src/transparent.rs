@@ -224,8 +224,17 @@ impl Input {
         data: Option<Vec<u8>>,
         sequence: Option<u32>,
     ) -> Input {
-        // "No extra coinbase data" is the default.
-        let data = data.unwrap_or_default();
+        // `zcashd` includes an extra byte after the coinbase height in the coinbase data. We do
+        // that only if the data is empty to stay compliant with the following consensus rule:
+        //
+        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+        //
+        // ## Rationale
+        //
+        // Coinbase heights < 17 are serialized as a single byte, and if there is no coinbase data,
+        // the script of a coinbase tx with such a height would consist only of this single byte,
+        // violating the consensus rule.
+        let data = data.map_or(vec![0], |d| if d.is_empty() { vec![0] } else { d });
         let height_size = height.coinbase_zcash_serialized_size();
 
         assert!(
