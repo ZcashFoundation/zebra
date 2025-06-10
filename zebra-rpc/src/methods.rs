@@ -2700,22 +2700,6 @@ where
                         ));
                     }
                 }
-                AddNodeCommand::Remove => {
-                    return Err(ErrorObject::owned(
-                        ErrorCode::InvalidParams.code(),
-                        format!(
-                            "removing peer address from the address book is not supported: {addr}"
-                        ),
-                        None::<()>,
-                    ));
-                }
-                AddNodeCommand::Onetry => {
-                    return Err(ErrorObject::owned(
-                        ErrorCode::InvalidParams.code(),
-                        format!("onetry command is not supported: {addr}, please use add"),
-                        None::<()>,
-                    ));
-                }
             }
         } else {
             return Err(ErrorObject::owned(
@@ -3995,10 +3979,4 @@ pub enum AddNodeCommand {
     /// Add a node to the address book.
     #[serde(rename = "add")]
     Add,
-    /// Remove a node from the address book.
-    #[serde(rename = "remove")]
-    Remove,
-    /// Add a node to the address book, but only try to connect once.
-    #[serde(rename = "onetry")]
-    Onetry,
 }
