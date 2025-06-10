@@ -166,6 +166,7 @@ use semver::Version;
 use serde_json::Value;
 use tower::ServiceExt;
 
+use zcash_keys::address::Address;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, Height},
     parameters::Network::{self, *},
@@ -3291,10 +3292,14 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let default_test_config = default_test_config(&network)?;
     let mining_config = default_test_config.mining;
-    let miner_address = mining_config
-        .miner_address
-        .clone()
-        .expect("hard-coded config should have a miner address");
+    let miner_address = Address::try_from_zcash_address(
+        &network,
+        mining_config
+            .miner_address
+            .clone()
+            .expect("mining address should be configured"),
+    )
+    .expect("configured mining address should be valid");
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network);
