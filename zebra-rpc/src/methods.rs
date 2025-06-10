@@ -3019,7 +3019,7 @@ impl From<DAddressStrings> for AddressStrings {
     fn from(address_strings: DAddressStrings) -> Self {
         match address_strings {
             DAddressStrings::Addresses { addresses } => AddressStrings { addresses },
-            DAddressStrings::Address { address } => AddressStrings {
+            DAddressStrings::Address(address) => AddressStrings {
                 addresses: vec![address],
             },
         }
@@ -3033,7 +3033,7 @@ enum DAddressStrings {
     /// A list of address strings.
     Addresses { addresses: Vec<String> },
     /// A single address string.
-    Address { address: String },
+    Address(String),
 }
 
 impl AddressStrings {
