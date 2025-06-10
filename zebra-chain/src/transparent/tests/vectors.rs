@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
 use super::super::serialize::parse_coinbase_height;
-use crate::{
-    block::Block, parameters::Network, primitives::zcash_primitives::transparent_output_address,
-    serialization::ZcashDeserializeInto, transaction,
-};
+use crate::{block::Block, parameters::Network, serialization::ZcashDeserializeInto, transaction};
 use hex::FromHex;
 
 use zebra_test::prelude::*;
@@ -64,20 +61,22 @@ fn get_transparent_output_address() -> Result<()> {
     // for the prefixes.
 
     // Script hash 1b8a9bda4b62cd0d0582b55455d0778c86f8628f
-    let addr = transparent_output_address(&transaction.outputs()[0], &Network::Mainnet)
+    let addr = transaction.outputs()[0]
+        .address(&Network::Mainnet)
         .expect("should return address");
     assert_eq!(addr.to_string(), "t3M5FDmPfWNRG3HRLddbicsuSCvKuk9hxzZ");
-    let addr =
-        transparent_output_address(&transaction.outputs()[0], &Network::new_default_testnet())
-            .expect("should return address");
+    let addr = transaction.outputs()[0]
+        .address(&Network::new_default_testnet())
+        .expect("should return address");
     assert_eq!(addr.to_string(), "t294SGSVoNq2daz15ZNbmAW65KQZ5e3nN5G");
     // Public key hash e4ff5512ffafe9287992a1cd177ca6e408e03003
-    let addr = transparent_output_address(&transaction.outputs()[1], &Network::Mainnet)
+    let addr = transaction.outputs()[1]
+        .address(&Network::Mainnet)
         .expect("should return address");
     assert_eq!(addr.to_string(), "t1ekRwsd4LaSsd6NXgsx66q2HxQWTLCF44y");
-    let addr =
-        transparent_output_address(&transaction.outputs()[1], &Network::new_default_testnet())
-            .expect("should return address");
+    let addr = transaction.outputs()[1]
+        .address(&Network::new_default_testnet())
+        .expect("should return address");
     assert_eq!(addr.to_string(), "tmWbBGi7TjExNmLZyMcFpxVh3ZPbGrpbX3H");
 
     Ok(())

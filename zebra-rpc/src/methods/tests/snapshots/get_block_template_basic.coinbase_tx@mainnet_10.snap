@@ -1,5 +1,5 @@
 ---
-source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: coinbase_tx
 ---
 V4(
@@ -15,7 +15,7 @@ V4(
   outputs: [
     Output(
       value: 250000000,
-      lock_script: Script("a914adadadadadadadadadadadadadadadadadadadad87"),
+      lock_script: Script("76a9147e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e88ac"),
     ),
     Output(
       value: 21875000,

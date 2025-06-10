@@ -8,7 +8,7 @@ use zcash_protocol::value::BalanceError;
 
 use crate::{
     amount::{Amount, NonNegative},
-    parameters::{Network, NetworkUpgrade},
+    parameters::NetworkUpgrade,
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -328,27 +328,4 @@ pub(crate) fn auth_digest(tx: &Transaction) -> AuthDigest {
             .try_into()
             .expect("digest has the correct size"),
     )
-}
-
-/// Return the destination address from a transparent output.
-///
-/// Returns None if the address type is not valid or unrecognized.
-pub(crate) fn transparent_output_address(
-    output: &transparent::Output,
-    network: &Network,
-) -> Option<transparent::Address> {
-    let tx_out = zcash_transparent::bundle::TxOut::try_from(output)
-        .expect("zcash_primitives and Zebra transparent output formats must be compatible");
-
-    let alt_addr = tx_out.recipient_address();
-
-    match alt_addr {
-        Some(zcash_primitives::legacy::TransparentAddress::PublicKeyHash(pub_key_hash)) => Some(
-            transparent::Address::from_pub_key_hash(network.t_addr_kind(), pub_key_hash),
-        ),
-        Some(zcash_primitives::legacy::TransparentAddress::ScriptHash(script_hash)) => Some(
-            transparent::Address::from_script_hash(network.t_addr_kind(), script_hash),
-        ),
-        None => None,
-    }
 }

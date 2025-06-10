@@ -13,12 +13,13 @@ use rand::{
     prelude::thread_rng,
 };
 
+use zcash_keys::address::Address;
+
 use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
     transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
-    transparent,
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
@@ -56,7 +57,7 @@ type SelectedMempoolTx = VerifiedUnminedTx;
 pub fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
-    miner_address: &transparent::Address,
+    miner_address: &Address,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
     like_zcashd: bool,
@@ -146,7 +147,7 @@ pub fn select_mempool_transactions(
 pub fn fake_coinbase_transaction(
     network: &Network,
     height: Height,
-    miner_address: &transparent::Address,
+    miner_address: &Address,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
 ) -> TransactionTemplate<NegativeOrZero> {
