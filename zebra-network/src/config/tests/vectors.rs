@@ -23,6 +23,12 @@ fn parse_config_listen_addr() {
             "listen_addr = '0.0.0.0:8233'\nnetwork = 'Testnet'",
             "0.0.0.0:8233",
         ),
+        ("listen_addr = '[::]'", "[::]:8233"),
+        ("listen_addr = '[::]:9999'", "[::]:9999"),
+        ("listen_addr = '[::]'\nnetwork = 'Testnet'", "[::]:18233"),
+        ("listen_addr = '[::]:8233'\nnetwork = 'Testnet'", "[::]:8233"),
+        ("listen_addr = '[::1]:8233'", "[::1]:8233"),
+        ("listen_addr = '[2001:db8::1]:8233'", "[2001:db8::1]:8233")
     ];
 
     for (config, value) in fixtures {
@@ -64,4 +70,13 @@ fn testnet_params_serialization_roundtrip() {
     let deserialized: Config = toml::from_str(&serialized).unwrap();
 
     assert_eq!(config, deserialized);
+}
+
+#[test]
+fn default_config_uses_ipv6() {
+    let _init_guard = zebra_test::init();
+    let config = Config::default();
+
+    assert_eq!(config.listen_addr.to_string(), "[::]:8233");
+    assert!(config.listen_addr.is_ipv6());
 }
