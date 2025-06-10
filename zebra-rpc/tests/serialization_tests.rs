@@ -106,7 +106,8 @@ fn test_get_address_balance() -> Result<(), Box<dyn std::error::Error>> {
     // Test response
     let json = r#"
 {
-  "balance": 11290259389
+  "balance": 11290259389,
+  "received": 11290259390
 }
 "#;
     let obj: AddressBalance = serde_json::from_str(json)?;
