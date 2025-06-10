@@ -41,7 +41,8 @@ BASE_SCRIPTS= [
     'reindex.py',
     'getmininginfo.py',
     'nuparams.py',
-    'addnode.py']
+    'addnode.py',
+    'wallet.py']
 
 ZMQ_SCRIPTS = [
     # ZMQ test can only be run if bitcoin was built with zmq-enabled.

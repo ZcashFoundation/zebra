@@ -1924,7 +1924,6 @@ where
     ) -> Result<get_block_template::Response> {
         // Clone Configs
         let network = self.network.clone();
-        let miner_address = self.gbt.miner_address();
         let debug_like_zcashd = self.debug_like_zcashd;
         let extra_coinbase_data = self.gbt.extra_coinbase_data();
 
@@ -1953,11 +1952,10 @@ where
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
-        // - One-off checks
-
-        // Check config and parameters.
-        // These checks always have the same result during long polling.
-        let miner_address = get_block_template::check_miner_address(miner_address)?;
+        let miner_address = self
+            .gbt
+            .miner_address()
+            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //

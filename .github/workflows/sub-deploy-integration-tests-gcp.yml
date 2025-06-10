@@ -132,6 +132,7 @@ jobs:
     outputs:
       cached_disk_name: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
       state_version: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.state_version || '' }}
+      container_id: ${{ steps.find-container.outputs.CONTAINER_ID }}
     env:
       CACHED_DISK_NAME: ${{ (inputs.needs_zebra_state || inputs.needs_lwd_state) && needs.get-disk-name.outputs.cached_disk_name || '' }}
     permissions:
@@ -170,7 +171,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -232,6 +233,7 @@ jobs:
           --container-tty \
           --container-image="${GAR_BASE_TRIMMED}/${{ vars.CI_IMAGE_NAME }}:sha-${{ env.GITHUB_SHA_SHORT }}" \
           --container-env="${CONTAINER_ENV}" \
+          --container-restart-policy=never \
           --subnet=${{ vars.GCP_SUBNETWORK }} \
           --scopes cloud-platform \
           --service-account=${{ vars.GCP_DEPLOYMENTS_SA }} \
@@ -257,6 +259,36 @@ jobs:
           sudo journalctl -b \
           '
 
+      # Find the container ID and save it for use in subsequent steps
+      - name: Find container ID
+        id: find-container
+        run: |
+          INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
+          CONTAINER_PREFIX="klt-${INSTANCE_NAME}"
+
+          echo "Looking for container with prefix: ${CONTAINER_PREFIX}"
+
+          # Wait up to 60 seconds for container to start
+          for attempt in {1..30}; do
+            echo "Attempt ${attempt}/30: Checking for running container..."
+            CONTAINER_ID=$(gcloud compute ssh ${INSTANCE_NAME} \
+              --zone ${{ vars.GCP_ZONE }} \
+              --ssh-flag="-o ServerAliveInterval=5" \
+              --ssh-flag="-o ConnectionAttempts=20" \
+              --ssh-flag="-o ConnectTimeout=5" \
+              --command="sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc" 2>/dev/null || echo "")
+            if [ -n "${CONTAINER_ID}" ]; then
+              echo "Found running container: ${CONTAINER_ID}"
+              echo "CONTAINER_ID=${CONTAINER_ID}" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            echo "No running container found yet, waiting 2 seconds..."
+            sleep 2
+          done
+
+          echo "Container not found after 60 seconds"
+          exit 1
+
       # Check that the container executed at least 1 Rust test harness test, and that all tests passed.
       # Then wait for the container to finish, and exit with the test's exit status.
       # Also shows all the test logs.
@@ -269,48 +301,37 @@ jobs:
       # (`docker wait` can also wait for multiple containers, but we only ever wait for a single container.)
       - name: Result of ${{ inputs.test_id }} test
         run: |
+          CONTAINER_ID="${{ steps.find-container.outputs.CONTAINER_ID }}"
+          echo "Using pre-discovered container ID: ${CONTAINER_ID}"
           gcloud compute ssh ${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          echo "Waiting for container to start..."; \
-          CONTAINER_ID=""; \
-          CONTAINER_PREFIX="klt-${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"; \
-          for i in {1..30}; do CONTAINER_ID=$(sudo docker ps --filter name=${CONTAINER_PREFIX} -q --no-trunc); if [ -n "${CONTAINER_ID}" ]; then break; fi; echo "Waiting for container ID starting with ${CONTAINER_PREFIX}... ($i/30)"; sleep 2; done; \
-          if [ -z "${CONTAINER_ID}" ]; then echo "Container ID starting with ${CONTAINER_PREFIX} not found after waiting."; exit 1; fi; \
-          echo "Found test container ID: ${CONTAINER_ID}"; \
-          echo "Streaming logs and waiting for test success message..."; \
-          sudo docker logs \
-          --tail all \
-          --follow \
-          ${CONTAINER_ID} \
+          --command="
+          echo 'Streaming logs and waiting for test success message...';
+          sudo docker logs --tail all --follow ${CONTAINER_ID} \
           | tee --output-error=exit-nopipe /dev/stderr \
           | grep --max-count=1 --extended-regexp --color=always \
-          "test result: .*ok.* [1-9][0-9]* passed.*finished in";
-          LOGS_EXIT_STATUS=$?;
-          echo "Waiting for container ${CONTAINER_ID} to exit...";
-          EXIT_STATUS=$(sudo docker wait ${CONTAINER_ID} || echo "Error retrieving exit status");
-          echo "Container exit status: $EXIT_STATUS";
+          'test result: .*ok.* [1-9][0-9]* passed.*finished in';
+          LOGS_EXIT_STATUS=\$?;
+          echo 'Waiting for container ${CONTAINER_ID} to exit...';
+          EXIT_STATUS=\$(sudo docker wait ${CONTAINER_ID} || echo 'Error retrieving exit status');
+          echo 'Container exit status: '\$EXIT_STATUS;
 
-          if [ $LOGS_EXIT_STATUS -ne 0 ]; then
-            # Grep failed (pattern not found)
-            echo "Test failed: Success log pattern not found (grep exit status: $LOGS_EXIT_STATUS).";
+          if [ \$LOGS_EXIT_STATUS -ne 0 ]; then
+            echo 'Test failed: Success log pattern not found (grep exit status: '\$LOGS_EXIT_STATUS').';
             exit 1;
           else
-            # Grep succeeded (pattern found), now check specific exit code
-            if [ "$EXIT_STATUS" -eq 1 ]; then
-              # Explicit failure code 1
-              echo "Test failed: Success log pattern found BUT container exited with status 1.";
+            if [ \"\$EXIT_STATUS\" -eq 1 ]; then
+              echo 'Test failed: Success log pattern found BUT container exited with status 1.';
               exit 1;
             else
-              # Grep succeeded and exit status is not 1
-              echo "Test successful: Success log pattern found. Container exit status $EXIT_STATUS ignored (as it is not 1).";
+              echo 'Test successful: Success log pattern found. Container exit status '\$EXIT_STATUS' ignored (as it is not 1).';
               exit 0;
             fi
-          fi \
-          '
+          fi
+          "
 
   # create a state image from the instance's state disk, if requested by the caller
   create-state-image:
@@ -372,7 +393,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -424,24 +445,18 @@ jobs:
           INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching first 1000 log entries via SSH for instance ${INSTANCE_NAME} to find DB versions..."
+          CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          CONTAINER_ID=$(sudo docker ps -q --no-trunc | head -n 1); \
-          if [ -n "${CONTAINER_ID}" ]; then \
-             sudo docker logs ${CONTAINER_ID} | head -1000; \
-          else \
-             echo "Error: No running container found."; exit 1; \
-          fi; \
-          ' \
+          --command="sudo docker logs ${CONTAINER_ID} | head -1000" \
           )
 
-          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
-              echo "Failed to retrieve logs via SSH or no container found."
+          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
+              echo "Failed to retrieve logs via SSH."
               exit 1
           fi
 
@@ -527,24 +542,18 @@ jobs:
           INSTANCE_NAME="${{ inputs.test_id }}-${{ env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}"
 
           echo "Fetching last 200 log entries via SSH for instance ${INSTANCE_NAME} to find sync height..."
+          CONTAINER_ID="${{ needs.test-result.outputs.container_id }}"
           DOCKER_LOGS=$( \
           gcloud compute ssh ${INSTANCE_NAME} \
           --zone ${{ vars.GCP_ZONE }} \
           --ssh-flag="-o ServerAliveInterval=5" \
           --ssh-flag="-o ConnectionAttempts=20" \
           --ssh-flag="-o ConnectTimeout=5" \
-          --command=' \
-          CONTAINER_ID=$(sudo docker ps -q --no-trunc | head -n 1); \
-          if [ -n "${CONTAINER_ID}" ]; then \
-             sudo docker logs --tail 200 ${CONTAINER_ID}; \
-          else \
-             echo "Error: No running container found."; exit 1; \
-          fi; \
-          ' \
+          --command="sudo docker logs --tail 200 ${CONTAINER_ID}" \
           )
 
-          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]] || [[ "$DOCKER_LOGS" == *"Error: No running container found."* ]]; then
-              echo "Failed to retrieve logs via SSH or no container found."
+          if [[ $? -ne 0 ]] || [[ -z "$DOCKER_LOGS" ]]; then
+              echo "Failed to retrieve logs via SSH."
               exit 1
           fi
 
@@ -684,7 +693,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'

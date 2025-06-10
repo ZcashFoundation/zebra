@@ -86,7 +86,7 @@ pub fn new_coinbase_script(address: &transparent::Address) -> Script {
     // > of the form OP_HASH160 fs.RedeemScriptHash(height) OP_EQUAL as the scriptPubKey.
     //
     // [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-    address.create_script_from_address()
+    address.script()
 }
 
 /// Returns a list of outputs in `transaction`, which have a script address equal to `address`.

@@ -15,7 +15,6 @@ use zebra_chain::{
     transparent::Script,
 };
 use zebra_consensus::groth16::Description;
-use zebra_script::CachedFfiTransaction;
 use zebra_state::IntoDisk;
 
 use super::zec::Zec;
@@ -117,12 +116,10 @@ impl TransactionTemplate<NegativeOrZero> {
             .constrain()
             .expect("negating a NonNegative amount always results in a valid NegativeOrZero");
 
-        let legacy_sigop_count = CachedFfiTransaction::new(tx.transaction.clone(), Vec::new())
-            .legacy_sigop_count()
-            .expect(
-                "invalid generated coinbase transaction: \
+        let legacy_sigop_count = zebra_script::legacy_sigop_count(&tx.transaction).expect(
+            "invalid generated coinbase transaction: \
                  failure in zcash_script sigop count",
-            );
+        );
 
         Self {
             data: tx.transaction.as_ref().into(),

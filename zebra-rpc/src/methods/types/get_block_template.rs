@@ -11,6 +11,8 @@ use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use tokio::sync::watch::{self, error::SendError};
 use tower::{Service, ServiceExt};
+use zcash_keys::address::Address;
+use zcash_protocol::PoolType;
 
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
@@ -24,7 +26,7 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
-        Network, NetworkKind, NetworkUpgrade,
+        Network, NetworkUpgrade,
     },
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
@@ -252,7 +254,7 @@ impl GetBlockTemplate {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         network: &Network,
-        miner_address: &transparent::Address,
+        miner_address: &Address,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
@@ -420,10 +422,8 @@ where
     <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    /// The configured miner address for this RPC service.
-    ///
-    /// Zebra currently only supports transparent addresses.
-    miner_address: Option<transparent::Address>,
+    /// Address for receiving miner subsidy and tx fees.
+    miner_address: Option<Address>,
 
     /// Extra data to include in coinbase transaction inputs.
     /// Limited to around 95 bytes by the consensus rules.
@@ -454,7 +454,7 @@ where
     ///
     /// # Panics
     ///
-    /// - If the provided `mining_config` is not valid.
+    /// - If the `miner_address` in `conf` is not valid.
     pub fn new(
         net: &Network,
         conf: config::mining::Config,
@@ -462,28 +462,16 @@ where
         sync_status: SyncStatus,
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
-        // Prevent loss of miner funds due to an unsupported or incorrect address type.
-        if let Some(miner_address) = conf.miner_address.clone() {
-            match net.kind() {
-                NetworkKind::Mainnet => assert_eq!(
-                    miner_address.network_kind(),
-                    NetworkKind::Mainnet,
-                    "Incorrect config: Zebra is configured to run on a Mainnet network, \
-                    which implies the configured mining address needs to be for Mainnet, \
-                    but the provided address is for {}.",
-                    miner_address.network_kind(),
-                ),
-                // `Regtest` uses `Testnet` transparent addresses.
-                network_kind @ (NetworkKind::Testnet | NetworkKind::Regtest) => assert_eq!(
-                    miner_address.network_kind(),
-                    NetworkKind::Testnet,
-                    "Incorrect config: Zebra is configured to run on a {network_kind} network, \
-                    which implies the configured mining address needs to be for Testnet, \
-                    but the provided address is for {}.",
-                    miner_address.network_kind(),
-                ),
+        // Check that the configured miner address is valid.
+        let miner_address = conf.miner_address.map(|zaddr| {
+            if zaddr.can_receive_as(PoolType::Transparent) {
+                Address::try_from_zcash_address(net, zaddr)
+                    .expect("miner_address must be a valid Zcash address")
+            } else {
+                // TODO: Remove this panic once we support mining to shielded addresses.
+                panic!("miner_address can't receive transparent funds")
             }
-        }
+        });
 
         // A limit on the configured extra coinbase data, regardless of the current block height.
         // This is different from the consensus rule, which limits the total height + data.
@@ -513,7 +501,7 @@ where
         );
 
         Self {
-            miner_address: conf.miner_address,
+            miner_address,
             extra_coinbase_data,
             block_verifier_router,
             sync_status,
@@ -522,8 +510,8 @@ where
         }
     }
 
-    /// Returns the miner's address.
-    pub fn miner_address(&self) -> Option<transparent::Address> {
+    /// Returns a valid miner address, if any.
+    pub fn miner_address(&self) -> Option<Address> {
         self.miner_address.clone()
     }
 
@@ -616,15 +604,6 @@ pub fn check_parameters(parameters: &Option<JsonParameters>) -> RpcResult<()> {
             None,
         )),
     }
-}
-
-/// Returns the miner address, or an error if it is invalid.
-pub fn check_miner_address(
-    miner_address: Option<transparent::Address>,
-) -> RpcResult<transparent::Address> {
-    miner_address.ok_or_misc_error(
-        "set `mining.miner_address` in `zebrad.toml` to a transparent address".to_string(),
-    )
 }
 
 /// Attempts to validate block proposal against all of the server's
@@ -811,7 +790,7 @@ where
 pub fn generate_coinbase_and_roots(
     network: &Network,
     block_template_height: Height,
-    miner_address: &transparent::Address,
+    miner_address: &Address,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
     like_zcashd: bool,
@@ -854,7 +833,7 @@ pub fn generate_coinbase_and_roots(
 pub fn generate_coinbase_transaction(
     network: &Network,
     height: Height,
-    miner_address: &transparent::Address,
+    miner_address: &Address,
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
     extra_coinbase_data: Vec<u8>,
@@ -890,7 +869,7 @@ pub fn calculate_miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegat
 pub fn standard_coinbase_outputs(
     network: &Network,
     height: Height,
-    miner_address: &transparent::Address,
+    miner_address: &Address,
     miner_fee: Amount<NonNegative>,
     like_zcashd: bool,
 ) -> Vec<(Amount<NonNegative>, transparent::Script)> {
@@ -918,19 +897,6 @@ pub fn standard_coinbase_outputs(
     let miner_reward =
         miner_reward.expect("reward calculations are valid for reasonable chain heights");
 
-    combine_coinbase_outputs(funding_streams, miner_address, miner_reward, like_zcashd)
-}
-
-/// Combine the miner reward and funding streams into a list of coinbase amounts and addresses.
-///
-/// If `like_zcashd` is true, try to match the coinbase transactions generated by `zcashd`
-/// in the `getblocktemplate` RPC.
-fn combine_coinbase_outputs(
-    funding_streams: HashMap<FundingStreamReceiver, (Amount<NonNegative>, &transparent::Address)>,
-    miner_address: &transparent::Address,
-    miner_reward: Amount<NonNegative>,
-    like_zcashd: bool,
-) -> Vec<(Amount<NonNegative>, transparent::Script)> {
     // Collect all the funding streams and convert them to outputs.
     let funding_streams_outputs: Vec<(Amount<NonNegative>, &transparent::Address)> =
         funding_streams
@@ -938,11 +904,18 @@ fn combine_coinbase_outputs(
             .map(|(_receiver, (amount, address))| (amount, address))
             .collect();
 
+    // Combine the miner reward and funding streams into a list of coinbase amounts and addresses.
     let mut coinbase_outputs: Vec<(Amount<NonNegative>, transparent::Script)> =
         funding_streams_outputs
             .iter()
-            .map(|(amount, address)| (*amount, address.create_script_from_address()))
+            .map(|(amount, address)| (*amount, address.script()))
             .collect();
+
+    let script = miner_address
+        .to_transparent_address()
+        .expect("address must have a transparent component")
+        .script()
+        .into();
 
     // The HashMap returns funding streams in an arbitrary order,
     // but Zebra's snapshot tests expect the same order every time.
@@ -951,13 +924,10 @@ fn combine_coinbase_outputs(
         coinbase_outputs.sort_by_key(|(_amount, script)| script.clone());
 
         // The miner reward is always the first output independent of the sort order
-        coinbase_outputs.insert(
-            0,
-            (miner_reward, miner_address.create_script_from_address()),
-        );
+        coinbase_outputs.insert(0, (miner_reward, script));
     } else {
         // Unlike zcashd, in Zebra the miner reward is part of the sorting
-        coinbase_outputs.push((miner_reward, miner_address.create_script_from_address()));
+        coinbase_outputs.push((miner_reward, script));
 
         // Zebra sorts by amount then script.
         //
