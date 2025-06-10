@@ -5,13 +5,18 @@ use std::sync::Arc;
 use futures::FutureExt;
 use tower::buffer::Buffer;
 
+use zcash_address::{ToAddress, ZcashAddress};
+use zcash_keys::address::Address;
+use zcash_protocol::consensus::NetworkType;
+use zcash_transparent::address::TransparentAddress;
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{Block, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
-    parameters::Network::*,
+    parameters::{Network::*, NetworkKind},
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
@@ -1783,44 +1788,39 @@ async fn rpc_getnetworksolps() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblocktemplate() {
-    // test getblocktemplate with a miner P2SH address
-    rpc_getblocktemplate_mining_address(true).await;
-    // test getblocktemplate with a miner P2PKH address
-    rpc_getblocktemplate_mining_address(false).await;
-}
-
-async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
+async fn getblocktemplate() {
     let _init_guard = zebra_test::init();
 
+    // TODO Run the test with all possible network types.
+    let net = Network::Mainnet;
+
+    // TODO Run the test with all address types supported for mining.
+    let addr = ZcashAddress::from_transparent_p2pkh(
+        NetworkType::from(NetworkKind::from(&net)),
+        [0x7e; 20],
+    );
+
+    gbt_with(net, addr).await;
+}
+
+async fn gbt_with(net: Network, addr: ZcashAddress) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
-    let network = Network::Mainnet;
-    let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(
-            network.kind(),
-            [0x7e; 20],
-        )),
-        true => Some(transparent::Address::from_pub_key_hash(
-            network.kind(),
-            [0x7e; 20],
-        )),
-    };
-
-    #[allow(clippy::unnecessary_struct_initialization)]
     let mining_conf = crate::config::mining::Config {
-        miner_address: miner_address.clone(),
+        miner_address: Some(addr.clone()),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
         internal_miner: true,
     };
 
     // nu5 block height
-    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
+    let fake_tip_height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("nu5 activation height");
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
@@ -1840,7 +1840,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
-        Mainnet,
+        net.clone(),
         mining_conf,
         Default::default(),
         "0.0.1",
@@ -1904,18 +1904,17 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         )
     };
 
-    let coinbase_transaction =
+    let coinbase_addr = ZcashAddress::from(
         Transaction::zcash_deserialize(get_block_template.coinbase_txn.data.as_ref())
-            .expect("coinbase transaction data should be deserializable");
-
-    assert_eq!(
-        coinbase_transaction
+            .expect("coinbase transaction data should be deserializable")
             .outputs()
             .first()
-            .unwrap()
-            .address(&network),
-        miner_address
+            .expect("coinbase tx should have at least one output")
+            .address(&net)
+            .expect("coinbase tx output should have an address"),
     );
+
+    assert_eq!(coinbase_addr, addr);
 
     assert_eq!(get_block_template.capabilities, CAPABILITIES_FIELD.to_vec());
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
@@ -1944,13 +1943,20 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     assert!(get_block_template.coinbase_txn.required);
     assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
     assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
-    if use_p2pkh {
+
+    let taddr = Address::try_from_zcash_address(&net, addr.clone())
+        .expect("address should be convertible")
+        .to_transparent_address()
+        .expect("address should have a transparent component");
+
+    if matches!(taddr, TransparentAddress::PublicKeyHash(_)) {
         // there is one sig operation if miner address is p2pkh.
         assert_eq!(get_block_template.coinbase_txn.sigops, 1);
     } else {
         // everything in the coinbase is p2sh.
         assert_eq!(get_block_template.coinbase_txn.sigops, 0);
     }
+
     // Coinbase transaction checks for empty blocks.
     assert_eq!(
         get_block_template.coinbase_txn.fee,

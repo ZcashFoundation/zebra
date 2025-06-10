@@ -1,15 +1,5 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
 
-use std::{collections::HashMap, fmt, iter, ops::AddAssign};
-
-use crate::{
-    amount::{Amount, NonNegative},
-    block,
-    parameters::Network,
-    primitives::zcash_primitives,
-    transaction,
-};
-
 mod address;
 mod keys;
 mod opcodes;
@@ -17,7 +7,18 @@ mod script;
 mod serialize;
 mod utxo;
 
+use std::{collections::HashMap, fmt, iter, ops::AddAssign};
+
 pub use address::Address;
+use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
+
+use crate::{
+    amount::{Amount, NonNegative},
+    block,
+    parameters::Network,
+    transaction,
+};
+
 pub use script::Script;
 pub use serialize::{GENESIS_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN};
 pub use utxo::{
@@ -441,8 +442,15 @@ impl Output {
     /// Return the destination address from a transparent output.
     ///
     /// Returns None if the address type is not valid or unrecognized.
-    pub fn address(&self, network: &Network) -> Option<Address> {
-        zcash_primitives::transparent_output_address(self, network)
+    pub fn address(&self, net: &Network) -> Option<Address> {
+        match TxOut::try_from(self).ok()?.recipient_address()? {
+            TransparentAddress::PublicKeyHash(pkh) => {
+                Some(Address::from_pub_key_hash(net.t_addr_kind(), pkh))
+            }
+            TransparentAddress::ScriptHash(sh) => {
+                Some(Address::from_script_hash(net.t_addr_kind(), sh))
+            }
+        }
     }
 }
 

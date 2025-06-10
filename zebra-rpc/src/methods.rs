@@ -1964,14 +1964,13 @@ where
         parameters: Option<GetBlockTemplateParameters>,
     ) -> Result<GetBlockTemplateResponse> {
         use types::get_block_template::{
-            check_miner_address, check_parameters, check_synced_to_tip, fetch_mempool_transactions,
+            check_parameters, check_synced_to_tip, fetch_mempool_transactions,
             fetch_state_tip_and_local_time, validate_block_proposal,
             zip317::select_mempool_transactions,
         };
 
         // Clone Configs
         let network = self.network.clone();
-        let miner_address = self.gbt.miner_address();
         let debug_like_zcashd = self.debug_like_zcashd;
         let extra_coinbase_data = self.gbt.extra_coinbase_data();
 
@@ -2000,11 +1999,10 @@ where
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
-        // - One-off checks
-
-        // Check config and parameters.
-        // These checks always have the same result during long polling.
-        let miner_address = check_miner_address(miner_address)?;
+        let miner_address = self
+            .gbt
+            .miner_address()
+            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //

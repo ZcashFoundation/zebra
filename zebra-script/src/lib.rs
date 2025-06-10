@@ -27,7 +27,7 @@ use zebra_chain::{
 };
 
 /// An Error type representing the error codes returned from zcash_script.
-#[derive(Copy, Clone, Debug, Error, PartialEq, Eq)]
+#[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
     /// script verification failed
@@ -42,6 +42,8 @@ pub enum Error {
     TxCoinbase,
     /// unknown error from zcash_script: {0}
     Unknown(zcash_script_error_t),
+    /// transaction is invalid according to zebra_chain (not a zcash_script error)
+    TxInvalid(#[from] zebra_chain::Error),
 }
 
 impl fmt::Display for Error {
@@ -55,6 +57,7 @@ impl fmt::Display for Error {
                 "tx is a coinbase transaction and should not be verified".to_owned()
             }
             Error::Unknown(e) => format!("unknown error from zcash_script: {e}"),
+            Error::TxInvalid(e) => format!("tx is invalid: {e}"),
         })
     }
 }
@@ -83,7 +86,10 @@ pub struct CachedFfiTransaction {
 
     /// The outputs from previous transactions that match each input in the transaction
     /// being verified.
-    all_previous_outputs: Vec<transparent::Output>,
+    all_previous_outputs: Arc<Vec<transparent::Output>>,
+
+    /// The sighasher context to use to compute sighashes.
+    sighasher: SigHasher,
 }
 
 /// A sighash context used for the zcash_script sighash callback.
@@ -91,7 +97,7 @@ struct SigHashContext<'a> {
     /// The index of the input being verified.
     input_index: usize,
     /// The SigHasher for the transaction being verified.
-    sighasher: SigHasher<'a>,
+    sighasher: &'a SigHasher,
 }
 
 /// The sighash callback to use with zcash_script.
@@ -127,12 +133,15 @@ impl CachedFfiTransaction {
     /// being verified.
     pub fn new(
         transaction: Arc<Transaction>,
-        all_previous_outputs: Vec<transparent::Output>,
-    ) -> Self {
-        Self {
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
+        nu: NetworkUpgrade,
+    ) -> Result<Self, Error> {
+        let sighasher = transaction.sighasher(nu, all_previous_outputs.clone())?;
+        Ok(Self {
             transaction,
             all_previous_outputs,
-        }
+            sighasher,
+        })
     }
 
     /// Returns the transparent inputs for this transaction.
@@ -146,10 +155,15 @@ impl CachedFfiTransaction {
         &self.all_previous_outputs
     }
 
+    /// Return the sighasher being used for this transaction.
+    pub fn sighasher(&self) -> &SigHasher {
+        &self.sighasher
+    }
+
     /// Verify if the script in the input at `input_index` of a transaction correctly spends the
     /// matching [`transparent::Output`] it refers to.
     #[allow(clippy::unwrap_in_result)]
-    pub fn is_valid(&self, nu: NetworkUpgrade, input_index: usize) -> Result<(), Error> {
+    pub fn is_valid(&self, input_index: usize) -> Result<(), Error> {
         let previous_output = self
             .all_previous_outputs
             .get(input_index)
@@ -193,7 +207,7 @@ impl CachedFfiTransaction {
 
         let ctx = Box::new(SigHashContext {
             input_index: n_in,
-            sighasher: SigHasher::new(&self.transaction, nu, &self.all_previous_outputs),
+            sighasher: &self.sighasher,
         });
         // SAFETY: The `script_*` fields are created from a valid Rust `slice`.
         let ret = unsafe {
@@ -217,46 +231,46 @@ impl CachedFfiTransaction {
             Err(Error::from(err))
         }
     }
+}
 
-    /// Returns the number of transparent signature operations in the
-    /// transparent inputs and outputs of this transaction.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn legacy_sigop_count(&self) -> Result<u64, Error> {
-        let mut count: u64 = 0;
+/// Returns the number of transparent signature operations in the
+/// transparent inputs and outputs of the given transaction.
+#[allow(clippy::unwrap_in_result)]
+pub fn legacy_sigop_count(transaction: &Transaction) -> Result<u64, Error> {
+    let mut count: u64 = 0;
 
-        for input in self.transaction.inputs() {
-            count += match input {
-                transparent::Input::PrevOut {
-                    outpoint: _,
-                    unlock_script,
-                    sequence: _,
-                } => {
-                    let script = unlock_script.as_raw_bytes();
-                    // SAFETY: `script` is created from a valid Rust `slice`.
-                    unsafe {
-                        zcash_script::zcash_script_legacy_sigop_count_script(
-                            script.as_ptr(),
-                            script.len() as u32,
-                        )
-                    }
+    for input in transaction.inputs() {
+        count += match input {
+            transparent::Input::PrevOut {
+                outpoint: _,
+                unlock_script,
+                sequence: _,
+            } => {
+                let script = unlock_script.as_raw_bytes();
+                // SAFETY: `script` is created from a valid Rust `slice`.
+                unsafe {
+                    zcash_script::zcash_script_legacy_sigop_count_script(
+                        script.as_ptr(),
+                        script.len() as u32,
+                    )
                 }
-                transparent::Input::Coinbase { .. } => 0,
-            } as u64;
-        }
-
-        for output in self.transaction.outputs() {
-            let script = output.lock_script.as_raw_bytes();
-            // SAFETY: `script` is created from a valid Rust `slice`.
-            let ret = unsafe {
-                zcash_script::zcash_script_legacy_sigop_count_script(
-                    script.as_ptr(),
-                    script.len() as u32,
-                )
-            };
-            count += ret as u64;
-        }
-        Ok(count)
+            }
+            transparent::Input::Coinbase { .. } => 0,
+        } as u64;
     }
+
+    for output in transaction.outputs() {
+        let script = output.lock_script.as_raw_bytes();
+        // SAFETY: `script` is created from a valid Rust `slice`.
+        let ret = unsafe {
+            zcash_script::zcash_script_legacy_sigop_count_script(
+                script.as_ptr(),
+                script.len() as u32,
+            )
+        };
+        count += ret as u64;
+    }
+    Ok(count)
 }
 
 #[cfg(test)]
@@ -292,9 +306,10 @@ mod tests {
         };
         let input_index = 0;
 
-        let previous_output = vec![output];
-        let verifier = super::CachedFfiTransaction::new(transaction, previous_output);
-        verifier.is_valid(nu, input_index)?;
+        let previous_output = Arc::new(vec![output]);
+        let verifier = super::CachedFfiTransaction::new(transaction, previous_output, nu)
+            .expect("network upgrade should be valid for tx");
+        verifier.is_valid(input_index)?;
 
         Ok(())
     }
@@ -318,8 +333,7 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let cached_tx = super::CachedFfiTransaction::new(transaction, Vec::new());
-        assert_eq!(cached_tx.legacy_sigop_count()?, 1);
+        assert_eq!(super::legacy_sigop_count(&transaction)?, 1);
 
         Ok(())
     }
@@ -337,9 +351,14 @@ mod tests {
             lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()[..]),
         };
         let input_index = 0;
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
+        let verifier = super::CachedFfiTransaction::new(
+            transaction,
+            Arc::new(vec![output]),
+            NetworkUpgrade::Blossom,
+        )
+        .expect("network upgrade should be valid for tx");
         verifier
-            .is_valid(NetworkUpgrade::Blossom, input_index)
+            .is_valid(input_index)
             .expect_err("verification should fail");
 
         Ok(())
@@ -358,12 +377,17 @@ mod tests {
             lock_script: transparent::Script::new(&SCRIPT_PUBKEY.clone()),
         };
 
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
+        let verifier = super::CachedFfiTransaction::new(
+            transaction,
+            Arc::new(vec![output]),
+            NetworkUpgrade::Blossom,
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
+        verifier.is_valid(input_index)?;
+        verifier.is_valid(input_index)?;
 
         Ok(())
     }
@@ -381,13 +405,18 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
+        let verifier = super::CachedFfiTransaction::new(
+            transaction,
+            Arc::new(vec![output]),
+            NetworkUpgrade::Blossom,
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
+        verifier.is_valid(input_index)?;
         verifier
-            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .is_valid(input_index + 1)
             .expect_err("verification should fail");
 
         Ok(())
@@ -406,14 +435,19 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
+        let verifier = super::CachedFfiTransaction::new(
+            transaction,
+            Arc::new(vec![output]),
+            NetworkUpgrade::Blossom,
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
         verifier
-            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .is_valid(input_index + 1)
             .expect_err("verification should fail");
-        verifier.is_valid(NetworkUpgrade::Blossom, input_index)?;
+        verifier.is_valid(input_index)?;
 
         Ok(())
     }
@@ -431,16 +465,21 @@ mod tests {
         let transaction =
             SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-        let verifier = super::CachedFfiTransaction::new(transaction, vec![output]);
+        let verifier = super::CachedFfiTransaction::new(
+            transaction,
+            Arc::new(vec![output]),
+            NetworkUpgrade::Blossom,
+        )
+        .expect("network upgrade should be valid for tx");
 
         let input_index = 0;
 
         verifier
-            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .is_valid(input_index + 1)
             .expect_err("verification should fail");
 
         verifier
-            .is_valid(NetworkUpgrade::Blossom, input_index + 1)
+            .is_valid(input_index + 1)
             .expect_err("verification should fail");
 
         Ok(())
@@ -460,9 +499,14 @@ mod tests {
             Output::zcash_deserialize(&hex::decode(serialized_output).unwrap().to_vec()[..])
                 .unwrap();
 
-        let verifier = super::CachedFfiTransaction::new(Arc::new(tx), vec![previous_output]);
+        let verifier = super::CachedFfiTransaction::new(
+            Arc::new(tx),
+            Arc::new(vec![previous_output]),
+            NetworkUpgrade::Nu5,
+        )
+        .expect("network upgrade should be valid for tx");
 
-        verifier.is_valid(NetworkUpgrade::Nu5, 0)?;
+        verifier.is_valid(0)?;
 
         Ok(())
     }
