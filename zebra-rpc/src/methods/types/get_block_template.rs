@@ -5,6 +5,9 @@ pub mod parameters;
 pub mod proposal;
 pub mod zip317;
 
+#[cfg(test)]
+mod tests;
+
 use std::{collections::HashMap, fmt, iter, sync::Arc};
 
 use jsonrpsee::core::RpcResult;
