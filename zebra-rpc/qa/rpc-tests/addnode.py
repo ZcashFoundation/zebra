@@ -33,10 +33,17 @@ class AddNodeTest (BitcoinTestFramework):
 
         # As we connected the nodes to each other, they should have,
         # at least 4 peers. Poll for that.
-        while (len(self.nodes[0].getpeerinfo()) < 4 or
-            len(self.nodes[1].getpeerinfo()) < 4 or
-            len(self.nodes[2].getpeerinfo()) < 4):
-            time.sleep(1)
+        timeout_for_connetions = 120
+        wait_time = 1
+        while timeout_for_connetions > 0:
+            if (len(self.nodes[0].getpeerinfo()) < 4 or
+                len(self.nodes[1].getpeerinfo()) < 4 or
+                len(self.nodes[2].getpeerinfo()) < 4):
+                timeout -= wait_time
+                time.sleep(wait_time)
+            else:
+                break
+        assert timeout_for_connetions > 0, "Timeout waiting for connections"
 
         print("Mining blocks...")
 
