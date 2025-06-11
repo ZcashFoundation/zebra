@@ -647,7 +647,7 @@ proptest! {
             let state_query = state
                 .expect_request(zebra_state::ReadRequest::AddressBalance(addresses))
                 .map_ok(|responder| {
-                    responder.respond(zebra_state::ReadResponse::AddressBalance { balance, received: Default::default() })
+                    responder.respond(zebra_state::ReadResponse::AddressBalance { balance, received: balance.into() })
                 });
 
             // Await the RPC call and the state query
@@ -658,7 +658,7 @@ proptest! {
             // Check that response contains the expected balance
             let received_balance = response?;
 
-            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into() });
+            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into(), received: balance.into() });
 
             // Check no further requests were made during this test
             mempool.expect_no_requests().await?;

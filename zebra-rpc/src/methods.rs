@@ -1026,8 +1026,9 @@ where
         let response = state.oneshot(request).await.map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance { balance, .. } => Ok(AddressBalance {
+            zebra_state::ReadResponse::AddressBalance { balance, received } => Ok(AddressBalance {
                 balance: u64::from(balance),
+                received,
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
         }
@@ -3006,9 +3007,31 @@ impl GetBlockChainInfo {
 /// This is used for the input parameter of [`RpcServer::get_address_balance`],
 /// [`RpcServer::get_address_tx_ids`] and [`RpcServer::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
+#[serde(from = "DAddressStrings")]
 pub struct AddressStrings {
     /// A list of transparent address strings.
     addresses: Vec<String>,
+}
+
+impl From<DAddressStrings> for AddressStrings {
+    fn from(address_strings: DAddressStrings) -> Self {
+        match address_strings {
+            DAddressStrings::Addresses { addresses } => AddressStrings { addresses },
+            DAddressStrings::Address(address) => AddressStrings {
+                addresses: vec![address],
+            },
+        }
+    }
+}
+
+/// An intermediate type used to deserialize [`AddressStrings`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[serde(untagged)]
+enum DAddressStrings {
+    /// A list of address strings.
+    Addresses { addresses: Vec<String> },
+    /// A single address string.
+    Address(String),
 }
 
 impl AddressStrings {
@@ -3060,6 +3083,8 @@ impl AddressStrings {
 pub struct AddressBalance {
     /// The total transparent balance.
     pub balance: u64,
+    /// The total received balance, including change.
+    pub received: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
