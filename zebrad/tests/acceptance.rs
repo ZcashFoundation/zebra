@@ -1020,10 +1020,7 @@ fn stored_configs_work() -> Result<()> {
 
         let success_regexes = [
             // When logs are sent to the terminal, we see the config loading message and path.
-            format!(
-                "loaded zebrad config.*config_path.*=.*{}",
-                regex::escape(config_file_name)
-            ),
+            format!("Using config file at:.*{}", regex::escape(config_file_name)),
             // If they are sent to a file, we see a log file message on stdout,
             // and a logo, welcome message, and progress bar on stderr.
             "Sending logs to".to_string(),
