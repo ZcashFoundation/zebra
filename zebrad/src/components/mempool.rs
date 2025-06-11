@@ -851,6 +851,18 @@ impl Service<Request> for Mempool {
                     // all the work for this request is done in poll_ready
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
+
+                // Remove a single transaction from the mempool
+                Request::RemoveTransaction(ref tx_id) => {
+                    trace!(?req, "got mempool request");
+
+                    let res = storage.remove_exact(&[tx_id.clone()].into_iter().collect());
+                    assert!(res == 1);
+
+                    trace!(?req, ?res, "answered mempool request");
+
+                    async move { Ok(Response::RemovedTransaction) }.boxed()
+                }
             },
             ActiveState::Disabled => {
                 // TODO: add the name of the request, but not the content,
@@ -901,6 +913,15 @@ impl Service<Request> for Mempool {
                         // all the work for this request is done in poll_ready
                         Response::CheckedForVerifiedTransactions
                     }
+
+                    // No transactions to remove from the mempool
+                    Request::RemoveTransaction(_) => {
+                        return async move {
+                            Err("mempool is not active: wait for Zebra to sync to the tip".into())
+                        }
+                        .boxed()
+
+                    },
                 };
 
                 async move { Ok(resp) }.boxed()
