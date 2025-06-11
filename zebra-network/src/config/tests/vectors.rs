@@ -26,9 +26,12 @@ fn parse_config_listen_addr() {
         ("listen_addr = '[::]'", "[::]:8233"),
         ("listen_addr = '[::]:9999'", "[::]:9999"),
         ("listen_addr = '[::]'\nnetwork = 'Testnet'", "[::]:18233"),
-        ("listen_addr = '[::]:8233'\nnetwork = 'Testnet'", "[::]:8233"),
+        (
+            "listen_addr = '[::]:8233'\nnetwork = 'Testnet'",
+            "[::]:8233",
+        ),
         ("listen_addr = '[::1]:8233'", "[::1]:8233"),
-        ("listen_addr = '[2001:db8::1]:8233'", "[2001:db8::1]:8233")
+        ("listen_addr = '[2001:db8::1]:8233'", "[2001:db8::1]:8233"),
     ];
 
     for (config, value) in fixtures {

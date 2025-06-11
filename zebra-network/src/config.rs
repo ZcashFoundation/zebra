@@ -62,9 +62,9 @@ pub struct Config {
     /// `address` can be an IP address or a DNS name. DNS names are
     /// only resolved once, when Zebra starts up.
     ///
-    /// By default, Zebra listenes on '[::]' (all IPv6 and IPv4 addresses).
+    /// By default, Zebra listens on '[::]' (all IPv6 and IPv4 addresses).
     /// This enables dual-stack support, accepting both IPv4 and IPv6 connections.
-    /// 
+    ///
     /// If a specific listener address is configured, Zebra will advertise
     /// it to other nodes. But by default, Zebra uses an unspecified address
     /// ("\[::\]:port"), which is not advertised to other nodes.
