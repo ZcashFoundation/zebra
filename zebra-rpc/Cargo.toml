@@ -21,13 +21,14 @@ categories = [
 
 [features]
 
-indexer-rpcs = [
+default = ["server"]
+
+server = [
     "tonic-build",
     "tonic",
     "tonic-reflection",
     "prost",
     "tokio-stream",
-    "zebra-state/indexer"
 ]
 
 # Production features that activate extra dependencies, or extra features in
@@ -69,7 +70,7 @@ color-eyre = { workspace = true }
 tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = { workspace = true }
 
-# indexer-rpcs dependencies
+# gRPC server dependencies
 tonic = { workspace = true, optional = true }
 tonic-reflection = { workspace = true, optional = true }
 prost = { workspace = true, optional = true }
