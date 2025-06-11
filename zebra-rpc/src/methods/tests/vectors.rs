@@ -1,6 +1,6 @@
 //! Fixed test vectors for RPC methods.
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use futures::FutureExt;
 use tower::buffer::Buffer;
@@ -16,13 +16,15 @@ use zebra_chain::{
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
-    parameters::{Network::*, NetworkKind},
+    parameters::{testnet, Network::*, NetworkKind},
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
-use zebra_network::{address_book_peers::MockAddressBookPeers, types::PeerServices};
+use zebra_network::{
+    address_book_peers::MockAddressBookPeers, types::PeerServices, PeerSocketAddr,
+};
 use zebra_node_services::BoxError;
 use zebra_state::{
     GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadRequest, ReadResponse,
@@ -2568,4 +2570,73 @@ async fn rpc_z_listunifiedreceivers() {
         Some(String::from("t1dMjwmwM2a6NtavQ6SiPP8i9ofx4cgfYYP"))
     );
     assert_eq!(response.p2sh(), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_addnode() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Testnet(Arc::new(testnet::Parameters::new_regtest(
+        Default::default(),
+    )));
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet);
+
+    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
+
+    //let mock_address_book = MockAddressBookPeers::default();
+    let mock_address_book =
+        zebra_network::address_book_peers::mock::SharedMockAddressBookPeers::default();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        network,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        block_verifier_router,
+        MockSyncStatus::default(),
+        tip.clone(),
+        mock_address_book,
+        rx,
+        None,
+    );
+
+    let get_peer_info = rpc
+        .get_peer_info()
+        .await
+        .expect("We should have an array of addresses");
+
+    assert_eq!(get_peer_info, []);
+
+    let addr = PeerSocketAddr::from_str("127.0.0.1:9999").unwrap();
+
+    // Call `add_node`
+    rpc.add_node(addr, AddNodeCommand::Add)
+        .await
+        .expect("We should have an array of addresses");
+
+    let get_peer_info = rpc
+        .get_peer_info()
+        .await
+        .expect("We should have an array of addresses");
+
+    assert_eq!(
+        get_peer_info,
+        [PeerInfo {
+            addr,
+            inbound: false,
+        }]
+    );
+
+    mempool.expect_no_requests().await;
 }
