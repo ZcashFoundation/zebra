@@ -84,10 +84,11 @@ serde = { workspace = true, features = ["serde_derive"] }
 # For the `stop` RPC method.
 nix = { workspace = true, features = ["signal"] }
 
-zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
-zcash_protocol.workspace = true
-
 zcash_address = { workspace = true }
+zcash_keys = { workspace = true }
+zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
+zcash_protocol = { workspace = true }
+zcash_transparent = { workspace = true }
 
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }

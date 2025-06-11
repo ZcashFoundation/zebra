@@ -7,7 +7,10 @@ use chrono::{DateTime, Utc};
 use zebra_chain::{
     amount::{Amount, Error as AmountError, NonNegative},
     block::{Block, Hash, Header, Height},
-    parameters::{subsidy::FundingStreamReceiver, Network, NetworkUpgrade},
+    parameters::{
+        subsidy::{FundingStreamReceiver, SubsidyError},
+        Network, NetworkUpgrade,
+    },
     transaction::{self, Transaction},
     work::{
         difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
@@ -153,7 +156,8 @@ pub fn subsidy_is_valid(
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
     // Validate funding streams
-    let Some(halving_div) = subsidy::general::halving_divisor(height, network) else {
+    let Some(halving_div) = zebra_chain::parameters::subsidy::halving_divisor(height, network)
+    else {
         // Far future halving, with no founders reward or funding streams
         return Ok(());
     };
@@ -180,7 +184,7 @@ pub fn subsidy_is_valid(
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
         // funding stream amount values
-        let funding_streams = subsidy::funding_streams::funding_stream_values(
+        let funding_streams = zebra_chain::parameters::subsidy::funding_stream_values(
             height,
             network,
             expected_block_subsidy,
@@ -240,7 +244,7 @@ pub fn miner_fees_are_valid(
     expected_deferred_amount: Amount<NonNegative>,
     network: &Network,
 ) -> Result<(), BlockError> {
-    let transparent_value_balance = subsidy::general::output_amounts(coinbase_tx)
+    let transparent_value_balance = zebra_chain::parameters::subsidy::output_amounts(coinbase_tx)
         .iter()
         .sum::<Result<Amount<NonNegative>, AmountError>>()
         .map_err(|_| SubsidyError::SumOverflow)?

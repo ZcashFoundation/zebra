@@ -238,9 +238,7 @@ impl Config {
     pub fn initial_peer_hostnames(&self) -> IndexSet<String> {
         match &self.network {
             Network::Mainnet => self.initial_mainnet_peers.clone(),
-            Network::Testnet(params) if !params.is_regtest() => self.initial_testnet_peers.clone(),
-            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_regtest()` (#8361)
-            Network::Testnet(_params) => IndexSet::new(),
+            Network::Testnet(_params) => self.initial_testnet_peers.clone(),
         }
     }
 
@@ -251,19 +249,22 @@ impl Config {
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
-        // Return early if network is regtest in case there are somehow any entries in the peer cache
-        if self.network.is_regtest() {
-            return HashSet::new();
-        }
-
         // TODO: do DNS and disk in parallel if startup speed becomes important
         let dns_peers =
             Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
 
-        // Ignore disk errors because the cache is optional and the method already logs them.
-        let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+        if self.network.is_regtest() {
+            // Only return local peer addresses and skip loading the peer cache on Regtest.
+            dns_peers
+                .into_iter()
+                .filter(PeerSocketAddr::is_localhost)
+                .collect()
+        } else {
+            // Ignore disk errors because the cache is optional and the method already logs them.
+            let disk_peers = self.load_peer_cache().await.unwrap_or_default();
 
-        dns_peers.into_iter().chain(disk_peers).collect()
+            dns_peers.into_iter().chain(disk_peers).collect()
+        }
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a

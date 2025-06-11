@@ -39,7 +39,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        subsidy::{
+            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
+            ParameterSubsidy,
+        },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
@@ -52,10 +55,7 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
-    ParameterCheckpoint, RouterError,
-};
+use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
 use zebra_network::address_book_peers::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{
@@ -1026,7 +1026,7 @@ where
         let response = state.oneshot(request).await.map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+            zebra_state::ReadResponse::AddressBalance { balance, .. } => Ok(AddressBalance {
                 balance: u64::from(balance),
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
@@ -1907,7 +1907,6 @@ where
     ) -> Result<get_block_template::Response> {
         // Clone Configs
         let network = self.network.clone();
-        let miner_address = self.gbt.miner_address();
         let debug_like_zcashd = self.debug_like_zcashd;
         let extra_coinbase_data = self.gbt.extra_coinbase_data();
 
@@ -1936,11 +1935,10 @@ where
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
-        // - One-off checks
-
-        // Check config and parameters.
-        // These checks always have the same result during long polling.
-        let miner_address = get_block_template::check_miner_address(miner_address)?;
+        let miner_address = self
+            .gbt
+            .miner_address()
+            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //

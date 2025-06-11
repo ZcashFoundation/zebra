@@ -30,20 +30,22 @@ use tracing::instrument;
 use zebra_chain::{
     amount,
     block::{self, Block},
-    parameters::{subsidy::FundingStreamReceiver, Network, GENESIS_PREVIOUS_BLOCK_HASH},
+    parameters::{
+        subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver, SubsidyError},
+        Network, GENESIS_PREVIOUS_BLOCK_HASH,
+    },
     work::equihash,
 };
 use zebra_state::{self as zs, CheckpointVerifiedBlock};
 
 use crate::{
     block::VerifyBlockError,
-    block_subsidy,
     checkpoint::types::{
         Progress::{self, *},
         TargetHeight::{self, *},
     },
-    error::{BlockError, SubsidyError},
-    funding_stream_values, BoxError, ParameterCheckpoint as _,
+    error::BlockError,
+    BoxError, ParameterCheckpoint as _,
 };
 
 pub(crate) mod list;

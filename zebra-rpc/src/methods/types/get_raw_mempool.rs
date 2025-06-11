@@ -12,7 +12,7 @@ use super::zec::Zec;
 /// Response to a `getrawmempool` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_mempool` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum GetRawMempool {
     /// The transaction IDs, as hex strings (verbose=0)
@@ -24,7 +24,7 @@ pub enum GetRawMempool {
 
 /// A mempool transaction details object as returned by `getrawmempool` in
 /// verbose mode.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MempoolObject {
     /// Transaction size in bytes.
     pub(crate) size: u64,
