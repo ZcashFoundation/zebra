@@ -41,6 +41,7 @@ BASE_SCRIPTS= [
     'reindex.py',
     'getmininginfo.py',
     'nuparams.py',
+    'addnode.py',
     'wallet.py']
 
 ZMQ_SCRIPTS = [

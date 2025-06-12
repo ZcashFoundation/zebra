@@ -82,7 +82,7 @@ use zebra_chain::{
     },
 };
 use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
-use zebra_network::address_book_peers::AddressBookPeers;
+use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
 
@@ -626,6 +626,23 @@ pub trait Rpc {
     /// method: post
     /// tags: generating
     async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHashResponse>>;
+
+    #[method(name = "addnode")]
+    /// Add or remove a node from the address book.
+    ///
+    /// # Parameters
+    ///
+    /// - `addr`: (string, required) The address of the node to add or remove.
+    /// - `command`: (string, required) The command to execute, either "add", "onetry", or "remove".
+    ///
+    /// # Notes
+    ///
+    /// Only the "add" command is currently supported.
+    ///
+    /// zcashd reference: [`addnode`](https://zcash.github.io/rpc/addnode.html)
+    /// method: post
+    /// tags: network
+    async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
 }
 
 /// RPC method implementations.
@@ -1073,9 +1090,10 @@ where
         let response = state.oneshot(request).await.map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance { balance, .. } => {
+            zebra_state::ReadResponse::AddressBalance { balance, received } => {
                 Ok(GetAddressBalanceResponse {
                     balance: u64::from(balance),
+                    received,
                 })
             }
             _ => unreachable!("Unexpected response from state service: {response:?}"),
@@ -2722,6 +2740,35 @@ where
 
         Ok(block_hashes)
     }
+
+    async fn add_node(
+        &self,
+        addr: zebra_network::PeerSocketAddr,
+        command: AddNodeCommand,
+    ) -> Result<()> {
+        if self.network.is_regtest() {
+            match command {
+                AddNodeCommand::Add => {
+                    tracing::info!(?addr, "adding peer address to the address book");
+                    if self.address_book.clone().add_peer(addr) {
+                        Ok(())
+                    } else {
+                        return Err(ErrorObject::owned(
+                            ErrorCode::InvalidParams.code(),
+                            format!("peer address was already present in the address book: {addr}"),
+                            None::<()>,
+                        ));
+                    }
+                }
+            }
+        } else {
+            return Err(ErrorObject::owned(
+                ErrorCode::InvalidParams.code(),
+                "addnode command is only supported on regtest",
+                None::<()>,
+            ));
+        }
+    }
 }
 
 // TODO: Move the code below to separate modules.
@@ -3041,9 +3088,31 @@ impl GetBlockchainInfoResponse {
 /// This is used for the input parameter of [`RpcServer::get_address_balance`],
 /// [`RpcServer::get_address_tx_ids`] and [`RpcServer::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
+#[serde(from = "DAddressStrings")]
 pub struct AddressStrings {
     /// A list of transparent address strings.
     addresses: Vec<String>,
+}
+
+impl From<DAddressStrings> for AddressStrings {
+    fn from(address_strings: DAddressStrings) -> Self {
+        match address_strings {
+            DAddressStrings::Addresses { addresses } => AddressStrings { addresses },
+            DAddressStrings::Address(address) => AddressStrings {
+                addresses: vec![address],
+            },
+        }
+    }
+}
+
+/// An intermediate type used to deserialize [`AddressStrings`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[serde(untagged)]
+enum DAddressStrings {
+    /// A list of address strings.
+    Addresses { addresses: Vec<String> },
+    /// A single address string.
+    Address(String),
 }
 
 /// A request to get the transparent balance of a set of addresses.
@@ -3110,6 +3179,8 @@ impl AddressStrings {
 pub struct GetAddressBalanceResponse {
     /// The total transparent balance.
     balance: u64,
+    /// The total received balance, including change.
+    pub received: u64,
 }
 
 #[deprecated(note = "Use `GetAddressBalanceResponse` instead.")]
@@ -4069,4 +4140,12 @@ where
 
     // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
     Ok(pow_limit / difficulty)
+}
+
+/// Commands for the `addnode` RPC method.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AddNodeCommand {
+    /// Add a node to the address book.
+    #[serde(rename = "add")]
+    Add,
 }
