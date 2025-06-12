@@ -2,7 +2,7 @@
 # status and date are the only required elements. Feel free to remove the rest.
 status: {[proposed | rejected | accepted | deprecated | … | superseded by [ADR-NAME](adr-file-name.md)]}
 date: {YYYY-MM-DD when the decision was last updated}
-builds-on: {[Short Title](2021-05-15-short-title.md)}
+builds-on: {[Short Title](0001-short-title.md)}
 story: {description or link to contextual issue}
 ---
 
