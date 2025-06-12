@@ -128,7 +128,7 @@ jobs:
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   test-lightwalletd-integration:
-    name: Test integration with lightwalletd
+    name: Lightwalletd integration
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:

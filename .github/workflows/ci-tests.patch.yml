@@ -117,7 +117,7 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  rpc-get-block-template:
+  rpc-get-template:
     name: Integration tests / get block template / Run get-block-template test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
@@ -125,7 +125,7 @@ jobs:
       - run: 'echo "No build required"'
 
   rpc-submit-block:
-    name:  Integration tests / submit block / Run submit-block test
+    name: Integration tests / submit block / Run submit-block test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:

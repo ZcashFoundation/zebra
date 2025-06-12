@@ -136,7 +136,7 @@ jobs:
     if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     with:
       app_name: zebrad
-      test_id: full-sync
+      test_id: sync-full-mainnet
       test_description: Test a full sync up to the tip
       # The value of SYNC_FULL_MAINNET_TIMEOUT_MINUTES is currently ignored.
       # TODO: update the test to use {{ input.network }} instead?
@@ -178,7 +178,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
-      test_id: update-to-tip
+      test_id: sync-update-mainnet
       test_description: Test syncing to tip with a Zebra tip state
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},SYNC_UPDATE=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true
@@ -240,7 +240,7 @@ jobs:
     if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     with:
       app_name: zebrad
-      test_id: full-sync-testnet
+      test_id: sync-full-testnet
       test_description: Test a full sync up to the tip on testnet
       # The value of SYNC_FULL_TESTNET_TIMEOUT_MINUTES is currently ignored.
       test_variables: "NETWORK=Testnet,SYNC_FULL_TESTNET_TIMEOUT_MINUTES=0,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
@@ -316,7 +316,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
     with:
       app_name: lightwalletd
-      test_id: lwd-full-sync
+      test_id: lwd-sync-full
       test_description: Test lightwalletd full sync
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_SYNC_FULL=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       # This test runs for longer than 6 hours, so it needs multiple jobs
@@ -351,7 +351,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
-      test_id: lwd-update-sync
+      test_id: lwd-sync-update
       test_description: Test lightwalletd update sync with both states
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_SYNC_UPDATE=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
@@ -379,7 +379,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
-      test_id: fully-synced-rpc
+      test_id: lwd-rpc-test
       test_description: Test lightwalletd RPC with a Zebra tip state
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},RPC_FULLY_SYNCED_TEST=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true
@@ -395,13 +395,13 @@ jobs:
   # If the state version has changed, waits for the new cached states to be created.
   # Otherwise, if the state rebuild was skipped, runs immediately after the build job.
   lightwalletd-send-transactions:
-    name: lightwalletd tip send
+    name: Lightwalletd send transactions
     needs: [lightwalletd-sync-full, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || needs.lightwalletd-sync-full.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: lightwalletd
-      test_id: lwd-send-transactions
+      test_id: lwd-rpc-send-tx
       test_description: Test sending transactions via lightwalletd
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_SEND_TRANSACTIONS=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
@@ -451,7 +451,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
-      test_id: get-block-template
+      test_id: rpc-get-template
       test_description: Test getblocktemplate RPC method via Zebra's rpc server
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},RPC_GET_BLOCK_TEMPLATE=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true

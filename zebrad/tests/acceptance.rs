@@ -1774,8 +1774,8 @@ fn non_blocking_logger() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[cfg(not(target_os = "windows"))]
-fn lightwalletd_integration() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState {
+fn lwd_integration() -> Result<()> {
+    lwd_integration_test(LaunchWithEmptyState {
         launches_lightwalletd: true,
     })
 }
@@ -1787,7 +1787,7 @@ fn lightwalletd_integration() -> Result<()> {
 /// This test might work on Windows.
 #[test]
 fn zebrad_update_sync() -> Result<()> {
-    lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)
+    lwd_integration_test(UpdateZebraCachedStateNoRpc)
 }
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
@@ -1801,8 +1801,8 @@ fn zebrad_update_sync() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 #[cfg(feature = "lightwalletd-grpc-tests")]
-fn lightwalletd_sync_update() -> Result<()> {
-    lightwalletd_integration_test(UpdateCachedState)
+fn lwd_sync_update() -> Result<()> {
+    lwd_integration_test(UpdateCachedState)
 }
 
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
@@ -1817,8 +1817,8 @@ fn lightwalletd_sync_update() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 #[cfg(feature = "lightwalletd-grpc-tests")]
-fn lightwalletd_sync_full() -> Result<()> {
-    lightwalletd_integration_test(FullSyncFromGenesis {
+fn lwd_sync_full() -> Result<()> {
+    lwd_integration_test(FullSyncFromGenesis {
         allow_lightwalletd_cached_state: false,
     })
 }
@@ -1841,12 +1841,12 @@ fn lightwalletd_sync_full() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 async fn lightwalletd_test_suite() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState {
+    lwd_integration_test(LaunchWithEmptyState {
         launches_lightwalletd: true,
     })?;
 
     // Only runs when ZEBRA_CACHE_DIR is set.
-    lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)?;
+    lwd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
     // These tests need the compile-time gRPC feature
     #[cfg(feature = "lightwalletd-grpc-tests")]
@@ -1854,7 +1854,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
         // Do the quick tests first
 
         // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
-        lightwalletd_integration_test(UpdateCachedState)?;
+        lwd_integration_test(UpdateCachedState)?;
 
         // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
         common::lightwalletd::wallet_grpc_test::run().await?;
@@ -1863,7 +1863,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 
         // Only runs when ZEBRA_CACHE_DIR is set.
         // When manually running the test suite, allow cached state in the full sync test.
-        lightwalletd_integration_test(FullSyncFromGenesis {
+        lwd_integration_test(FullSyncFromGenesis {
             allow_lightwalletd_cached_state: true,
         })?;
 
@@ -1891,13 +1891,13 @@ async fn lightwalletd_test_suite() -> Result<()> {
 /// If the `test_type` requires `--features=lightwalletd-grpc-tests`,
 /// but Zebra was not compiled with that feature.
 #[tracing::instrument]
-fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
+fn lwd_integration_test(test_type: TestType) -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We run these sync tests with a network connection, for better test coverage.
     let use_internet_connection = true;
     let network = Mainnet;
-    let test_name = "lightwalletd_integration_test";
+    let test_name = "lwd_integration_test";
 
     if test_type.launches_lightwalletd() && !can_spawn_lightwalletd_for_rpc(test_name, test_type) {
         tracing::info!("skipping test due to missing lightwalletd network or cached state");
@@ -2518,7 +2518,7 @@ fn delete_old_databases() -> Result<()> {
 #[ignore]
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
-async fn lightwalletd_send_transactions() -> Result<()> {
+async fn lwd_rpc_send_transactions() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
 }
 
@@ -2531,7 +2531,7 @@ async fn lightwalletd_send_transactions() -> Result<()> {
 #[ignore]
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
-async fn lightwalletd_grpc_wallet() -> Result<()> {
+async fn lwd_grpc_wallet() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
 
