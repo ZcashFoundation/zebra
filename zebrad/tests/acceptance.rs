@@ -1296,7 +1296,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 
 /// Sync up to the mandatory checkpoint height on mainnet and stop.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_to_checkpoint_mainnet", test)]
+#[cfg_attr(feature = "sync_to_checkpoint_mainnet", test)]
 fn sync_to_checkpoint_mainnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -1305,7 +1305,7 @@ fn sync_to_checkpoint_mainnet() -> Result<()> {
 
 /// Sync to the mandatory checkpoint height testnet and stop.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_to_checkpoint_testnet", test)]
+#[cfg_attr(feature = "sync_to_checkpoint_testnet", test)]
 fn sync_to_checkpoint_testnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Network::new_default_testnet();
@@ -1318,7 +1318,7 @@ fn sync_to_checkpoint_testnet() -> Result<()> {
 /// activation on mainnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_past_checkpoint_mainnet", test)]
+#[cfg_attr(feature = "sync_past_checkpoint_mainnet", test)]
 fn sync_past_checkpoint_mainnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -1331,7 +1331,7 @@ fn sync_past_checkpoint_mainnet() -> Result<()> {
 /// activation on testnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_past_checkpoint_testnet", test)]
+#[cfg_attr(feature = "sync_past_checkpoint_testnet", test)]
 fn sync_past_checkpoint_testnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Network::new_default_testnet();
