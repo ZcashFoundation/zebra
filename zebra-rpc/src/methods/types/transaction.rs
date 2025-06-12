@@ -190,6 +190,10 @@ pub struct TransactionObject {
     /// The time the transaction was included in a block.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<i64>,
+    
+     /// The raw transaction, encoded as hex bytes.
+    #[serde(with = "hex")]
+    pub txid: transaction::Hash,
     // TODO: some fields not yet supported
 }
 
@@ -381,6 +385,7 @@ impl Default for TransactionObject {
             value_balance_zat: None,
             size: None,
             time: None,
+            txid: transaction::Hash::from([0u8;32]),
         }
     }
 }
@@ -564,6 +569,7 @@ impl TransactionObject {
             },
             size: tx.as_bytes().len().try_into().ok(),
             time: block_time.map(|bt| bt.timestamp()),
+            txid: tx.hash(),
         }
     }
 }
