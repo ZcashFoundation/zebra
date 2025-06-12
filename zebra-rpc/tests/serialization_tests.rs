@@ -6,14 +6,12 @@
 
 mod vectors;
 
-use std::str::FromStr;
-
 use vectors::{
     GET_BLOCKCHAIN_INFO_RESPONSE, GET_BLOCK_RESPONSE_1, GET_BLOCK_RESPONSE_2,
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_chain::{subtree::NoteCommitmentSubtreeIndex, transaction};
+use zebra_chain::subtree::NoteCommitmentSubtreeIndex;
 use zebra_rpc::methods::{
     trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
     types::{
