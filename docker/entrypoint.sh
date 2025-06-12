@@ -202,7 +202,7 @@ run_tests() {
 
   elif [[ "${SYNC_TO_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
-    run_cargo_test "${FEATURES} test_sync_to_checkpoint_${NETWORK,,}" \
+    run_cargo_test "${FEATURES} sync_to_checkpoint_${NETWORK,,}" \
       "sync_to_checkpoint_${NETWORK,,}"
     echo "ran test_disk_rebuild"
 
@@ -214,7 +214,7 @@ run_tests() {
   elif [[ "${SYNC_PAST_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
     # past it.
-    run_cargo_test "${FEATURES} test_sync_past_checkpoint_${NETWORK,,}" \
+    run_cargo_test "${FEATURES} sync_past_checkpoint_${NETWORK,,}" \
       "sync_past_checkpoint_${NETWORK,,}"
 
   elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
