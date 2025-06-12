@@ -598,7 +598,7 @@ where
     /// Returns `Ok(extra_hashes)` if it was able to extend once and synchronize sone of the chain.
     /// Returns `Err` if there was an unrecoverable error and restarting the synchronization is
     /// necessary.
-    #[instrument(skip(self))]
+    #[instrument(skip(self, extra_hashes))]
     async fn try_to_sync_once(
         &mut self,
         mut extra_hashes: IndexSet<block::Hash>,
