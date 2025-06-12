@@ -1786,7 +1786,7 @@ fn lwd_integration() -> Result<()> {
 ///
 /// This test might work on Windows.
 #[test]
-fn zebrad_update_sync() -> Result<()> {
+fn sync_update_mainnet() -> Result<()> {
     lwd_integration_test(UpdateZebraCachedStateNoRpc)
 }
 
@@ -2393,7 +2393,7 @@ where
 
 #[tokio::test]
 #[ignore]
-async fn rpc_fully_synced_test() -> Result<()> {
+async fn lwd_rpc_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
@@ -2518,7 +2518,7 @@ fn delete_old_databases() -> Result<()> {
 #[ignore]
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
-async fn lwd_rpc_send_transactions() -> Result<()> {
+async fn lwd_rpc_send_tx() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
 }
 
@@ -2547,7 +2547,7 @@ async fn get_peer_info() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::get_block_template`] for more information.
 #[tokio::test]
-async fn get_block_template() -> Result<()> {
+async fn rpc_get_block_template() -> Result<()> {
     common::get_block_template_rpcs::get_block_template::run().await
 }
 
@@ -2555,7 +2555,7 @@ async fn get_block_template() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::submit_block`] for more information.
 #[tokio::test]
-async fn submit_block() -> Result<()> {
+async fn rpc_submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
 

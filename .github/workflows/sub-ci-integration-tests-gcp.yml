@@ -180,7 +180,7 @@ jobs:
       app_name: zebrad
       test_id: sync-update-mainnet
       test_description: Test syncing to tip with a Zebra tip state
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},SYNC_UPDATE=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},SYNC_UPDATE_MAINNET=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
@@ -318,7 +318,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-full
       test_description: Test lightwalletd full sync
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_SYNC_FULL=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LWD_SYNC_FULL=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
@@ -353,7 +353,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-update
       test_description: Test lightwalletd update sync with both states
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_SYNC_UPDATE=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_SYNC_UPDATE_MAINNET=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: true
@@ -381,7 +381,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-test
       test_description: Test lightwalletd RPC with a Zebra tip state
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},RPC_FULLY_SYNCED_TEST=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LWD_RPC_TEST=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true
       saves_to_disk: false
     secrets: inherit
@@ -403,7 +403,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-send-tx
       test_description: Test sending transactions via lightwalletd
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_SEND_TRANSACTIONS=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LWD_RPC_SEND_TX=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -426,7 +426,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LIGHTWALLETD_GRPC_WALLET=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},LWD_GRPC_WALLET=1,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -451,7 +451,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
-      test_id: rpc-get-template
+      test_id: rpc-get-block-template
       test_description: Test getblocktemplate RPC method via Zebra's rpc server
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},RPC_GET_BLOCK_TEMPLATE=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true
@@ -474,7 +474,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && github.event.inputs.regenerate-disks != 'true' && github.event.inputs.run-full-sync != 'true' && github.event.inputs.run-lwd-sync != 'true' }}
     with:
       app_name: zebrad
-      test_id: submit-block
+      test_id: rpc-submit-block
       test_description: Test submitting blocks via Zebra's rpc server
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},RPC_SUBMIT_BLOCK=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true
