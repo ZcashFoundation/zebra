@@ -24,6 +24,15 @@ pub fn test_transaction_serialization() {
         size: None,
         time: None,
         txid: transaction::Hash::from([0u8; 32]),
+        in_active_chain: None,
+        auth_digest: None,
+        overwintered: false,
+        version: 2,
+        version_group_id: None,
+        lock_time: 0,
+        expiry_height: None,
+        block_hash: None,
+        block_time: None,
     }));
 
     assert_eq!(
@@ -45,6 +54,15 @@ pub fn test_transaction_serialization() {
         size: None,
         time: None,
         txid: transaction::Hash::from([0u8; 32]),
+        in_active_chain: None,
+        auth_digest: None,
+        overwintered: false,
+        version: 4,
+        version_group_id: None,
+        lock_time: 0,
+        expiry_height: None,
+        block_hash: None,
+        block_time: None,
     }));
 
     assert_eq!(

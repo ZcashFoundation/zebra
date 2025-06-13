@@ -333,7 +333,7 @@ proptest! {
 
         runtime.block_on(async move {
             // Check the invalid TXID first.
-            let rpc_rsp = rpc.get_raw_transaction(invalid_txid, Some(1)).await;
+            let rpc_rsp = rpc.get_raw_transaction(invalid_txid, Some(1), None).await;
 
             check_err_code(rpc_rsp, ErrorCode::ServerError(-5))?;
 
@@ -350,7 +350,7 @@ proptest! {
                 .expect_request(zebra_state::ReadRequest::Transaction(unknown_txid))
                 .map_ok(|r| r.respond(zebra_state::ReadResponse::Transaction(None)));
 
-            let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(1));
+            let rpc_query = rpc.get_raw_transaction(unknown_txid.encode_hex(), Some(1), None);
 
             let (rpc_rsp, _, _) =  tokio::join!(rpc_query, mempool_query, state_query);
 
