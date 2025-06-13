@@ -1,5 +1,7 @@
 //! Fixed Zebra RPC serialization test vectors.
 
+use zebra_chain::transaction;
+
 use crate::methods::{types::transaction::TransactionObject, GetBlock, GetRawTransaction};
 
 #[test]
@@ -21,11 +23,12 @@ pub fn test_transaction_serialization() {
         orchard: None,
         size: None,
         time: None,
+        txid: transaction::Hash::from([0u8; 32]),
     }));
 
     assert_eq!(
         serde_json::to_string(&tx).unwrap(),
-        r#"{"hex":"42","height":1,"confirmations":0}"#
+        r#"{"hex":"42","height":1,"confirmations":0,"txid":"0000000000000000000000000000000000000000000000000000000000000000"}"#
     );
 
     let tx = GetRawTransaction::Object(Box::new(TransactionObject {
@@ -41,9 +44,13 @@ pub fn test_transaction_serialization() {
         orchard: None,
         size: None,
         time: None,
+        txid: transaction::Hash::from([0u8; 32]),
     }));
 
-    assert_eq!(serde_json::to_string(&tx).unwrap(), r#"{"hex":"42"}"#);
+    assert_eq!(
+        serde_json::to_string(&tx).unwrap(),
+        r#"{"hex":"42","txid":"0000000000000000000000000000000000000000000000000000000000000000"}"#
+    );
 }
 
 #[test]

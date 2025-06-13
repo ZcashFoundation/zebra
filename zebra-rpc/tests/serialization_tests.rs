@@ -386,6 +386,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let value_balance_zat = tx.value_balance_zat;
     let size = tx.size;
     let time = tx.time;
+    let txid = tx.txid;
 
     // TODO: add test for ShieldedSpend, ShieldedOutput, Orchard
 
@@ -402,6 +403,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         value_balance_zat,
         size,
         time,
+        txid,
     }));
 
     assert_eq!(obj, new_obj);

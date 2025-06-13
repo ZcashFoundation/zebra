@@ -44,6 +44,7 @@ expression: rsp
     "valueBalance": 0.0,
     "valueBalanceZat": 0,
     "size": 129,
-    "time": 1477671596
+    "time": 1477671596,
+    "txid": "851bf6fbf7a976327817c738c489d7fa657752445430922d94c983c0b9ed4609"
   }
 }
