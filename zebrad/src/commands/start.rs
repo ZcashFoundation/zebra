@@ -207,7 +207,7 @@ impl StartCmd {
         );
 
         info!("initializing mempool");
-        let (mempool, mempool_transaction_receiver) = Mempool::new(
+        let (mempool, mempool_transaction_subscriber) = Mempool::new(
             &config.mempool,
             peer_set.clone(),
             state.clone(),
@@ -273,14 +273,14 @@ impl StartCmd {
 
         // TODO: Add a shutdown signal and start the server with `serve_with_incoming_shutdown()` if
         //       any related unit tests sometimes crash with memory errors
-        #[cfg(feature = "indexer")]
-        let indexer_rpc_task_handle =
+        let indexer_rpc_task_handle = {
             if let Some(indexer_listen_addr) = config.rpc.indexer_listen_addr {
                 info!("spawning indexer RPC server");
                 let (indexer_rpc_task_handle, _listen_addr) = zebra_rpc::indexer::server::init(
                     indexer_listen_addr,
                     read_only_state_service.clone(),
                     latest_chain_tip.clone(),
+                    mempool_transaction_subscriber.clone(),
                 )
                 .await
                 .map_err(|err| eyre!(err))?;
@@ -289,12 +289,8 @@ impl StartCmd {
             } else {
                 warn!("configure an indexer_listen_addr to start the indexer RPC server");
                 tokio::spawn(std::future::pending().in_current_span())
-            };
-
-        #[cfg(not(feature = "indexer"))]
-        // Spawn a dummy indexer rpc task which doesn't do anything and never finishes.
-        let indexer_rpc_task_handle: tokio::task::JoinHandle<Result<(), tower::BoxError>> =
-            tokio::spawn(std::future::pending().in_current_span());
+            }
+        };
 
         // Start concurrent tasks which don't add load to other tasks
         info!("spawning block gossip task");
@@ -313,8 +309,11 @@ impl StartCmd {
 
         info!("spawning mempool transaction gossip task");
         let tx_gossip_task_handle = tokio::spawn(
-            mempool::gossip_mempool_transaction_id(mempool_transaction_receiver, peer_set.clone())
-                .in_current_span(),
+            mempool::gossip_mempool_transaction_id(
+                mempool_transaction_subscriber.subscribe(),
+                peer_set.clone(),
+            )
+            .in_current_span(),
         );
 
         info!("spawning delete old databases task");

@@ -3,7 +3,6 @@
 use std::{future, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use futures::{future::BoxFuture, Future, FutureExt};
 
 use crate::{block, parameters::Network, transaction, BoxError};
 
@@ -64,11 +63,9 @@ pub trait ChainTip {
     /// Returns an error if Zebra is shutting down, or the state has permanently failed.
     ///
     /// See [`tokio::watch::Receiver::changed()`](https://docs.rs/tokio/latest/tokio/sync/watch/struct.Receiver.html#method.changed) for details.
-    //
-    // TODO:
-    // Use async_fn_in_trait or return_position_impl_trait_in_trait when one of them stabilises:
-    // https://github.com/rust-lang/rust/issues/91611
-    fn best_tip_changed(&mut self) -> BestTipChanged;
+    fn best_tip_changed(
+        &mut self,
+    ) -> impl std::future::Future<Output = Result<(), BoxError>> + Send;
 
     /// Mark the current best tip as seen.
     ///
@@ -123,33 +120,6 @@ pub trait ChainTip {
     }
 }
 
-/// A future for the [`ChainTip::best_tip_changed()`] method.
-/// See that method for details.
-pub struct BestTipChanged<'f> {
-    fut: BoxFuture<'f, Result<(), BoxError>>,
-}
-
-impl<'f> BestTipChanged<'f> {
-    /// Returns a new [`BestTipChanged`] containing `fut`.
-    pub fn new<Fut>(fut: Fut) -> Self
-    where
-        Fut: Future<Output = Result<(), BoxError>> + Send + 'f,
-    {
-        Self { fut: Box::pin(fut) }
-    }
-}
-
-impl Future for BestTipChanged<'_> {
-    type Output = Result<(), BoxError>;
-
-    fn poll(
-        mut self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        self.fut.poll_unpin(cx)
-    }
-}
-
 /// A chain tip that is always empty and never changes.
 ///
 /// Used in production for isolated network connections,
@@ -183,8 +153,8 @@ impl ChainTip for NoChainTip {
     }
 
     /// The [`NoChainTip`] best tip never changes, so this never returns.
-    fn best_tip_changed(&mut self) -> BestTipChanged {
-        BestTipChanged::new(future::pending())
+    async fn best_tip_changed(&mut self) -> Result<(), BoxError> {
+        future::pending().await
     }
 
     /// The [`NoChainTip`] best tip never changes, so this does nothing.

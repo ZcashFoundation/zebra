@@ -8,11 +8,14 @@ use tonic::{Response, Status};
 use tower::BoxError;
 
 use zebra_chain::chain_tip::ChainTip;
+use zebra_node_services::mempool::MempoolChangeKind;
 
-use super::{indexer_server::Indexer, server::IndexerRPC, Empty};
+use super::{
+    indexer_server::Indexer, server::IndexerRPC, BlockHashAndHeight, Empty, MempoolChangeMessage,
+};
 
 /// The maximum number of messages that can be queued to be streamed to a client
-const RESPONSE_BUFFER_SIZE: usize = 10_000;
+const RESPONSE_BUFFER_SIZE: usize = 4_000;
 
 #[tonic::async_trait]
 impl<ReadStateService, Tip> Indexer for IndexerRPC<ReadStateService, Tip>
@@ -28,7 +31,10 @@ where
     <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    type ChainTipChangeStream = Pin<Box<dyn Stream<Item = Result<Empty, Status>> + Send>>;
+    type ChainTipChangeStream =
+        Pin<Box<dyn Stream<Item = Result<BlockHashAndHeight, Status>> + Send>>;
+    type MempoolChangeStream =
+        Pin<Box<dyn Stream<Item = Result<MempoolChangeMessage, Status>> + Send>>;
 
     async fn chain_tip_change(
         &self,
@@ -41,13 +47,70 @@ where
         tokio::spawn(async move {
             // Notify the client of chain tip changes until the channel is closed
             while let Ok(()) = chain_tip_change.best_tip_changed().await {
-                let tx = response_sender.clone();
-                tokio::spawn(async move { tx.send(Ok(Empty {})).await });
+                let Some((tip_height, tip_hash)) = chain_tip_change.best_tip_height_and_hash()
+                else {
+                    continue;
+                };
+
+                if let Err(error) = response_sender
+                    .send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)))
+                    .await
+                {
+                    tracing::info!(?error, "failed to send chain tip change, dropping task");
+                    return;
+                }
             }
 
+            tracing::warn!("chain_tip_change channel has closed");
             let _ = response_sender
                 .send(Err(Status::unavailable(
                     "chain_tip_change channel has closed",
+                )))
+                .await;
+        });
+
+        Ok(Response::new(Box::pin(response_stream)))
+    }
+
+    async fn mempool_change(
+        &self,
+        _: tonic::Request<Empty>,
+    ) -> Result<Response<Self::MempoolChangeStream>, Status> {
+        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
+        let response_stream = ReceiverStream::new(response_receiver);
+        let mut mempool_change = self.mempool_change.subscribe();
+
+        tokio::spawn(async move {
+            // Notify the client of chain tip changes until the channel is closed
+            while let Ok(change) = mempool_change.recv().await {
+                for tx_id in change.tx_ids() {
+                    tracing::debug!("mempool change: {:?}", change);
+
+                    if let Err(error) = response_sender
+                        .send(Ok(MempoolChangeMessage {
+                            change_type: match change.kind() {
+                                MempoolChangeKind::Added => 0,
+                                MempoolChangeKind::Invalidated => 1,
+                                MempoolChangeKind::Mined => 2,
+                            },
+                            tx_hash: tx_id.mined_id().bytes_in_display_order().to_vec(),
+                            auth_digest: tx_id
+                                .auth_digest()
+                                .map(|d| d.bytes_in_display_order().to_vec())
+                                .unwrap_or_default(),
+                        }))
+                        .await
+                    {
+                        tracing::info!(?error, "failed to send mempool change, dropping task");
+                        return;
+                    }
+                }
+            }
+
+            tracing::warn!("mempool_change channel has closed");
+            let _ = response_sender
+                .send(Err(Status::unavailable(
+                    "mempool_change channel has closed",
                 )))
                 .await;
         });
