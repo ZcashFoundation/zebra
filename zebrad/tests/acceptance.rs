@@ -168,8 +168,12 @@ use tower::ServiceExt;
 
 use zcash_keys::address::Address;
 use zebra_chain::{
-    block::{self, genesis::regtest_genesis_block, Height},
-    parameters::Network::{self, *},
+    block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
+    chain_tip::ChainTip,
+    parameters::{
+        testnet::ConfiguredActivationHeights,
+        Network::{self, *},
+    },
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -183,7 +187,7 @@ use zebra_rpc::{
             },
             submit_block::{self, SubmitBlockChannel},
         },
-        RpcImpl, RpcServer,
+        GetBlockHash, RpcImpl, RpcServer,
     },
     server::OPENED_RPC_ENDPOINT_MSG,
 };
@@ -2974,15 +2978,17 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use common::regtest::MiningRpcMethods;
     use eyre::Error;
     use tokio::time::timeout;
-    use zebra_chain::{
-        chain_tip::ChainTip, parameters::NetworkUpgrade,
-        primitives::byte_array::increment_big_endian,
-    };
-    use zebra_rpc::methods::GetBlockHash;
+    use zebra_chain::primitives::byte_array::increment_big_endian;
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
+
+    let activation_heights = ConfiguredActivationHeights {
+        nu5: Some(1),
+        ..Default::default()
+    };
+
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
     config.state.ephemeral = false;
     let network = config.network.network.clone();
 
@@ -3020,7 +3026,10 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client.submit_block_from_template().await?;
+        let (block, height) = rpc_client.block_from_template().await?;
+
+        rpc_client.submit_block(block.clone()).await?;
+
         blocks.push(block);
         let tip_action = timeout(
             Duration::from_secs(1),
@@ -3067,12 +3076,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     }
 
     tracing::info!("getting next block template");
-    let (block_11, _) = rpc_client.block_from_template(Height(100)).await?;
-    let next_blocks: Vec<_> = blocks
-        .split_off(5)
-        .into_iter()
-        .chain(std::iter::once(block_11))
-        .collect();
+    let (block_11, _) = rpc_client.block_from_template().await?;
+    blocks.push(block_11);
+    let next_blocks: Vec<_> = blocks.split_off(5);
 
     tracing::info!("creating populated state");
     let genesis_block = regtest_genesis_block();
@@ -3085,11 +3091,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     tracing::info!("attempting to trigger a best chain change");
     for mut block in next_blocks {
-        let is_chain_history_activation_height = NetworkUpgrade::Heartwood
-            .activation_height(&network)
-            == Some(block.coinbase_height().unwrap());
-        let header = Arc::make_mut(&mut block.header);
-        increment_big_endian(header.nonce.as_mut());
         let ReadResponse::ChainInfo(chain_info) = read_state2
             .clone()
             .oneshot(zebra_state::ReadRequest::ChainInfo)
@@ -3099,13 +3100,22 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             unreachable!("wrong response variant");
         };
 
-        header.previous_block_hash = chain_info.tip_hash;
-        header.commitment_bytes = chain_info
+        let auth_root = block.auth_data_root();
+
+        let history_root = chain_info
             .chain_history_root
-            .or(is_chain_history_activation_height.then_some([0; 32].into()))
-            .expect("history tree can't be empty")
-            .bytes_in_serialized_order()
-            .into();
+            .expect("chain history root should be present");
+
+        let header = Arc::make_mut(&mut block.header);
+
+        header.commitment_bytes =
+            ChainHistoryBlockTxAuthCommitmentHash::from_commitments(&history_root, &auth_root)
+                .bytes_in_serialized_order()
+                .into();
+
+        increment_big_endian(header.nonce.as_mut());
+
+        header.previous_block_hash = chain_info.tip_hash;
 
         let Response::Committed(block_hash) = state2
             .clone()
