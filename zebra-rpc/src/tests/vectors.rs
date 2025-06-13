@@ -47,7 +47,10 @@ pub fn test_transaction_serialization() {
         txid: transaction::Hash::from([0u8; 32]),
     }));
 
-    assert_eq!(serde_json::to_string(&tx).unwrap(), r#"{"hex":"42","txid":"0000000000000000000000000000000000000000000000000000000000000000"}"#);
+    assert_eq!(
+        serde_json::to_string(&tx).unwrap(),
+        r#"{"hex":"42","txid":"0000000000000000000000000000000000000000000000000000000000000000"}"#
+    );
 }
 
 #[test]
