@@ -8,7 +8,7 @@ use hex::ToHex;
 
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
-    block::{self, merkle::AUTH_DIGEST_PLACEHOLDER},
+    block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::Network,
     sapling::NotSmallOrderValueCommitment,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
@@ -17,6 +17,7 @@ use zebra_chain::{
 use zebra_consensus::groth16::Description;
 use zebra_state::IntoDisk;
 
+use super::super::opthex;
 use super::zec::Zec;
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
@@ -143,6 +144,10 @@ impl TransactionTemplate<NegativeOrZero> {
 /// requests.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TransactionObject {
+    /// Whether specified block is in the active chain or not (only present with
+    /// explicit "blockhash" argument)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_active_chain: Option<bool>,
     /// The raw transaction, encoded as hex bytes.
     #[serde(with = "hex")]
     pub hex: SerializedTransaction,
@@ -194,7 +199,51 @@ pub struct TransactionObject {
     /// The transaction identifier, encoded as hex bytes.
     #[serde(with = "hex")]
     pub txid: transaction::Hash,
+
     // TODO: some fields not yet supported
+    //
+    /// The transaction's auth digest. For pre-v5 transactions this will be
+    /// ffff..ffff
+    #[serde(
+        rename = "authdigest",
+        with = "opthex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub auth_digest: Option<transaction::AuthDigest>,
+
+    /// Whether the overwintered flag is set
+    pub overwintered: bool,
+
+    /// The version of the transaction.
+    pub version: u32,
+
+    /// The version group ID.
+    #[serde(
+        rename = "versiongroupid",
+        with = "opthex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub version_group_id: Option<Vec<u8>>,
+
+    /// The lock time
+    #[serde(rename = "locktime")]
+    pub lock_time: u32,
+
+    /// The block height after which the transaction expires
+    #[serde(rename = "expiryheight", skip_serializing_if = "Option::is_none")]
+    pub expiry_height: Option<Height>,
+
+    /// The block hash
+    #[serde(
+        rename = "blockhash",
+        with = "opthex",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub block_hash: Option<block::Hash>,
+
+    /// The block height after which the transaction expires
+    #[serde(rename = "blocktime", skip_serializing_if = "Option::is_none")]
+    pub block_time: Option<i64>,
 }
 
 /// The transparent input of a transaction.
@@ -386,6 +435,15 @@ impl Default for TransactionObject {
             size: None,
             time: None,
             txid: transaction::Hash::from([0u8; 32]),
+            in_active_chain: None,
+            auth_digest: None,
+            overwintered: false,
+            version: 4,
+            version_group_id: None,
+            lock_time: 0,
+            expiry_height: None,
+            block_hash: None,
+            block_time: None,
         }
     }
 }
@@ -399,7 +457,10 @@ impl TransactionObject {
         confirmations: Option<u32>,
         network: &Network,
         block_time: Option<DateTime<Utc>>,
+        block_hash: Option<block::Hash>,
+        in_active_chain: Option<bool>,
     ) -> Self {
+        let block_time = block_time.map(|bt| bt.timestamp());
         Self {
             hex: tx.clone().into(),
             height: height.map(|height| height.0),
@@ -568,8 +629,17 @@ impl TransactionObject {
                 })
             },
             size: tx.as_bytes().len().try_into().ok(),
-            time: block_time.map(|bt| bt.timestamp()),
+            time: block_time,
             txid: tx.hash(),
+            in_active_chain,
+            auth_digest: tx.auth_digest(),
+            overwintered: tx.is_overwintered(),
+            version: tx.version(),
+            version_group_id: tx.version_group_id().map(|id| id.to_be_bytes().to_vec()),
+            lock_time: tx.raw_lock_time(),
+            expiry_height: tx.expiry_height(),
+            block_hash,
+            block_time,
         }
     }
 }

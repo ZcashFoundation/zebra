@@ -387,6 +387,15 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let size = tx.size;
     let time = tx.time;
     let txid = tx.txid;
+    let in_active_chain = tx.in_active_chain;
+    let auth_digest = tx.auth_digest;
+    let overwintered = tx.overwintered;
+    let version = tx.version;
+    let version_group_id = tx.version_group_id.clone();
+    let lock_time = tx.lock_time;
+    let expiry_height = tx.expiry_height;
+    let block_hash = tx.block_hash;
+    let block_time = tx.block_time;
 
     // TODO: add test for ShieldedSpend, ShieldedOutput, Orchard
 
@@ -404,6 +413,15 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         size,
         time,
         txid,
+        in_active_chain,
+        auth_digest,
+        overwintered,
+        version,
+        version_group_id,
+        lock_time,
+        expiry_height,
+        block_hash,
+        block_time,
     }));
 
     assert_eq!(obj, new_obj);

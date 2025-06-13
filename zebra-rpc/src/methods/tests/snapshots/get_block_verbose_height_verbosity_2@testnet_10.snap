@@ -13,6 +13,7 @@ expression: block
   "finalsaplingroot": "0000000000000000000000000000000000000000000000000000000000000000",
   "tx": [
     {
+      "in_active_chain": true,
       "hex": "01000000010000000000000000000000000000000000000000000000000000000000000000ffffffff03510101ffffffff0250c30000000000002321025229e1240a21004cf8338db05679fa34753706e84f6aebba086ba04317fd8f99acd43000000000000017a914ef775f1f997f122a062fff1a2d7443abd1f9c6428700000000",
       "height": 1,
       "confirmations": 10,
@@ -54,7 +55,12 @@ expression: block
       "valueBalanceZat": 0,
       "size": 130,
       "time": 1477674473,
-      "txid": "f37e9f691fffb635de0999491d906ee85ba40cd36dae9f6e5911a8277d7c5f75"
+      "txid": "f37e9f691fffb635de0999491d906ee85ba40cd36dae9f6e5911a8277d7c5f75",
+      "overwintered": false,
+      "version": 1,
+      "locktime": 0,
+      "blockhash": "025579869bcf52a989337342f5f57a84f3a28b968f7d6a8307902b065a668d23",
+      "blocktime": 1477674473
     }
   ],
   "time": 1477674473,
