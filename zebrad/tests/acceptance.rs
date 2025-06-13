@@ -3250,7 +3250,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
             },
-            NetworkUpgrade,
         },
         serialization::ZcashSerialize,
         work::difficulty::U256,
@@ -3365,7 +3364,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         )
     };
 
-    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
     // Check that the block template is a valid block proposal
@@ -3474,7 +3473,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         ..(*block_template)
     };
 
-    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
 
     // Submit the invalid block with an excessive coinbase output value
     let submit_block_response = rpc
@@ -3516,7 +3515,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         ..block_template
     };
 
-    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
 
     // Submit the invalid block with an excessive coinbase input value
     let submit_block_response = rpc
@@ -3532,8 +3531,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the original block template can be submitted successfully
-    let proposal_block =
-        proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&valid_original_block_template, None)?;
     let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;

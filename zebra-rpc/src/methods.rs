@@ -2648,7 +2648,6 @@ where
             let proposal_block = proposal_block_from_template(
                 &block_template,
                 get_block_template::TimeSource::CurTime,
-                NetworkUpgrade::current(&network, Height(block_template.height)),
             )
             .map_error(server::error::LegacyCode::default())?;
             let hex_proposal_block = HexData(

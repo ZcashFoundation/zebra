@@ -12,10 +12,7 @@ use color_eyre::eyre::Result;
 use serde_json::Value;
 use structopt::StructOpt;
 
-use zebra_chain::{
-    parameters::NetworkUpgrade,
-    serialization::{DateTime32, ZcashSerialize},
-};
+use zebra_chain::serialization::{DateTime32, ZcashSerialize};
 use zebra_rpc::methods::types::{
     get_block_template::{proposal::proposal_block_from_template, GetBlockTemplate},
     long_poll::LONG_POLL_ID_LENGTH,
@@ -99,7 +96,7 @@ fn main() -> Result<()> {
     let template: GetBlockTemplate = serde_json::from_value(template)?;
 
     // generate proposal according to arguments
-    let proposal = proposal_block_from_template(&template, time_source, NetworkUpgrade::Nu5)?;
+    let proposal = proposal_block_from_template(&template, time_source)?;
     eprintln!("{proposal:#?}");
 
     let proposal = proposal
