@@ -20,9 +20,7 @@ use zcash_protocol::PoolType;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{
-        self,
-        merkle::{self, AuthDataRoot},
-        Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
+        self, Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
         MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_sync_status::ChainSyncStatus,
@@ -797,12 +795,11 @@ pub fn generate_coinbase_and_roots(
                 .then_some([0; 32].into())
         })
         .expect("history tree can't be empty");
-    let default_roots =
-        calculate_default_root_hashes(&coinbase_txn, mempool_txs, chain_history_root);
 
-    let coinbase_txn = TransactionTemplate::from_coinbase(&coinbase_txn, miner_fee);
-
-    (coinbase_txn, default_roots)
+    (
+        TransactionTemplate::from_coinbase(&coinbase_txn, miner_fee),
+        calculate_default_root_hashes(&coinbase_txn, mempool_txs, chain_history_root),
+    )
 }
 
 // - Coinbase transaction processing
@@ -908,7 +905,9 @@ pub fn calculate_default_root_hashes(
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: ChainHistoryMmrRootHash,
 ) -> DefaultRoots {
-    let (merkle_root, auth_data_root) = calculate_transaction_roots(coinbase_txn, mempool_txs);
+    let block_txs = || iter::once(coinbase_txn).chain(mempool_txs.iter().map(|tx| &tx.transaction));
+    let merkle_root = block_txs().cloned().collect();
+    let auth_data_root = block_txs().cloned().collect();
 
     let block_commitments_hash = if chain_history_root == [0; 32].into() {
         [0; 32].into()
@@ -925,22 +924,4 @@ pub fn calculate_default_root_hashes(
         auth_data_root,
         block_commitments_hash,
     }
-}
-
-/// Returns the transaction effecting and authorizing roots
-/// for `coinbase_txn` and `mempool_txs`, which are used in the block header.
-//
-// TODO: should this be spawned into a cryptographic operations pool?
-//       (it would only matter if there were a lot of small transactions in a block)
-pub fn calculate_transaction_roots(
-    coinbase_txn: &UnminedTx,
-    mempool_txs: &[VerifiedUnminedTx],
-) -> (merkle::Root, AuthDataRoot) {
-    let block_transactions =
-        || iter::once(coinbase_txn).chain(mempool_txs.iter().map(|tx| &tx.transaction));
-
-    let merkle_root = block_transactions().cloned().collect();
-    let auth_data_root = block_transactions().cloned().collect();
-
-    (merkle_root, auth_data_root)
 }
