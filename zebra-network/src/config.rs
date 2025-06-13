@@ -62,7 +62,7 @@ pub struct Config {
     /// `address` can be an IP address or a DNS name. DNS names are
     /// only resolved once, when Zebra starts up.
     ///
-    /// By default, Zebra listens on '[::]' (all IPv6 and IPv4 addresses).
+    /// By default, Zebra listens on `[::]` (all IPv6 and IPv4 addresses).
     /// This enables dual-stack support, accepting both IPv4 and IPv6 connections.
     ///
     /// If a specific listener address is configured, Zebra will advertise
@@ -845,7 +845,7 @@ impl<'de> Deserialize<'de> for Config {
         };
 
         let [max_connections_per_ip, peerset_initial_target_size] = [
-            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP), 
+            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP),
             // If we want Zebra to operate with no network,
             // we should implement a `zebrad` command that doesn't use `zebra-network`.
             ("peerset_initial_target_size", Some(peerset_initial_target_size), DEFAULT_PEERSET_INITIAL_TARGET_SIZE)
