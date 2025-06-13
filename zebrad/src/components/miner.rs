@@ -61,10 +61,10 @@ pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 /// mining thread.
 ///
 /// See [`run_mining_solver()`] for more details.
-pub fn spawn_init<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>(
+pub fn spawn_init<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>(
     network: &Network,
     config: &Config,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> JoinHandle<Result<(), Report>>
 // TODO: simplify or avoid repeating these generics (how?)
 where
@@ -78,6 +78,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -85,7 +94,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -109,10 +118,10 @@ where
 /// mining thread.
 ///
 /// See [`run_mining_solver()`] for more details.
-pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+pub async fn init<Mempool, State, ReadState, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     network: Network,
     _config: Config,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -125,6 +134,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -132,7 +150,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -216,13 +234,14 @@ where
 pub async fn generate_block_templates<
     Mempool,
     State,
+    ReadState,
     Tip,
     BlockVerifierRouter,
     SyncStatus,
     AddressBook,
 >(
     network: Network,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
     template_sender: watch::Sender<Option<Arc<Block>>>,
 ) -> Result<(), Report>
 where
@@ -236,6 +255,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -243,7 +271,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -330,10 +358,18 @@ where
 /// It can run for minutes or hours if the network difficulty is high. Mining uses a thread with
 /// low CPU priority.
 #[instrument(skip(template_receiver, rpc))]
-pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+pub async fn run_mining_solver<
+    Mempool,
+    State,
+    ReadState,
+    Tip,
+    BlockVerifierRouter,
+    SyncStatus,
+    AddressBook,
+>(
     solver_id: u8,
     mut template_receiver: WatchReceiver<Option<Arc<Block>>>,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -346,6 +382,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -353,7 +398,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone

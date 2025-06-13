@@ -32,6 +32,15 @@ pub enum Response {
     /// successfully committed to the state.
     Committed(block::Hash),
 
+    /// Response to [`Request::InvalidateBlock`] indicating that a block was found and
+    /// invalidated in the state.
+    Invalidated(block::Hash),
+
+    /// Response to [`Request::ReconsiderBlock`] indicating that a previously invalidated
+    /// block was reconsidered and re-committed to the non-finalized state. Contains a list
+    /// of block hashes that were reconsidered in the state and successfully re-committed.
+    Reconsidered(Vec<block::Hash>),
+
     /// Response to [`Request::Depth`] with the depth of the specified block.
     Depth(Option<u32>),
 

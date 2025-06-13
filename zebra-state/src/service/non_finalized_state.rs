@@ -21,7 +21,7 @@ use crate::{
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
     service::{check, finalized_state::ZebraDb},
-    SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 mod chain;
@@ -272,9 +272,10 @@ impl NonFinalizedState {
 
     /// Invalidate block with hash `block_hash` and all descendants from the non-finalized state. Insert
     /// the new chain into the chain_set and discard the previous.
-    pub fn invalidate_block(&mut self, block_hash: Hash) {
+    #[allow(clippy::unwrap_in_result)]
+    pub fn invalidate_block(&mut self, block_hash: Hash) -> Result<block::Hash, BoxError> {
         let Some(chain) = self.find_chain(|chain| chain.contains_block_hash(block_hash)) else {
-            return;
+            return Err("block hash not found in any non-finalized chain".into());
         };
 
         let invalidated_blocks = if chain.non_finalized_root_hash() == block_hash {
@@ -294,8 +295,13 @@ impl NonFinalizedState {
             invalidated_blocks
         };
 
+        // TODO: Allow for invalidating multiple block hashes at a given height (#9552).
         self.invalidated_blocks.insert(
-            invalidated_blocks.first().unwrap().clone().height,
+            invalidated_blocks
+                .first()
+                .expect("should not be empty")
+                .clone()
+                .height,
             Arc::new(invalidated_blocks),
         );
 
@@ -305,6 +311,8 @@ impl NonFinalizedState {
 
         self.update_metrics_for_chains();
         self.update_metrics_bars();
+
+        Ok(block_hash)
     }
 
     /// Reconsiders a previously invalidated block and its descendants into the non-finalized state
@@ -314,7 +322,7 @@ impl NonFinalizedState {
         &mut self,
         block_hash: block::Hash,
         finalized_state: &ZebraDb,
-    ) -> Result<(), ReconsiderError> {
+    ) -> Result<Vec<block::Hash>, ReconsiderError> {
         // Get the invalidated blocks that were invalidated by the given block_hash
         let height = self
             .invalidated_blocks
@@ -328,16 +336,21 @@ impl NonFinalizedState {
             })
             .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
 
-        let mut invalidated_blocks = self
-            .invalidated_blocks
-            .clone()
-            .shift_remove(height)
-            .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?;
-        let mut_blocks = Arc::make_mut(&mut invalidated_blocks);
+        let invalidated_blocks = Arc::unwrap_or_clone(
+            self.invalidated_blocks
+                .clone()
+                .shift_remove(height)
+                .ok_or(ReconsiderError::MissingInvalidatedBlock(block_hash))?,
+        );
+
+        let invalidated_block_hashes = invalidated_blocks
+            .iter()
+            .map(|block| block.hash)
+            .collect::<Vec<_>>();
 
         // Find and fork the parent chain of the invalidated_root. Update the parent chain
         // with the invalidated_descendants
-        let invalidated_root = mut_blocks
+        let invalidated_root = invalidated_blocks
             .first()
             .ok_or(ReconsiderError::InvalidatedBlocksEmpty)?;
 
@@ -366,7 +379,7 @@ impl NonFinalizedState {
         };
 
         let mut modified_chain = Arc::unwrap_or_clone(chain_result);
-        for block in Arc::unwrap_or_clone(invalidated_blocks) {
+        for block in invalidated_blocks {
             modified_chain = modified_chain.push(block)?;
         }
 
@@ -385,7 +398,7 @@ impl NonFinalizedState {
 
         self.update_metrics_for_committed_block(height, hash);
 
-        Ok(())
+        Ok(invalidated_block_hashes)
     }
 
     /// Commit block to the non-finalized state as a new chain where its parent
