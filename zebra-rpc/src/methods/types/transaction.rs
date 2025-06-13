@@ -191,7 +191,7 @@ pub struct TransactionObject {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<i64>,
 
-    /// The raw transaction, encoded as hex bytes.
+    /// The transaction identifier, encoded as hex bytes.
     #[serde(with = "hex")]
     pub txid: transaction::Hash,
     // TODO: some fields not yet supported
