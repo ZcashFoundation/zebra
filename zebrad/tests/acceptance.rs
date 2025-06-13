@@ -174,18 +174,15 @@ use zebra_chain::{
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    methods::{
-        types::{
-            get_block_template::{
-                self, fetch_state_tip_and_local_time, generate_coinbase_and_roots,
-                proposal::proposal_block_from_template, GetBlockTemplate,
-                GetBlockTemplateRequestMode,
-            },
-            submit_block::{self, SubmitBlockChannel},
-        },
-        RpcImpl, RpcServer,
+    client::{
+        BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+        GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
     },
+    fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+    methods::{RpcImpl, RpcServer},
+    proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
+    SubmitBlockChannel,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 use zebra_test::{
@@ -2981,7 +2978,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         chain_tip::ChainTip, parameters::NetworkUpgrade,
         primitives::byte_array::increment_big_endian,
     };
-    use zebra_rpc::methods::GetBlockHash;
+    use zebra_rpc::methods::GetBlockHashResponse;
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
@@ -3128,12 +3125,12 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
-        let GetBlockHash(best_block_hash) = rpc_client
+        let best_block_hash: GetBlockHashResponse = rpc_client
             .json_result_from_call("getbestblockhash", "[]")
             .await
             .map_err(|err| eyre!(err))?;
 
-        if block_hash == best_block_hash {
+        if block_hash == best_block_hash.hash() {
             break;
         }
     }
@@ -3260,7 +3257,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     };
     use zebra_network::address_book_peers::MockAddressBookPeers;
     use zebra_node_services::mempool;
-    use zebra_rpc::methods::hex_data::HexData;
+    use zebra_rpc::client::HexData;
     use zebra_test::mock_service::MockService;
 
     let _init_guard = zebra_test::init();
@@ -3360,7 +3357,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let block_template_fut = rpc.get_block_template(None);
     let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
     let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
-    let get_block_template::Response::TemplateMode(block_template) =
+    let GetBlockTemplateResponse::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -3372,12 +3369,14 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
     // Check that the block template is a valid block proposal
-    let get_block_template::Response::ProposalMode(block_proposal_result) = rpc
-        .get_block_template(Some(get_block_template::JsonParameters {
-            mode: GetBlockTemplateRequestMode::Proposal,
-            data: Some(hex_proposal_block),
-            ..Default::default()
-        }))
+    let GetBlockTemplateResponse::ProposalMode(block_proposal_result) = rpc
+        .get_block_template(Some(GetBlockTemplateParameters::new(
+            GetBlockTemplateRequestMode::Proposal,
+            Some(hex_proposal_block),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )))
         .await?
     else {
         panic!(
@@ -3397,7 +3396,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::Accepted,
+        SubmitBlockResponse::Accepted,
         "valid block should be accepted"
     );
 
@@ -3437,7 +3436,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let block_template_fut = rpc.get_block_template(None);
     let mock_mempool_request_handler = make_mock_mempool_request_handler.clone()();
     let (block_template, _) = tokio::join!(block_template_fut, mock_mempool_request_handler);
-    let get_block_template::Response::TemplateMode(block_template) =
+    let GetBlockTemplateResponse::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -3461,7 +3460,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
-        Height(block_template.height),
+        Height(block_template.height()),
         &miner_address,
         &[],
         chain_history_root,
@@ -3469,14 +3468,29 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
     );
 
-    let block_template = GetBlockTemplate {
-        coinbase_txn,
-        block_commitments_hash: default_roots.block_commitments_hash,
-        light_client_root_hash: default_roots.block_commitments_hash,
-        final_sapling_root_hash: default_roots.block_commitments_hash,
+    let block_template = BlockTemplateResponse::new(
+        block_template.capabilities().clone(),
+        block_template.version(),
+        block_template.previous_block_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
         default_roots,
-        ..(*block_template)
-    };
+        block_template.transactions().clone(),
+        coinbase_txn,
+        block_template.long_poll_id(),
+        block_template.target(),
+        block_template.min_time(),
+        block_template.mutable().clone(),
+        block_template.nonce_range().clone(),
+        block_template.sigop_limit(),
+        block_template.size_limit(),
+        block_template.cur_time(),
+        block_template.bits(),
+        block_template.height(),
+        block_template.max_time(),
+        block_template.submit_old(),
+    );
 
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
@@ -3489,7 +3503,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Rejected),
         "invalid block with excessive coinbase output value should be rejected"
     );
 
@@ -3504,7 +3518,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
         &network,
-        Height(block_template.height),
+        Height(block_template.height()),
         &miner_address,
         &[],
         chain_history_root,
@@ -3512,14 +3526,29 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         vec![],
     );
 
-    let block_template = GetBlockTemplate {
-        coinbase_txn,
-        block_commitments_hash: default_roots.block_commitments_hash,
-        light_client_root_hash: default_roots.block_commitments_hash,
-        final_sapling_root_hash: default_roots.block_commitments_hash,
+    let block_template = BlockTemplateResponse::new(
+        block_template.capabilities().clone(),
+        block_template.version(),
+        block_template.previous_block_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
+        default_roots.block_commitments_hash(),
         default_roots,
-        ..block_template
-    };
+        block_template.transactions().clone(),
+        coinbase_txn,
+        block_template.long_poll_id(),
+        block_template.target(),
+        block_template.min_time(),
+        block_template.mutable().clone(),
+        block_template.nonce_range().clone(),
+        block_template.sigop_limit(),
+        block_template.size_limit(),
+        block_template.cur_time(),
+        block_template.bits(),
+        block_template.height(),
+        block_template.max_time(),
+        block_template.submit_old(),
+    );
 
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
@@ -3532,7 +3561,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Rejected),
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Rejected),
         "invalid block with insufficient coinbase output value should be rejected"
     );
 
@@ -3545,7 +3574,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     assert_eq!(
         submit_block_response,
-        submit_block::Response::Accepted,
+        SubmitBlockResponse::Accepted,
         "valid block should be accepted"
     );
 

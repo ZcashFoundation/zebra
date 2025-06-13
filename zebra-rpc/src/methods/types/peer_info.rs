@@ -1,23 +1,22 @@
 //! An array of [`PeerInfo`] is the output of the `getpeerinfo` RPC method.
 
+use derive_getters::Getters;
+use derive_new::new;
 use zebra_network::{types::MetaAddr, PeerSocketAddr};
 
 /// Item of the `getpeerinfo` response
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct PeerInfo {
     /// The IP address and port of the peer
-    pub addr: PeerSocketAddr,
+    #[getter(copy)]
+    pub(crate) addr: PeerSocketAddr,
 
     /// Inbound (true) or Outbound (false)
-    pub inbound: bool,
+    pub(crate) inbound: bool,
 }
 
-impl PeerInfo {
-    /// Create a new `PeerInfo` from a `MetaAddr`
-    pub fn new(meta_addr: MetaAddr) -> Self {
-        Self::from(meta_addr)
-    }
-}
+/// Response type for the `getpeerinfo` RPC method.
+pub type GetPeerInfoResponse = Vec<PeerInfo>;
 
 impl From<MetaAddr> for PeerInfo {
     fn from(meta_addr: MetaAddr) -> Self {

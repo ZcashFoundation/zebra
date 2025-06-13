@@ -35,13 +35,14 @@ use zebra_test::mock_service::MockService;
 use crate::methods::{
     self,
     types::{
-        get_blockchain_info,
-        get_raw_mempool::{GetRawMempool, MempoolObject},
+        get_blockchain_info::GetBlockchainInfoBalance,
+        get_raw_mempool::{GetRawMempoolResponse, MempoolObject},
     },
 };
 
 use super::super::{
-    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
+    AddressStrings, GetAddressBalanceResponse, NetworkUpgradeStatus, RpcImpl, RpcServer,
+    SendRawTransactionResponse,
 };
 
 proptest! {
@@ -56,7 +57,7 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            let hash = SentTransactionHash(transaction.hash());
+            let hash = SendRawTransactionResponse(transaction.hash());
 
             let transaction_bytes = transaction.zcash_serialize_to_vec()?;
 
@@ -284,9 +285,9 @@ proptest! {
                             )
                         })
                         .collect::<HashMap<_, _>>();
-                    GetRawMempool::Verbose(map)
+                    GetRawMempoolResponse::Verbose(map)
                 } else {
-                    GetRawMempool::TxIds(expected_response)
+                    GetRawMempoolResponse::TxIds(expected_response)
                 };
 
                 let mempool_query = mempool
@@ -587,7 +588,7 @@ proptest! {
             prop_assert_eq!(response.best_block_hash, genesis_block.header.hash());
             prop_assert_eq!(response.chain, network.bip70_network_name());
             prop_assert_eq!(response.blocks, Height::MIN);
-            prop_assert_eq!(response.value_pools, get_blockchain_info::Balance::value_pools(ValueBalance::zero()));
+            prop_assert_eq!(response.value_pools, GetBlockchainInfoBalance::value_pools(ValueBalance::zero()));
 
             let genesis_branch_id = NetworkUpgrade::current(&network, Height::MIN).branch_id().unwrap_or(ConsensusBranchId::RPC_MISSING_ID);
             let next_height = (Height::MIN + 1).expect("genesis height plus one is next height and valid");
@@ -658,7 +659,7 @@ proptest! {
             // Check that response contains the expected balance
             let received_balance = response?;
 
-            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into(), received: balance.into() });
+            prop_assert_eq!(received_balance, GetAddressBalanceResponse { balance: balance.into(), received: balance.into() });
 
             // Check no further requests were made during this test
             mempool.expect_no_requests().await?;

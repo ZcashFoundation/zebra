@@ -53,15 +53,12 @@ use crate::methods::{
     hex_data::HexData,
     tests::utils::fake_history_tree,
     types::{
-        get_block_template::{self, GetBlockTemplateRequestMode},
-        get_mining_info,
+        get_block_template::GetBlockTemplateRequestMode,
         long_poll::{LongPollId, LONG_POLL_ID_LENGTH},
         peer_info::PeerInfo,
-        submit_block,
-        subsidy::BlockSubsidy,
-        unified_address, validate_address, z_validate_address,
+        subsidy::GetBlockSubsidyResponse,
     },
-    GetBlockHash,
+    GetBlockHashResponse,
 };
 
 use super::super::*;
@@ -442,7 +439,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // make the api call
     let get_raw_mempool = rpc.get_raw_mempool(None);
     let (response, _) = futures::join!(get_raw_mempool, mempool_req);
-    let GetRawMempool::TxIds(get_raw_mempool) =
+    let GetRawMempoolResponse::TxIds(get_raw_mempool) =
         response.expect("We should have a GetRawTransaction struct")
     else {
         panic!("should return TxIds for non verbose");
@@ -647,7 +644,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 }
 
 /// Snapshot `getinfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
+fn snapshot_rpc_getinfo(info: GetInfoResponse, settings: &insta::Settings) {
     settings.bind(|| {
         insta::assert_json_snapshot!("get_info", info, {
             ".subversion" => dynamic_redaction(|value, _path| {
@@ -666,7 +663,7 @@ fn snapshot_rpc_getinfo(info: GetInfo, settings: &insta::Settings) {
 /// Snapshot `getblockchaininfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockchaininfo(
     variant_suffix: &str,
-    info: GetBlockChainInfo,
+    info: GetBlockchainInfoResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -688,7 +685,10 @@ fn snapshot_rpc_getblockchaininfo(
 }
 
 /// Snapshot `getaddressbalance` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &insta::Settings) {
+fn snapshot_rpc_getaddressbalance(
+    address_balance: GetAddressBalanceResponse,
+    settings: &insta::Settings,
+) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_balance", address_balance));
 }
 
@@ -698,7 +698,7 @@ fn snapshot_rpc_getaddressbalance(address_balance: AddressBalance, settings: &in
 /// The snapshot file does not contain any data, but it does enforce the response format.
 fn snapshot_rpc_getblock_data(
     variant: &'static str,
-    block: GetBlock,
+    block: GetBlockResponse,
     expected_block_data: &[u8],
     settings: &insta::Settings,
 ) {
@@ -719,7 +719,7 @@ fn snapshot_rpc_getblock_data(
 /// Check valid `getblock` response with verbosity=1, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblock_verbose(
     variant: &'static str,
-    block: GetBlock,
+    block: GetBlockResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!(format!("get_block_verbose_{variant}"), block));
@@ -728,7 +728,7 @@ fn snapshot_rpc_getblock_verbose(
 /// Check valid `getblockheader` response using `cargo insta`.
 fn snapshot_rpc_getblockheader(
     variant: &'static str,
-    block: GetBlockHeader,
+    block: GetBlockHeaderResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| insta::assert_json_snapshot!(format!("get_block_header_{variant}"), block));
@@ -737,7 +737,7 @@ fn snapshot_rpc_getblockheader(
 /// Check invalid height `getblock` response using `cargo insta`.
 fn snapshot_rpc_getblock_invalid(
     variant: &'static str,
-    response: Result<GetBlock>,
+    response: Result<GetBlockResponse>,
     settings: &insta::Settings,
 ) {
     settings
@@ -745,7 +745,7 @@ fn snapshot_rpc_getblock_invalid(
 }
 
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHash, settings: &insta::Settings) {
+fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHashResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
 }
 
@@ -780,7 +780,7 @@ fn snapshot_rpc_getaddresstxids_invalid(
 }
 
 /// Snapshot `getaddressutxos` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getaddressutxos(utxos: Vec<GetAddressUtxos>, settings: &insta::Settings) {
+fn snapshot_rpc_getaddressutxos(utxos: Vec<Utxo>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_address_utxos", utxos));
 }
 
@@ -790,14 +790,14 @@ fn snapshot_rpc_getblockcount(block_count: u32, settings: &insta::Settings) {
 }
 
 /// Snapshot valid `getblockhash` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getblockhash_valid(block_hash: GetBlockHash, settings: &insta::Settings) {
+fn snapshot_rpc_getblockhash_valid(block_hash: GetBlockHashResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_block_hash_valid", block_hash));
 }
 
 /// Snapshot invalid `getblockhash` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblockhash_invalid(
     variant: &'static str,
-    block_hash: Result<GetBlockHash>,
+    block_hash: Result<GetBlockHashResponse>,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -808,7 +808,7 @@ fn snapshot_rpc_getblockhash_invalid(
 /// Snapshot `getblocktemplate` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblocktemplate(
     variant: &'static str,
-    block_template: get_block_template::Response,
+    block_template: GetBlockTemplateResponse,
     coinbase_tx: Option<Transaction>,
     settings: &insta::Settings,
 ) {
@@ -828,7 +828,7 @@ fn snapshot_rpc_getblocktemplate(
 
 /// Snapshot `submitblock` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_submit_block_invalid(
-    submit_block_response: submit_block::Response,
+    submit_block_response: SubmitBlockResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -837,17 +837,14 @@ fn snapshot_rpc_submit_block_invalid(
 }
 
 /// Snapshot `getmininginfo` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getmininginfo(
-    get_mining_info: get_mining_info::Response,
-    settings: &insta::Settings,
-) {
+fn snapshot_rpc_getmininginfo(get_mining_info: GetMiningInfoResponse, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_mining_info", get_mining_info));
 }
 
 /// Snapshot `getblocksubsidy` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getblocksubsidy(
     variant: &'static str,
-    get_block_subsidy: BlockSubsidy,
+    get_block_subsidy: GetBlockSubsidyResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -868,7 +865,7 @@ fn snapshot_rpc_getnetworksolps(get_network_sol_ps: u64, settings: &insta::Setti
 /// Snapshot `validateaddress` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_validateaddress(
     variant: &'static str,
-    validate_address: validate_address::Response,
+    validate_address: ValidateAddressResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -879,7 +876,7 @@ fn snapshot_rpc_validateaddress(
 /// Snapshot `z_validateaddress` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_z_validateaddress(
     variant: &'static str,
-    z_validate_address: z_validate_address::Response,
+    z_validate_address: ZValidateAddressResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -901,7 +898,7 @@ fn snapshot_rpc_getdifficulty_valid(
 /// Snapshot `snapshot_rpc_z_listunifiedreceivers` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_z_listunifiedreceivers(
     variant: &'static str,
-    response: unified_address::Response,
+    response: ZListUnifiedReceiversResponse,
     settings: &insta::Settings,
 ) {
     settings.bind(|| {
@@ -1156,7 +1153,7 @@ pub async fn test_mining_rpcs<ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -1190,7 +1187,7 @@ pub async fn test_mining_rpcs<ReadState>(
     let mock_mempool_request_handler = make_mock_mempool_request_handler();
 
     let get_block_template_fut = rpc_mock_state.get_block_template(
-        get_block_template::JsonParameters {
+        GetBlockTemplateParameters {
             long_poll_id: long_poll_id.into(),
             ..Default::default()
         }
@@ -1203,7 +1200,7 @@ pub async fn test_mining_rpcs<ReadState>(
         mock_read_state_request_handler,
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -1227,12 +1224,11 @@ pub async fn test_mining_rpcs<ReadState>(
 
     // `getblocktemplate` proposal mode variant
 
-    let get_block_template =
-        rpc_mock_state.get_block_template(Some(get_block_template::JsonParameters {
-            mode: GetBlockTemplateRequestMode::Proposal,
-            data: Some(HexData("".into())),
-            ..Default::default()
-        }));
+    let get_block_template = rpc_mock_state.get_block_template(Some(GetBlockTemplateParameters {
+        mode: GetBlockTemplateRequestMode::Proposal,
+        data: Some(HexData("".into())),
+        ..Default::default()
+    }));
 
     let get_block_template = get_block_template
         .await
@@ -1260,7 +1256,7 @@ pub async fn test_mining_rpcs<ReadState>(
     );
 
     let get_block_template_fut =
-        rpc_mock_state_verifier.get_block_template(Some(get_block_template::JsonParameters {
+        rpc_mock_state_verifier.get_block_template(Some(GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(HexData(BLOCK_MAINNET_1_BYTES.to_vec())),
             ..Default::default()

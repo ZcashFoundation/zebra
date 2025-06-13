@@ -84,10 +84,7 @@ use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
 use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
-use zebra_rpc::{
-    methods::{types::submit_block::SubmitBlockChannel, RpcImpl},
-    server::RpcServer,
-};
+use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
 use crate::{
     application::{build_version, user_agent, LAST_WARN_ERROR_LOG_SENDER},

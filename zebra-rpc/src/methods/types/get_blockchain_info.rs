@@ -12,7 +12,7 @@ use super::*;
 /// A value pool's balance in Zec and Zatoshis
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Balance {
+pub struct GetBlockchainInfoBalance {
     /// Name of the pool
     #[serde(skip_serializing_if = "String::is_empty", default)]
     id: String,
@@ -24,13 +24,13 @@ pub struct Balance {
     monitored: bool,
 }
 
-impl Balance {
-    /// Returns a list of [`Balance`]s converted from the default [`ValueBalance`].
+impl GetBlockchainInfoBalance {
+    /// Returns a list of [`GetBlockchainInfoBalance`]s converted from the default [`ValueBalance`].
     pub fn zero_pools() -> [Self; 5] {
         Self::value_pools(Default::default())
     }
 
-    /// Creates a new [`Balance`] from a pool name and its value balance.
+    /// Creates a new [`GetBlockchainInfoBalance`] from a pool name and its value balance.
     pub fn new(id: impl ToString, amount: Amount<NonNegative>) -> Self {
         Self {
             id: id.to_string(),
@@ -40,32 +40,32 @@ impl Balance {
         }
     }
 
-    /// Creates a [`Balance`] for the transparent pool.
+    /// Creates a [`GetBlockchainInfoBalance`] for the transparent pool.
     pub fn transparent(amount: Amount<NonNegative>) -> Self {
         Self::new("transparent", amount)
     }
 
-    /// Creates a [`Balance`] for the Sprout pool.
+    /// Creates a [`GetBlockchainInfoBalance`] for the Sprout pool.
     pub fn sprout(amount: Amount<NonNegative>) -> Self {
         Self::new("sprout", amount)
     }
 
-    /// Creates a [`Balance`] for the Sapling pool.
+    /// Creates a [`GetBlockchainInfoBalance`] for the Sapling pool.
     pub fn sapling(amount: Amount<NonNegative>) -> Self {
         Self::new("sapling", amount)
     }
 
-    /// Creates a [`Balance`] for the Orchard pool.
+    /// Creates a [`GetBlockchainInfoBalance`] for the Orchard pool.
     pub fn orchard(amount: Amount<NonNegative>) -> Self {
         Self::new("orchard", amount)
     }
 
-    /// Creates a [`Balance`] for the Deferred pool.
+    /// Creates a [`GetBlockchainInfoBalance`] for the Deferred pool.
     pub fn deferred(amount: Amount<NonNegative>) -> Self {
         Self::new("deferred", amount)
     }
 
-    /// Converts a [`ValueBalance`] to a list of [`Balance`]s.
+    /// Converts a [`ValueBalance`] to a list of [`GetBlockchainInfoBalance`]s.
     pub fn value_pools(value_balance: ValueBalance<NonNegative>) -> [Self; 5] {
         [
             Self::transparent(value_balance.transparent_amount()),
@@ -76,12 +76,12 @@ impl Balance {
         ]
     }
 
-    /// Converts a [`ValueBalance`] to a [`Balance`] representing the total chain supply.
+    /// Converts a [`ValueBalance`] to a [`GetBlockchainInfoBalance`] representing the total chain supply.
     pub fn chain_supply(value_balance: ValueBalance<NonNegative>) -> Self {
         Self::value_pools(value_balance)
             .into_iter()
             .reduce(|a, b| {
-                Balance::new(
+                GetBlockchainInfoBalance::new(
                     "",
                     (a.chain_value_zat + b.chain_value_zat)
                         .expect("sum of value balances should not overflow"),
