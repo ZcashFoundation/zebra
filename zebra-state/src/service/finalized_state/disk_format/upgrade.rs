@@ -497,12 +497,12 @@ impl DbFormatChange {
             )
         });
 
-        let inital_disk_version = self
+        let initial_disk_version = self
             .initial_disk_version()
             .map_or_else(|| "None".to_string(), |version| version.to_string());
         info!(
             running_version = %self.running_version(),
-            %inital_disk_version,
+            %initial_disk_version,
             "database format is valid"
         );
 
