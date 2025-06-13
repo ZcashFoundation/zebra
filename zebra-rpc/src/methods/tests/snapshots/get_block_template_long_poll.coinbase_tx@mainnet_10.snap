@@ -22,7 +22,7 @@ V5(
   outputs: [
     Output(
       value: 250000000,
-      lock_script: Script("76a9147e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e88ac"),
+      lock_script: Script("a9147e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e87"),
     ),
     Output(
       value: 21875000,

@@ -950,7 +950,7 @@ pub async fn test_mining_rpcs<ReadState>(
 
     #[allow(clippy::unnecessary_struct_initialization)]
     let mining_conf = crate::config::mining::Config {
-        miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+        miner_address: Some(ZcashAddress::from_transparent_p2sh(
             NetworkType::from(NetworkKind::from(network)),
             [0x7e; 20],
         )),
