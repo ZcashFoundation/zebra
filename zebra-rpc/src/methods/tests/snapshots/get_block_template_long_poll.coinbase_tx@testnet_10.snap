@@ -2,20 +2,27 @@
 source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: coinbase_tx
 ---
-V4(
+V5(
+  network_upgrade: NU5,
+  lock_time: Height(Height(0)),
+  expiry_height: Height(1842421),
   inputs: [
     Coinbase(
       height: Height(1842421),
       data: CoinbaseData([
-        0,
+        122,
+        240,
+        159,
+        166,
+        147,
       ]),
-      sequence: 4294967295,
+      sequence: 0,
     ),
   ],
   outputs: [
     Output(
       value: 250000000,
-      lock_script: Script("76a9147e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e88ac"),
+      lock_script: Script("a9147e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e87"),
     ),
     Output(
       value: 15625000,
@@ -30,8 +37,6 @@ V4(
       lock_script: Script("a91471e1df05024288a00802de81e08c437859586c8787"),
     ),
   ],
-  lock_time: Height(Height(0)),
-  expiry_height: Height(1842421),
-  joinsplit_data: None,
   sapling_shielded_data: None,
+  orchard_shielded_data: None,
 )

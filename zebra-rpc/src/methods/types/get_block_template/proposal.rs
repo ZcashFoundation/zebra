@@ -6,7 +6,6 @@ use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block, Height},
-    parameters::NetworkUpgrade,
     serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
     work::equihash::Solution,
 };
@@ -173,7 +172,6 @@ impl FromStr for TimeSource {
 pub fn proposal_block_from_template(
     template: &GetBlockTemplate,
     time_source: impl Into<Option<TimeSource>>,
-    network_upgrade: NetworkUpgrade,
 ) -> Result<Block, SerializationError> {
     let GetBlockTemplate {
         version,
@@ -183,7 +181,6 @@ pub fn proposal_block_from_template(
             DefaultRoots {
                 merkle_root,
                 block_commitments_hash,
-                chain_history_root,
                 ..
             },
         bits: difficulty_threshold,
@@ -209,18 +206,7 @@ pub fn proposal_block_from_template(
         transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
     }
 
-    let commitment_bytes = match network_upgrade {
-        NetworkUpgrade::Genesis
-        | NetworkUpgrade::BeforeOverwinter
-        | NetworkUpgrade::Overwinter
-        | NetworkUpgrade::Sapling
-        | NetworkUpgrade::Blossom
-        | NetworkUpgrade::Heartwood => panic!("pre-Canopy block templates not supported"),
-        NetworkUpgrade::Canopy => chain_history_root.bytes_in_serialized_order().into(),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
-            block_commitments_hash.bytes_in_serialized_order().into()
-        }
-    };
+    let commitment_bytes = block_commitments_hash.bytes_in_serialized_order().into();
 
     Ok(Block {
         header: Arc::new(block::Header {

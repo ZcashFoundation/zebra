@@ -2,4 +2,4 @@
 source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: rsp
 ---
-[]
+{}
