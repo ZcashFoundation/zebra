@@ -33,6 +33,7 @@ class AddNodeTest (BitcoinTestFramework):
 
         # As we connected the nodes to each other, they should have,
         # at least 4 peers. Poll for that.
+        # TODO: Add a function for this check.
         timeout_for_connetions = 120
         wait_time = 1
         while timeout_for_connetions > 0:

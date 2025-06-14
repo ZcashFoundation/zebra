@@ -4,14 +4,11 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://www.opensource.org/licenses/mit-license.php .
 
-from test_framework.test_framework import BitcoinTestFramework
-from test_framework.authproxy import JSONRPCException
-from test_framework.mininode import COIN
-from test_framework.util import assert_equal, start_nodes, start_wallets, start_node, \
-    connect_nodes_bi, sync_blocks, sync_mempools
-from test_framework.zip317 import conventional_fee
-
 from decimal import Decimal
+import time
+
+from test_framework.test_framework import BitcoinTestFramework
+from test_framework.util import assert_equal, start_nodes, start_wallets, connect_nodes_bi
 
 class WalletTest (BitcoinTestFramework):
 
@@ -23,11 +20,9 @@ class WalletTest (BitcoinTestFramework):
     def setup_network(self, split=False):
         self.nodes = start_nodes(3, self.options.tmpdir)
 
-        # TODO: Connect nodes between them, we need addnode RPC method:
-        # https://github.com/ZcashFoundation/zebra/issues/9555
-        #connect_nodes_bi(self.nodes,0,1)
-        #connect_nodes_bi(self.nodes,1,2)
-        #connect_nodes_bi(self.nodes,0,2)
+        connect_nodes_bi(self.nodes,0,1)
+        connect_nodes_bi(self.nodes,1,2)
+        connect_nodes_bi(self.nodes,0,2)
         self.is_network_split=False
         self.sync_all()
 
@@ -35,20 +30,31 @@ class WalletTest (BitcoinTestFramework):
         self.nodes[0].generate(1)
         self.sync_all()
 
-        # But as we can't connect nodes yet, we need to generate a block to each node manually
-        # TODO: Remove this when we have addnode RPC method:
-        # https://github.com/ZcashFoundation/zebra/issues/9555
-        for i in range(1, len(self.nodes)):
-            self.nodes[i].generate(1)
-
         # TODO: Wallets can be started but we need to add miner address at least one of them:
         # https://github.com/ZcashFoundation/zebra/issues/9557
         self.wallets = start_wallets(3, self.options.tmpdir)
 
     def run_test(self):
+        print("checking connections...")
+
+        # As we connected the nodes to each other, they should have,
+        # at least 4 peers. Poll for that.
+        # TODO: Add a function for this check.
+        timeout_for_connetions = 120
+        wait_time = 1
+        while timeout_for_connetions > 0:
+            if (len(self.nodes[0].getpeerinfo()) < 4 or
+                len(self.nodes[1].getpeerinfo()) < 4 or
+                len(self.nodes[2].getpeerinfo()) < 4):
+                timeout -= wait_time
+                time.sleep(wait_time)
+            else:
+                break
+        assert timeout_for_connetions > 0, "Timeout waiting for connections"
+
         print("Mining blocks...")
 
-        self.nodes[0].generate(4)
+        self.nodes[0].generate(1)
         self.sync_all()
 
         walletinfo = self.wallets[0].getwalletinfo()
