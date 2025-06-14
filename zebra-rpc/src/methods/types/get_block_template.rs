@@ -770,51 +770,31 @@ where
 /// Generates and returns the coinbase transaction and default roots.
 pub fn generate_coinbase_and_roots(
     network: &Network,
-    block_template_height: Height,
+    height: Height,
     miner_address: &Address,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
     extra_coinbase_data: Vec<u8>,
 ) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
-    // Generate the coinbase transaction
     let miner_fee = calculate_miner_fee(mempool_txs);
-    let coinbase_txn = generate_coinbase_transaction(
-        network,
-        block_template_height,
-        miner_address,
-        miner_fee,
-        extra_coinbase_data,
-    );
+    let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
+    let coinbase =
+        Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into();
 
     // Calculate block default roots
     //
     // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
     let chain_history_root = chain_history_root
         .or_else(|| {
-            (NetworkUpgrade::Heartwood.activation_height(network) == Some(block_template_height))
+            (NetworkUpgrade::Heartwood.activation_height(network) == Some(height))
                 .then_some([0; 32].into())
         })
         .expect("history tree can't be empty");
 
     (
-        TransactionTemplate::from_coinbase(&coinbase_txn, miner_fee),
-        calculate_default_root_hashes(&coinbase_txn, mempool_txs, chain_history_root),
+        TransactionTemplate::from_coinbase(&coinbase, miner_fee),
+        calculate_default_root_hashes(&coinbase, mempool_txs, chain_history_root),
     )
-}
-
-// - Coinbase transaction processing
-
-/// Returns a coinbase transaction for the supplied parameters.
-pub fn generate_coinbase_transaction(
-    network: &Network,
-    height: Height,
-    miner_address: &Address,
-    miner_fee: Amount<NonNegative>,
-    extra_coinbase_data: Vec<u8>,
-) -> UnminedTx {
-    let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
-
-    Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into()
 }
 
 /// Returns the total miner fee for `mempool_txs`.

@@ -19,20 +19,20 @@ use zebra_chain::{
     amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
+    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, VerifiedUnminedTx},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
 
-use crate::methods::{
-    get_block_template::generate_coinbase_transaction, types::transaction::TransactionTemplate,
-};
+use crate::methods::types::transaction::TransactionTemplate;
 
 #[cfg(test)]
 mod tests;
 
 #[cfg(test)]
 use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
+
+use super::standard_coinbase_outputs;
 
 /// Used in the return type of [`select_mempool_transactions()`] for test compilations.
 #[cfg(test)]
@@ -138,7 +138,7 @@ pub fn select_mempool_transactions(
 /// This transaction's serialized size and sigops must be at least as large as the real coinbase
 /// transaction with the correct height and fee.
 pub fn fake_coinbase_transaction(
-    network: &Network,
+    net: &Network,
     height: Height,
     miner_address: &Address,
     extra_coinbase_data: Vec<u8>,
@@ -153,16 +153,10 @@ pub fn fake_coinbase_transaction(
     // so one zat has the same size as the real amount:
     // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
     let miner_fee = 1.try_into().expect("amount is valid and non-negative");
+    let outputs = standard_coinbase_outputs(net, height, miner_address, miner_fee);
+    let coinbase = Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into();
 
-    let coinbase_tx = generate_coinbase_transaction(
-        network,
-        height,
-        miner_address,
-        miner_fee,
-        extra_coinbase_data,
-    );
-
-    TransactionTemplate::from_coinbase(&coinbase_tx, miner_fee)
+    TransactionTemplate::from_coinbase(&coinbase, miner_fee)
 }
 
 /// Returns a fee-weighted index and the total weight of `transactions`.
