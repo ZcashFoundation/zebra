@@ -42,6 +42,10 @@ deny = [
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
+    # wait for other dependencies to match zcash_script
+    # This is not in `skip-tree` because we don't want to allow duplicated
+    # secp256k1-sys crates, where the C code lives
+    { name = "secp256k1", version = "=0.29.1" }
 ]
 
 # Similarly to `skip` allows you to skip certain crates during duplicate

@@ -39,7 +39,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        subsidy::{
+            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
+            ParameterSubsidy,
+        },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
@@ -52,11 +55,8 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
-    ParameterCheckpoint, RouterError,
-};
-use zebra_network::address_book_peers::AddressBookPeers;
+use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
+use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
@@ -497,7 +497,7 @@ pub trait Rpc {
     #[method(name = "getpeerinfo")]
     async fn get_peer_info(&self) -> Result<Vec<PeerInfo>>;
 
-    /// Checks if a zcash address is valid.
+    /// Checks if a zcash transparent address of type P2PKH, P2SH or TEX is valid.
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`validateaddress`](https://zcash.github.io/rpc/validateaddress.html)
@@ -510,7 +510,7 @@ pub trait Rpc {
     #[method(name = "validateaddress")]
     async fn validate_address(&self, address: String) -> Result<validate_address::Response>;
 
-    /// Checks if a zcash address is valid.
+    /// Checks if a zcash address of type P2PKH, P2SH, TEX, SAPLING or UNIFIED is valid.
     /// Returns information about the given address if valid.
     ///
     /// zcashd reference: [`z_validateaddress`](https://zcash.github.io/rpc/z_validateaddress.html)
@@ -583,6 +583,23 @@ pub trait Rpc {
     /// method: post
     /// tags: generating
     async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>>;
+
+    #[method(name = "addnode")]
+    /// Add or remove a node from the address book.
+    ///
+    /// # Parameters
+    ///
+    /// - `addr`: (string, required) The address of the node to add or remove.
+    /// - `command`: (string, required) The command to execute, either "add", "onetry", or "remove".
+    ///
+    /// # Notes
+    ///
+    /// Only the "add" command is currently supported.
+    ///
+    /// zcashd reference: [`addnode`](https://zcash.github.io/rpc/addnode.html)
+    /// method: post
+    /// tags: network
+    async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
 }
 
 /// RPC method implementations.
@@ -1026,8 +1043,9 @@ where
         let response = state.oneshot(request).await.map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+            zebra_state::ReadResponse::AddressBalance { balance, received } => Ok(AddressBalance {
                 balance: u64::from(balance),
+                received,
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
         }
@@ -1907,7 +1925,6 @@ where
     ) -> Result<get_block_template::Response> {
         // Clone Configs
         let network = self.network.clone();
-        let miner_address = self.gbt.miner_address();
         let debug_like_zcashd = self.debug_like_zcashd;
         let extra_coinbase_data = self.gbt.extra_coinbase_data();
 
@@ -1936,11 +1953,10 @@ where
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
-        // - One-off checks
-
-        // Check config and parameters.
-        // These checks always have the same result during long polling.
-        let miner_address = get_block_template::check_miner_address(miner_address)?;
+        let miner_address = self
+            .gbt
+            .miner_address()
+            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //
@@ -2663,6 +2679,35 @@ where
 
         Ok(block_hashes)
     }
+
+    async fn add_node(
+        &self,
+        addr: zebra_network::PeerSocketAddr,
+        command: AddNodeCommand,
+    ) -> Result<()> {
+        if self.network.is_regtest() {
+            match command {
+                AddNodeCommand::Add => {
+                    tracing::info!(?addr, "adding peer address to the address book");
+                    if self.address_book.clone().add_peer(addr) {
+                        Ok(())
+                    } else {
+                        return Err(ErrorObject::owned(
+                            ErrorCode::InvalidParams.code(),
+                            format!("peer address was already present in the address book: {addr}"),
+                            None::<()>,
+                        ));
+                    }
+                }
+            }
+        } else {
+            return Err(ErrorObject::owned(
+                ErrorCode::InvalidParams.code(),
+                "addnode command is only supported on regtest",
+                None::<()>,
+            ));
+        }
+    }
 }
 
 // TODO: Move the code below to separate modules.
@@ -3007,10 +3052,32 @@ impl GetBlockChainInfo {
 ///
 /// This is used for the input parameter of [`RpcServer::get_address_balance`],
 /// [`RpcServer::get_address_tx_ids`] and [`RpcServer::get_address_utxos`].
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
+#[serde(from = "DAddressStrings")]
 pub struct AddressStrings {
     /// A list of transparent address strings.
     addresses: Vec<String>,
+}
+
+impl From<DAddressStrings> for AddressStrings {
+    fn from(address_strings: DAddressStrings) -> Self {
+        match address_strings {
+            DAddressStrings::Addresses { addresses } => AddressStrings { addresses },
+            DAddressStrings::Address(address) => AddressStrings {
+                addresses: vec![address],
+            },
+        }
+    }
+}
+
+/// An intermediate type used to deserialize [`AddressStrings`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[serde(untagged)]
+enum DAddressStrings {
+    /// A list of address strings.
+    Addresses { addresses: Vec<String> },
+    /// A single address string.
+    Address(String),
 }
 
 impl AddressStrings {
@@ -3056,10 +3123,14 @@ impl AddressStrings {
 }
 
 /// The transparent balance of a set of addresses.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Hash, serde::Serialize)]
+#[derive(
+    Clone, Copy, Debug, Default, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize,
+)]
 pub struct AddressBalance {
     /// The total transparent balance.
     pub balance: u64,
+    /// The total received balance, including change.
+    pub received: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -3191,7 +3262,7 @@ impl SentTransactionHash {
 /// Response to a `getblock` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block`] method.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 #[allow(clippy::large_enum_variant)] //TODO: create a struct for the Object and Box it
 pub enum GetBlock {
@@ -3315,7 +3386,7 @@ impl Default for GetBlock {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 /// The transaction list in a `getblock` call. Can be a list of transaction
 /// IDs or the full transaction details depending on verbosity.
@@ -3329,7 +3400,7 @@ pub enum GetBlockTransaction {
 /// Response to a `getblockheader` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block_header`] method.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum GetBlockHeader {
     /// The request block header, hex-encoded.
@@ -3339,7 +3410,7 @@ pub enum GetBlockHeader {
     Object(Box<GetBlockHeaderObject>),
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 /// Verbose response to a `getblockheader` RPC request.
 ///
 /// See the notes for the [`RpcServer::get_block_header`] method.
@@ -3469,7 +3540,7 @@ impl Default for GetBlockHash {
 /// Response to a `getrawtransaction` RPC request.
 ///
 /// See the notes for the [`Rpc::get_raw_transaction` method].
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 pub enum GetRawTransaction {
     /// The raw transaction, encoded as hex bytes.
@@ -3487,7 +3558,7 @@ impl Default for GetRawTransaction {
 /// Response to a `getaddressutxos` RPC request.
 ///
 /// See the notes for the [`Rpc::get_address_utxos` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GetAddressUtxos {
     /// The transparent address, base58check encoded
     address: transparent::Address,
@@ -3574,7 +3645,7 @@ impl GetAddressUtxos {
 /// A struct to use as parameter of the `getaddresstxids`.
 ///
 /// See the notes for the [`Rpc::get_address_tx_ids` method].
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct GetAddressTxIdsRequest {
     // A list of addresses to get transactions from.
     addresses: Vec<String>,
@@ -3764,11 +3835,12 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
     }
 }
 
-/// A helper module to serialize `Option<T: ToHex>` as a hex string.
-mod opthex {
-    use hex::ToHex;
-    use serde::Serializer;
+/// A helper module to serialize and deserialize `Option<T: ToHex>` as a hex string.
+pub mod opthex {
+    use hex::{FromHex, ToHex};
+    use serde::{de, Deserialize, Deserializer, Serializer};
 
+    #[allow(missing_docs)]
     pub fn serialize<S, T>(data: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -3781,6 +3853,64 @@ mod opthex {
             }
             None => serializer.serialize_none(),
         }
+    }
+
+    #[allow(missing_docs)]
+    pub fn deserialize<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: FromHex,
+    {
+        let opt = Option::<String>::deserialize(deserializer)?;
+        match opt {
+            Some(s) => T::from_hex(&s)
+                .map(Some)
+                .map_err(|_e| de::Error::custom("failed to convert hex string")),
+            None => Ok(None),
+        }
+    }
+}
+
+/// A helper module to serialize and deserialize `[u8; N]` as a hex string.
+pub mod arrayhex {
+    use serde::{Deserializer, Serializer};
+    use std::fmt;
+
+    #[allow(missing_docs)]
+    pub fn serialize<S, const N: usize>(data: &[u8; N], serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let hex_string = hex::encode(data);
+        serializer.serialize_str(&hex_string)
+    }
+
+    #[allow(missing_docs)]
+    pub fn deserialize<'de, D, const N: usize>(deserializer: D) -> Result<[u8; N], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct HexArrayVisitor<const N: usize>;
+
+        impl<const N: usize> serde::de::Visitor<'_> for HexArrayVisitor<N> {
+            type Value = [u8; N];
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(formatter, "a hex string representing exactly {} bytes", N)
+            }
+
+            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                let vec = hex::decode(v).map_err(E::custom)?;
+                vec.clone().try_into().map_err(|_| {
+                    E::invalid_length(vec.len(), &format!("expected {} bytes", N).as_str())
+                })
+            }
+        }
+
+        deserializer.deserialize_str(HexArrayVisitor::<N>)
     }
 }
 
@@ -3864,4 +3994,12 @@ where
 
     // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
     Ok(pow_limit / difficulty)
+}
+
+/// Commands for the `addnode` RPC method.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AddNodeCommand {
+    /// Add a node to the address book.
+    #[serde(rename = "add")]
+    Add,
 }

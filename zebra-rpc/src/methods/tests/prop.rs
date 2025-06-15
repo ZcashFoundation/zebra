@@ -1,28 +1,19 @@
 //! Randomised property tests for RPC methods.
 
-use crate::methods::{
-    self,
-    types::{
-        get_blockchain_info,
-        get_raw_mempool::{GetRawMempool, MempoolObject},
-    },
-};
-
-use super::super::{
-    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
-};
-use futures::{join, FutureExt, TryFutureExt};
-use hex::{FromHex, ToHex};
-use jsonrpsee_types::{ErrorCode, ErrorObject};
-use proptest::{collection::vec, prelude::*};
 use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     sync::Arc,
 };
+
+use futures::{join, FutureExt, TryFutureExt};
+use hex::{FromHex, ToHex};
+use jsonrpsee_types::{ErrorCode, ErrorObject};
+use proptest::{collection::vec, prelude::*};
 use thiserror::Error;
 use tokio::sync::oneshot;
 use tower::buffer::Buffer;
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
@@ -40,6 +31,18 @@ use zebra_network::address_book_peers::MockAddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_state::{BoxError, GetBlockTemplateChainInfo};
 use zebra_test::mock_service::MockService;
+
+use crate::methods::{
+    self,
+    types::{
+        get_blockchain_info,
+        get_raw_mempool::{GetRawMempool, MempoolObject},
+    },
+};
+
+use super::super::{
+    AddressBalance, AddressStrings, NetworkUpgradeStatus, RpcImpl, RpcServer, SentTransactionHash,
+};
 
 proptest! {
     /// Test that when sending a raw transaction, it is received by the mempool service.
@@ -644,7 +647,7 @@ proptest! {
             let state_query = state
                 .expect_request(zebra_state::ReadRequest::AddressBalance(addresses))
                 .map_ok(|responder| {
-                    responder.respond(zebra_state::ReadResponse::AddressBalance(balance))
+                    responder.respond(zebra_state::ReadResponse::AddressBalance { balance, received: balance.into() })
                 });
 
             // Await the RPC call and the state query
@@ -655,7 +658,7 @@ proptest! {
             // Check that response contains the expected balance
             let received_balance = response?;
 
-            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into() });
+            prop_assert_eq!(received_balance, AddressBalance { balance: balance.into(), received: balance.into() });
 
             // Check no further requests were made during this test
             mempool.expect_no_requests().await?;

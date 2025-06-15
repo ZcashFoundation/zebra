@@ -73,22 +73,26 @@ pub struct JsonParameters {
     ///
     /// Hex-encoded block data to be validated and checked against the server's usual acceptance rules
     /// (excluding the check for a valid proof-of-work).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub data: Option<HexData>,
 
     /// A list of client-side supported capability features
     #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<GetBlockTemplateCapability>,
 
     /// An ID that delays the RPC response until the template changes.
     ///
     /// In Zebra, the ID represents the chain tip, max time, and mempool contents.
     #[serde(rename = "longpollid")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub long_poll_id: Option<LongPollId>,
 
     /// The workid for the block template.
     ///
     /// currently unused.
     #[serde(rename = "workid")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub _work_id: Option<String>,
 }
 

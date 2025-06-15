@@ -1,9 +1,14 @@
 //! Fixed test vectors for RPC methods.
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use futures::FutureExt;
 use tower::buffer::Buffer;
+
+use zcash_address::{ToAddress, ZcashAddress};
+use zcash_keys::address::Address;
+use zcash_protocol::consensus::NetworkType;
+use zcash_transparent::address::TransparentAddress;
 
 use zebra_chain::{
     amount::{Amount, NonNegative},
@@ -11,13 +16,15 @@ use zebra_chain::{
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
-    parameters::Network::*,
+    parameters::{testnet, Network::*, NetworkKind},
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
-use zebra_network::{address_book_peers::MockAddressBookPeers, types::PeerServices};
+use zebra_network::{
+    address_book_peers::MockAddressBookPeers, types::PeerServices, PeerSocketAddr,
+};
 use zebra_node_services::BoxError;
 use zebra_state::{
     GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadRequest, ReadResponse,
@@ -1791,44 +1798,39 @@ async fn rpc_getnetworksolps() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblocktemplate() {
-    // test getblocktemplate with a miner P2SH address
-    rpc_getblocktemplate_mining_address(true).await;
-    // test getblocktemplate with a miner P2PKH address
-    rpc_getblocktemplate_mining_address(false).await;
-}
-
-async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
+async fn getblocktemplate() {
     let _init_guard = zebra_test::init();
 
+    // TODO Run the test with all possible network types.
+    let net = Network::Mainnet;
+
+    // TODO Run the test with all address types supported for mining.
+    let addr = ZcashAddress::from_transparent_p2pkh(
+        NetworkType::from(NetworkKind::from(&net)),
+        [0x7e; 20],
+    );
+
+    gbt_with(net, addr).await;
+}
+
+async fn gbt_with(net: Network, addr: ZcashAddress) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
-    let network = Network::Mainnet;
-    let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(
-            network.kind(),
-            [0x7e; 20],
-        )),
-        true => Some(transparent::Address::from_pub_key_hash(
-            network.kind(),
-            [0x7e; 20],
-        )),
-    };
-
-    #[allow(clippy::unnecessary_struct_initialization)]
     let mining_conf = crate::config::mining::Config {
-        miner_address: miner_address.clone(),
+        miner_address: Some(addr.clone()),
         extra_coinbase_data: None,
         debug_like_zcashd: true,
         internal_miner: true,
     };
 
     // nu5 block height
-    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
+    let fake_tip_height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("nu5 activation height");
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
@@ -1848,7 +1850,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
-        Mainnet,
+        net.clone(),
         mining_conf,
         Default::default(),
         "0.0.1",
@@ -1913,18 +1915,17 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         )
     };
 
-    let coinbase_transaction =
+    let coinbase_addr = ZcashAddress::from(
         Transaction::zcash_deserialize(get_block_template.coinbase_txn.data.as_ref())
-            .expect("coinbase transaction data should be deserializable");
-
-    assert_eq!(
-        coinbase_transaction
+            .expect("coinbase transaction data should be deserializable")
             .outputs()
             .first()
-            .unwrap()
-            .address(&network),
-        miner_address
+            .expect("coinbase tx should have at least one output")
+            .address(&net)
+            .expect("coinbase tx output should have an address"),
     );
+
+    assert_eq!(coinbase_addr, addr);
 
     assert_eq!(get_block_template.capabilities, CAPABILITIES_FIELD.to_vec());
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
@@ -1953,13 +1954,20 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     assert!(get_block_template.coinbase_txn.required);
     assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
     assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
-    if use_p2pkh {
+
+    let taddr = Address::try_from_zcash_address(&net, addr.clone())
+        .expect("address should be convertible")
+        .to_transparent_address()
+        .expect("address should have a transparent component");
+
+    if matches!(taddr, TransparentAddress::PublicKeyHash(_)) {
         // there is one sig operation if miner address is p2pkh.
         assert_eq!(get_block_template.coinbase_txn.sigops, 1);
     } else {
         // everything in the coinbase is p2sh.
         assert_eq!(get_block_template.coinbase_txn.sigops, 0);
     }
+
     // Coinbase transaction checks for empty blocks.
     assert_eq!(
         get_block_template.coinbase_txn.fee,
@@ -2191,6 +2199,18 @@ async fn rpc_validateaddress() {
         None,
     );
 
+    // t1 address: valid
+    let validate_address = rpc
+        .validate_address("t1fMAAnYrpwt1HQ8ZqxeFqVSSi6PQjwTLUm".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "t1 address should be valid on Mainnet"
+    );
+
+    // t3 address: valid
     let validate_address = rpc
         .validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
         .await
@@ -2201,6 +2221,7 @@ async fn rpc_validateaddress() {
         "Mainnet founder address should be valid on Mainnet"
     );
 
+    // t2 address: invalid
     let validate_address = rpc
         .validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
         .await
@@ -2210,6 +2231,32 @@ async fn rpc_validateaddress() {
         validate_address,
         validate_address::Response::invalid(),
         "Testnet founder address should be invalid on Mainnet"
+    );
+
+    // tex address: valid
+    let validate_address = rpc
+        .validate_address("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "ZIP-230 sample address should be valid on Mainnet"
+    );
+
+    // sprout address: invalid
+    let validate_address = rpc
+        .validate_address(
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya"
+                .to_string(),
+        )
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert_eq!(
+        validate_address,
+        validate_address::Response::invalid(),
+        "Sapling address should be invalid on Mainnet"
     );
 }
 
@@ -2235,6 +2282,18 @@ async fn rpc_z_validateaddress() {
         None,
     );
 
+    // t1 address: valid
+    let z_validate_address = rpc
+        .z_validate_address("t1fMAAnYrpwt1HQ8ZqxeFqVSSi6PQjwTLUm".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "t1 address should be valid on Mainnet"
+    );
+
+    // t3 address: valid
     let z_validate_address = rpc
         .z_validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
         .await
@@ -2245,6 +2304,7 @@ async fn rpc_z_validateaddress() {
         "Mainnet founder address should be valid on Mainnet"
     );
 
+    // t2 address: invalid
     let z_validate_address = rpc
         .z_validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
         .await
@@ -2254,6 +2314,54 @@ async fn rpc_z_validateaddress() {
         z_validate_address,
         z_validate_address::Response::invalid(),
         "Testnet founder address should be invalid on Mainnet"
+    );
+
+    // tex address: valid
+    let z_validate_address = rpc
+        .z_validate_address("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte".to_string())
+        .await
+        .expect("we should have a z_validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "ZIP-230 sample address should be valid on Mainnet"
+    );
+
+    // sprout address: invalid
+    let z_validate_address = rpc
+        .z_validate_address("zcWsmqT4X2V4jgxbgiCzyrAfRT1vi1F4sn7M5Pkh66izzw8Uk7LBGAH3DtcSMJeUb2pi3W4SQF8LMKkU2cUuVP68yAGcomL".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert_eq!(
+        z_validate_address,
+        z_validate_address::Response::invalid(),
+        "Sprout address should be invalid on Mainnet"
+    );
+
+    // sapling address: valid
+    let z_validate_address = rpc
+        .z_validate_address(
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya"
+                .to_string(),
+        )
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Sapling address should be valid on Mainnet"
+    );
+
+    // unified address: valid
+    let z_validate_address = rpc
+        .z_validate_address("u1c4ndwzy9hx70zjdtq4qt4x3c7zm0fnh85g9thsc8sunjcpk905w898pdvw82gdpj2p0mggs9tm23u6mzwk3xn4q25fq4czglssz5l6rlj268wfamxn7z4pvmgxwfl55xf0ua2u03afw66579fplkh8mvx2tp6t8er3zvvvtvf8e43mjv7n32st3zpvamfpvmxdrnzesakax8jrq3l3e".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Unified address should be valid on Mainnet"
     );
 }
 
@@ -2463,4 +2571,73 @@ async fn rpc_z_listunifiedreceivers() {
         Some(String::from("t1dMjwmwM2a6NtavQ6SiPP8i9ofx4cgfYYP"))
     );
     assert_eq!(response.p2sh(), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_addnode() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Testnet(Arc::new(testnet::Parameters::new_regtest(
+        Default::default(),
+    )));
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet);
+
+    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
+
+    //let mock_address_book = MockAddressBookPeers::default();
+    let mock_address_book =
+        zebra_network::address_book_peers::mock::SharedMockAddressBookPeers::default();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        network,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        block_verifier_router,
+        MockSyncStatus::default(),
+        tip.clone(),
+        mock_address_book,
+        rx,
+        None,
+    );
+
+    let get_peer_info = rpc
+        .get_peer_info()
+        .await
+        .expect("We should have an array of addresses");
+
+    assert_eq!(get_peer_info, []);
+
+    let addr = PeerSocketAddr::from_str("127.0.0.1:9999").unwrap();
+
+    // Call `add_node`
+    rpc.add_node(addr, AddNodeCommand::Add)
+        .await
+        .expect("We should have an array of addresses");
+
+    let get_peer_info = rpc
+        .get_peer_info()
+        .await
+        .expect("We should have an array of addresses");
+
+    assert_eq!(
+        get_peer_info,
+        [PeerInfo {
+            addr,
+            inbound: false,
+        }]
+    );
+
+    mempool.expect_no_requests().await;
 }

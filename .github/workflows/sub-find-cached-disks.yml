@@ -20,9 +20,6 @@ on:
       disk_suffix:
         required: false
         type: string
-      prefer_main_cached_state:
-        required: false
-        type: boolean
       test_id:
         description: 'The test ID requiring the cached state disks'
         required: false
@@ -71,7 +68,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -106,7 +103,6 @@ jobs:
           NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
           DISK_PREFIX: ${{ inputs.disk_prefix }}
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
-          PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
           source ./.github/workflows/scripts/gcp-get-cached-disks.sh
           echo "state_version=${LOCAL_STATE_VERSION}" >> "${GITHUB_OUTPUT}"

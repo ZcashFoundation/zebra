@@ -18,6 +18,8 @@ use insta::{dynamic_redaction, Settings};
 use jsonrpsee::core::RpcResult as Result;
 use tower::{buffer::Buffer, util::BoxService, Service};
 
+use zcash_address::{ToAddress, ZcashAddress};
+use zcash_protocol::consensus::NetworkType;
 use zebra_chain::{
     block::{Block, Hash},
     chain_sync_status::MockSyncStatus,
@@ -27,13 +29,12 @@ use zebra_chain::{
         subsidy::POST_NU6_FUNDING_STREAMS_TESTNET,
         testnet::{self, ConfiguredActivationHeights, Parameters},
         Network::{self, Mainnet},
-        NetworkUpgrade,
+        NetworkKind, NetworkUpgrade,
     },
     sapling,
     serialization::{DateTime32, ZcashDeserializeInto},
     subtree::NoteCommitmentSubtreeData,
     transaction::Transaction,
-    transparent,
     work::difficulty::CompactDifficulty,
 };
 use zebra_consensus::Request;
@@ -942,9 +943,9 @@ pub async fn test_mining_rpcs<ReadState>(
 
     #[allow(clippy::unnecessary_struct_initialization)]
     let mining_conf = crate::config::mining::Config {
-        miner_address: Some(transparent::Address::from_script_hash(
-            network.kind(),
-            [0xad; 20],
+        miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+            NetworkType::from(NetworkKind::from(network)),
+            [0x7e; 20],
         )),
         extra_coinbase_data: None,
         debug_like_zcashd: true,

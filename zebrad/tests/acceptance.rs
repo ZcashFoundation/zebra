@@ -148,6 +148,8 @@
 //! export TMPDIR=/path/to/disk/directory
 //! ```
 
+mod common;
+
 use std::{
     cmp::Ordering,
     collections::HashSet,
@@ -164,6 +166,7 @@ use semver::Version;
 use serde_json::Value;
 use tower::ServiceExt;
 
+use zcash_keys::address::Address;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, Height},
     parameters::Network::{self, *},
@@ -185,10 +188,6 @@ use zebra_rpc::{
     server::OPENED_RPC_ENDPOINT_MSG,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
-
-#[cfg(not(target_os = "windows"))]
-use zebra_network::constants::PORT_IN_USE_ERROR;
-
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
@@ -196,11 +195,15 @@ use zebra_test::{
 };
 
 #[cfg(not(target_os = "windows"))]
+use zebra_network::constants::PORT_IN_USE_ERROR;
+#[cfg(not(target_os = "windows"))]
 use zebra_test::net::random_known_port;
 
-mod common;
-
 use common::{
+    cached_state::{
+        wait_for_state_version_message, wait_for_state_version_upgrade,
+        DATABASE_FORMAT_UPGRADE_IS_LONG,
+    },
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
@@ -219,10 +222,6 @@ use common::{
         TINY_CHECKPOINT_TIMEOUT,
     },
     test_type::TestType::{self, *},
-};
-
-use crate::common::cached_state::{
-    wait_for_state_version_message, wait_for_state_version_upgrade, DATABASE_FORMAT_UPGRADE_IS_LONG,
 };
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
@@ -3293,10 +3292,14 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let default_test_config = default_test_config(&network)?;
     let mining_config = default_test_config.mining;
-    let miner_address = mining_config
-        .miner_address
-        .clone()
-        .expect("hard-coded config should have a miner address");
+    let miner_address = Address::try_from_zcash_address(
+        &network,
+        mining_config
+            .miner_address
+            .clone()
+            .expect("mining address should be configured"),
+    )
+    .expect("configured mining address should be valid");
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network);

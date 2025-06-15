@@ -83,9 +83,10 @@ secp256k1 = { workspace = true, features = ["serde"] }
 sha2 = { workspace = true, features = ["compress"] }
 uint = { workspace = true }
 x25519-dalek = { workspace = true, features = ["serde"] }
+bech32 = { workspace = true }
 
 # ECC deps
-halo2 = { package = "halo2_proofs", version = "0.3.0" }
+halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
 zcash_encoding.workspace = true
 zcash_history.workspace = true
@@ -95,7 +96,7 @@ sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent.workspace = true
-sinsemilla = { version = "0.1.0" }
+sinsemilla = { version = "0.1" }
 
 # Time
 chrono = { workspace = true, features = ["clock", "std", "serde"] }

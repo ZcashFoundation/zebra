@@ -1,15 +1,5 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
 
-use std::{collections::HashMap, fmt, iter};
-
-use crate::{
-    amount::{Amount, NonNegative},
-    block,
-    parameters::Network,
-    primitives::zcash_primitives,
-    transaction,
-};
-
 mod address;
 mod keys;
 mod opcodes;
@@ -17,7 +7,18 @@ mod script;
 mod serialize;
 mod utxo;
 
+use std::{collections::HashMap, fmt, iter};
+
 pub use address::Address;
+use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
+
+use crate::{
+    amount::{Amount, NonNegative},
+    block,
+    parameters::Network,
+    transaction,
+};
+
 pub use script::Script;
 pub use serialize::{GENESIS_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN};
 pub use utxo::{
@@ -223,8 +224,17 @@ impl Input {
         data: Option<Vec<u8>>,
         sequence: Option<u32>,
     ) -> Input {
-        // "No extra coinbase data" is the default.
-        let data = data.unwrap_or_default();
+        // `zcashd` includes an extra byte after the coinbase height in the coinbase data. We do
+        // that only if the data is empty to stay compliant with the following consensus rule:
+        //
+        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+        //
+        // ## Rationale
+        //
+        // Coinbase heights < 17 are serialized as a single byte, and if there is no coinbase data,
+        // the script of a coinbase tx with such a height would consist only of this single byte,
+        // violating the consensus rule.
+        let data = data.map_or(vec![0], |d| if d.is_empty() { vec![0] } else { d });
         let height_size = height.coinbase_zcash_serialized_size();
 
         assert!(
@@ -238,9 +248,8 @@ impl Input {
         Input::Coinbase {
             height,
             data: CoinbaseData(data),
-
-            // If the caller does not specify the sequence number,
-            // use a sequence number that activates the LockTime.
+            // If the caller does not specify the sequence number, use a sequence number that
+            // activates the LockTime.
             sequence: sequence.unwrap_or(0),
         }
     }
@@ -440,7 +449,14 @@ impl Output {
     /// Return the destination address from a transparent output.
     ///
     /// Returns None if the address type is not valid or unrecognized.
-    pub fn address(&self, network: &Network) -> Option<Address> {
-        zcash_primitives::transparent_output_address(self, network)
+    pub fn address(&self, net: &Network) -> Option<Address> {
+        match TxOut::try_from(self).ok()?.recipient_address()? {
+            TransparentAddress::PublicKeyHash(pkh) => {
+                Some(Address::from_pub_key_hash(net.t_addr_kind(), pkh))
+            }
+            TransparentAddress::ScriptHash(sh) => {
+                Some(Address::from_script_hash(net.t_addr_kind(), sh))
+            }
+        }
     }
 }

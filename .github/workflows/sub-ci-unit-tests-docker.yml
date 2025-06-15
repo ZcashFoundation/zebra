@@ -34,7 +34,7 @@ jobs:
   test-all:
     name: Test all
     timeout-minutes: 180
-    runs-on: ubuntu-latest-xl
+    runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-xl' || 'ubuntu-latest' }}
     steps:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 

@@ -104,7 +104,7 @@ proptest = { workspace = true }
 proptest-derive = { workspace = true }
 rand = { workspace = true }
 
-halo2 = { package = "halo2_proofs", version = "0.3.0" }
+halo2 = { package = "halo2_proofs", version = "0.3" }
 jubjub = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }

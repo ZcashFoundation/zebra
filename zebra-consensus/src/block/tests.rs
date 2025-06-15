@@ -12,15 +12,14 @@ use zebra_chain::{
         },
         Block, Height,
     },
-    parameters::NetworkUpgrade,
+    parameters::{subsidy::block_subsidy, NetworkUpgrade},
     serialization::{ZcashDeserialize, ZcashDeserializeInto},
     transaction::{arbitrary::transaction_to_fake_v5, LockTime, Transaction},
     work::difficulty::{ParameterDifficulty as _, INVALID_COMPACT_DIFFICULTY},
 };
-use zebra_script::CachedFfiTransaction;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::{block_subsidy, transaction};
+use crate::transaction;
 
 use super::*;
 
@@ -304,7 +303,8 @@ fn subsidy_is_valid_for_network(network: Network) -> Result<(), Report> {
         // TODO: first halving, second halving, third halving, and very large halvings
         if height >= canopy_activation_height {
             let expected_block_subsidy =
-                subsidy::general::block_subsidy(height, &network).expect("valid block subsidy");
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
+                    .expect("valid block subsidy");
 
             check::subsidy_is_valid(&block, &network, expected_block_subsidy)
                 .expect("subsidies should pass for this block");
@@ -326,7 +326,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .expect("block should deserialize");
     let mut block = Arc::try_unwrap(block).expect("block should unwrap");
 
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -352,7 +352,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
             .expect("block should deserialize");
     let mut block = Arc::try_unwrap(block).expect("block should unwrap");
 
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -392,7 +392,7 @@ fn coinbase_validation_failure() -> Result<(), Report> {
     let expected = BlockError::Transaction(TransactionError::CoinbaseAfterFirst);
     assert_eq!(expected, result);
 
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -429,7 +429,8 @@ fn funding_stream_validation_for_network(network: Network) -> Result<(), Report>
         if height >= canopy_activation_height {
             let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
             let expected_block_subsidy =
-                subsidy::general::block_subsidy(height, &network).expect("valid block subsidy");
+                zebra_chain::parameters::subsidy::block_subsidy(height, &network)
+                    .expect("valid block subsidy");
 
             // Validate
             let result = check::subsidy_is_valid(&block, &network, expected_block_subsidy);
@@ -476,7 +477,7 @@ fn funding_stream_validation_failure() -> Result<(), Report> {
     };
 
     // Validate it
-    let expected_block_subsidy = subsidy::general::block_subsidy(
+    let expected_block_subsidy = zebra_chain::parameters::subsidy::block_subsidy(
         block
             .coinbase_height()
             .expect("block should have coinbase height"),
@@ -516,7 +517,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
             let expected_block_subsidy = block_subsidy(height, &network)?;
 
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let expected_deferred_amount = subsidy::funding_streams::funding_stream_values(
+            let expected_deferred_amount = zebra_chain::parameters::subsidy::funding_stream_values(
                 height,
                 &network,
                 expected_block_subsidy,
@@ -551,10 +552,14 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     let expected_block_subsidy = block_subsidy(height, &network)?;
     // See [ZIP-1015](https://zips.z.cash/zip-1015).
     let expected_deferred_amount: Amount<zebra_chain::amount::NonNegative> =
-        subsidy::funding_streams::funding_stream_values(height, &network, expected_block_subsidy)
-            .expect("we always expect a funding stream hashmap response even if empty")
-            .remove(&FundingStreamReceiver::Deferred)
-            .unwrap_or_default();
+        zebra_chain::parameters::subsidy::funding_stream_values(
+            height,
+            &network,
+            expected_block_subsidy,
+        )
+        .expect("we always expect a funding stream hashmap response even if empty")
+        .remove(&FundingStreamReceiver::Deferred)
+        .unwrap_or_default();
 
     assert_eq!(
         check::miner_fees_are_valid(
@@ -697,11 +702,10 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_single_transaction_block_many_inputs();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let cached_ffi_transaction =
-            Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
-        let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
-        assert_eq!(tx_sigop_count, Ok(0));
-        legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
+        let tx_sigop_count =
+            zebra_script::legacy_sigop_count(&transaction).expect("unexpected invalid sigop count");
+        assert_eq!(tx_sigop_count, 0);
+        legacy_sigop_count += tx_sigop_count;
     }
     // We know this block has no sigops.
     assert_eq!(legacy_sigop_count, 0);
@@ -709,11 +713,10 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     let block = large_multi_transaction_block();
     let mut legacy_sigop_count = 0;
     for transaction in block.transactions {
-        let cached_ffi_transaction =
-            Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
-        let tx_sigop_count = cached_ffi_transaction.legacy_sigop_count();
-        assert_eq!(tx_sigop_count, Ok(1));
-        legacy_sigop_count += tx_sigop_count.expect("unexpected invalid sigop count");
+        let tx_sigop_count =
+            zebra_script::legacy_sigop_count(&transaction).expect("unexpected invalid sigop count");
+        assert_eq!(tx_sigop_count, 1);
+        legacy_sigop_count += tx_sigop_count;
     }
     // Test that large blocks can actually fail the sigops check.
     assert!(legacy_sigop_count > MAX_BLOCK_SIGOPS);
@@ -732,10 +735,7 @@ fn legacy_sigops_count_for_historic_blocks() {
             .zcash_deserialize_into()
             .expect("block test vector is valid");
         for transaction in block.transactions {
-            let cached_ffi_transaction =
-                Arc::new(CachedFfiTransaction::new(transaction.clone(), Vec::new()));
-            legacy_sigop_count += cached_ffi_transaction
-                .legacy_sigop_count()
+            legacy_sigop_count += zebra_script::legacy_sigop_count(&transaction)
                 .expect("unexpected invalid sigop count");
         }
         // Test that historic blocks pass the sigops check.
