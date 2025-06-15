@@ -34,12 +34,13 @@ use zebra_chain::{
     block::{self, Height},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
+    parameters::Network,
     transaction::UnminedTxId,
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_node_services::mempool::{Gossip, Request, Response};
-use zebra_state as zs;
+use zebra_state::{self as zs, ReadStateService};
 use zebra_state::{ChainTipChange, TipAction};
 
 use crate::components::sync::SyncStatus;
@@ -264,6 +265,65 @@ pub struct Mempool {
     /// Only displayed after the mempool's first activation.
     #[cfg(feature = "progress-bar")]
     rejected_count_bar: Option<howudoin::Tx>,
+
+    /// Data needed to simulate a getblocktemplate proposal in the mempool.
+    gbt_data: Option<GetblockTemplateData>,
+}
+
+#[derive(Clone)]
+pub struct GetblockTemplateData {
+    /// The network this mempool is running on.
+    network: Network,
+
+    /// The mining configuration for this mempool.
+    mining_config: zebra_rpc::config::mining::Config,
+
+    /// The state service used to read the chain state.
+    state: Option<ReadStateService>,
+
+    /// The block verifier router service,
+    block_verifier_router: Buffer<
+        BoxService<
+            zebra_consensus::Request,
+            zebra_chain::block::Hash,
+            zebra_consensus::RouterError,
+        >,
+        zebra_consensus::Request,
+    >,
+
+    /// The current synchronization status of the node.
+    sync_status: SyncStatus,
+
+    /// The latest chain tip, used to verify the block proposal.
+    latest_chain_tip: zs::LatestChainTip,
+}
+
+impl GetblockTemplateData {
+    /// Create a new instance of `GetblockTemplateData`.
+    pub fn new(
+        network: Network,
+        mining_config: zebra_rpc::config::mining::Config,
+        state: Option<ReadStateService>,
+        block_verifier_router: Buffer<
+            BoxService<
+                zebra_consensus::Request,
+                zebra_chain::block::Hash,
+                zebra_consensus::RouterError,
+            >,
+            zebra_consensus::Request,
+        >,
+        sync_status: SyncStatus,
+        latest_chain_tip: zs::LatestChainTip,
+    ) -> Self {
+        Self {
+            network,
+            mining_config,
+            state,
+            block_verifier_router,
+            sync_status,
+            latest_chain_tip,
+        }
+    }
 }
 
 impl Mempool {
@@ -277,6 +337,7 @@ impl Mempool {
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
+        gbt_data: Option<GetblockTemplateData>,
     ) -> (Self, broadcast::Receiver<HashSet<UnminedTxId>>) {
         let (transaction_sender, transaction_receiver) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
@@ -301,6 +362,7 @@ impl Mempool {
             transaction_cost_bar: None,
             #[cfg(feature = "progress-bar")]
             rejected_count_bar: None,
+            gbt_data,
         };
 
         // Make sure `is_enabled` is accurate.
@@ -602,8 +664,12 @@ impl Service<Request> for Mempool {
                         // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
-                            let insert_result =
-                                storage.insert(tx, spent_mempool_outpoints, best_tip_height);
+                            let insert_result = storage.insert(
+                                tx,
+                                spent_mempool_outpoints,
+                                best_tip_height,
+                                self.gbt_data.clone(),
+                            );
 
                             tracing::trace!(
                                 ?insert_result,
@@ -851,18 +917,6 @@ impl Service<Request> for Mempool {
                     // all the work for this request is done in poll_ready
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
-
-                // Remove a single transaction from the mempool
-                Request::RemoveTransaction(ref tx_id) => {
-                    trace!(?req, "got mempool request");
-
-                    let res = storage.remove_exact(&[tx_id.clone()].into_iter().collect());
-                    assert!(res == 1);
-
-                    trace!(?req, ?res, "answered mempool request");
-
-                    async move { Ok(Response::RemovedTransaction) }.boxed()
-                }
             },
             ActiveState::Disabled => {
                 // TODO: add the name of the request, but not the content,
@@ -913,15 +967,6 @@ impl Service<Request> for Mempool {
                         // all the work for this request is done in poll_ready
                         Response::CheckedForVerifiedTransactions
                     }
-
-                    // No transactions to remove from the mempool
-                    Request::RemoveTransaction(_) => {
-                        return async move {
-                            Err("mempool is not active: wait for Zebra to sync to the tip".into())
-                        }
-                        .boxed()
-
-                    },
                 };
 
                 async move { Ok(resp) }.boxed()

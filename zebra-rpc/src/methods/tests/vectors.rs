@@ -1845,8 +1845,6 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     mock_tip_sender.send_best_tip_hash(fake_tip_hash);
     mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
-    let mut mock_block_verifier_router = MockService::build().for_unit_tests();
-
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -1857,7 +1855,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(read_state.clone(), 1),
-        mock_block_verifier_router.clone(),
+        MockService::build().for_unit_tests(),
         mock_sync_status.clone(),
         mock_tip,
         MockAddressBookPeers::default(),
@@ -1901,19 +1899,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     let get_block_template_fut = rpc.get_block_template(None);
 
-    let mut mock_block_verifier_router_cloned = mock_block_verifier_router.clone();
-    let mock_block_verifier_router_request_handler = async move {
-        mock_block_verifier_router_cloned
-            .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
-            .await
-            .respond(Hash::from([0; 32]));
-    };
-
     let (get_block_template, ..) = tokio::join!(
         get_block_template_fut,
         make_mock_mempool_request_handler(vec![], fake_tip_hash),
         make_mock_read_state_request_handler(),
-        mock_block_verifier_router_request_handler,
     );
 
     let get_block_template::Response::TemplateMode(get_block_template) =
@@ -2093,18 +2082,10 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     mock_tip_sender.send_estimated_distance_to_network_chain_tip(Some(0));
 
-    let mock_block_verifier_router_request_handler = async move {
-        mock_block_verifier_router
-            .expect_request_that(|req| matches!(req, zebra_consensus::Request::CheckProposal(_)))
-            .await
-            .respond(Hash::from([0; 32]));
-    };
-
     let (get_block_template, ..) = tokio::join!(
         rpc.get_block_template(None),
         make_mock_mempool_request_handler(vec![verified_unmined_tx], next_fake_tip_hash),
         make_mock_read_state_request_handler(),
-        mock_block_verifier_router_request_handler,
     );
 
     let get_block_template::Response::TemplateMode(get_block_template) =

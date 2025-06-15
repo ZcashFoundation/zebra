@@ -97,9 +97,6 @@ pub enum Request {
     /// when too many slots are reserved but unused:
     /// <https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
     CheckForVerifiedTransactions,
-
-    /// Remove a single transaction from the mempool.
-    RemoveTransaction(UnminedTxId),
 }
 
 /// A response to a mempool service request.
@@ -157,7 +154,4 @@ pub enum Response {
 
     /// Confirms that the mempool has checked for recently verified transactions.
     CheckedForVerifiedTransactions,
-
-    /// Confirms that the mempool has removed a transaction.
-    RemovedTransaction,
 }

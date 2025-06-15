@@ -972,6 +972,7 @@ async fn setup(
         latest_chain_tip.clone(),
         chain_tip_change.clone(),
         misbehavior_tx,
+        None,
     );
 
     // Pretend we're close to tip
@@ -1072,7 +1073,7 @@ fn add_some_stuff_to_mempool(
     // Insert the genesis block coinbase transaction into the mempool storage.
     mempool_service
         .storage()
-        .insert(genesis_transactions[0].clone(), Vec::new(), None)
+        .insert(genesis_transactions[0].clone(), Vec::new(), None, None)
         .unwrap();
 
     genesis_transactions

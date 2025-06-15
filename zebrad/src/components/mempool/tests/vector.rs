@@ -63,7 +63,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     let mut inserted_ids = HashSet::new();
     service
         .storage()
-        .insert(genesis_transaction.clone(), Vec::new(), None)?;
+        .insert(genesis_transaction.clone(), Vec::new(), None, None)?;
     inserted_ids.insert(genesis_transaction.transaction.id);
 
     // Test `Request::TransactionIds`
@@ -133,7 +133,7 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
         inserted_ids.insert(tx.transaction.id);
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
+        let _ = service.storage().insert(tx.clone(), Vec::new(), None, None);
     }
 
     // Test `Request::RejectedTransactionIds`
@@ -214,7 +214,7 @@ async fn mempool_queue_single() -> Result<(), Report> {
     for tx in transactions.iter() {
         // Error must be ignored because a insert can trigger an eviction and
         // an error is returned if the transaction being inserted in chosen.
-        let _ = service.storage().insert(tx.clone(), Vec::new(), None);
+        let _ = service.storage().insert(tx.clone(), Vec::new(), None, None);
     }
 
     // Test `Request::Queue` for a new transaction
@@ -297,7 +297,7 @@ async fn mempool_service_disabled() -> Result<(), Report> {
     // Insert the genesis block coinbase transaction into the mempool storage.
     service
         .storage()
-        .insert(genesis_transaction.clone(), Vec::new(), None)?;
+        .insert(genesis_transaction.clone(), Vec::new(), None, None)?;
 
     // Test if the mempool answers correctly (i.e. is enabled)
     let response = service
@@ -1082,6 +1082,7 @@ async fn setup(
         latest_chain_tip,
         chain_tip_change.clone(),
         misbehavior_tx,
+        None,
     );
 
     tokio::spawn(async move { while mempool_transaction_receiver.recv().await.is_ok() {} });

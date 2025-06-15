@@ -2215,110 +2215,18 @@ where
 
         // - After this point, the template only depends on the previously fetched data.
 
-        let network_upgrade = NetworkUpgrade::current(&network, next_block_height);
-
-        // Validate the full block from the original mempool
-        let full_response = GetBlockTemplate::new(
+        let response = GetBlockTemplate::new(
             &network,
             &miner_address,
             &chain_tip_and_local_time,
             server_long_poll_id,
-            mempool_txs.clone(),
+            mempool_txs,
             submit_old,
             debug_like_zcashd,
-            extra_coinbase_data.clone(),
+            extra_coinbase_data,
         );
 
-        // Get block bytes from the full block template
-        let full_block_bytes = proposal_block_from_template(&full_response, None, network_upgrade)
-            .map_err(to_jsonrpc_error)?
-            .zcash_serialize_to_vec()
-            .map_err(to_jsonrpc_error)?;
-
-        let validation_result = get_block_template::validate_block_proposal(
-            self.gbt.block_verifier_router(),
-            full_block_bytes,
-            network.clone(),
-            latest_chain_tip.clone(),
-            sync_status.clone(),
-        )
-        .await?;
-
-        // Try to remove invalid transactions only if the full block is invalid
-        if let get_block_template::Response::ProposalMode(response) = validation_result {
-            if !response.is_valid() {
-                tracing::debug!("block template is invalid");
-
-                #[cfg(not(test))]
-                let tx_iter = mempool_txs.iter();
-                #[cfg(test)]
-                let tx_iter = mempool_txs.iter().map(|(_, tx)| tx);
-
-                for tx in tx_iter {
-                    let tx_id = tx.transaction.id;
-
-                    // Filter mempool without the current tx
-                    #[cfg(not(test))]
-                    let trimmed_mempool: Vec<_> = mempool_txs
-                        .iter()
-                        .filter(|t| t.transaction.id != tx_id)
-                        .cloned()
-                        .collect();
-
-                    #[cfg(test)]
-                    let trimmed_mempool: Vec<_> = mempool_txs
-                        .iter()
-                        .filter(|(_, t)| t.transaction.id != tx_id)
-                        .cloned()
-                        .collect();
-
-                    let trimmed_response = GetBlockTemplate::new(
-                        &network,
-                        &miner_address,
-                        &chain_tip_and_local_time,
-                        server_long_poll_id,
-                        trimmed_mempool.clone(),
-                        submit_old,
-                        debug_like_zcashd,
-                        extra_coinbase_data.clone(),
-                    );
-
-                    let block_bytes =
-                        proposal_block_from_template(&trimmed_response, None, network_upgrade)
-                            .map_err(to_jsonrpc_error)?
-                            .zcash_serialize_to_vec()
-                            .map_err(to_jsonrpc_error)?;
-
-                    if let Ok(get_block_template::Response::ProposalMode(response)) =
-                        get_block_template::validate_block_proposal(
-                            self.gbt.block_verifier_router(),
-                            block_bytes,
-                            network.clone(),
-                            latest_chain_tip.clone(),
-                            sync_status.clone(),
-                        )
-                        .await
-                    {
-                        if response.is_valid() {
-                            tracing::debug!(
-                                "block template is valid after removing tx {:?}",
-                                tx_id
-                            );
-
-                            // Remove the transaction from the mempool
-                            let _ = mempool
-                                .clone()
-                                .oneshot(mempool::Request::RemoveTransaction(tx_id))
-                                .await;
-
-                            return Ok(response.into());
-                        }
-                    }
-                }
-            }
-        }
-        // Full block is valid or no tx removal helped
-        Ok(full_response.into())
+        Ok(response.into())
     }
 
     async fn submit_block(
@@ -3956,8 +3864,4 @@ where
 
     // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
     Ok(pow_limit / difficulty)
-}
-
-fn to_jsonrpc_error(e: impl std::fmt::Display) -> ErrorObject<'static> {
-    ErrorObject::owned(0, e.to_string(), None::<()>)
 }

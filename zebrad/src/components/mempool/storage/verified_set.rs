@@ -14,7 +14,9 @@ use zebra_chain::{
 };
 use zebra_node_services::mempool::TransactionDependencies;
 
-use crate::components::mempool::pending_outputs::PendingOutputs;
+use crate::components::mempool::{
+    pending_outputs::PendingOutputs, storage::get_block_template, GetblockTemplateData,
+};
 
 use super::super::SameEffectsTipRejectionError;
 
@@ -146,6 +148,7 @@ impl VerifiedSet {
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
         pending_outputs: &mut PendingOutputs,
         height: Option<Height>,
+        gbt_data: Option<GetblockTemplateData>,
     ) -> Result<(), SameEffectsTipRejectionError> {
         if self.has_spend_conflicts(&transaction.transaction) {
             return Err(SameEffectsTipRejectionError::SpendConflict);
@@ -184,6 +187,16 @@ impl VerifiedSet {
 
         self.update_metrics();
 
+        // If we have GBT data, we simulate the block template to verify that
+        // the transaction can be included in a block template.
+        if let Some(gbt_data) = gbt_data {
+            let simulation_result = get_block_template::verify_block_template(self, gbt_data);
+
+            // Simulation failed, remove the last inserted transaction and it's dependents.
+            if let Ok(false) = simulation_result {
+                self.remove(&tx_id);
+            }
+        }
         Ok(())
     }
 

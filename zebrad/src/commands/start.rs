@@ -202,6 +202,15 @@ impl StartCmd {
             misbehavior_sender.clone(),
         );
 
+        let gbt_data = crate::components::mempool::GetblockTemplateData::new(
+            config.network.network.clone(),
+            config.mining.clone(),
+            Some(read_only_state_service.clone()),
+            block_verifier_router.clone(),
+            sync_status.clone(),
+            latest_chain_tip.clone(),
+        );
+
         info!("initializing mempool");
         let (mempool, mempool_transaction_receiver) = Mempool::new(
             &config.mempool,
@@ -212,6 +221,7 @@ impl StartCmd {
             latest_chain_tip.clone(),
             chain_tip_change.clone(),
             misbehavior_sender.clone(),
+            Some(gbt_data),
         );
         let mempool = BoxService::new(mempool);
         let mempool = ServiceBuilder::new()

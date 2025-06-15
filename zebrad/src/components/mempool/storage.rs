@@ -26,7 +26,7 @@ use zebra_node_services::mempool::TransactionDependencies;
 use self::{eviction_list::EvictionList, verified_set::VerifiedSet};
 use super::{
     config, downloads::TransactionDownloadVerifyError, pending_outputs::PendingOutputs,
-    MempoolError,
+    GetblockTemplateData, MempoolError,
 };
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -36,6 +36,7 @@ use proptest_derive::Arbitrary;
 pub mod tests;
 
 mod eviction_list;
+mod get_block_template;
 mod verified_set;
 
 /// The size limit for mempool transaction rejection lists per [ZIP-401].
@@ -205,6 +206,7 @@ impl Storage {
         tx: VerifiedUnminedTx,
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
         height: Option<Height>,
+        gbt_data: Option<GetblockTemplateData>,
     ) -> Result<UnminedTxId, MempoolError> {
         // # Security
         //
@@ -245,6 +247,7 @@ impl Storage {
             spent_mempool_outpoints,
             &mut self.pending_outputs,
             height,
+            gbt_data,
         ) {
             tracing::debug!(
                 ?tx_id,
