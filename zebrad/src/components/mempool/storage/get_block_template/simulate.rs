@@ -1,5 +1,7 @@
 use tokio::{runtime::Handle, task::block_in_place};
 
+use zcash_keys::address::Address;
+
 use zebra_chain::{parameters::NetworkUpgrade, serialization::ZcashSerialize};
 
 use zebra_rpc::methods::types::{
@@ -94,7 +96,8 @@ pub async fn async_verify_block_template(
 
     let response = GetBlockTemplate::new(
         &network,
-        &miner_address,
+        &Address::try_from_zcash_address(&network, miner_address)
+            .map_err(|_| SimulateBlockTemplateError::InvalidMinerAddress)?,
         &chain_tip_and_local_time,
         longpollid,
         txs,

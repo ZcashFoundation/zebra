@@ -248,6 +248,9 @@ proptest-derive = { workspace = true, optional = true }
 # test feature tokio-console
 console-subscriber = { workspace = true, optional = true }
 
+# Needed for gbt simulation
+zcash_keys = { workspace = true }
+
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
@@ -272,8 +275,6 @@ tracing-test = { workspace = true, features = ["no-env-filter"] }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-stream = { workspace = true }
-
-zcash_keys = { workspace = true }
 
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }

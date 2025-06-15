@@ -1900,7 +1900,6 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     };
 
     let get_block_template_fut = rpc.get_block_template(None);
-
     let (get_block_template, ..) = tokio::join!(
         get_block_template_fut,
         make_mock_mempool_request_handler(vec![], fake_tip_hash),
