@@ -74,7 +74,7 @@ proptest! {
             // Insert a dummy transaction.
             mempool
                 .storage()
-                .insert(transaction.0, Vec::new(), None)
+                .insert(transaction.0, Vec::new(), None, None)
                 .expect("Inserting a transaction should succeed");
 
             // The first call to `poll_ready` shouldn't clear the storage yet.
@@ -148,7 +148,7 @@ proptest! {
                 // Insert the dummy transaction into the mempool.
                 mempool
                     .storage()
-                    .insert(transaction.0.clone(), Vec::new(), None)
+                    .insert(transaction.0.clone(), Vec::new(), None, None)
                     .expect("Inserting a transaction should succeed");
 
                 // Set the new chain tip.
@@ -205,7 +205,7 @@ proptest! {
             // Insert a dummy transaction.
             mempool
                 .storage()
-                .insert(transaction, Vec::new(), None)
+                .insert(transaction, Vec::new(), None, None)
                 .expect("Inserting a transaction should succeed");
 
             // The first call to `poll_ready` shouldn't clear the storage yet.
@@ -284,6 +284,7 @@ fn setup(
         latest_chain_tip,
         chain_tip_change,
         misbehavior_tx,
+        None,
     );
 
     // sends a fake chain tip so that the mempool can be enabled
