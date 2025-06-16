@@ -2629,6 +2629,7 @@ async fn rpc_addnode() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),

@@ -3708,7 +3708,6 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     use std::sync::Arc;
 
     use common::regtest::MiningRpcMethods;
-    use zebra_chain::parameters::testnet::REGTEST_NU5_ACTIVATION_HEIGHT;
 
     let _init_guard = zebra_test::init();
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
@@ -3726,9 +3725,7 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..50 {
-        let (block, _) = rpc_client
-            .block_from_template(Height(REGTEST_NU5_ACTIVATION_HEIGHT))
-            .await?;
+        let (block, _) = rpc_client.block_from_template().await?;
 
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);
