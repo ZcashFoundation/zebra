@@ -265,3 +265,9 @@ impl Sigops for zebra_chain::transaction::UnminedTx {
     }
 }
 
+impl Sigops for CachedFfiTransaction {
+    fn scripts(&self) -> impl Iterator<Item = &[u8]> {
+        self.transaction.scripts()
+    }
+}
+
