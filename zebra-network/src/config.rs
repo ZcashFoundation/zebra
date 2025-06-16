@@ -672,7 +672,7 @@ impl From<Config> for DConfig {
     ) -> Self {
         let testnet_parameters = network
             .parameters()
-            .filter(|params| !params.is_default_testnet() && !params.is_regtest())
+            .filter(|params| !params.is_default_testnet())
             .map(Into::into);
 
         DConfig {

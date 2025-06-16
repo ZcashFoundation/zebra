@@ -1,7 +1,8 @@
 //! Tests for types and functions for the `getblocktemplate` RPC.
 
-use zcash_address::TryFromRawAddress;
 use zcash_keys::address::Address;
+use zcash_transparent::address::TransparentAddress;
+
 use zebra_chain::{
     amount::Amount,
     block::Height,
@@ -10,7 +11,7 @@ use zebra_chain::{
     transaction::Transaction,
 };
 
-use super::generate_coinbase_transaction;
+use super::standard_coinbase_outputs;
 
 /// Tests that a minimal coinbase transaction can be generated.
 #[test]
@@ -27,19 +28,18 @@ fn minimal_coinbase() -> Result<(), Box<dyn std::error::Error>> {
         })
         .to_network();
 
-    // It should be possible to generate a coinbase tx from these params.
-    generate_coinbase_transaction(
+    let outputs = standard_coinbase_outputs(
         &regtest,
         Height(1),
-        &Address::try_from_raw_transparent_p2pkh([0x42; 20]).unwrap(),
+        &Address::from(TransparentAddress::PublicKeyHash([0x42; 20])),
         Amount::zero(),
-        false,
-        vec![],
-    )
-    .transaction
-    .zcash_serialize_to_vec()?
-    // Deserialization contains checks for elementary consensus rules, which must pass.
-    .zcash_deserialize_into::<Transaction>()?;
+    );
+
+    // It should be possible to generate a coinbase tx from these params.
+    Transaction::new_v5_coinbase(&regtest, Height(1), outputs, vec![])
+        .zcash_serialize_to_vec()?
+        // Deserialization contains checks for elementary consensus rules, which must pass.
+        .zcash_deserialize_into::<Transaction>()?;
 
     Ok(())
 }

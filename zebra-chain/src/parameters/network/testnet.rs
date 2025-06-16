@@ -23,11 +23,6 @@ use super::{
     },
 };
 
-/// The Regtest NU5 activation height in tests
-// TODO: Serialize testnet parameters in Config then remove this and use a configured NU5 activation height.
-#[cfg(any(test, feature = "proptest-impl"))]
-pub const REGTEST_NU5_ACTIVATION_HEIGHT: u32 = 100;
-
 /// Reserved network names that should not be allowed for configured Testnets.
 pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
     "Mainnet",
