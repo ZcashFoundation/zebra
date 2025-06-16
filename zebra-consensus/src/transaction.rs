@@ -37,7 +37,7 @@ use zebra_chain::{
 };
 
 use zebra_node_services::mempool;
-use zebra_script::CachedFfiTransaction;
+use zebra_script::{CachedFfiTransaction, Sigops};
 use zebra_state as zs;
 
 use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
@@ -581,7 +581,7 @@ where
                 };
             }
 
-            let legacy_sigop_count = zebra_script::legacy_sigop_count(&tx)?;
+            let legacy_sigop_count: u64 = tx.sigops().map_err(zebra_script::Error::from)?.into();
 
             let rsp = match req {
                 Request::Block { .. } => Response::Block {
