@@ -166,6 +166,9 @@ zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "update
 zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
 zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "update-prover-api" }
 
+[patch.crates-io]
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "impl-display-derive-error" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
