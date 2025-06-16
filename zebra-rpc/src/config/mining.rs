@@ -7,7 +7,7 @@ use zcash_address::ZcashAddress;
 
 /// Mining configuration section.
 #[serde_as]
-#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// Address for receiving miner subsidy and tx fees.
@@ -26,6 +26,12 @@ pub struct Config {
     /// Otherwise, it will be UTF-8 encoded into bytes.
     pub extra_coinbase_data: Option<String>,
 
+    /// Should Zebra's block templates try to imitate `zcashd`?
+    ///
+    /// This developer-only config is not supported for general use.
+    /// TODO: remove this option as part of zcashd deprecation
+    pub debug_like_zcashd: bool,
+
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
     ///
     /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
@@ -34,6 +40,19 @@ pub struct Config {
     /// The internal miner is off by default.
     #[serde(default)]
     pub internal_miner: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            miner_address: None,
+            // For now, act like `zcashd` as much as possible.
+            // TODO: do we want to default to v5 transactions and Zebra coinbase data?
+            extra_coinbase_data: None,
+            debug_like_zcashd: true,
+            internal_miner: false,
+        }
+    }
 }
 
 impl Config {

@@ -30,6 +30,7 @@ tx_cost_limit = 80000000
 [metrics]
 
 [mining]
+debug_like_zcashd = true
 
 [network]
 cache_dir = true

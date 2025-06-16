@@ -12,6 +12,7 @@ use super::select_mempool_transactions;
 fn excludes_tx_with_unselected_dependencies() {
     let network = Network::Mainnet;
     let next_block_height = Height(1_000_000);
+    let like_zcashd = true;
     let extra_coinbase_data = Vec::new();
     let mut mempool_tx_deps = TransactionDependencies::default();
     let miner_address =
@@ -33,6 +34,7 @@ fn excludes_tx_with_unselected_dependencies() {
             &miner_address,
             vec![unmined_tx],
             mempool_tx_deps,
+            like_zcashd,
             extra_coinbase_data,
         ),
         vec![],
@@ -70,6 +72,7 @@ fn includes_tx_with_selected_dependencies() {
         ],
     );
 
+    let like_zcashd = true;
     let extra_coinbase_data = Vec::new();
 
     let selected_txs = select_mempool_transactions(
@@ -78,6 +81,7 @@ fn includes_tx_with_selected_dependencies() {
         &miner_address,
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
+        like_zcashd,
         extra_coinbase_data,
     );
 

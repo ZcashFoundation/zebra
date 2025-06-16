@@ -1,5 +1,6 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
-expression: rsp
+assertion_line: 213
+expression: raw_mempool
 ---
 []

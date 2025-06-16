@@ -118,6 +118,7 @@ tx_cost_limit = 80000000
 [metrics]
 
 [mining]
+debug_like_zcashd = true
 miner_address = "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
 # if you want to enable mining, which also requires selecting the `internal-miner` compilation feature
 internal_miner = true
@@ -178,4 +179,3 @@ use_journald = false
 # This enables debug network logging. It can be useful but it's very verbose!
 filter = 'info,zebra_network=debug'
 ```
-
