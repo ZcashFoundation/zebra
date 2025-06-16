@@ -28,8 +28,8 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
         Network, NetworkUpgrade,
+        subsidy::{FundingStreamReceiver, block_subsidy, funding_stream_values, miner_subsidy},
     },
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
@@ -38,7 +38,7 @@ use zebra_chain::{
     },
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
-use zebra_consensus::{funding_stream_address, MAX_BLOCK_SIGOPS};
+use zebra_consensus::{MAX_BLOCK_SIGOPS, funding_stream_address};
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
@@ -159,7 +159,7 @@ pub struct BlockTemplateResponse {
 
     /// Max legacy signature operations in the block.
     #[serde(rename = "sigoplimit")]
-    pub(crate) sigop_limit: u64,
+    pub(crate) sigop_limit: u32,
 
     /// Max block size in bytes
     #[serde(rename = "sizelimit")]
