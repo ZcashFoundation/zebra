@@ -271,3 +271,14 @@ impl Sigops for CachedFfiTransaction {
     }
 }
 
+impl Sigops for zcash_primitives::transaction::Transaction {
+    fn scripts(&self) -> impl Iterator<Item = &[u8]> {
+        self.transparent_bundle().into_iter().flat_map(|bundle| {
+            (!bundle.is_coinbase())
+                .then(|| bundle.vin.iter().map(|i| i.script_sig.0.as_slice()))
+                .into_iter()
+                .flatten()
+                .chain(bundle.vout.iter().map(|o| o.script_pubkey.0.as_slice()))
+        })
+    }
+}
