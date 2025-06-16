@@ -16,32 +16,30 @@ use tower::Service;
 use tracing::{Instrument, Span};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
-    parameters::{Network, NetworkUpgrade},
     serialization::{AtLeastOne, ZcashSerialize},
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
 };
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_rpc::{
-    config::mining::Config,
-    methods::{
-        hex_data::HexData,
-        types::get_block_template::{
-            self,
-            parameters::GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
-            proposal::proposal_block_from_template,
-            GetBlockTemplateRequestMode::Template,
-            TimeSource,
-        },
-        RpcImpl, RpcServer,
+use zebra_rpc::methods::{
+    hex_data::HexData,
+    types::get_block_template::{
+        self,
+        parameters::GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
+        proposal::proposal_block_from_template,
+        GetBlockTemplateRequestMode::Template,
+        TimeSource,
     },
+    RpcImpl, RpcServer,
 };
 use zebra_state::WatchReceiver;
+
+use crate::components::metrics::Config;
 
 /// The amount of time we wait between block template retries.
 pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
@@ -62,7 +60,6 @@ pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 ///
 /// See [`run_mining_solver()`] for more details.
 pub fn spawn_init<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>(
-    network: &Network,
     config: &Config,
     rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> JoinHandle<Result<(), Report>>
@@ -105,11 +102,8 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    let network = network.clone();
-    let config = config.clone();
-
     // TODO: spawn an entirely new executor here, so mining is isolated from higher priority tasks.
-    tokio::spawn(init(network, config, rpc).in_current_span())
+    tokio::spawn(init(config.clone(), rpc).in_current_span())
 }
 
 /// Initialize the miner based on its config.
@@ -119,7 +113,6 @@ where
 ///
 /// See [`run_mining_solver()`] for more details.
 pub async fn init<Mempool, State, ReadState, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
-    network: Network,
     _config: Config,
     rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
@@ -185,7 +178,7 @@ where
     let mut abort_handles = Vec::new();
 
     let template_generator = tokio::task::spawn(
-        generate_block_templates(network, rpc.clone(), template_sender).in_current_span(),
+        generate_block_templates(rpc.clone(), template_sender).in_current_span(),
     );
     abort_handles.push(template_generator.abort_handle());
     let template_generator = template_generator.wait_for_panics();
@@ -230,7 +223,7 @@ where
 }
 
 /// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
-#[instrument(skip(rpc, template_sender, network))]
+#[instrument(skip(rpc, template_sender))]
 pub async fn generate_block_templates<
     Mempool,
     State,
@@ -240,7 +233,6 @@ pub async fn generate_block_templates<
     SyncStatus,
     AddressBook,
 >(
-    network: Network,
     rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
     template_sender: watch::Sender<Option<Arc<Block>>>,
 ) -> Result<(), Report>
@@ -325,12 +317,7 @@ where
         // Tell the next get_block_template() call to wait until the template has changed.
         parameters.long_poll_id = Some(template.long_poll_id);
 
-        let block = proposal_block_from_template(
-            &template,
-            TimeSource::CurTime,
-            NetworkUpgrade::current(&network, Height(template.height)),
-        )
-        .expect("unexpected invalid block template");
+        let block = proposal_block_from_template(&template, TimeSource::CurTime)?;
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {
