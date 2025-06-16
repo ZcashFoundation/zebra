@@ -202,7 +202,7 @@ pub enum Response {
 
         /// The number of legacy signature operations in this transaction's
         /// transparent inputs and outputs.
-        legacy_sigop_count: u64,
+        sigops: u32,
     },
 
     /// A response to a mempool transaction verification request.
@@ -343,12 +343,10 @@ impl Response {
 
     /// The number of legacy transparent signature operations in this transaction's
     /// inputs and outputs.
-    pub fn legacy_sigop_count(&self) -> u64 {
+    pub fn sigops(&self) -> u32 {
         match self {
-            Response::Block {
-                legacy_sigop_count, ..
-            } => *legacy_sigop_count,
-            Response::Mempool { transaction, .. } => transaction.legacy_sigop_count,
+            Response::Block { sigops, .. } => *sigops,
+            Response::Mempool { transaction, .. } => transaction.sigops,
         }
     }
 
@@ -408,7 +406,7 @@ where
                 return Ok(Response::Block {
                     tx_id,
                     miner_fee: Some(verified_tx.miner_fee),
-                    legacy_sigop_count: verified_tx.legacy_sigop_count
+                    sigops: verified_tx.sigops
                 });
             }
 
@@ -581,19 +579,19 @@ where
                 };
             }
 
-            let legacy_sigop_count: u64 = tx.sigops().map_err(zebra_script::Error::from)?.into();
+            let sigops = tx.sigops().map_err(zebra_script::Error::from)?;
 
             let rsp = match req {
                 Request::Block { .. } => Response::Block {
                     tx_id,
                     miner_fee,
-                    legacy_sigop_count,
+                    sigops,
                 },
                 Request::Mempool { transaction: tx, .. } => {
                     let transaction = VerifiedUnminedTx::new(
                         tx,
                         miner_fee.expect("fee should have been checked earlier"),
-                        legacy_sigop_count,
+                        sigops,
                     )?;
 
                     if let Some(mut mempool) = mempool {

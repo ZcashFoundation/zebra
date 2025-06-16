@@ -2201,7 +2201,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let verified_unmined_tx = VerifiedUnminedTx {
         transaction: unmined_tx,
         miner_fee: 0.try_into().unwrap(),
-        legacy_sigop_count: 0,
+        sigops: 0,
         conventional_actions,
         unpaid_actions: 0,
         fee_weight_ratio: 1.0,
