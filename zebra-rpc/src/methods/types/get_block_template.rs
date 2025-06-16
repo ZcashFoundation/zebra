@@ -149,7 +149,7 @@ pub struct GetBlockTemplate {
 
     /// Max legacy signature operations in the block.
     #[serde(rename = "sigoplimit")]
-    pub sigop_limit: u64,
+    pub sigop_limit: u32,
 
     /// Max block size in bytes
     #[serde(rename = "sizelimit")]

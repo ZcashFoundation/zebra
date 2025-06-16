@@ -711,14 +711,14 @@ fn legacy_sigops_count_for_large_generated_blocks() {
     assert_eq!(legacy_sigop_count, 0);
 
     let block = large_multi_transaction_block();
-    let mut legacy_sigop_count = 0;
+    let mut sigops = 0;
     for tx in block.transactions {
-        let tx_sigop_count: u64 = tx.sigops().expect("unexpected invalid sigop count").into();
+        let tx_sigop_count = tx.sigops().expect("unexpected invalid sigop count");
         assert_eq!(tx_sigop_count, 1);
-        legacy_sigop_count += tx_sigop_count;
+        sigops += tx_sigop_count;
     }
     // Test that large blocks can actually fail the sigops check.
-    assert!(legacy_sigop_count > MAX_BLOCK_SIGOPS);
+    assert!(sigops > MAX_BLOCK_SIGOPS);
 }
 
 #[test]
@@ -728,17 +728,17 @@ fn legacy_sigops_count_for_historic_blocks() {
     // We can't test sigops using the transaction verifier, because it looks up UTXOs.
 
     for block in zebra_test::vectors::BLOCKS.iter() {
-        let mut legacy_sigop_count = 0;
+        let mut sigops = 0;
 
         let block: Block = block
             .zcash_deserialize_into()
             .expect("block test vector is valid");
         for tx in block.transactions {
-            legacy_sigop_count += u64::from(tx.sigops().expect("unexpected invalid sigop count"));
+            sigops += tx.sigops().expect("unexpected invalid sigop count");
         }
 
         // Test that historic blocks pass the sigops check.
-        assert!(legacy_sigop_count <= MAX_BLOCK_SIGOPS);
+        assert!(sigops <= MAX_BLOCK_SIGOPS);
     }
 }
 
