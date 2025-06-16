@@ -18,6 +18,7 @@ use chrono::{DateTime, Utc};
 
 use zebra_chain::{
     block::{self, Block, Height},
+    block_info::BlockInfo,
     serialization::ZcashSerialize as _,
     transaction::{self, Transaction},
     transparent::{self, Utxo},
@@ -255,4 +256,25 @@ pub fn any_utxo(
     non_finalized_state
         .any_utxo(&outpoint)
         .or_else(|| db.utxo(&outpoint).map(|utxo| utxo.utxo))
+}
+
+/// Returns the [`BlockInfo`] with [`block::Hash`] or
+/// [`Height`], if it exists in the non-finalized `chain` or finalized `db`.
+pub fn block_info<C>(
+    chain: Option<C>,
+    db: &ZebraDb,
+    hash_or_height: HashOrHeight,
+) -> Option<BlockInfo>
+where
+    C: AsRef<Chain>,
+{
+    // # Correctness
+    //
+    // Since blocks are the same in the finalized and non-finalized state, we
+    // check the most efficient alternative first. (`chain` is always in memory,
+    // but `db` stores blocks on disk, with a memory cache.)
+    chain
+        .as_ref()
+        .and_then(|chain| chain.as_ref().block_info(hash_or_height))
+        .or_else(|| db.block_info(hash_or_height))
 }

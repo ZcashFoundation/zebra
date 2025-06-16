@@ -2,50 +2,15 @@
 //!
 //! [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
 
-use std::collections::HashMap;
-
 use zebra_chain::{
-    amount::{Amount, Error, NonNegative},
     block::Height,
-    parameters::{subsidy::*, Network, NetworkUpgrade::*},
+    parameters::{subsidy::*, Network},
     transaction::Transaction,
     transparent::{self, Script},
 };
 
 #[cfg(test)]
 mod tests;
-
-/// Returns the `fs.Value(height)` for each stream receiver
-/// as described in [protocol specification §7.8][7.8]
-///
-/// [7.8]: https://zips.z.cash/protocol/protocol.pdf#subsidies
-pub fn funding_stream_values(
-    height: Height,
-    network: &Network,
-    expected_block_subsidy: Amount<NonNegative>,
-) -> Result<HashMap<FundingStreamReceiver, Amount<NonNegative>>, Error> {
-    let canopy_height = Canopy.activation_height(network).unwrap();
-    let mut results = HashMap::new();
-
-    if height >= canopy_height {
-        let funding_streams = network.funding_streams(height);
-        if funding_streams.height_range().contains(&height) {
-            for (&receiver, recipient) in funding_streams.recipients() {
-                // - Spec equation: `fs.value = floor(block_subsidy(height)*(fs.numerator/fs.denominator))`:
-                //   https://zips.z.cash/protocol/protocol.pdf#subsidies
-                // - In Rust, "integer division rounds towards zero":
-                //   https://doc.rust-lang.org/stable/reference/expressions/operator-expr.html#arithmetic-and-logical-binary-operators
-                //   This is the same as `floor()`, because these numbers are all positive.
-                let amount_value = ((expected_block_subsidy * recipient.numerator())?
-                    / FUNDING_STREAM_RECEIVER_DENOMINATOR)?;
-
-                results.insert(receiver, amount_value);
-            }
-        }
-    }
-
-    Ok(results)
-}
 
 /// Returns the position in the address slice for each funding stream
 /// as described in [protocol specification §7.10][7.10]
@@ -121,7 +86,7 @@ pub fn new_coinbase_script(address: &transparent::Address) -> Script {
     // > of the form OP_HASH160 fs.RedeemScriptHash(height) OP_EQUAL as the scriptPubKey.
     //
     // [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-    address.create_script_from_address()
+    address.script()
 }
 
 /// Returns a list of outputs in `transaction`, which have a script address equal to `address`.

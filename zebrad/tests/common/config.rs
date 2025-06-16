@@ -68,11 +68,15 @@ pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
     #[allow(unused_mut)]
     let mut mining = zebra_rpc::config::mining::Config::default();
 
-    let miner_address = if network.network.is_a_test_network() {
-        // Assume test networks all use the same address prefix and format
-        "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
+    let miner_address = if network.network.is_mainnet() {
+        // Mainnet UA
+        "u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a"
+    } else if network.network.is_regtest() {
+        // Regtest UA
+        "uregtest1a2yn922nnxyvnj4qmax07lkr7kmnyxq3rw0paa2kes87h2rapehrzgy8xrq665sg6aatmpgzkngwlumzr40e5y4vc40a809rsyqcwq25xfj5r2sxu774xdt6dj5xckjkv5ll0c2tv6qtsl60mpccwd6m95upy2da0rheqmkmxr7fv9z5uve0kpkmssxcuvzasewwns986yud6aact4y"
     } else {
-        "t3dvVE3SQEi7kqNzwrfNePxZ1d4hUyztBA1"
+        // Testnet UA
+        "utest1quxrs9munape90f833rnse9s02xwkvrh2yzlvm56rsg2lccpr3kwmprxw4zq6ukkv5ht6uvmzasf9pwwfhpfqct4ghmkp7zka6ufurnc9vkwvzt4jved8hld2cram6x75qxs0dgg3eq8gef8kttpw4eqjywnxpuns0fpfz072whje4xmld6ahy9dezsvzmugemn8lerr47lhcx3rzl6"
     };
 
     mining.miner_address = Some(miner_address.parse().expect("hard-coded address is valid"));

@@ -39,7 +39,10 @@ use zebra_chain::{
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        subsidy::{FundingStreamReceiver, ParameterSubsidy},
+        subsidy::{
+            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
+            ParameterSubsidy,
+        },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
@@ -52,11 +55,8 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{
-    block_subsidy, funding_stream_address, funding_stream_values, miner_subsidy,
-    ParameterCheckpoint, RouterError,
-};
-use zebra_network::address_book_peers::AddressBookPeers;
+use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
+use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{
     HashOrHeight, OutputIndex, OutputLocation, ReadRequest, ReadResponse, TransactionLocation,
@@ -601,6 +601,23 @@ pub trait Rpc {
     /// method: post
     /// tags: generating
     async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>>;
+
+    #[method(name = "addnode")]
+    /// Add or remove a node from the address book.
+    ///
+    /// # Parameters
+    ///
+    /// - `addr`: (string, required) The address of the node to add or remove.
+    /// - `command`: (string, required) The command to execute, either "add", "onetry", or "remove".
+    ///
+    /// # Notes
+    ///
+    /// Only the "add" command is currently supported.
+    ///
+    /// zcashd reference: [`addnode`](https://zcash.github.io/rpc/addnode.html)
+    /// method: post
+    /// tags: network
+    async fn add_node(&self, addr: PeerSocketAddr, command: AddNodeCommand) -> Result<()>;
 }
 
 /// RPC method implementations.
@@ -1088,8 +1105,9 @@ where
             .map_misc_error()?;
 
         match response {
-            zebra_state::ReadResponse::AddressBalance(balance) => Ok(AddressBalance {
+            zebra_state::ReadResponse::AddressBalance { balance, received } => Ok(AddressBalance {
                 balance: u64::from(balance),
+                received,
             }),
             _ => unreachable!("Unexpected response from state service: {response:?}"),
         }
@@ -1971,7 +1989,6 @@ where
     ) -> Result<get_block_template::Response> {
         // Clone Configs
         let network = self.network.clone();
-        let miner_address = self.gbt.miner_address();
         let debug_like_zcashd = self.debug_like_zcashd;
         let extra_coinbase_data = self.gbt.extra_coinbase_data();
 
@@ -2000,11 +2017,10 @@ where
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
-        // - One-off checks
-
-        // Check config and parameters.
-        // These checks always have the same result during long polling.
-        let miner_address = get_block_template::check_miner_address(miner_address)?;
+        let miner_address = self
+            .gbt
+            .miner_address()
+            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //
@@ -2748,6 +2764,35 @@ where
 
         Ok(block_hashes)
     }
+
+    async fn add_node(
+        &self,
+        addr: zebra_network::PeerSocketAddr,
+        command: AddNodeCommand,
+    ) -> Result<()> {
+        if self.network.is_regtest() {
+            match command {
+                AddNodeCommand::Add => {
+                    tracing::info!(?addr, "adding peer address to the address book");
+                    if self.address_book.clone().add_peer(addr) {
+                        Ok(())
+                    } else {
+                        return Err(ErrorObject::owned(
+                            ErrorCode::InvalidParams.code(),
+                            format!("peer address was already present in the address book: {addr}"),
+                            None::<()>,
+                        ));
+                    }
+                }
+            }
+        } else {
+            return Err(ErrorObject::owned(
+                ErrorCode::InvalidParams.code(),
+                "addnode command is only supported on regtest",
+                None::<()>,
+            ));
+        }
+    }
 }
 
 // TODO: Move the code below to separate modules.
@@ -3093,9 +3138,31 @@ impl GetBlockChainInfo {
 /// This is used for the input parameter of [`RpcServer::get_address_balance`],
 /// [`RpcServer::get_address_tx_ids`] and [`RpcServer::get_address_utxos`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize, serde::Serialize)]
+#[serde(from = "DAddressStrings")]
 pub struct AddressStrings {
     /// A list of transparent address strings.
     addresses: Vec<String>,
+}
+
+impl From<DAddressStrings> for AddressStrings {
+    fn from(address_strings: DAddressStrings) -> Self {
+        match address_strings {
+            DAddressStrings::Addresses { addresses } => AddressStrings { addresses },
+            DAddressStrings::Address(address) => AddressStrings {
+                addresses: vec![address],
+            },
+        }
+    }
+}
+
+/// An intermediate type used to deserialize [`AddressStrings`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[serde(untagged)]
+enum DAddressStrings {
+    /// A list of address strings.
+    Addresses { addresses: Vec<String> },
+    /// A single address string.
+    Address(String),
 }
 
 impl AddressStrings {
@@ -3147,6 +3214,8 @@ impl AddressStrings {
 pub struct AddressBalance {
     /// The total transparent balance.
     pub balance: u64,
+    /// The total received balance, including change.
+    pub received: u64,
 }
 
 /// A hex-encoded [`ConsensusBranchId`] string.
@@ -4010,4 +4079,12 @@ where
 
     // Invert the division to give approximately: `work(difficulty) / work(pow_limit)`
     Ok(pow_limit / difficulty)
+}
+
+/// Commands for the `addnode` RPC method.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum AddNodeCommand {
+    /// Add a node to the address book.
+    #[serde(rename = "add")]
+    Add,
 }

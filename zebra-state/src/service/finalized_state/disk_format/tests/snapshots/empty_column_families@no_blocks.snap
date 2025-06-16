@@ -5,6 +5,7 @@ expression: empty_column_families
 [
   "balance_by_transparent_addr: no entries",
   "block_header_by_height: no entries",
+  "block_info: no entries",
   "hash_by_height: no entries",
   "hash_by_tx_loc: no entries",
   "height_by_hash: no entries",
