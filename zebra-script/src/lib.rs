@@ -180,48 +180,6 @@ impl CachedFfiTransaction {
     }
 }
 
-/// Returns the number of transparent signature operations in the
-/// transparent inputs and outputs of the given transaction.
-#[allow(clippy::unwrap_in_result)]
-pub fn legacy_sigop_count(transaction: &Transaction) -> Result<u64, Error> {
-    let mut count: u64 = 0;
-
-    // Create a dummy interpreter since these inputs are not used to count
-    // the sigops
-    let interpreter = get_interpreter(
-        &|_, _| None,
-        0,
-        true,
-        zcash_script::VerificationFlags::P2SH
-            | zcash_script::VerificationFlags::CHECKLOCKTIMEVERIFY,
-    );
-
-    for input in transaction.inputs() {
-        count += match input {
-            transparent::Input::PrevOut {
-                outpoint: _,
-                unlock_script,
-                sequence: _,
-            } => {
-                let script = unlock_script.as_raw_bytes();
-                interpreter
-                    .legacy_sigop_count_script(script)
-                    .map_err(Error::from)?
-            }
-            transparent::Input::Coinbase { .. } => 0,
-        } as u64;
-    }
-
-    for output in transaction.outputs() {
-        let script = output.lock_script.as_raw_bytes();
-        let ret = interpreter
-            .legacy_sigop_count_script(script)
-            .map_err(Error::from)?;
-        count += ret as u64;
-    }
-    Ok(count)
-}
-
 /// Trait for counting the number of transparent signature operations
 /// in the transparent inputs and outputs of a transaction.
 pub trait Sigops {
