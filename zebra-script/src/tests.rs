@@ -8,6 +8,8 @@ use zebra_chain::{
 };
 use zebra_test::prelude::*;
 
+use crate::Sigops;
+
 lazy_static::lazy_static! {
     pub static ref SCRIPT_PUBKEY: Vec<u8> = <Vec<u8>>::from_hex("76a914f47cac1e6fec195c055994e8064ffccce0044dd788ac")
         .unwrap();
@@ -47,10 +49,9 @@ fn verify_valid_script_v4() -> Result<()> {
 fn count_legacy_sigops() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let transaction =
-        SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
+    let tx = SCRIPT_TX.zcash_deserialize_into::<Arc<zebra_chain::transaction::Transaction>>()?;
 
-    assert_eq!(super::legacy_sigop_count(&transaction)?, 1);
+    assert_eq!(tx.sigops()?, 1);
 
     Ok(())
 }
