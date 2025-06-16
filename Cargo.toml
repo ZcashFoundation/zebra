@@ -154,6 +154,9 @@ x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.3.1"
 
+[patch.crates-io]
+zcash_script = { git = "https://github.com/ZcashFoundation/zcash_script", branch = "impl-display-derive-error" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
