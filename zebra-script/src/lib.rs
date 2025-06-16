@@ -222,3 +222,28 @@ pub fn legacy_sigop_count(transaction: &Transaction) -> Result<u64, Error> {
     Ok(count)
 }
 
+/// Trait for counting the number of transparent signature operations
+/// in the transparent inputs and outputs of a transaction.
+pub trait Sigops {
+    /// Returns the number of transparent signature operations in the
+    /// transparent inputs and outputs of the given transaction.
+    fn sigops(&self) -> Result<u32, zcash_script::Error> {
+        let interpreter = get_interpreter(
+            &|_, _| None,
+            0,
+            true,
+            zcash_script::VerificationFlags::P2SH
+                | zcash_script::VerificationFlags::CHECKLOCKTIMEVERIFY,
+        );
+
+        self.scripts().try_fold(0, |acc, s| {
+            interpreter.legacy_sigop_count_script(s).map(|n| acc + n)
+        })
+    }
+
+    /// Returns an iterator over the input and output scripts in the transaction.
+    ///
+    /// The number of input scripts in a coinbase tx is zero.
+    fn scripts(&self) -> impl Iterator<Item = &[u8]>;
+}
+
