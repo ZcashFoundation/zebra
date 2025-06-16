@@ -17,7 +17,7 @@ use zcash_script::ZcashScript;
 
 use zebra_chain::{
     parameters::NetworkUpgrade,
-    transaction::{HashType, SigHasher, Transaction},
+    transaction::{HashType, SigHasher},
     transparent,
 };
 
@@ -85,7 +85,7 @@ pub struct CachedFfiTransaction {
     /// The deserialized Zebra transaction.
     ///
     /// This field is private so that `transaction`, and `all_previous_outputs` always match.
-    transaction: Arc<Transaction>,
+    transaction: Arc<zebra_chain::transaction::Transaction>,
 
     /// The outputs from previous transactions that match each input in the transaction
     /// being verified.
@@ -100,7 +100,7 @@ impl CachedFfiTransaction {
     /// from previous transactions that match each input in the transaction
     /// being verified.
     pub fn new(
-        transaction: Arc<Transaction>,
+        transaction: Arc<zebra_chain::transaction::Transaction>,
         all_previous_outputs: Arc<Vec<transparent::Output>>,
         nu: NetworkUpgrade,
     ) -> Result<Self, Error> {
