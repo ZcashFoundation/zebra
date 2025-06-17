@@ -3338,25 +3338,25 @@ pub enum GetBlock {
 
         /// The merkle root of the requested block.
         #[serde(with = "opthex", rename = "merkleroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         merkle_root: Option<block::merkle::Root>,
 
         /// The blockcommitments field of the requested block. Its interpretation changes
         /// depending on the network and height.
         #[serde(with = "opthex", rename = "blockcommitments")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         block_commitments: Option<[u8; 32]>,
 
         // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
         //
         /// The root of the Sapling commitment tree after applying this block.
         #[serde(with = "opthex", rename = "finalsaplingroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         final_sapling_root: Option<[u8; 32]>,
 
         /// The root of the Orchard commitment tree after applying this block.
         #[serde(with = "opthex", rename = "finalorchardroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         final_orchard_root: Option<[u8; 32]>,
 
         // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
@@ -3371,18 +3371,18 @@ pub enum GetBlock {
 
         /// The nonce of the requested block header.
         #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         nonce: Option<[u8; 32]>,
 
         /// The Equihash solution in the requested block header.
         /// Note: presence of this field in getblock is not documented in zcashd.
         #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         solution: Option<Solution>,
 
         /// The difficulty threshold of the requested block header displayed in compact form.
         #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         bits: Option<CompactDifficulty>,
 
         /// Floating point number that represents the difficulty limit for this block as a multiple

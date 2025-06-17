@@ -207,7 +207,8 @@ pub struct TransactionObject {
     #[serde(
         rename = "authdigest",
         with = "opthex",
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        default
     )]
     pub auth_digest: Option<transaction::AuthDigest>,
 
@@ -221,7 +222,8 @@ pub struct TransactionObject {
     #[serde(
         rename = "versiongroupid",
         with = "opthex",
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        default
     )]
     pub version_group_id: Option<Vec<u8>>,
 
@@ -237,7 +239,8 @@ pub struct TransactionObject {
     #[serde(
         rename = "blockhash",
         with = "opthex",
-        skip_serializing_if = "Option::is_none"
+        skip_serializing_if = "Option::is_none",
+        default
     )]
     pub block_hash: Option<block::Hash>,
 
