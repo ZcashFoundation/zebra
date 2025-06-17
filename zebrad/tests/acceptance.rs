@@ -170,10 +170,7 @@ use zcash_keys::address::Address;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     chain_tip::ChainTip,
-    parameters::{
-        testnet::ConfiguredActivationHeights,
-        Network::{self, *},
-    },
+    parameters::Network::{self, *},
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -2983,12 +2980,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let activation_heights = ConfiguredActivationHeights {
-        nu5: Some(1),
-        ..Default::default()
-    };
-
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
     config.state.ephemeral = false;
     let network = config.network.network.clone();
 
