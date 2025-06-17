@@ -169,7 +169,7 @@ impl VerifiedSet {
         for (index, output) in tx.outputs().iter().cloned().enumerate() {
             let outpoint = transparent::OutPoint::from_usize(tx_id, index);
             self.created_outputs.insert(outpoint, output.clone());
-            pending_outputs.respond(&outpoint, output)
+            pending_outputs.respond(&outpoint, transaction.transaction.transaction)
         }
         self.spent_outpoints.extend(tx.spent_outpoints());
         self.sprout_nullifiers.extend(tx.sprout_nullifiers());

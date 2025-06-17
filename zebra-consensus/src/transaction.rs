@@ -224,6 +224,9 @@ pub enum Response {
         /// in the mempool and to avoid adding transactions with missing spends
         /// to its verified set.
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
+
+        /// Transactions in the mempool with outputs that are spent by this transaction.
+        tx_dependencies: Vec<Transaction>,
     },
 }
 
@@ -481,7 +484,7 @@ where
             // The UTXOs are required for almost all the async checks.
             let load_spent_utxos_fut =
                 Self::spent_utxos(tx.clone(), req.clone(), state.clone(), mempool.clone(),);
-            let (spent_utxos, spent_outputs, spent_mempool_outpoints) = load_spent_utxos_fut.await?;
+            let (spent_utxos, spent_outputs, spent_mempool_outpoints, tx_dependencies) = load_spent_utxos_fut.await?;
 
             // WONTFIX: Return an error for Request::Block as well to replace this check in
             //       the state once #2336 has been implemented?
@@ -610,7 +613,7 @@ where
                         });
                     }
 
-                    Response::Mempool { transaction, spent_mempool_outpoints }
+                    Response::Mempool { transaction, spent_mempool_outpoints, tx_dependencies }
                 },
             };
 
@@ -755,6 +758,7 @@ where
         let mut spent_utxos = HashMap::new();
         let mut spent_outputs = Vec::new();
         let mut spent_mempool_outpoints = Vec::new();
+        let mut tx_dependencies = Vec::new();
 
         for input in inputs {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
@@ -804,8 +808,8 @@ where
                     .clone()
                     .oneshot(mempool::Request::AwaitOutput(spent_mempool_outpoint));
 
-                let output = match query.await {
-                    Ok(mempool::Response::UnspentOutput(output)) => output,
+                let tx = match query.await {
+                    Ok(mempool::Response::UnspentOutputTransaction(tx)) => tx,
                     Ok(_) => unreachable!("UnspentOutput always responds with UnspentOutput"),
                     Err(err) => {
                         return match err.downcast::<Elapsed>() {
@@ -815,7 +819,8 @@ where
                     }
                 };
 
-                spent_outputs.push(output.clone());
+                spent_outputs.push(tx.outputs().get(spent_mempool_outpoint.index));
+                transaction_dependencies.push(tx);
                 spent_utxos.insert(
                     spent_mempool_outpoint,
                     // Assume the Utxo height will be next height after the best chain tip height
@@ -831,7 +836,12 @@ where
             return Err(TransactionError::TransparentInputNotFound);
         }
 
-        Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
+        Ok((
+            spent_utxos,
+            spent_outputs,
+            spent_mempool_outpoints,
+            tx_dependencies,
+        ))
     }
 
     /// Accepts `request`, a transaction verifier [`&Request`](Request),

@@ -6,7 +6,7 @@ use std::collections::HashSet;
 
 use tokio::sync::oneshot;
 use zebra_chain::{
-    transaction::{self, UnminedTx, UnminedTxId, VerifiedUnminedTx},
+    transaction::{self, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
 
@@ -118,7 +118,7 @@ pub enum Response {
     Transactions(Vec<UnminedTx>),
 
     /// Response to [`Request::AwaitOutput`] with the transparent output
-    UnspentOutput(transparent::Output),
+    UnspentOutputTransaction(Transaction),
 
     /// Response to [`Request::TransactionWithDepsByMinedId`].
     TransactionWithDeps {
