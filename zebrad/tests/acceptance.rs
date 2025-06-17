@@ -3710,7 +3710,13 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     use common::regtest::MiningRpcMethods;
 
     let _init_guard = zebra_test::init();
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
+
+    let activation_heights = zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+        nu5: Some(1),
+        ..Default::default()
+    };
+
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
     config.state.ephemeral = false;
 
     let test_dir = testdir()?.with_config(&mut config)?;
