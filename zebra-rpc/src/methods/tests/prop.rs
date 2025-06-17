@@ -249,29 +249,10 @@ proptest! {
         tokio::time::pause();
 
         runtime.block_on(async move {
-            // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
-            let (expected_response, mempool_query) = {
-                let mut expected_response = transactions.clone();
-
-                expected_response.sort_by_cached_key(|tx| {
-                    // zcashd uses modified fee here but Zebra doesn't currently
-                    // support prioritizing transactions
-                    std::cmp::Reverse((
-                        i64::from(tx.miner_fee) as u128 * zebra_chain::block::MAX_BLOCK_BYTES as u128
-                            / tx.transaction.size as u128,
-                        // transaction hashes are compared in their serialized byte-order.
-                        tx.transaction.id.mined_id(),
-                    ))
-                });
-
-                let expected_response = expected_response
-                    .iter()
-                    .map(|tx| tx.transaction.id.mined_id().encode_hex::<String>())
-                    .collect::<Vec<_>>();
-
-                let transaction_dependencies = Default::default();
-                let expected_response = if verbose.unwrap_or(false) {
-                    let map = transactions
+            if verbose.unwrap_or(false) {
+                let (expected_response, mempool_query) = {
+                    let transaction_dependencies = Default::default();
+                    let txs = transactions
                         .iter()
                         .map(|unmined_tx| {
                             (
@@ -284,25 +265,42 @@ proptest! {
                             )
                         })
                         .collect::<HashMap<_, _>>();
-                    GetRawMempool::Verbose(map)
-                } else {
-                    GetRawMempool::TxIds(expected_response)
+
+                    let mempool_query = mempool.expect_request(mempool::Request::FullTransactions)
+                        .map_ok(|r| r.respond(mempool::Response::FullTransactions {
+                            transactions,
+                            transaction_dependencies,
+                            last_seen_tip_hash: [0; 32].into(),
+                        }));
+
+                    (GetRawMempool::Verbose(txs), mempool_query)
                 };
 
-                let mempool_query = mempool
-                    .expect_request(mempool::Request::FullTransactions)
-                    .map_ok(|r| r.respond(mempool::Response::FullTransactions {
-                        transactions,
-                        transaction_dependencies,
-                        last_seen_tip_hash: [0; 32].into(),
-                    }));
+                let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(verbose), mempool_query);
+                prop_assert_eq!(rpc_rsp?, expected_response);
+            } else {
+                let (expected_rsp, mempool_query) = {
+                    let mut tx_ids = transactions
+                        .iter()
+                        .map(|tx| tx.transaction.id.mined_id().encode_hex::<String>())
+                        .collect::<Vec<_>>();
 
-                (expected_response, mempool_query)
-            };
+                    tx_ids.sort();
 
-            let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(verbose), mempool_query);
+                    let mempool_rsp = transactions
+                        .iter()
+                        .map(|tx| tx.transaction.id)
+                        .collect::<HashSet<_>>();
 
-            prop_assert_eq!(rpc_rsp?, expected_response);
+                    let mempool_query = mempool.expect_request(mempool::Request::TransactionIds)
+                            .map_ok(|r| r.respond(mempool::Response::TransactionIds(mempool_rsp)));
+
+                    (GetRawMempool::TxIds(tx_ids), mempool_query,)
+                };
+
+                let (rpc_rsp, _) = tokio::join!(rpc.get_raw_mempool(verbose), mempool_query);
+                prop_assert_eq!(rpc_rsp?, expected_rsp);
+            }
 
             mempool.expect_no_requests().await?;
             state.expect_no_requests().await?;
@@ -944,6 +942,14 @@ fn mock_services<Tip>(
         >,
         tower::buffer::Buffer<
             zebra_test::mock_service::MockService<
+                zebra_state::Request,
+                zebra_state::Response,
+                zebra_test::mock_service::PropTestAssertion,
+            >,
+            zebra_state::Request,
+        >,
+        tower::buffer::Buffer<
+            zebra_test::mock_service::MockService<
                 zebra_state::ReadRequest,
                 zebra_state::ReadResponse,
                 zebra_test::mock_service::PropTestAssertion,
@@ -966,6 +972,7 @@ where
 {
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
+    let read_state = MockService::build().for_prop_tests();
     let block_verifier_router = MockService::build().for_prop_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -977,6 +984,7 @@ where
         "RPC test",
         mempool.clone(),
         Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),
         chain_tip,
@@ -985,5 +993,5 @@ where
         None,
     );
 
-    (mempool, state, rpc, mempool_tx_queue)
+    (mempool, read_state, rpc, mempool_tx_queue)
 }

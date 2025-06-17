@@ -561,6 +561,24 @@ pub trait Rpc {
     #[method(name = "z_listunifiedreceivers")]
     async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response>;
 
+    /// Invalidates a block if it is not yet finalized, removing it from the non-finalized
+    /// state if it is present and rejecting it during contextual validation if it is submitted.
+    ///
+    /// # Parameters
+    ///
+    /// - `block_hash`: (hex-encoded block hash, required) The block hash to invalidate.
+    // TODO: Invalidate block hashes even if they're not present in the non-finalized state (#9553).
+    #[method(name = "invalidateblock")]
+    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()>;
+
+    /// Reconsiders a previously invalidated block if it exists in the cache of previously invalidated blocks.
+    ///
+    /// # Parameters
+    ///
+    /// - `block_hash`: (hex-encoded block hash, required) The block hash to reconsider.
+    #[method(name = "reconsiderblock")]
+    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>>;
+
     #[method(name = "generate")]
     /// Mine blocks immediately. Returns the block hashes of the generated blocks.
     ///
@@ -597,7 +615,7 @@ pub trait Rpc {
 
 /// RPC method implementations.
 #[derive(Clone)]
-pub struct RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
+pub struct RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -609,6 +627,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -616,7 +643,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -642,10 +669,6 @@ where
     /// no matter what the estimated height or local clock is.
     debug_force_finished_sync: bool,
 
-    /// Test-only option that makes RPC responses more like `zcashd`.
-    #[allow(dead_code)]
-    debug_like_zcashd: bool,
-
     // Services
     //
     /// A handle to the mempool service.
@@ -653,6 +676,9 @@ where
 
     /// A handle to the state service.
     state: State,
+
+    /// A handle to the state service.
+    read_state: ReadState,
 
     /// Allows efficient access to the best tip of the blockchain.
     latest_chain_tip: Tip,
@@ -675,8 +701,8 @@ where
 /// A type alias for the last event logged by the server.
 pub type LoggedLastEvent = watch::Receiver<Option<(String, tracing::Level, chrono::DateTime<Utc>)>>;
 
-impl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus> fmt::Debug
-    for RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
+impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus> fmt::Debug
+    for RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -688,6 +714,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -695,7 +730,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -713,14 +748,13 @@ where
             .field("user_agent", &self.user_agent)
             .field("network", &self.network)
             .field("debug_force_finished_sync", &self.debug_force_finished_sync)
-            .field("debug_like_zcashd", &self.debug_like_zcashd)
             .field("getblocktemplate", &self.gbt)
             .finish()
     }
 }
 
-impl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
-    RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
+impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
+    RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -732,6 +766,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -739,7 +782,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -763,6 +806,7 @@ where
         user_agent: UserAgentString,
         mempool: Mempool,
         state: State,
+        read_state: ReadState,
         block_verifier_router: BlockVerifierRouter,
         sync_status: SyncStatus,
         latest_chain_tip: Tip,
@@ -797,9 +841,9 @@ where
             user_agent,
             network: network.clone(),
             debug_force_finished_sync,
-            debug_like_zcashd: mining_config.debug_like_zcashd,
             mempool: mempool.clone(),
             state: state.clone(),
+            read_state: read_state.clone(),
             latest_chain_tip: latest_chain_tip.clone(),
             queue_sender,
             address_book,
@@ -810,7 +854,7 @@ where
         // run the process queue
         let rpc_tx_queue_task_handle = tokio::spawn(
             runner
-                .run(mempool, state, latest_chain_tip, network)
+                .run(mempool, read_state, latest_chain_tip, network)
                 .in_current_span(),
         );
 
@@ -819,8 +863,8 @@ where
 }
 
 #[async_trait]
-impl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus> RpcServer
-    for RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
+impl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus> RpcServer
+    for RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>
 where
     Mempool: Service<
             mempool::Request,
@@ -832,6 +876,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    State::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -839,7 +892,7 @@ where
         + Send
         + Sync
         + 'static,
-    State::Future: Send,
+    ReadState::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
@@ -877,7 +930,7 @@ where
 
         let relay_fee = zebra_chain::transaction::zip317::MIN_MEMPOOL_TX_FEE_RATE as f64
             / (zebra_chain::amount::COIN as f64);
-        let difficulty = chain_tip_difficulty(self.network.clone(), self.state.clone(), true)
+        let difficulty = chain_tip_difficulty(self.network.clone(), self.read_state.clone(), true)
             .await
             .expect("should always be Ok when `should_use_default` is true");
 
@@ -907,11 +960,11 @@ where
 
         let (usage_info_rsp, tip_pool_values_rsp, chain_tip_difficulty) = {
             use zebra_state::ReadRequest::*;
-            let state_call = |request| self.state.clone().oneshot(request);
+            let state_call = |request| self.read_state.clone().oneshot(request);
             tokio::join!(
                 state_call(UsageInfo),
                 state_call(TipPoolValues),
-                chain_tip_difficulty(network.clone(), self.state.clone(), true)
+                chain_tip_difficulty(network.clone(), self.read_state.clone(), true)
             )
         };
 
@@ -1028,12 +1081,15 @@ where
     }
 
     async fn get_address_balance(&self, address_strings: AddressStrings) -> Result<AddressBalance> {
-        let state = self.state.clone();
-
         let valid_addresses = address_strings.valid_addresses()?;
 
         let request = zebra_state::ReadRequest::AddressBalance(valid_addresses);
-        let response = state.oneshot(request).await.map_misc_error()?;
+        let response = self
+            .read_state
+            .clone()
+            .oneshot(request)
+            .await
+            .map_misc_error()?;
 
         match response {
             zebra_state::ReadResponse::AddressBalance { balance, received } => Ok(AddressBalance {
@@ -1112,7 +1168,6 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     async fn get_block(&self, hash_or_height: String, verbosity: Option<u8>) -> Result<GetBlock> {
-        let mut state = self.state.clone();
         let verbosity = verbosity.unwrap_or(1);
         let network = self.network.clone();
         let original_hash_or_height = hash_or_height.clone();
@@ -1132,9 +1187,10 @@ where
 
         if verbosity == 0 {
             let request = zebra_state::ReadRequest::Block(hash_or_height);
-            let response = state
-                .ready()
-                .and_then(|service| service.call(request))
+            let response = self
+                .read_state
+                .clone()
+                .oneshot(request)
                 .await
                 .map_misc_error()?;
 
@@ -1197,7 +1253,7 @@ where
             let mut futs = FuturesOrdered::new();
 
             for request in requests {
-                futs.push_back(state.clone().oneshot(request));
+                futs.push_back(self.read_state.clone().oneshot(request));
             }
 
             let tx_ids_response = futs.next().await.expect("`futs` should not be empty");
@@ -1298,7 +1354,6 @@ where
         hash_or_height: String,
         verbose: Option<bool>,
     ) -> Result<GetBlockHeader> {
-        let state = self.state.clone();
         let verbose = verbose.unwrap_or(true);
         let network = self.network.clone();
 
@@ -1312,7 +1367,8 @@ where
             hash,
             height,
             next_block_hash,
-        } = state
+        } = self
+            .read_state
             .clone()
             .oneshot(zebra_state::ReadRequest::BlockHeader(hash_or_height))
             .await
@@ -1335,7 +1391,8 @@ where
         let response = if !verbose {
             GetBlockHeader::Raw(HexData(header.zcash_serialize_to_vec().map_misc_error()?))
         } else {
-            let zebra_state::ReadResponse::SaplingTree(sapling_tree) = state
+            let zebra_state::ReadResponse::SaplingTree(sapling_tree) = self
+                .read_state
                 .clone()
                 .oneshot(zebra_state::ReadRequest::SaplingTree(hash_or_height))
                 .await
@@ -1347,7 +1404,8 @@ where
             // This could be `None` if there's a chain reorg between state queries.
             let sapling_tree = sapling_tree.ok_or_misc_error("missing Sapling tree")?;
 
-            let zebra_state::ReadResponse::Depth(depth) = state
+            let zebra_state::ReadResponse::Depth(depth) = self
+                .read_state
                 .clone()
                 .oneshot(zebra_state::ReadRequest::Depth(hash))
                 .await
@@ -1438,12 +1496,9 @@ where
 
         use zebra_chain::block::MAX_BLOCK_BYTES;
 
-        // Determines whether the output of this RPC is sorted like zcashd
-        let should_use_zcashd_order = self.debug_like_zcashd;
-
         let mut mempool = self.mempool.clone();
 
-        let request = if should_use_zcashd_order || verbose {
+        let request = if verbose {
             mempool::Request::FullTransactions
         } else {
             mempool::Request::TransactionIds
@@ -1523,7 +1578,6 @@ where
         verbose: Option<u8>,
         block_hash: Option<String>,
     ) -> Result<GetRawTransaction> {
-        let mut state = self.state.clone();
         let mut mempool = self.mempool.clone();
         let verbose = verbose.unwrap_or(0) != 0;
 
@@ -1599,9 +1653,10 @@ where
         };
 
         // If the tx wasn't in the mempool, check the state.
-        match state
-            .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::Transaction(txid)))
+        match self
+            .read_state
+            .clone()
+            .oneshot(zebra_state::ReadRequest::Transaction(txid))
             .await
             .map_misc_error()?
         {
@@ -1647,7 +1702,7 @@ where
     // - use `height_from_signed_int()` to handle negative heights
     //   (this might be better in the state request, because it needs the state height)
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestate> {
-        let mut state = self.state.clone();
+        let mut read_state = self.read_state.clone();
         let network = self.network.clone();
 
         let hash_or_height =
@@ -1664,7 +1719,7 @@ where
         // be based on the hash.
         //
         // TODO: If this RPC is called a lot, just get the block header, rather than the whole block.
-        let block = match state
+        let block = match read_state
             .ready()
             .and_then(|service| service.call(zebra_state::ReadRequest::Block(hash_or_height)))
             .await
@@ -1693,7 +1748,7 @@ where
 
         let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
         let sapling = if network.is_nu_active(sapling_nu, height.into()) {
-            match state
+            match read_state
                 .ready()
                 .and_then(|service| {
                     service.call(zebra_state::ReadRequest::SaplingTree(hash.into()))
@@ -1710,7 +1765,7 @@ where
 
         let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
         let orchard = if network.is_nu_active(orchard_nu, height.into()) {
-            match state
+            match read_state
                 .ready()
                 .and_then(|service| {
                     service.call(zebra_state::ReadRequest::OrchardTree(hash.into()))
@@ -1736,13 +1791,13 @@ where
         start_index: NoteCommitmentSubtreeIndex,
         limit: Option<NoteCommitmentSubtreeIndex>,
     ) -> Result<GetSubtrees> {
-        let mut state = self.state.clone();
+        let mut read_state = self.read_state.clone();
 
         const POOL_LIST: &[&str] = &["sapling", "orchard"];
 
         if pool == "sapling" {
             let request = zebra_state::ReadRequest::SaplingSubtrees { start_index, limit };
-            let response = state
+            let response = read_state
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
@@ -1768,7 +1823,7 @@ where
             })
         } else if pool == "orchard" {
             let request = zebra_state::ReadRequest::OrchardSubtrees { start_index, limit };
-            let response = state
+            let response = read_state
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
@@ -1802,7 +1857,7 @@ where
     }
 
     async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>> {
-        let mut state = self.state.clone();
+        let mut read_state = self.read_state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         let height_range = build_height_range(
@@ -1820,7 +1875,7 @@ where
             addresses: valid_addresses,
             height_range,
         };
-        let response = state
+        let response = read_state
             .ready()
             .and_then(|service| service.call(request))
             .await
@@ -1857,14 +1912,14 @@ where
         &self,
         address_strings: AddressStrings,
     ) -> Result<Vec<GetAddressUtxos>> {
-        let mut state = self.state.clone();
+        let mut read_state = self.read_state.clone();
         let mut response_utxos = vec![];
 
         let valid_addresses = address_strings.valid_addresses()?;
 
         // get utxos data for addresses
         let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
-        let response = state
+        let response = read_state
             .ready()
             .and_then(|service| service.call(request))
             .await
@@ -1940,7 +1995,7 @@ where
     }
 
     async fn get_block_hash(&self, index: i32) -> Result<GetBlockHash> {
-        let mut state = self.state.clone();
+        let mut read_state = self.read_state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
         // TODO: look up this height as part of the state request?
@@ -1949,7 +2004,7 @@ where
         let height = height_from_signed_int(index, tip_height)?;
 
         let request = zebra_state::ReadRequest::BestChainBlockHash(height);
-        let response = state
+        let response = read_state
             .ready()
             .and_then(|service| service.call(request))
             .await
@@ -1972,14 +2027,13 @@ where
     ) -> Result<get_block_template::Response> {
         // Clone Configs
         let network = self.network.clone();
-        let debug_like_zcashd = self.debug_like_zcashd;
         let extra_coinbase_data = self.gbt.extra_coinbase_data();
 
         // Clone Services
         let mempool = self.mempool.clone();
         let mut latest_chain_tip = self.latest_chain_tip.clone();
         let sync_status = self.gbt.sync_status();
-        let state = self.state.clone();
+        let read_state = self.read_state.clone();
 
         if let Some(HexData(block_proposal_bytes)) = parameters
             .as_ref()
@@ -2050,7 +2104,7 @@ where
                 max_time,
                 cur_time,
                 ..
-            } = get_block_template::fetch_state_tip_and_local_time(state.clone()).await?;
+            } = get_block_template::fetch_state_tip_and_local_time(read_state.clone()).await?;
 
             // Fetch the mempool data for the block template:
             // - if the mempool transactions change, we might return from long polling.
@@ -2264,7 +2318,6 @@ where
             &miner_address,
             mempool_txs,
             mempool_tx_deps,
-            debug_like_zcashd,
             extra_coinbase_data.clone(),
         );
 
@@ -2285,7 +2338,6 @@ where
             server_long_poll_id,
             mempool_txs,
             submit_old,
-            debug_like_zcashd,
             extra_coinbase_data,
         );
 
@@ -2388,7 +2440,7 @@ where
 
     async fn get_mining_info(&self) -> Result<get_mining_info::Response> {
         let network = self.network.clone();
-        let mut state = self.state.clone();
+        let mut read_state = self.read_state.clone();
 
         let chain_tip = self.latest_chain_tip.clone();
         let tip_height = chain_tip.best_tip_height().unwrap_or(Height(0)).0;
@@ -2405,7 +2457,7 @@ where
         let mut current_block_size = None;
         if tip_height > 0 {
             let request = zebra_state::ReadRequest::TipBlockSize;
-            let response: zebra_state::ReadResponse = state
+            let response: zebra_state::ReadResponse = read_state
                 .ready()
                 .and_then(|service| service.call(request))
                 .await
@@ -2444,11 +2496,11 @@ where
         // height. Since negative values aren't valid heights, we can just use the conversion.
         let height = height.and_then(|height| height.try_into_height().ok());
 
-        let mut state = self.state.clone();
+        let mut read_state = self.read_state.clone();
 
         let request = ReadRequest::SolutionRate { num_blocks, height };
 
-        let response = state
+        let response = read_state
             .ready()
             .and_then(|service| service.call(request))
             .await
@@ -2627,7 +2679,7 @@ where
     }
 
     async fn get_difficulty(&self) -> Result<f64> {
-        chain_tip_difficulty(self.network.clone(), self.state.clone(), false).await
+        chain_tip_difficulty(self.network.clone(), self.read_state.clone(), false).await
     }
 
     async fn z_list_unified_receivers(&self, address: String) -> Result<unified_address::Response> {
@@ -2677,6 +2729,27 @@ where
         ))
     }
 
+    async fn invalidate_block(&self, block_hash: block::Hash) -> Result<()> {
+        self.state
+            .clone()
+            .oneshot(zebra_state::Request::InvalidateBlock(block_hash))
+            .await
+            .map(|rsp| assert_eq!(rsp, zebra_state::Response::Invalidated(block_hash)))
+            .map_misc_error()
+    }
+
+    async fn reconsider_block(&self, block_hash: block::Hash) -> Result<Vec<block::Hash>> {
+        self.state
+            .clone()
+            .oneshot(zebra_state::Request::ReconsiderBlock(block_hash))
+            .await
+            .map(|rsp| match rsp {
+                zebra_state::Response::Reconsidered(block_hashes) => block_hashes,
+                _ => unreachable!("unmatched response to a reconsider block request"),
+            })
+            .map_misc_error()
+    }
+
     async fn generate(&self, num_blocks: u32) -> Result<Vec<GetBlockHash>> {
         let rpc = self.clone();
         let network = self.network.clone();
@@ -2707,7 +2780,6 @@ where
             let proposal_block = proposal_block_from_template(
                 &block_template,
                 get_block_template::TimeSource::CurTime,
-                NetworkUpgrade::current(&network, Height(block_template.height)),
             )
             .map_error(server::error::LegacyCode::default())?;
             let hex_proposal_block = HexData(
