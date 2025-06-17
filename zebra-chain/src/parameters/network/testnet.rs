@@ -669,6 +669,7 @@ impl Parameters {
     pub fn new_regtest(
         ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
     ) -> Self {
+        // TODO: Activate Canopy at height 1 at NU5 at height 100 once #9605 is done.
         let (canopy, nu5) = if cfg!(test) || cfg!(feature = "proptest-impl") {
             (None, nu5.or(Some(1)))
         } else {
