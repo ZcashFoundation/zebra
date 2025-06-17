@@ -39,14 +39,14 @@ class WalletTest (BitcoinTestFramework):
 
         # As we connected the nodes to each other, they should have,
         # at least 4 peers. Poll for that.
-        # TODO: Add a function for this check.
-        timeout_for_connetions = 120
+        # TODO: Move this check to its own function.
+        timeout_for_connetions = 180
         wait_time = 1
         while timeout_for_connetions > 0:
             if (len(self.nodes[0].getpeerinfo()) < 4 or
                 len(self.nodes[1].getpeerinfo()) < 4 or
                 len(self.nodes[2].getpeerinfo()) < 4):
-                timeout -= wait_time
+                timeout_for_connetions -= wait_time
                 time.sleep(wait_time)
             else:
                 break
