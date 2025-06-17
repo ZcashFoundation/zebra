@@ -669,8 +669,11 @@ impl Parameters {
     pub fn new_regtest(
         ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
     ) -> Self {
-        #[cfg(any(test, feature = "proptest-impl"))]
-        let nu5 = nu5.or(Some(100));
+        let (canopy, nu5) = if cfg!(test) || cfg!(feature = "proptest-impl") {
+            (None, nu5.or(Some(1)))
+        } else {
+            (Some(1), nu5.or(Some(100)))
+        };
 
         let parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
@@ -682,7 +685,7 @@ impl Parameters {
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(ConfiguredActivationHeights {
-                canopy: Some(1),
+                canopy,
                 nu5,
                 nu6,
                 nu7,
