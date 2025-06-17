@@ -384,7 +384,7 @@ impl Chain {
         let block_height = self.height_by_hash(block_hash)?;
         let mut new_chain = self.fork(block_hash)?;
         new_chain.pop_tip();
-        new_chain.last_fork_height = None;
+        new_chain.last_fork_height = self.last_fork_height.min(Some(block_height));
         Some((new_chain, self.child_blocks(&block_height)))
     }
 

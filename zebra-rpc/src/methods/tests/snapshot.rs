@@ -137,7 +137,8 @@ async fn test_z_get_treestate() {
         .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
-    let (_, state, tip, _) = zebra_state::populated_state(blocks.clone(), &custom_testnet).await;
+    let (state, read_state, tip, _) =
+        zebra_state::populated_state(blocks.clone(), &custom_testnet).await;
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
         custom_testnet,
@@ -147,6 +148,7 @@ async fn test_z_get_treestate() {
         "RPC test",
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         state,
+        read_state,
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         MockSyncStatus::default(),
         tip,
@@ -231,6 +233,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     test_mining_rpcs(
         network,
         mempool.clone(),
+        state.clone(),
         read_state.clone(),
         block_verifier_router.clone(),
         settings.clone(),
@@ -246,6 +249,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state,
         read_state,
         block_verifier_router,
         MockSyncStatus::default(),
@@ -582,7 +586,8 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     settings.set_snapshot_suffix(network_string(network));
 
     let (latest_chain_tip, _) = MockChainTip::new();
-    let mut state = MockService::build().for_unit_tests();
+    let state = MockService::build().for_unit_tests();
+    let mut read_state = MockService::build().for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -593,6 +598,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         "RPC test",
         MockService::build().for_unit_tests(),
         state.clone(),
+        read_state.clone(),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         latest_chain_tip,
@@ -613,7 +619,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     }
 
     // Prepare the response.
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::SaplingSubtrees { .. }))
         .map(|responder| responder.respond(ReadResponse::SaplingSubtrees(subtrees)));
 
@@ -641,7 +647,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     }
 
     // Prepare the response.
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::OrchardSubtrees { .. }))
         .map(|responder| responder.respond(ReadResponse::OrchardSubtrees(subtrees)));
 
@@ -923,7 +929,7 @@ fn network_string(network: &Network) -> String {
     net_suffix
 }
 
-pub async fn test_mining_rpcs<ReadState>(
+pub async fn test_mining_rpcs<State, ReadState>(
     network: &Network,
     mempool: MockService<
         mempool::Request,
@@ -931,10 +937,20 @@ pub async fn test_mining_rpcs<ReadState>(
         PanicAssertion,
         zebra_node_services::BoxError,
     >,
+    state: State,
     read_state: ReadState,
     block_verifier_router: Buffer<BoxService<Request, Hash, RouterError>, Request>,
     settings: Settings,
 ) where
+    State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
     ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -1002,6 +1018,7 @@ pub async fn test_mining_rpcs<ReadState>(
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state,
         read_state,
         block_verifier_router.clone(),
         mock_sync_status.clone(),
@@ -1092,6 +1109,7 @@ pub async fn test_mining_rpcs<ReadState>(
     // `getblocktemplate` - the following snapshots use a mock read_state
 
     // get a new empty state
+    let state = MockService::build().for_unit_tests();
     let read_state = MockService::build().for_unit_tests();
 
     let make_mock_read_state_request_handler = || {
@@ -1139,6 +1157,7 @@ pub async fn test_mining_rpcs<ReadState>(
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         read_state.clone(),
         block_verifier_router,
         mock_sync_status.clone(),
@@ -1256,6 +1275,7 @@ pub async fn test_mining_rpcs<ReadState>(
         "0.0.1",
         "RPC test",
         Buffer::new(mempool, 1),
+        state.clone(),
         read_state.clone(),
         mock_block_verifier_router.clone(),
         mock_sync_status,

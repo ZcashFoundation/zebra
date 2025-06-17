@@ -942,6 +942,14 @@ fn mock_services<Tip>(
         >,
         tower::buffer::Buffer<
             zebra_test::mock_service::MockService<
+                zebra_state::Request,
+                zebra_state::Response,
+                zebra_test::mock_service::PropTestAssertion,
+            >,
+            zebra_state::Request,
+        >,
+        tower::buffer::Buffer<
+            zebra_test::mock_service::MockService<
                 zebra_state::ReadRequest,
                 zebra_state::ReadResponse,
                 zebra_test::mock_service::PropTestAssertion,
@@ -964,6 +972,7 @@ where
 {
     let mempool = MockService::build().for_prop_tests();
     let state = MockService::build().for_prop_tests();
+    let read_state = MockService::build().for_prop_tests();
     let block_verifier_router = MockService::build().for_prop_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -975,6 +984,7 @@ where
         "RPC test",
         mempool.clone(),
         Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),
         chain_tip,
@@ -983,5 +993,5 @@ where
         None,
     );
 
-    (mempool, state, rpc, mempool_tx_queue)
+    (mempool, read_state, rpc, mempool_tx_queue)
 }
