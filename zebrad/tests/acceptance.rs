@@ -168,8 +168,11 @@ use tower::ServiceExt;
 
 use zcash_keys::address::Address;
 use zebra_chain::{
-    block::{self, genesis::regtest_genesis_block, Height},
-    parameters::Network::{self, *},
+    block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
+    parameters::{
+        testnet::ConfiguredActivationHeights,
+        Network::{self, *},
+    },
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -1017,10 +1020,7 @@ fn stored_configs_work() -> Result<()> {
 
         let success_regexes = [
             // When logs are sent to the terminal, we see the config loading message and path.
-            format!(
-                "loaded zebrad config.*config_path.*=.*{}",
-                regex::escape(config_file_name)
-            ),
+            format!("Using config file at:.*{}", regex::escape(config_file_name)),
             // If they are sent to a file, we see a log file message on stdout,
             // and a logo, welcome message, and progress bar on stderr.
             "Sending logs to".to_string(),
@@ -2974,15 +2974,18 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use common::regtest::MiningRpcMethods;
     use eyre::Error;
     use tokio::time::timeout;
-    use zebra_chain::{
-        chain_tip::ChainTip, parameters::NetworkUpgrade,
-        primitives::byte_array::increment_big_endian,
-    };
+    use zebra_chain::{chain_tip::ChainTip, primitives::byte_array::increment_big_endian};
     use zebra_rpc::methods::GetBlockHashResponse;
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
+
+    let activation_heights = ConfiguredActivationHeights {
+        nu5: Some(1),
+        ..Default::default()
+    };
+
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
     config.state.ephemeral = false;
     let network = config.network.network.clone();
 
@@ -3020,7 +3023,10 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client.submit_block_from_template().await?;
+        let (block, height) = rpc_client.block_from_template().await?;
+
+        rpc_client.submit_block(block.clone()).await?;
+
         blocks.push(block);
         let tip_action = timeout(
             Duration::from_secs(1),
@@ -3067,12 +3073,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     }
 
     tracing::info!("getting next block template");
-    let (block_11, _) = rpc_client.block_from_template(Height(100)).await?;
-    let next_blocks: Vec<_> = blocks
-        .split_off(5)
-        .into_iter()
-        .chain(std::iter::once(block_11))
-        .collect();
+    let (block_11, _) = rpc_client.block_from_template().await?;
+    blocks.push(block_11);
+    let next_blocks: Vec<_> = blocks.split_off(5);
 
     tracing::info!("creating populated state");
     let genesis_block = regtest_genesis_block();
@@ -3085,11 +3088,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     tracing::info!("attempting to trigger a best chain change");
     for mut block in next_blocks {
-        let is_chain_history_activation_height = NetworkUpgrade::Heartwood
-            .activation_height(&network)
-            == Some(block.coinbase_height().unwrap());
-        let header = Arc::make_mut(&mut block.header);
-        increment_big_endian(header.nonce.as_mut());
         let ReadResponse::ChainInfo(chain_info) = read_state2
             .clone()
             .oneshot(zebra_state::ReadRequest::ChainInfo)
@@ -3099,13 +3097,22 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             unreachable!("wrong response variant");
         };
 
-        header.previous_block_hash = chain_info.tip_hash;
-        header.commitment_bytes = chain_info
+        let auth_root = block.auth_data_root();
+
+        let history_root = chain_info
             .chain_history_root
-            .or(is_chain_history_activation_height.then_some([0; 32].into()))
-            .expect("history tree can't be empty")
-            .bytes_in_serialized_order()
-            .into();
+            .expect("chain history root should be present");
+
+        let header = Arc::make_mut(&mut block.header);
+
+        header.commitment_bytes =
+            ChainHistoryBlockTxAuthCommitmentHash::from_commitments(&history_root, &auth_root)
+                .bytes_in_serialized_order()
+                .into();
+
+        increment_big_endian(header.nonce.as_mut());
+
+        header.previous_block_hash = chain_info.tip_hash;
 
         let Response::Committed(block_hash) = state2
             .clone()
@@ -3250,7 +3257,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
             },
-            NetworkUpgrade,
         },
         serialization::ZcashSerialize,
         work::difficulty::U256,
@@ -3259,7 +3265,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_node_services::mempool;
     use zebra_rpc::client::HexData;
     use zebra_test::mock_service::MockService;
-
     let _init_guard = zebra_test::init();
 
     tracing::info!("running nu6_funding_streams_and_coinbase_balance test");
@@ -3301,7 +3306,12 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network);
 
-    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+    let (
+        block_verifier_router,
+        _transaction_verifier,
+        _parameter_download_task_handle,
+        _max_checkpoint_height,
+    ) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
         &network,
         state.clone(),
@@ -3333,6 +3343,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         "0.0.1",
         "Zebra tests",
         mempool.clone(),
+        state.clone(),
         read_state.clone(),
         block_verifier_router,
         mock_sync_status,
@@ -3360,12 +3371,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let GetBlockTemplateResponse::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
-        panic!(
-            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
-        )
+        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
     };
 
-    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
     // Check that the block template is a valid block proposal
@@ -3464,7 +3473,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &miner_address,
         &[],
         chain_history_root,
-        true,
         vec![],
     );
 
@@ -3492,7 +3500,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
 
     // Submit the invalid block with an excessive coinbase output value
     let submit_block_response = rpc
@@ -3522,7 +3530,6 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &miner_address,
         &[],
         chain_history_root,
-        true,
         vec![],
     );
 
@@ -3550,7 +3557,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&block_template, None)?;
 
     // Submit the invalid block with an excessive coinbase input value
     let submit_block_response = rpc
@@ -3566,8 +3573,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the original block template can be submitted successfully
-    let proposal_block =
-        proposal_block_from_template(&valid_original_block_template, None, NetworkUpgrade::Nu6)?;
+    let proposal_block = proposal_block_from_template(&valid_original_block_template, None)?;
     let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;
@@ -3722,6 +3728,96 @@ async fn has_spending_transaction_ids() -> Result<()> {
         !is_failure,
         "at least one spend was missing a spending transaction id"
     );
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn invalidate_and_reconsider_block() -> Result<()> {
+    use std::sync::Arc;
+
+    use common::regtest::MiningRpcMethods;
+
+    let _init_guard = zebra_test::init();
+
+    let activation_heights = zebra_chain::parameters::testnet::ConfiguredActivationHeights {
+        nu5: Some(1),
+        ..Default::default()
+    };
+
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
+    config.state.ephemeral = false;
+
+    let test_dir = testdir()?.with_config(&mut config)?;
+
+    let mut child = test_dir.spawn_child(args!["start"])?;
+    let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+
+    tracing::info!("waiting for Zebra state cache to be opened");
+
+    tokio::time::sleep(LAUNCH_DELAY).await;
+
+    let rpc_client = RpcRequestClient::new(rpc_address);
+    let mut blocks = Vec::new();
+    for _ in 0..50 {
+        let (block, _) = rpc_client.block_from_template().await?;
+
+        rpc_client.submit_block(block.clone()).await?;
+        blocks.push(block);
+    }
+
+    tracing::info!("checking that read state has the new non-finalized best chain blocks");
+    for expected_block in blocks.clone() {
+        let height = expected_block.coinbase_height().unwrap();
+        let zebra_block = rpc_client
+            .get_block(height.0 as i32)
+            .await
+            .map_err(|err| eyre!(err))?
+            .expect("Zebra test child should have the expected block");
+
+        assert_eq!(
+            zebra_block,
+            Arc::new(expected_block),
+            "Zebra should have the same block"
+        );
+    }
+
+    tracing::info!("invalidating blocks");
+
+    // Note: This is the block at height 7, it's the 6th generated block.
+    let block_6_hash = blocks.get(5).expect("should have 50 blocks").hash();
+    let params = serde_json::to_string(&vec![block_6_hash]).expect("should serialize successfully");
+
+    let _: () = rpc_client
+        .json_result_from_call("invalidateblock", &params)
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    let expected_reconsidered_hashes = blocks
+        .iter()
+        .skip(5)
+        .map(|block| block.hash())
+        .collect::<Vec<_>>();
+
+    tracing::info!("reconsidering blocks");
+
+    let reconsidered_hashes: Vec<block::Hash> = rpc_client
+        .json_result_from_call("reconsiderblock", &params)
+        .await
+        .map_err(|err| eyre!(err))?;
+
+    assert_eq!(
+        reconsidered_hashes, expected_reconsidered_hashes,
+        "reconsidered hashes should match expected hashes"
+    );
+
+    child.kill(false)?;
+    let output = child.wait_with_output()?;
+
+    // Make sure the command was killed
+    output.assert_was_killed()?;
+
+    output.assert_failure()?;
 
     Ok(())
 }

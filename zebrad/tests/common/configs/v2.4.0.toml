@@ -55,7 +55,7 @@ initial_testnet_peers = [
     "testnet.seeder.zfnd.org:18233",
     "testnet.is.yolo.money:18233",
 ]
-listen_addr = "0.0.0.0:8233"
+listen_addr = "[::]:8233"
 max_connections_per_ip = 1
 network = "Mainnet"
 peerset_initial_target_size = 25
@@ -82,3 +82,4 @@ buffer_limit = 128000
 force_use_color = false
 use_color = true
 use_journald = false
+
