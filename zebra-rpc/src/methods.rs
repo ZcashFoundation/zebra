@@ -1625,13 +1625,12 @@ where
         let txid = if let Some(block_hash) = block_hash {
             let block_hash = block::Hash::from_hex(block_hash)
                 .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
-            match state
-                .ready()
-                .and_then(|service| {
-                    service.call(zebra_state::ReadRequest::TransactionIdsForBlock(
-                        block_hash.into(),
-                    ))
-                })
+            match self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::TransactionIdsForBlock(
+                    block_hash.into(),
+                ))
                 .await
                 .map_misc_error()?
             {
@@ -1661,11 +1660,10 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
-                let block_hash = match state
-                    .ready()
-                    .and_then(|service| {
-                        service.call(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
-                    })
+                let block_hash = match self
+                    .read_state
+                    .clone()
+                    .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
                     .await
                     .map_misc_error()?
                 {
