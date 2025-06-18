@@ -397,18 +397,20 @@ where
                     height: next_height,
                 })
                 .map_ok(|rsp| {
-                    let tx::Response::Mempool { transaction, spent_mempool_outpoints } = rsp else {
+                    let tx::Response::Mempool { transaction, spent_mempool_outpoints, mempool_dependencies } = rsp else {
                         panic!("unexpected non-mempool response to mempool request")
                     };
 
-                    (transaction, spent_mempool_outpoints, tip_height)
+                    (transaction, spent_mempool_outpoints, mempool_dependencies, tip_height)
                 })
                 .await;
 
             // Hide the transaction data to avoid filling the logs
             trace!(?txid, result = ?result.as_ref().map(|_tx| ()), "verified transaction for the mempool");
 
-            result.map_err(|e| TransactionDownloadVerifyError::Invalid { error: e.into(), advertiser_addr } )
+            let (transaction, spent_mempool_outpoints, mempool_dependencies, tip_height) = result.map_err(|e| TransactionDownloadVerifyError::Invalid { error: e.into(), advertiser_addr } )?;
+
+            Ok((transaction, spent_mempool_outpoints, tip_height))
         }
         .map_ok(|(tx, spent_mempool_outpoints, tip_height)| {
             metrics::counter!(

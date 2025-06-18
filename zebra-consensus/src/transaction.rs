@@ -224,6 +224,10 @@ pub enum Response {
         /// in the mempool and to avoid adding transactions with missing spends
         /// to its verified set.
         spent_mempool_outpoints: Vec<transparent::OutPoint>,
+
+        /// Transactions in the mempool on which the verified transaction
+        /// directly or indirectly depends.
+        mempool_dependencies: Vec<Arc<Transaction>>,
     },
 }
 
@@ -233,6 +237,7 @@ impl From<VerifiedUnminedTx> for Response {
         Response::Mempool {
             transaction,
             spent_mempool_outpoints: Vec::new(),
+            mempool_dependencies: Vec::new(),
         }
     }
 }
@@ -479,9 +484,17 @@ where
 
             // Load spent UTXOs from state.
             // The UTXOs are required for almost all the async checks.
-            let load_spent_utxos_fut =
-                Self::spent_utxos(tx.clone(), req.clone(), state.clone(), mempool.clone(),);
-            let (spent_utxos, spent_outputs, spent_mempool_outpoints) = load_spent_utxos_fut.await?;
+            let (
+                spent_utxos,
+                spent_outputs,
+                mempool_dependencies,
+                spent_mempool_outpoints,
+            ) = Self::spent_utxos(
+                tx.clone(),
+                req.clone(),
+                state.clone(),
+                mempool.clone()
+            ).await?;
 
             // WONTFIX: Return an error for Request::Block as well to replace this check in
             //       the state once #2336 has been implemented?
@@ -610,7 +623,7 @@ where
                         });
                     }
 
-                    Response::Mempool { transaction, spent_mempool_outpoints }
+                    Response::Mempool { transaction, spent_mempool_outpoints, mempool_dependencies }
                 },
             };
 
@@ -732,6 +745,7 @@ where
     /// Returns a triple containing:
     /// - `OutPoint` -> `Utxo` map,
     /// - vec of `Output`s in the same order as the matching inputs in the `tx`,
+    /// - vec of `Transaction`s that are ordered direct or indirect dependencies of the `tx` in the mempool,
     /// - vec of `Outpoint`s spent by a mempool `tx` that were not found in the best chain's utxo set.
     async fn spent_utxos(
         tx: Arc<Transaction>,
@@ -742,6 +756,7 @@ where
         (
             HashMap<transparent::OutPoint, transparent::Utxo>,
             Vec<transparent::Output>,
+            Vec<Arc<Transaction>>,
             Vec<transparent::OutPoint>,
         ),
         TransactionError,
@@ -755,6 +770,7 @@ where
         let mut spent_utxos = HashMap::new();
         let mut spent_outputs = Vec::new();
         let mut spent_mempool_outpoints = Vec::new();
+        let mut tx_dependencies = Vec::new();
 
         for input in inputs {
             if let transparent::Input::PrevOut { outpoint, .. } = input {
@@ -799,6 +815,18 @@ where
         }
 
         if let Some(mempool) = mempool {
+            let mempool_direct_dependency_hashes = spent_mempool_outpoints
+                .iter()
+                .map(|outpoint| outpoint.hash)
+                .collect::<HashSet<_>>();
+
+            // TODO: Update mempool response to `AwaitOutput` requests to return:
+            //       - full transactions for each hash in `mempool_direct_dependency_hashes`, and
+            //       - full transactions that this transaction indirectly depends on.
+            //       These transaction dependencies must be ordered, either in the response, or by
+            //       sorting them here, or by sorting them in the mempool's downloads component.
+            // let mut mempool_dependencies = Vec::new();
+
             for &spent_mempool_outpoint in &spent_mempool_outpoints {
                 let query = mempool
                     .clone()
@@ -831,7 +859,12 @@ where
             return Err(TransactionError::TransparentInputNotFound);
         }
 
-        Ok((spent_utxos, spent_outputs, spent_mempool_outpoints))
+        Ok((
+            spent_utxos,
+            spent_outputs,
+            tx_dependencies,
+            spent_mempool_outpoints,
+        ))
     }
 
     /// Accepts `request`, a transaction verifier [`&Request`](Request),

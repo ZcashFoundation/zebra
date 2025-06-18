@@ -966,6 +966,7 @@ async fn mempool_responds_to_await_output() -> Result<(), Report> {
     let mock_verify_tx_fut = tx_verifier.expect_request_that(|_| true).map(|responder| {
         responder.respond(transaction::Response::Mempool {
             transaction: verified_unmined_tx,
+            mempool_dependencies: Vec::new(),
             spent_mempool_outpoints: Vec::new(),
         });
     });
