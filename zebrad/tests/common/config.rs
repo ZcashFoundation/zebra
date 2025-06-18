@@ -53,15 +53,9 @@ pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
 
     let consensus = zebra_consensus::Config::default();
 
-    let force_use_color = !matches!(
-        env::var("ZEBRA_FORCE_USE_COLOR"),
-        Err(env::VarError::NotPresent)
-    );
+    let tracing = tracing::Config::default();
 
-    let mut tracing = tracing::Config::default();
-    tracing.force_use_color = force_use_color;
-
-    let mut state = zebra_state::Config::ephemeral();
+    let mut state: zebra_state::Config = zebra_state::Config::ephemeral();
     state.debug_validity_check_interval = Some(DATABASE_FORMAT_CHECK_INTERVAL);
 
     // These are the ZF funding stream addresses for mainnet and testnet.

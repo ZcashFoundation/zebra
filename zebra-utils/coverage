@@ -3,7 +3,7 @@ set -e
 set -o xtrace
 
 export CARGO_TARGET_DIR="coverage-target"
-export ZEBRA_SKIP_NETWORK_TESTS=1
+export TESTS_ZEBRA_SKIP_NETWORK=1
 export LLVM_PROFILE_FILE="${PWD}/$CARGO_TARGET_DIR/coverage/test.%m.profraw"
 export RUSTFLAGS="-Zinstrument-coverage -C link-dead-code -C debuginfo=2"
 

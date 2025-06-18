@@ -31,9 +31,6 @@ use crate::common::{
     test_type::TestType,
 };
 
-/// The environmental variable that holds the path to a directory containing a cached Zebra state.
-pub const ZEBRA_CACHE_DIR: &str = "ZEBRA_CACHE_DIR";
-
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///
 /// This should be short enough that format bugs cause CI test failures,
@@ -215,7 +212,7 @@ pub async fn raw_future_blocks(
     );
 
     let should_sync = true;
-    let (zebrad, zebra_rpc_address) =
+    let (zebrad, zebra_rpc_address, config) =
         spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)?
             .ok_or_else(|| eyre!("raw_future_blocks requires a cached state"))?;
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
@@ -272,12 +269,10 @@ pub async fn raw_future_blocks(
     // Sleep for a few seconds to make sure zebrad releases lock on cached state directory
     std::thread::sleep(Duration::from_secs(3));
 
-    let zebrad_state_path = test_type
-        .zebrad_state_path(test_name)
-        .expect("already checked that there is a cached state path");
+    let zebrad_state_path = &config.state.cache_dir;
 
     let Height(finalized_tip_height) =
-        load_tip_height_from_state_directory(network, zebrad_state_path.as_ref()).await?;
+        load_tip_height_from_state_directory(network, zebrad_state_path).await?;
 
     tracing::info!(
         ?finalized_tip_height,
