@@ -27,8 +27,8 @@ pub struct Output {
     /// A value commitment to the value of the input note.
     pub cv: commitment::NotSmallOrderValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::Fq")]
-    pub cm_u: jubjub::Fq,
+    #[serde(with = "serde_helpers::SaplingExtractedNoteCommitment")]
+    pub cm_u: sapling_crypto::note::ExtractedNoteCommitment,
     /// An encoding of an ephemeral Jubjub public key.
     pub ephemeral_key: keys::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.
@@ -58,8 +58,8 @@ pub struct OutputPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
     pub cv: commitment::NotSmallOrderValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
-    #[serde(with = "serde_helpers::Fq")]
-    pub cm_u: jubjub::Fq,
+    #[serde(with = "serde_helpers::SaplingExtractedNoteCommitment")]
+    pub cm_u: sapling_crypto::note::ExtractedNoteCommitment,
     /// An encoding of an ephemeral Jubjub public key.
     pub ephemeral_key: keys::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.
@@ -152,8 +152,8 @@ impl ZcashDeserialize for OutputInTransactionV4 {
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
             // However, the consensus rule above restricts it even more.
-            // See [`jubjub::Fq::zcash_deserialize`].
-            cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
+            // See [`sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize`].
+            cm_u: sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize(&mut reader)?,
             // Type is `KA^{Sapling}.Public`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].
@@ -215,8 +215,8 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
             cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
             // However, the consensus rule above restricts it even more.
-            // See [`jubjub::Fq::zcash_deserialize`].
-            cm_u: jubjub::Fq::zcash_deserialize(&mut reader)?,
+            // See [`sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize`].
+            cm_u: sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize(&mut reader)?,
             // Type is `KA^{Sapling}.Public`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
             // See [`keys::EphemeralPublicKey::zcash_deserialize`].

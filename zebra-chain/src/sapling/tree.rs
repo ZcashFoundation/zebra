@@ -43,7 +43,7 @@ use legacy::LegacyNoteCommitmentTree;
 /// The type that is used to update the note commitment tree.
 ///
 /// Unfortunately, this is not the same as `sapling::NoteCommitment`.
-pub type NoteCommitmentUpdate = jubjub::Fq;
+pub type NoteCommitmentUpdate = sapling_crypto::note::ExtractedNoteCommitment;
 
 pub(super) const MERKLE_DEPTH: u8 = 32;
 
@@ -279,6 +279,13 @@ impl Hashable for Node {
     }
 }
 
+impl From<sapling_crypto::note::ExtractedNoteCommitment> for Node {
+    fn from(x: sapling_crypto::note::ExtractedNoteCommitment) -> Self {
+        Node(x.to_bytes())
+    }
+}
+
+// TODO: Make test-only/proptest-impl only
 impl From<jubjub::Fq> for Node {
     fn from(x: jubjub::Fq) -> Self {
         Node(x.into())
@@ -312,9 +319,14 @@ impl<'de> serde::Deserialize<'de> for Node {
         D: serde::Deserializer<'de>,
     {
         let bytes = <[u8; 32]>::deserialize(deserializer)?;
-        Option::<jubjub::Fq>::from(jubjub::Fq::from_bytes(&bytes))
-            .map(Node::from)
-            .ok_or_else(|| serde::de::Error::custom("invalid JubJub field element"))
+
+        // TODO: Ensure `to_bytes()` call was unnecessary
+        Option::<sapling_crypto::note::ExtractedNoteCommitment>::from(
+            sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&bytes),
+        )
+        .ok_or_else(|| serde::de::Error::custom("invalid JubJub field element"))?;
+
+        Ok(Node(bytes))
     }
 }
 
@@ -688,9 +700,9 @@ impl PartialEq for NoteCommitmentTree {
     }
 }
 
-impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
+impl From<Vec<sapling_crypto::note::ExtractedNoteCommitment>> for NoteCommitmentTree {
     /// Computes the tree from a whole bunch of note commitments at once.
-    fn from(values: Vec<jubjub::Fq>) -> Self {
+    fn from(values: Vec<sapling_crypto::note::ExtractedNoteCommitment>) -> Self {
         let mut tree = Self::default();
 
         if values.is_empty() {

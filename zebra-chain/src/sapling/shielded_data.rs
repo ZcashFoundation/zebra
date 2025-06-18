@@ -250,7 +250,9 @@ where
 
     /// Collect the cm_u's for this transaction, if it contains [`Output`]s,
     /// in the order they appear in the transaction.
-    pub fn note_commitments(&self) -> impl Iterator<Item = &jubjub::Fq> {
+    pub fn note_commitments(
+        &self,
+    ) -> impl Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> {
         self.outputs().map(|output| &output.cm_u)
     }
 

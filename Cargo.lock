@@ -4091,8 +4091,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d3c081c83f1dc87403d9d71a06f52301c0aa9ea4c17da2a3435bbf493ffba4"
+source = "git+https://github.com/zcash/sapling-crypto.git?branch=pub-note-commitment-api#1d0256917e37349c55851a35f196deda9417f058"
 dependencies = [
  "aes",
  "bellman",
@@ -6607,6 +6606,7 @@ dependencies = [
  "regex",
  "rlimit",
  "rocksdb",
+ "sapling-crypto",
  "semver",
  "serde",
  "serde_json",

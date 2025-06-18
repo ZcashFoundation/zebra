@@ -23,9 +23,10 @@ use crate::{
 use super::*;
 use crate::sapling;
 
-impl ZcashDeserialize for jubjub::Fq {
+impl ZcashDeserialize for sapling_crypto::note::ExtractedNoteCommitment {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let possible_scalar = jubjub::Fq::from_bytes(&reader.read_32_bytes()?);
+        let possible_scalar =
+            sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&reader.read_32_bytes()?);
 
         if possible_scalar.is_some().into() {
             Ok(possible_scalar.unwrap())

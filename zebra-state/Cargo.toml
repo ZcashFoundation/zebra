@@ -67,7 +67,7 @@ crossbeam-channel = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
-
+sapling-crypto = { workspace = true }
 rayon = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { workspace = true, features = ["buffer", "util"] }

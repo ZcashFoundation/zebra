@@ -143,8 +143,10 @@ impl NoteCommitment {
     /// Hash Extractor for Jubjub (?)
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#concreteextractorjubjub>
-    pub fn extract_u(&self) -> jubjub::Fq {
-        self.0.get_u()
+    pub fn extract_u(&self) -> sapling_crypto::note::ExtractedNoteCommitment {
+        // TODO: Replace NoteCommitment type and use a `.into()` instead.
+        sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&self.0.get_u().to_bytes())
+            .unwrap()
     }
 }
 

@@ -313,7 +313,7 @@ pub fn compact_to_v4(tx: &CompactTx) -> Result<Transaction> {
 
             Ok(sapling::Output {
                 cv: sapling::NotSmallOrderValueCommitment::default(),
-                cm_u: Option::from(jubjub::Fq::from_bytes(
+                cm_u: Option::from(sapling_crypto::note::ExtractedNoteCommitment::from_bytes(
                     &output
                         .cmu()
                         .map_err(|_| Report::msg("Invalid commitment."))?
