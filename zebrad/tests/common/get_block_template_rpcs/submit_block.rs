@@ -48,7 +48,7 @@ pub(crate) async fn run() -> Result<()> {
 
     // Start zebrad with no peers, we run the rest of the submitblock test without syncing.
     let should_sync = false;
-    let (mut zebrad, zebra_rpc_address) =
+    let (mut zebrad, zebra_rpc_address, _config) =
         spawn_zebrad_for_rpc(network, test_name, test_type, should_sync)?
             .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
 

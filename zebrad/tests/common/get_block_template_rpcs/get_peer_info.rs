@@ -27,7 +27,7 @@ pub(crate) async fn run() -> Result<()> {
 
     tracing::info!(?network, "running getpeerinfo test using zebrad",);
 
-    let (mut zebrad, zebra_rpc_address) =
+    let (mut zebrad, zebra_rpc_address, _config) =
         spawn_zebrad_for_rpc(network, test_name, test_type, true)?
             .expect("Already checked zebra state path with can_spawn_zebrad_for_test_type");
 

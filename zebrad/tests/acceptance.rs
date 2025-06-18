@@ -2394,17 +2394,18 @@ async fn lwd_rpc_test() -> Result<()> {
     let test_type = TestType::UpdateCachedState;
     let network = Network::Mainnet;
 
-    let (mut zebrad, zebra_rpc_address, _config) = match spawn_zebrad_for_rpc(network, "fully_synced_rpc_test", test_type, false)? {
-        Some(zebrad_and_address) => {
-            tracing::info!("running fully synced zebrad RPC test");
+    let (mut zebrad, zebra_rpc_address, _config) =
+        match spawn_zebrad_for_rpc(network, "fully_synced_rpc_test", test_type, false)? {
+            Some(zebrad_and_address) => {
+                tracing::info!("running fully synced zebrad RPC test");
 
-            zebrad_and_address
-        }
-        None => {
-            // Skip the test, we don't have the required cached state
-            return Ok(());
-        }
-    };
+                zebrad_and_address
+            }
+            None => {
+                // Skip the test, we don't have the required cached state
+                return Ok(());
+            }
+        };
 
     let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
 

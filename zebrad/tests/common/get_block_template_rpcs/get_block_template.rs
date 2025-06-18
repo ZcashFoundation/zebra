@@ -77,9 +77,11 @@ pub(crate) async fn run() -> Result<()> {
     );
 
     let should_sync = true;
-    let (zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)?
-            .ok_or_else(|| eyre!("getblocktemplate test requires a cached state"))?;
+    let (zebrad, zebra_rpc_address, _config) =
+        match spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)? {
+            Some(zebrad_and_address) => zebrad_and_address,
+            None => return Err(eyre!("getblocktemplate test requires a cached state")),
+        };
 
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
 
