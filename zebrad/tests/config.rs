@@ -383,3 +383,28 @@ fn test_invalid_miner_address_fails() {
         Ok(())
     });
 }
+
+#[test]
+/// Replicates the CI 'Test RPC config' failure.
+/// Verifies that setting ZEBRA_RPC__LISTEN_ADDR via environment variables works correctly.
+fn test_rpc_config_from_env() {
+    Jail::expect_with(|jail| {
+        // Clear any existing ZEBRA_* environment variables that might interfere
+        jail.clear_env();
+
+        // This is what `prepare_conf_file` in entrypoint.sh does when ZEBRA_RPC_PORT is set.
+        jail.set_env("ZEBRA_RPC__LISTEN_ADDR", "0.0.0.0:8232");
+
+        // Load config with no config file, relying only on defaults and env vars.
+        let config = ZebradConfig::load(None)
+            .expect("Failed to load config with RPC env vars");
+
+        // Verify that the RPC listen address is correctly parsed and set
+        assert_eq!(
+            config.rpc.listen_addr.as_ref().map(|addr| addr.to_string()),
+            Some("0.0.0.0:8232".to_string())
+        );
+
+        Ok(())
+    });
+}
