@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use color_eyre::eyre::{eyre, Context, Result};
+use color_eyre::eyre::{Context, Result, eyre};
 use futures::FutureExt;
 
 use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
@@ -22,7 +22,7 @@ use zebra_rpc::{
 
 use crate::common::{
     launch::{can_spawn_zebrad_for_test_type, spawn_zebrad_for_rpc},
-    sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
+    sync::{MempoolBehavior, SYNC_FINISHED_REGEX, check_sync_logs_until},
     test_type::TestType,
 };
 
