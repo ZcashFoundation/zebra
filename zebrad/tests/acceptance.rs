@@ -195,13 +195,12 @@ use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_c
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
+    net::random_known_port,
     prelude::*,
 };
 
 #[cfg(not(target_os = "windows"))]
 use zebra_network::constants::PORT_IN_USE_ERROR;
-#[cfg(not(target_os = "windows"))]
-use zebra_test::net::random_known_port;
 
 use common::{
     cached_state::{
@@ -2990,12 +2989,14 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
     config.state.ephemeral = false;
+    config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
     let network = config.network.network.clone();
 
     let test_dir = testdir()?.with_config(&mut config)?;
 
     let mut child = test_dir.spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let indexer_listen_addr = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
     tracing::info!("waiting for Zebra state cache to be opened");
 
@@ -3008,6 +3009,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             config.state,
             &config.network.network,
             rpc_address,
+            indexer_listen_addr,
         )
         .await?
         .map_err(|err| eyre!(err))?;
@@ -3205,7 +3207,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
     config.state.ephemeral = false;
+    config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from((
+        [127, 0, 0, 1],
+        random_known_port(),
+    )));
+
     let rpc_address = config.rpc.listen_addr.unwrap();
+    let indexer_listen_addr = config.rpc.indexer_listen_addr.unwrap();
 
     let test_dir = testdir()?.with_config(&mut config)?;
 
@@ -3222,6 +3230,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             config.state,
             &config.network.network,
             rpc_address,
+            indexer_listen_addr,
         )
         .await?
         .map_err(|err| eyre!(err))?;

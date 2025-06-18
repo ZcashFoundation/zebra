@@ -52,6 +52,9 @@ fn scanner_help() -> eyre::Result<()> {
 async fn scan_binary_starts() -> Result<()> {
     use std::time::Duration;
 
+    use zebra_rpc::server::OPENED_RPC_ENDPOINT_MSG;
+    use zebra_test::net::random_known_port;
+
     let _init_guard = zebra_test::init();
 
     // Create a directory to dump test data into it.
@@ -60,20 +63,20 @@ async fn scan_binary_starts() -> Result<()> {
     // Create a config for zebrad with a cache directory inside the test directory.
     let mut config = zebrad::config::ZebradConfig::default();
     config.state.cache_dir = test_dir.path().join("zebra").to_path_buf();
+
+    let indexer_rpc_listen_addr = &format!("127.0.0.1:{}", random_known_port());
+    config.rpc.indexer_listen_addr = indexer_rpc_listen_addr.parse().ok();
+    config.network.initial_mainnet_peers = Default::default();
     let config_file = test_dir.path().join("zebrad.toml");
     std::fs::File::create(config_file.clone())?.write_all(toml::to_string(&config)?.as_bytes())?;
 
     // Start the node just to make sure a cache is created.
     let mut zebrad =
         test_dir.spawn_zebrad_child(args!["-c", config_file.clone().to_str().unwrap(), "start"])?;
+
     zebrad.expect_stdout_line_matches("Opened Zebra state cache at .*")?;
 
-    // Kill the node now that we have a valid zebra node cache.
-    zebrad.kill(false)?;
-    let output = zebrad.wait_with_output()?;
-
-    // Make sure the command was killed
-    output.assert_was_killed()?;
+    zebrad.expect_stdout_line_matches(OPENED_RPC_ENDPOINT_MSG)?;
 
     // Create a new directory for the scanner
     let test_dir = testdir()?;
@@ -94,7 +97,9 @@ async fn scan_binary_starts() -> Result<()> {
         "--listen-addr",
         listen_addr,
         "--zebra-rpc-listen-addr",
-        rpc_listen_addr
+        rpc_listen_addr,
+        "--zebra-indexer-rpc-listen-addr",
+        indexer_rpc_listen_addr
     ];
 
     // Start the scaner using another test directory.
@@ -124,6 +129,10 @@ async fn scan_binary_starts() -> Result<()> {
     // Make sure the command was killed
     output.assert_was_killed()?;
     output.assert_failure()?;
+
+    zebrad.kill(false)?;
+    let output = zebrad.wait_with_output()?;
+    output.assert_was_killed()?;
 
     Ok(())
 }

@@ -61,7 +61,7 @@ default-release-binaries = ["default", "sentry"]
 # Production features that activate extra dependencies, or extra features in dependencies
 
 # Indexer support
-indexer = ["zebra-rpc/indexer-rpcs", "zebra-state/indexer"]
+indexer = ["zebra-state/indexer"]
 
 # TODO: Remove this feature when releasing Zebra 3.0 (#9412).
 getblocktemplate-rpcs = []
