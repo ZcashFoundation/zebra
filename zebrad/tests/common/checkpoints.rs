@@ -98,18 +98,12 @@ pub async fn run(network: Network) -> Result<()> {
         //
         // TODO: combine this check with the CHECKPOINT_VERIFIER_REGEX and RPC endpoint checks.
         // This is tricky because we need to get the last checkpoint log.
-        //
-        // TODO: if the upgrade *is* slower than the RPC server spawn, we do nothing
-        // This might not work in future database upgrades, but works for the
-        // current one (27.0.0) where this `if` was introduced.
-        if !DATABASE_FORMAT_UPGRADE_IS_SLOWER_THAN_RPC_SPAWN {
-            wait_for_state_version_upgrade(
-                &mut zebrad,
-                &state_version_message,
-                state_database_format_version_in_code(),
-                None,
-            )?;
-        }
+        wait_for_state_version_upgrade(
+            &mut zebrad,
+            &state_version_message,
+            state_database_format_version_in_code(),
+            None,
+        )?;
     }
 
     let zebra_rpc_address = zebra_rpc_address.expect("zebra_checkpoints test must have RPC port");

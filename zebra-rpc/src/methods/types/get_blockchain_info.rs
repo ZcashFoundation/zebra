@@ -27,7 +27,7 @@ pub struct Balance {
     value_delta: Option<Zec<NegativeAllowed>>,
     /// Change to the amount in the pool produced by this block, in zatoshis
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    value_delta_zat: Option<Amount<NegativeAllowed>>,
+    value_delta_zat: Option<Amount>,
 }
 
 impl Balance {
