@@ -48,7 +48,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
     let client = RpcRequestClient::new(rpc_address);
 
     for _ in 1..=NUM_BLOCKS_TO_SUBMIT {
-        let (mut block, height) = client.block_from_template().await?;
+        let (mut block, height) = client.block_from_template(&network).await?;
 
         while !network.disable_pow()
             && zebra_consensus::difficulty_is_valid(&block.header, &network, &height, &block.hash())
@@ -72,20 +72,20 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
 #[allow(dead_code)]
 pub trait MiningRpcMethods {
-    async fn block_from_template(&self) -> Result<(Block, Height)>;
+    async fn block_from_template(&self, net: &Network) -> Result<(Block, Height)>;
     async fn submit_block(&self, block: Block) -> Result<()>;
     async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError>;
 }
 
 impl MiningRpcMethods for RpcRequestClient {
-    async fn block_from_template(&self) -> Result<(Block, Height)> {
+    async fn block_from_template(&self, net: &Network) -> Result<(Block, Height)> {
         let block_template: BlockTemplateResponse = self
             .json_result_from_call("getblocktemplate", "[]".to_string())
             .await
             .expect("response should be success output with a serialized `GetBlockTemplate`");
 
         Ok((
-            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default())?,
+            proposal_block_from_template(&block_template, BlockTemplateTimeSource::default(), net)?,
             Height(block_template.height()),
         ))
     }
