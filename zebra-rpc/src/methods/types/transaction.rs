@@ -454,6 +454,7 @@ impl Default for TransactionObject {
 impl TransactionObject {
     /// Converts `tx` and `height` into a new `GetRawTransaction` in the `verbose` format.
     #[allow(clippy::unwrap_in_result)]
+    #[allow(clippy::too_many_arguments)]
     pub fn from_transaction(
         tx: Arc<Transaction>,
         height: Option<block::Height>,
@@ -462,6 +463,7 @@ impl TransactionObject {
         block_time: Option<DateTime<Utc>>,
         block_hash: Option<block::Hash>,
         in_active_chain: Option<bool>,
+        txid: transaction::Hash,
     ) -> Self {
         let block_time = block_time.map(|bt| bt.timestamp());
         Self {
@@ -633,7 +635,7 @@ impl TransactionObject {
             },
             size: tx.as_bytes().len().try_into().ok(),
             time: block_time,
-            txid: tx.hash(),
+            txid,
             in_active_chain,
             auth_digest: tx.auth_digest(),
             overwintered: tx.is_overwintered(),
