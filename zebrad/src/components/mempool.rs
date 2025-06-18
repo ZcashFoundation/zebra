@@ -42,7 +42,7 @@ use zebra_node_services::mempool::{Gossip, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
-use crate::components::sync::SyncStatus;
+use crate::components::sync::{SyncStatus, BLOCK_VERIFY_TIMEOUT};
 
 pub mod config;
 mod crawler;
@@ -85,7 +85,8 @@ type BlockRouterVerifier = Buffer<
     BoxService<zebra_consensus::Request, block::Hash, zebra_consensus::RouterError>,
     zebra_consensus::Request,
 >;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
+type InboundTxDownloads =
+    TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, Timeout<BlockRouterVerifier>, State>;
 
 /// The state of the mempool.
 ///
@@ -371,6 +372,7 @@ impl Mempool {
                 let tx_downloads = Box::pin(TxDownloads::new(
                     Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                     Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                    Timeout::new(self.block_router_verifier.clone(), BLOCK_VERIFY_TIMEOUT),
                     self.state.clone(),
                 ));
                 self.active_state = ActiveState::Enabled {

@@ -45,7 +45,7 @@ use tower::{Service, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::{
-    block::Height,
+    block::{self, Height},
     transaction::{self, UnminedTxId, VerifiedUnminedTx},
     transparent,
 };
@@ -134,12 +134,17 @@ pub enum TransactionDownloadVerifyError {
 /// Represents a [`Stream`] of download and verification tasks.
 #[pin_project(PinnedDrop)]
 #[derive(Debug)]
-pub struct Downloads<ZN, ZV, ZS>
+pub struct Downloads<ZN, ZV, BlockVerifier, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    BlockVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    BlockVerifier::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
@@ -150,6 +155,9 @@ where
 
     /// A service that verifies downloaded transactions.
     verifier: ZV,
+
+    /// A service that verifies block proposals.
+    block_verifier: BlockVerifier,
 
     /// A service that manages cached blockchain state.
     state: ZS,
@@ -179,12 +187,17 @@ where
     cancel_handles: HashMap<UnminedTxId, (oneshot::Sender<CancelDownloadAndVerify>, Gossip)>,
 }
 
-impl<ZN, ZV, ZS> Stream for Downloads<ZN, ZV, ZS>
+impl<ZN, ZV, BlockVerifier, ZS> Stream for Downloads<ZN, ZV, BlockVerifier, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    BlockVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    BlockVerifier::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
@@ -239,12 +252,17 @@ where
     }
 }
 
-impl<ZN, ZV, ZS> Downloads<ZN, ZV, ZS>
+impl<ZN, ZV, BlockVerifier, ZS> Downloads<ZN, ZV, BlockVerifier, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    BlockVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    BlockVerifier::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
@@ -257,10 +275,11 @@ where
     /// The [`Downloads`] stream is agnostic to the network policy, so retry and
     /// timeout limits should be applied to the `network` service passed into
     /// this constructor.
-    pub fn new(network: ZN, verifier: ZV, state: ZS) -> Self {
+    pub fn new(network: ZN, tx_verifier: ZV, block_verifier: BlockVerifier, state: ZS) -> Self {
         Self {
             network,
-            verifier,
+            verifier: tx_verifier,
+            block_verifier,
             state,
             pending: FuturesUnordered::new(),
             cancel_handles: HashMap::new(),
@@ -541,12 +560,17 @@ where
 }
 
 #[pinned_drop]
-impl<ZN, ZV, ZS> PinnedDrop for Downloads<ZN, ZV, ZS>
+impl<ZN, ZV, BlockVerifier, ZS> PinnedDrop for Downloads<ZN, ZV, BlockVerifier, ZS>
 where
     ZN: Service<zn::Request, Response = zn::Response, Error = BoxError> + Send + Clone + 'static,
     ZN::Future: Send,
     ZV: Service<tx::Request, Response = tx::Response, Error = BoxError> + Send + Clone + 'static,
     ZV::Future: Send,
+    BlockVerifier: Service<zebra_consensus::Request, Response = block::Hash, Error = BoxError>
+        + Send
+        + Clone
+        + 'static,
+    BlockVerifier::Future: Send,
     ZS: Service<zs::Request, Response = zs::Response, Error = BoxError> + Send + Clone + 'static,
     ZS::Future: Send,
 {
