@@ -259,31 +259,19 @@ run_tests() {
 
 # Main Script Logic
 #
-# 1. First check if ZEBRA_CONF_PATH is explicitly set or if a file exists at that path
-# 2. If not set but default config exists, use that
-# 3. If neither exists, generate a default config at ${HOME}/.config/zebrad.toml
-# 4. Print environment variables and config for debugging
-# 5. Process command-line arguments and execute appropriate action
+# 1. Checks for a config file specified by ZEBRA_CONF_PATH, or at the default path.
+# 2. If a file is found, prepares a `--config` flag to pass to zebrad.
+# 3. If no file is found, zebrad is started without the flag, relying on
+#    figment to use environment variables and built-in defaults.
+# 4. Processes command-line arguments and executes zebrad with the correct flags.
 if [[ -n ${ZEBRA_CONF_PATH} ]]; then
   if [[ -f ${ZEBRA_CONF_PATH} ]]; then
-    echo "ZEBRA_CONF_PATH was set to ${ZEBRA_CONF_PATH} and a file exists."
-    echo "Using user-provided config file"
+    echo "INFO: Using Zebra config file at ${ZEBRA_CONF_PATH}"
+    conf_flag="--config ${ZEBRA_CONF_PATH}"
   else
-    echo "ERROR: ZEBRA_CONF_PATH was set and no config file found at ${ZEBRA_CONF_PATH}."
-    echo "Please ensure a config file exists or set ZEBRA_CONF_PATH to point to your config file."
-    exit 1
-  fi
-else
-  default_conf_path="${HOME}/.config/zebrad.toml"
-  if [[ -f "${default_conf_path}" ]]; then
-    echo "ZEBRA_CONF_PATH was not set."
-    echo "Using default config at ${default_conf_path}"
-    ZEBRA_CONF_PATH="${default_conf_path}"
-  else
-    echo "INFO: No config file found. Relying on defaults and environment variables."
-    # Unset the variable to ensure it's not used later.
+    echo "INFO: No config file found. Using defaults and environment variables."
+    # Unset the variable to ensure the --config flag is not used.
     unset ZEBRA_CONF_PATH
-    # Set up backwards-compatible environment variables for figment.
     prepare_conf_file
   fi
 fi
@@ -292,7 +280,7 @@ echo "INFO: Using the following environment variables:"
 printenv
 
 # Only try to cat the config file if the path is set and the file exists.
-if [[ -n "${ZEBRA_CONF_PATH}" && -f "${ZEBRA_CONF_PATH}" ]]; then
+if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
   echo "Using Zebra config at ${ZEBRA_CONF_PATH}:"
   cat "${ZEBRA_CONF_PATH}"
 fi
@@ -306,12 +294,8 @@ fi
 case "$1" in
 --* | -* | zebrad)
   shift
-  # Only add the --config flag if the variable is set.
-  if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
-    exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
-  else
-    exec_as_user zebrad "$@"
-  fi
+  # The conf_flag variable will be empty if no config file is used.
+  exec_as_user zebrad "${conf_flag}" "$@"
   ;;
 test)
   shift
