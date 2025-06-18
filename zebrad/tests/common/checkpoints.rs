@@ -28,10 +28,7 @@ use zebra_test::{
 };
 
 use crate::common::{
-    cached_state::{
-        wait_for_state_version_message, wait_for_state_version_upgrade,
-        DATABASE_FORMAT_UPGRADE_IS_SLOWER_THAN_RPC_SPAWN,
-    },
+    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
     launch::spawn_zebrad_for_rpc,
     sync::{CHECKPOINT_VERIFIER_REGEX, SYNC_FINISHED_REGEX},
     test_type::TestType::*,
