@@ -159,8 +159,8 @@ use std::{
 };
 
 use color_eyre::{
+    eyre::{eyre, WrapErr},
     Help,
-    eyre::{WrapErr, eyre},
 };
 use semver::Version;
 use serde_json::Value;
@@ -169,13 +169,15 @@ use tower::ServiceExt;
 use zcash_keys::address::Address;
 
 use zebra_chain::{
-    block::{self, ChainHistoryBlockTxAuthCommitmentHash, Height, genesis::regtest_genesis_block},
-    parameters::Network::{self, *},
+    block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
+    parameters::{
+        Network::{self, *},
+        NetworkUpgrade,
+    },
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
-    SubmitBlockChannel,
     client::{
         BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
         GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
@@ -184,11 +186,12 @@ use zebra_rpc::{
     methods::{RpcImpl, RpcServer},
     proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
+    SubmitBlockChannel,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 use zebra_test::{
     args,
-    command::{ContextFrom, to_regex::CollectRegexSet},
+    command::{to_regex::CollectRegexSet, ContextFrom},
     net::random_known_port,
     prelude::*,
 };
@@ -198,25 +201,25 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use common::{
     cached_state::{
-        DATABASE_FORMAT_UPGRADE_IS_LONG, wait_for_state_version_message,
-        wait_for_state_version_upgrade,
+        wait_for_state_version_message, wait_for_state_version_upgrade,
+        DATABASE_FORMAT_UPGRADE_IS_LONG,
     },
-    check::{EphemeralCheck, EphemeralConfig, is_zebrad_version},
+    check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
         os_assigned_rpc_port_config, persistent_test_config, random_known_rpc_port_config,
         read_listen_addr_from_logs, testdir,
     },
     launch::{
-        BETWEEN_NODES_DELAY, EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY, ZebradTestDirExt,
-        spawn_zebrad_for_rpc, spawn_zebrad_without_rpc,
+        spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
+        EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY,
     },
     lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
-        LARGE_CHECKPOINT_TEST_HEIGHT, LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT,
-        MempoolBehavior, STOP_AT_HEIGHT_REGEX, STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX,
-        TINY_CHECKPOINT_TEST_HEIGHT, TINY_CHECKPOINT_TIMEOUT, create_cached_database_height,
-        sync_until,
+        create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
+        LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
+        STOP_ON_LOAD_TIMEOUT, SYNC_FINISHED_REGEX, TINY_CHECKPOINT_TEST_HEIGHT,
+        TINY_CHECKPOINT_TIMEOUT,
     },
     test_type::TestType::{self, *},
 };
@@ -2970,8 +2973,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Default::default());
-    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    let net = Network::new_regtest(Default::default());
+    let mut config = os_assigned_rpc_port_config(false, &net)?;
 
     config.state.ephemeral = false;
     config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
@@ -3010,7 +3013,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client.block_from_template(&network).await?;
+        let (block, height) = rpc_client.block_from_template(&net).await?;
 
         rpc_client.submit_block(block.clone()).await?;
 
@@ -3060,7 +3063,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     }
 
     tracing::info!("getting next block template");
-    let (block_11, _) = rpc_client.block_from_template(&network).await?;
+    let (block_11, _) = rpc_client.block_from_template(&net).await?;
     blocks.push(block_11);
     let next_blocks: Vec<_> = blocks.split_off(5);
 
@@ -3069,7 +3072,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let (state2, read_state2, latest_chain_tip2, _chain_tip_change2) =
         zebra_state::populated_state(
             std::iter::once(genesis_block).chain(blocks.iter().cloned().map(Arc::new)),
-            &network,
+            &net,
         )
         .await;
 
@@ -3089,7 +3092,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         let hist_root = chain_info.chain_history_root.unwrap_or_default();
         let header = Arc::make_mut(&mut block.header);
 
-        header.commitment_bytes = match NetworkUpgrade::current(&network, height) {
+        header.commitment_bytes = match NetworkUpgrade::current(&net, height) {
             NetworkUpgrade::Canopy => hist_root.bytes_in_serialized_order(),
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
@@ -3249,7 +3252,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     use zebra_chain::{
         chain_sync_status::MockSyncStatus,
         parameters::{
-            subsidy::{FUNDING_STREAM_MG_ADDRESSES_TESTNET, FundingStreamReceiver},
+            subsidy::{FundingStreamReceiver, FUNDING_STREAM_MG_ADDRESSES_TESTNET},
             testnet::{
                 self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
                 ConfiguredFundingStreams,
