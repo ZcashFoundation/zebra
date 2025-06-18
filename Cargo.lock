@@ -627,9 +627,9 @@ checksum = "7575182f7272186991736b70173b0ea045398f984bf5ebbb3804736ce1330c9d"
 
 [[package]]
 name = "bytemuck"
-version = "1.23.1"
+version = "1.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c76a5792e44e4abe34d3abf15636779261d45a7450612059293d1d2cfc63422"
+checksum = "3995eaeebcdf32f91f980d360f78732ddc061097ab4e39991ae7a6ace9194677"
 
 [[package]]
 name = "byteorder"
@@ -655,9 +655,9 @@ dependencies = [
 
 [[package]]
 name = "camino"
-version = "1.1.10"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0da45bc31171d8d6960122e222a67740df867c1dd53b4d51caa297084c185cab"
+checksum = "5d07aa9a93b00c76f71bc35d598bed923f6d4f3a9ca5c24b7737ae1a292841c0"
 dependencies = [
  "serde",
 ]
@@ -708,9 +708,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.31"
+version = "1.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3a42d84bb6b69d3a8b3eaacf0d88f179e1929695e1ad012b6cf64d9caaa5fd2"
+checksum = "2352e5597e9c544d5e6d9c95190d5d27738ade584fa8db0a16e130e5c2b5296e"
 dependencies = [
  "jobserver",
  "libc",
@@ -1432,6 +1432,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.2.2"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
+dependencies = [
+ "blake2b_simd",
+ "core2",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1460,8 +1469,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d42773cb15447644d170be20231a3268600e0c4cea8987d013b93ac973d3cf7"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "blake2b_simd",
 ]
@@ -1868,9 +1876,9 @@ dependencies = [
 
 [[package]]
 name = "hashbrown"
-version = "0.15.4"
+version = "0.15.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5971ac85611da7067dbfcabef3c70ebb5606018acd9e2a3903a0da507521e0d5"
+checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
 dependencies = [
  "foldhash",
 ]
@@ -2315,7 +2323,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe4cd85333e22411419a0bcae1297d25e58c9443848b11dc6a86fefe8c78a661"
 dependencies = [
  "equivalent",
- "hashbrown 0.15.4",
+ "hashbrown 0.15.5",
  "serde",
 ]
 
@@ -2826,7 +2834,7 @@ checksum = "b8496cc523d1f94c1385dd8f0f0c2c480b2b8aeccb5b7e4485ad6365523ae376"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
- "hashbrown 0.15.4",
+ "hashbrown 0.15.5",
  "metrics",
  "quanta",
  "rand 0.9.2",
@@ -4210,9 +4218,9 @@ dependencies = [
 
 [[package]]
 name = "rustversion"
-version = "1.0.21"
+version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a0d197bd2c9dc6e53b84da9556a69ba4cdfab8619eb41a8bd1cc2027a0f6b1d"
+checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
 
 [[package]]
 name = "rusty-fork"
@@ -4244,8 +4252,7 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9d3c081c83f1dc87403d9d71a06f52301c0aa9ea4c17da2a3435bbf493ffba4"
+source = "git+https://github.com/zcash/sapling-crypto?branch=access-inner-param#a5c746b8bba09b26dc3ec8b94b41d23ceb4c229a"
 dependencies = [
  "aes",
  "bellman",
@@ -4637,9 +4644,9 @@ checksum = "c1e9a774a6c28142ac54bb25d25562e6bcf957493a184f15ad4eebccb23e410a"
 
 [[package]]
 name = "slab"
-version = "0.4.10"
+version = "0.4.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04dc19736151f35336d325007ac991178d504a119863a2fcb3758cdb5e52c50d"
+checksum = "7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589"
 
 [[package]]
 name = "smallvec"
@@ -5169,9 +5176,9 @@ dependencies = [
 
 [[package]]
 name = "tonic"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "308e1db96abdccdf0a9150fb69112bf6ea72640e0bd834ef0c4a618ccc8c8ddc"
+checksum = "67ac5a8627ada0968acec063a4746bf79588aa03ccb66db2f75d7dce26722a40"
 dependencies = [
  "async-trait",
  "axum 0.8.4",
@@ -5198,9 +5205,9 @@ dependencies = [
 
 [[package]]
 name = "tonic-build"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18262cdd13dec66e8e3f2e3fe535e4b2cc706fab444a7d3678d75d8ac2557329"
+checksum = "49e323d8bba3be30833707e36d046deabf10a35ae8ad3cae576943ea8933e25d"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -5210,20 +5217,20 @@ dependencies = [
 
 [[package]]
 name = "tonic-prost"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d8b5b7a44512c59f5ad45e0c40e53263cbbf4426d74fe6b569e04f1d4206e9c"
+checksum = "b9c511b9a96d40cb12b7d5d00464446acf3b9105fd3ce25437cfe41c92b1c87d"
 dependencies = [
  "bytes",
  "prost 0.14.1",
- "tonic 0.14.0",
+ "tonic 0.14.1",
 ]
 
 [[package]]
 name = "tonic-prost-build"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "114cca66d757d72422ef8cccf8be3065321860ac9fa4be73aab37a8a20a9a805"
+checksum = "8ef298fcd01b15e135440c4b8c974460ceca4e6a5af7f1c933b08e4d2875efa1"
 dependencies = [
  "prettyplease",
  "proc-macro2",
@@ -5237,15 +5244,15 @@ dependencies = [
 
 [[package]]
 name = "tonic-reflection"
-version = "0.14.0"
+version = "0.14.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b6a72aca1cabacc0a7b61a61b6045ce0e833d773de6fb455e7737194e548977"
+checksum = "0267a0073385cd94996197d12acb1856a3a0a2367482c726a48a769f6fed8a3a"
 dependencies = [
  "prost 0.14.1",
  "prost-types 0.14.1",
  "tokio",
  "tokio-stream",
- "tonic 0.14.0",
+ "tonic 0.14.1",
  "tonic-prost",
 ]
 
@@ -6309,8 +6316,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c984ae01367a4a3d20e9d34ae4e4cc0dca004b22d9a10a51eec43f43934612e"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "bech32",
  "bs58",
@@ -6323,8 +6329,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bca38087e6524e5f51a5b0fb3fc18f36d7b84bf67b2056f494ca0c281590953d"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "core2",
  "nonempty",
@@ -6333,8 +6338,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6344,8 +6348,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e401b87caabf016a414786749c9386e9ae934a4c40abaaeb901a338b7d3ef5fd"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -6383,8 +6386,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a0c26140f2e6b760dcf052d22bd01f1a8773cdefb650ff5829430798a21b85b"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6393,7 +6395,7 @@ dependencies = [
  "core2",
  "crypto-common 0.2.0-rc.1",
  "document-features",
- "equihash",
+ "equihash 0.2.2 (git+https://github.com/zcash/librustzcash?branch=update-prover-api)",
  "ff",
  "fpe",
  "getset",
@@ -6425,8 +6427,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f90d9521161f7308c2fe6bddf771947f1a0fcd01b9e8a3b624c30a5661ad945"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6441,6 +6442,7 @@ dependencies = [
  "redjubjub",
  "sapling-crypto",
  "tracing",
+ "wagyu-zcash-parameters",
  "xdg",
  "zcash_primitives",
 ]
@@ -6448,8 +6450,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9cfe9e3fb08e6851efe3d0ced457e4cb2c305daa928f64cb0d70c040f8f8336"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "core2",
  "document-features",
@@ -6487,8 +6488,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a7c162a8aa6f708e842503ed5157032465dadfb1d7f63adf9db2d45213a0b11"
+source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#d2f5e3a988914aaec91e035399b98d209847e90e"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6525,7 +6525,7 @@ dependencies = [
  "criterion",
  "dirs",
  "ed25519-zebra",
- "equihash",
+ "equihash 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "group",
  "halo2_proofs",
@@ -6612,7 +6612,6 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber",
- "wagyu-zcash-parameters",
  "zcash_proofs",
  "zcash_protocol",
  "zebra-chain",
@@ -6705,7 +6704,7 @@ dependencies = [
  "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
- "tonic 0.14.0",
+ "tonic 0.14.1",
  "tonic-prost",
  "tonic-prost-build",
  "tonic-reflection",
@@ -6891,7 +6890,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml 0.8.23",
- "tonic 0.14.0",
+ "tonic 0.14.1",
  "tonic-prost",
  "tonic-prost-build",
  "tower 0.4.13",
