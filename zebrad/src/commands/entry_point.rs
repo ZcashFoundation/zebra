@@ -14,9 +14,9 @@ use super::ZebradCmd;
 /// Toplevel entrypoint command.
 ///
 /// Handles obtaining toplevel help as well as verbosity settings.
-/// 
+///
 /// # Configuration Loading
-/// 
+///
 /// Configuration is loaded with the following precedence:
 /// 1. **Defaults**: Sensible defaults for all fields
 /// 2. **TOML File**: Config file specified via `-c`/`--config` or default platform path
@@ -41,7 +41,7 @@ pub struct EntryPoint {
     pub cmd: Option<ZebradCmd>,
 
     /// Path to the configuration file.
-    /// 
+    ///
     /// If not specified, uses the default platform-dependent path.
     /// All config fields can also be overridden with environment variables
     /// using the `ZEBRA_` prefix and double underscores for nesting.

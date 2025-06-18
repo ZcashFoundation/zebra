@@ -104,12 +104,11 @@ impl ZebradConfig {
     /// for nested fields (e.g., ZEBRA_RPC__LISTEN_ADDR).
     pub fn load(config_file_path: Option<PathBuf>) -> Result<Self, Error> {
         let default_config_file = Self::default_config_path();
-        
+
         let config_file_path = config_file_path.unwrap_or(default_config_file);
 
         // Create base figment with layered configuration
-        let mut figment = Figment::new()
-            .merge(Serialized::defaults(Self::default()));
+        let mut figment = Figment::new().merge(Serialized::defaults(Self::default()));
 
         // Only add TOML file if it exists - without .nested() to allow proper overriding
         if config_file_path.exists() {
