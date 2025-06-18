@@ -173,8 +173,8 @@ fn test_figment_env_override() {
         jail.set_env("ZEBRA_RPC__PARALLEL_CPU_THREADS", "4");
 
         let config_path = jail.directory().join("test_env.toml");
-        let config =
-            ZebradConfig::load(Some(config_path)).expect("Failed to load config with env overrides");
+        let config = ZebradConfig::load(Some(config_path))
+            .expect("Failed to load config with env overrides");
 
         // Verify environment variables override TOML values
         assert_eq!(config.network.network.to_string(), "Testnet"); // Overridden by ZEBRA_NETWORK__NETWORK
@@ -235,8 +235,8 @@ fn test_figment_nonexistent_config_file() {
         jail.clear_env();
 
         let nonexistent_path = jail.directory().join("nonexistent.toml");
-        let config =
-            ZebradConfig::load(Some(nonexistent_path)).expect("Failed to load with nonexistent file");
+        let config = ZebradConfig::load(Some(nonexistent_path))
+            .expect("Failed to load with nonexistent file");
 
         let default_config = ZebradConfig::default();
 
@@ -368,10 +368,7 @@ fn test_invalid_miner_address_fails() {
         jail.clear_env();
 
         // Set environment variable with an invalid address
-        jail.set_env(
-            "ZEBRA_MINING__MINER_ADDRESS",
-            "this-is-not-a-valid-address",
-        );
+        jail.set_env("ZEBRA_MINING__MINER_ADDRESS", "this-is-not-a-valid-address");
 
         let config_path = jail.directory().join("invalid_address.toml");
         let result = ZebradConfig::load(Some(config_path));
@@ -385,4 +382,4 @@ fn test_invalid_miner_address_fails() {
 
         Ok(())
     });
-} 
+}
