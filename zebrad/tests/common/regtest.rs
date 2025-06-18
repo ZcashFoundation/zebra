@@ -33,12 +33,7 @@ const NUM_BLOCKS_TO_SUBMIT: usize = 200;
 pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let activation_heights = zebra_chain::parameters::testnet::ConfiguredActivationHeights {
-        nu5: Some(1),
-        ..Default::default()
-    };
-
-    let network = Network::new_regtest(activation_heights);
+    let network = Network::new_regtest(Default::default());
     let mut config = os_assigned_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
 

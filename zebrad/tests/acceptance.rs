@@ -169,10 +169,7 @@ use tower::ServiceExt;
 use zcash_keys::address::Address;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
-    parameters::{
-        testnet::ConfiguredActivationHeights,
-        Network::{self, *},
-    },
+    parameters::Network::{self, *},
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
@@ -2981,12 +2978,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let activation_heights = ConfiguredActivationHeights {
-        nu5: Some(1),
-        ..Default::default()
-    };
-
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
     config.state.ephemeral = false;
     config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
     let network = config.network.network.clone();
@@ -3382,7 +3374,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let GetBlockTemplateResponse::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
-        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        panic!(
+            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
+        )
     };
 
     let proposal_block = proposal_block_from_template(&block_template, None)?;
@@ -3753,12 +3747,7 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let activation_heights = zebra_chain::parameters::testnet::ConfiguredActivationHeights {
-        nu5: Some(1),
-        ..Default::default()
-    };
-
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(Default::default()))?;
     config.state.ephemeral = false;
 
     let test_dir = testdir()?.with_config(&mut config)?;
