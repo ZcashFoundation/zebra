@@ -35,21 +35,34 @@ exec_as_user() {
 #
 # This function maps the old Docker environment variables to the new
 # figment-compatible format. It exports the new variables so `zebrad` can
-# detect them, ensuring backward compatibility.
+# detect them, and unsets the old ZEBRA_ prefixed variables to avoid conflicts.
 prepare_conf_file() {
   # Map network and state variables
-  # Default to Mainnet if NETWORK is not set
+  # Default to Mainnet if NETWORK is not set. NETWORK is not ZEBRA_ prefixed, so it's safe.
   export ZEBRA_NETWORK__NETWORK="${NETWORK:=Mainnet}"
-  export ZEBRA_STATE__CACHE_DIR="${ZEBRA_CACHE_DIR}"
 
-  # Map RPC variables, if ZEBRA_RPC_PORT is set
+  # Map legacy ZEBRA_CACHE_DIR to ZEBRA_STATE__CACHE_DIR and unset it.
+  if [[ -n ${ZEBRA_CACHE_DIR} ]]; then
+    export ZEBRA_STATE__CACHE_DIR="${ZEBRA_CACHE_DIR}"
+    unset ZEBRA_CACHE_DIR
+  fi
+
+  # Map RPC variables
+  # ZEBRA_RPC_PORT is used to build the listen address, then unset.
   if [[ -n ${ZEBRA_RPC_PORT} ]]; then
     export ZEBRA_RPC__LISTEN_ADDR="${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
-    export ZEBRA_RPC__ENABLE_COOKIE_AUTH="${ENABLE_COOKIE_AUTH:=true}"
-    if [[ -n ${ZEBRA_COOKIE_DIR} ]]; then
-      export ZEBRA_RPC__COOKIE_DIR="${ZEBRA_COOKIE_DIR}"
-    fi
+    unset ZEBRA_RPC_PORT
   fi
+
+  # ZEBRA_COOKIE_DIR is mapped directly, then unset.
+  if [[ -n ${ZEBRA_COOKIE_DIR} ]]; then
+    export ZEBRA_RPC__COOKIE_DIR="${ZEBRA_COOKIE_DIR}"
+    unset ZEBRA_COOKIE_DIR
+  fi
+
+  # ENABLE_COOKIE_AUTH is not prefixed with ZEBRA_, so it's safe.
+  # It's used to set the new variable.
+  export ZEBRA_RPC__ENABLE_COOKIE_AUTH="${ENABLE_COOKIE_AUTH:=true}"
 
   # Map metrics variables, if prometheus feature is enabled in the image
   if [[ " ${FEATURES} " =~ " prometheus " ]]; then
@@ -264,6 +277,11 @@ run_tests() {
 # 3. If no file is found, zebrad is started without the flag, relying on
 #    figment to use environment variables and built-in defaults.
 # 4. Processes command-line arguments and executes zebrad with the correct flags.
+
+# Always prepare environment variables first, as they have the highest precedence
+# and should override any config file settings.
+prepare_conf_file
+
 if [[ -n ${ZEBRA_CONF_PATH} ]]; then
   if [[ -f ${ZEBRA_CONF_PATH} ]]; then
     echo "INFO: Using Zebra config file at ${ZEBRA_CONF_PATH}"
@@ -272,7 +290,6 @@ if [[ -n ${ZEBRA_CONF_PATH} ]]; then
     echo "INFO: No config file found. Using defaults and environment variables."
     # Unset the variable to ensure the --config flag is not used.
     unset ZEBRA_CONF_PATH
-    prepare_conf_file
   fi
 fi
 
