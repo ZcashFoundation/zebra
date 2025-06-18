@@ -3485,7 +3485,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
-    );
+    )
+    .expect("coinbase transaction should be valid under the given parameters");
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3542,7 +3543,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
-    );
+    )
+    .expect("coinbase transaction should be valid under the given parameters");
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
