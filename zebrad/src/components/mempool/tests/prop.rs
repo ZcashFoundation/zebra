@@ -266,6 +266,7 @@ fn setup(
     let peer_set = MockService::build().for_prop_tests();
     let state_service = MockService::build().for_prop_tests();
     let tx_verifier = MockService::build().for_prop_tests();
+    let block_router_verifier = MockService::build().for_prop_tests();
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (mut chain_tip_sender, latest_chain_tip, chain_tip_change) =
@@ -280,6 +281,7 @@ fn setup(
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         Buffer::new(BoxService::new(state_service.clone()), 1),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
+        Buffer::new(BoxService::new(block_router_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
         chain_tip_change,

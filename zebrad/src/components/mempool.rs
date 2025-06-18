@@ -81,6 +81,10 @@ type TxVerifier = Buffer<
     BoxService<transaction::Request, transaction::Response, TransactionError>,
     transaction::Request,
 >;
+type BlockRouterVerifier = Buffer<
+    BoxService<zebra_consensus::Request, block::Hash, zebra_consensus::RouterError>,
+    zebra_consensus::Request,
+>;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
 /// The state of the mempool.
@@ -236,6 +240,10 @@ pub struct Mempool {
     /// Used to construct the transaction downloader.
     tx_verifier: TxVerifier,
 
+    /// Handle to the block router verifier service.
+    /// Used to construct the transaction downloader.
+    block_router_verifier: BlockRouterVerifier,
+
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: broadcast::Sender<HashSet<UnminedTxId>>,
@@ -273,6 +281,7 @@ impl Mempool {
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
+        block_router_verifier: BlockRouterVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
@@ -291,6 +300,7 @@ impl Mempool {
             outbound,
             state,
             tx_verifier,
+            block_router_verifier,
             transaction_sender,
             misbehavior_sender,
             #[cfg(feature = "progress-bar")]

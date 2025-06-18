@@ -1067,6 +1067,7 @@ async fn setup(
     let mut state_service = ServiceBuilder::new().buffer(1).service(state);
 
     let tx_verifier = MockService::build().for_unit_tests();
+    let block_router_verifier = MockService::build().for_unit_tests();
 
     let (sync_status, recent_syncs) = SyncStatus::new();
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
@@ -1078,6 +1079,7 @@ async fn setup(
         Buffer::new(BoxService::new(peer_set.clone()), 1),
         state_service.clone(),
         Buffer::new(BoxService::new(tx_verifier.clone()), 1),
+        Buffer::new(BoxService::new(block_router_verifier.clone()), 1),
         sync_status,
         latest_chain_tip,
         chain_tip_change.clone(),

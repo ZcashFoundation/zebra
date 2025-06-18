@@ -972,6 +972,7 @@ async fn setup(
         buffered_peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),
+        block_verifier.clone(),
         sync_status.clone(),
         latest_chain_tip.clone(),
         chain_tip_change.clone(),

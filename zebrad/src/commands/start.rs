@@ -212,6 +212,7 @@ impl StartCmd {
             peer_set.clone(),
             state.clone(),
             tx_verifier,
+            block_verifier_router.clone(),
             sync_status.clone(),
             latest_chain_tip.clone(),
             chain_tip_change.clone(),
