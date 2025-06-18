@@ -170,10 +170,7 @@ use zcash_keys::address::Address;
 
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
-    parameters::{
-        Network::{self, *},
-        NetworkUpgrade,
-    },
+    parameters::Network::{self, *},
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
