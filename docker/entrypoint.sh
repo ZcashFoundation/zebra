@@ -295,7 +295,8 @@ case "$1" in
 --* | -* | zebrad)
   shift
   # The conf_flag variable will be empty if no config file is used.
-  exec_as_user zebrad "${conf_flag}" "$@"
+  # shellcheck disable=SC2086
+  exec_as_user zebrad ${conf_flag} "$@"
   ;;
 test)
   shift
