@@ -904,6 +904,11 @@ where
 
         (rpc_impl, rpc_tx_queue_task_handle)
     }
+
+    /// Returns a reference to the configured network.
+    pub fn network(&self) -> &Network {
+        &self.network
+    }
 }
 
 #[async_trait]
