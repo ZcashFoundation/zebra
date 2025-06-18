@@ -396,8 +396,7 @@ fn test_rpc_config_from_env() {
         jail.set_env("ZEBRA_RPC__LISTEN_ADDR", "0.0.0.0:8232");
 
         // Load config with no config file, relying only on defaults and env vars.
-        let config = ZebradConfig::load(None)
-            .expect("Failed to load config with RPC env vars");
+        let config = ZebradConfig::load(None).expect("Failed to load config with RPC env vars");
 
         // Verify that the RPC listen address is correctly parsed and set
         assert_eq!(
