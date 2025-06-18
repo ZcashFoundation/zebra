@@ -2150,8 +2150,6 @@ where
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
-        // - Checks and fetches that can change during long polling
-        //
         // Set up the loop.
         let mut max_time_reached = false;
 
@@ -2168,11 +2166,13 @@ where
             // The result of this check can change during long polling.
             //
             // Optional TODO:
-            // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
+            //
+            // - Add `async changed()` method to ChainSyncStatus (like `ChainTip`).
             check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
-            // TODO: return an error if we have no peers, like `zcashd` does,
-            //       and add a developer config that mines regardless of how many peers we have.
-            // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
+
+            // TODO: Return an error if we have no peers, like `zcashd` does, and add a developer
+            // config that mines regardless of how many peers we have.
+            // <https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880>
 
             // We're just about to fetch state data, then maybe wait for any changes.
             // Mark all the changes before the fetch as seen.
@@ -2180,8 +2180,9 @@ where
             latest_chain_tip.mark_best_tip_seen();
 
             // Fetch the state data and local time for the block template:
+            //
             // - if the tip block hash changes, we must return from long polling,
-            // - if the local clock changes on testnet, we might return from long polling
+            // - if the local clock changes on testnet, we might return from long polling.
             //
             // We always return after 90 minutes on mainnet, even if we have the same response,
             // because the max time has been reached.
@@ -2194,14 +2195,11 @@ where
             } = fetch_state_tip_and_local_time(read_state.clone()).await?;
 
             // Fetch the mempool data for the block template:
+            //
             // - if the mempool transactions change, we might return from long polling.
             //
-            // If the chain fork has just changed, miners want to get the new block as fast
-            // as possible, rather than wait for transactions to re-verify. This increases
-            // miner profits (and any delays can cause chain forks). So we don't wait between
-            // the chain tip changing and getting mempool transactions.
-            //
             // Optional TODO:
+            //
             // - add a `MempoolChange` type with an `async changed()` method (like `ChainTip`)
             let Some((mempool_txs, mempool_tx_deps)) =
                 fetch_mempool_transactions(mempool.clone(), tip_hash)
@@ -2214,7 +2212,6 @@ where
                 continue;
             };
 
-            // - Long poll ID calculation
             let server_long_poll_id = LongPollInput::new(
                 tip_height,
                 tip_hash,
@@ -2224,6 +2221,7 @@ where
             .generate_id();
 
             // The loop finishes if:
+            //
             // - the client didn't pass a long poll ID,
             // - the server long poll ID is different to the client long poll ID, or
             // - the previous loop iteration waited until the max time.
@@ -2284,12 +2282,6 @@ where
                 None
             }
             .into();
-
-            // Optional TODO:
-            // `zcashd` generates the next coinbase transaction while waiting for changes.
-            // When Zebra supports shielded coinbase, we might want to do this in parallel.
-            // But the coinbase value depends on the selected transactions, so this needs
-            // further analysis to check if it actually saves us any time.
 
             tokio::select! {
                 // Poll the futures in the listed order, for efficiency.

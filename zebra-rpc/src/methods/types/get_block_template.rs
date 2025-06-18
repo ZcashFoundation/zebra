@@ -314,9 +314,6 @@ impl BlockTemplateResponse {
                 .unzip()
         };
 
-        // Generate the coinbase transaction and default roots
-        //
-        // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
         let (coinbase_txn, default_roots) = new_coinbase_with_roots(
             network,
             height,

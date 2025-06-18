@@ -32,6 +32,8 @@ zcash_primitives = "0.24"
 zcash_proofs = "0.24"
 zcash_transparent = "0.4"
 zcash_protocol = "0.6"
+zcash_note_encryption = "0.4.1"
+zcash_script = "0.3.2"
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
@@ -154,8 +156,6 @@ tracing-test = "0.2.4"
 uint = "0.10"
 vergen-git2 = { version = "1.0", default-features = false }
 x25519-dalek = "2.0.1"
-zcash_note_encryption = "0.4.1"
-zcash_script = "0.3.2"
 
 [patch.crates-io]
 zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
