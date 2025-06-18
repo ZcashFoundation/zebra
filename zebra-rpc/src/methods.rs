@@ -1285,6 +1285,7 @@ where
                                         Some(block_time),
                                         Some(hash.0),
                                         Some(true),
+                                        tx.hash(),
                                     ),
                                 ))
                             })
@@ -1608,6 +1609,7 @@ where
                                     None,
                                     None,
                                     Some(false),
+                                    txid,
                                 ),
                             ))
                         } else {
@@ -1681,6 +1683,7 @@ where
                     Some(tx.block_time),
                     block_hash,
                     Some(true),
+                    txid,
                 )))
             } else {
                 let hex = tx.tx.into();
