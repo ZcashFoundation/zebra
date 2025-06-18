@@ -6,6 +6,7 @@ use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block, Height},
+    parameters::{Network, NetworkUpgrade},
     serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
     work::equihash::Solution,
 };
@@ -172,6 +173,7 @@ impl FromStr for TimeSource {
 pub fn proposal_block_from_template(
     template: &GetBlockTemplate,
     time_source: impl Into<Option<TimeSource>>,
+    net: &Network,
 ) -> Result<Block, SerializationError> {
     let GetBlockTemplate {
         version,
@@ -181,6 +183,7 @@ pub fn proposal_block_from_template(
             DefaultRoots {
                 merkle_root,
                 block_commitments_hash,
+                chain_history_root,
                 ..
             },
         bits: difficulty_threshold,
@@ -189,16 +192,20 @@ pub fn proposal_block_from_template(
         ..
     } = *template;
 
-    if Height(height) > Height::MAX {
+    let height = Height(height);
+
+    // TODO: Refactor [`Height`] so that these checks lose relevance.
+    if height > Height::MAX {
         Err(SerializationError::Parse(
-            "height field must be lower than Height::MAX",
+            "height of coinbase transaction is {height}, which exceeds the maximum of {Height::MAX}",
         ))?;
     };
 
     let time = time_source
         .into()
         .unwrap_or_default()
-        .time_from_template(template);
+        .time_from_template(template)
+        .into();
 
     let mut transactions = vec![coinbase_txn.data.as_ref().zcash_deserialize_into()?];
 
@@ -206,7 +213,16 @@ pub fn proposal_block_from_template(
         transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
     }
 
-    let commitment_bytes = block_commitments_hash.bytes_in_serialized_order().into();
+    let commitment_bytes = match NetworkUpgrade::current(net, height) {
+        NetworkUpgrade::Canopy => chain_history_root.bytes_in_serialized_order(),
+        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
+            block_commitments_hash.bytes_in_serialized_order()
+        }
+        _ => Err(SerializationError::Parse(
+            "Zebra does not support generating pre-Canopy block templates",
+        ))?,
+    }
+    .into();
 
     Ok(Block {
         header: Arc::new(block::Header {
@@ -214,7 +230,7 @@ pub fn proposal_block_from_template(
             previous_block_hash,
             merkle_root,
             commitment_bytes,
-            time: time.into(),
+            time,
             difficulty_threshold,
             nonce: [0; 32].into(),
             solution: Solution::for_proposal(),

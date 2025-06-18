@@ -122,7 +122,7 @@ pub(crate) async fn run() -> Result<()> {
 
     for _ in 0..NUM_SUCCESSFUL_BLOCK_PROPOSALS_REQUIRED {
         let (validation_result, _) = futures::future::join(
-            try_validate_block_template(&client),
+            try_validate_block_template(&client, &network),
             tokio::time::sleep(BLOCK_PROPOSAL_INTERVAL),
         )
         .await;
@@ -154,7 +154,7 @@ pub(crate) async fn run() -> Result<()> {
 /// If an RPC call returns a failure
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
-async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
+async fn try_validate_block_template(client: &RpcRequestClient, net: &Network) -> Result<()> {
     let mut response_json_result: GetBlockTemplate = client
         .json_result_from_call("getblocktemplate", "[]")
         .await
@@ -211,7 +211,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
             // Propose a new block with an empty solution and nonce field
 
             let raw_proposal_block = hex::encode(
-                proposal_block_from_template(&response_json_result, time_source)?
+                proposal_block_from_template(&response_json_result, time_source, net)?
                     .zcash_serialize_to_vec()?,
             );
             let template = response_json_result.clone();

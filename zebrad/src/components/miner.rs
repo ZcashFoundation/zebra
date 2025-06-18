@@ -317,7 +317,7 @@ where
         // Tell the next get_block_template() call to wait until the template has changed.
         parameters.long_poll_id = Some(template.long_poll_id);
 
-        let block = proposal_block_from_template(&template, TimeSource::CurTime)?;
+        let block = proposal_block_from_template(&template, TimeSource::CurTime, rpc.network())?;
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {
