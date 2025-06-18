@@ -319,7 +319,9 @@ test)
   shift
   if [[ "$1" == "zebrad" ]]; then
     shift
-    exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+    # The conf_flag variable will be empty if no config file is used.
+    # shellcheck disable=SC2086
+    exec_as_user zebrad ${conf_flag} "$@"
   else
     run_tests "$@"
   fi
