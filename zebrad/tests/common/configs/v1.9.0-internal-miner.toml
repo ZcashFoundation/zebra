@@ -57,7 +57,7 @@ initial_testnet_peers = [
     "testnet.seeder.zfnd.org:18233",
     "testnet.is.yolo.money:18233",
 ]
-listen_addr = "0.0.0.0:8233"
+listen_addr = "0.0.0.0:18233"
 max_connections_per_ip = 1
 network = "Testnet"
 peerset_initial_target_size = 25

@@ -1,4 +1,7 @@
 //! Zebrad EntryPoint
+//!
+//! Handles command-line argument parsing and config file path resolution.
+//! The config system uses Figment with the precedence: Defaults → TOML → Environment Variables.
 
 use abscissa_core::{Command, Configurable, FrameworkError, Runnable};
 use clap::Parser;
@@ -11,6 +14,13 @@ use super::ZebradCmd;
 /// Toplevel entrypoint command.
 ///
 /// Handles obtaining toplevel help as well as verbosity settings.
+/// 
+/// # Configuration Loading
+/// 
+/// Configuration is loaded with the following precedence:
+/// 1. **Defaults**: Sensible defaults for all fields
+/// 2. **TOML File**: Config file specified via `-c`/`--config` or default platform path
+/// 3. **Environment Variables**: `ZEBRA_` prefixed vars with `__` for nesting (e.g., `ZEBRA_RPC__LISTEN_ADDR`)
 #[derive(Debug, clap::Parser)]
 #[clap(
     version = clap::crate_version!(),
@@ -30,7 +40,11 @@ pub struct EntryPoint {
     #[clap(subcommand)]
     pub cmd: Option<ZebradCmd>,
 
-    /// Path to the configuration file
+    /// Path to the configuration file.
+    /// 
+    /// If not specified, uses the default platform-dependent path.
+    /// All config fields can also be overridden with environment variables
+    /// using the `ZEBRA_` prefix and double underscores for nesting.
     #[clap(long, short, help = "path to configuration file")]
     pub config: Option<PathBuf>,
 

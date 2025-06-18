@@ -33,70 +33,49 @@ exec_as_user() {
 
 # Modifies the Zebra config file using environment variables.
 #
-# This function generates a new config file from scratch at ZEBRA_CONF_PATH
-# using the provided environment variables.
-#
-# It creates a complete configuration with network settings, state, RPC,
-# metrics, tracing, and mining sections based on environment variables.
+# This function maps the old Docker environment variables to the new
+# figment-compatible format. It exports the new variables so `zebrad` can
+# detect them, ensuring backward compatibility.
 prepare_conf_file() {
-  # Base configuration
-  cat >"${ZEBRA_CONF_PATH}" <<EOF
-[network]
-network = "${NETWORK:=Mainnet}"
-listen_addr = "0.0.0.0"
-cache_dir = "${ZEBRA_CACHE_DIR}"
+  # Map network and state variables
+  # Default to Mainnet if NETWORK is not set
+  export ZEBRA_NETWORK__NETWORK="${NETWORK:=Mainnet}"
+  export ZEBRA_STATE__CACHE_DIR="${ZEBRA_CACHE_DIR}"
 
-[state]
-cache_dir = "${ZEBRA_CACHE_DIR}"
+  # Map RPC variables, if ZEBRA_RPC_PORT is set
+  if [[ -n ${ZEBRA_RPC_PORT} ]]; then
+    export ZEBRA_RPC__LISTEN_ADDR="${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
+    export ZEBRA_RPC__ENABLE_COOKIE_AUTH="${ENABLE_COOKIE_AUTH:=true}"
+    if [[ -n ${ZEBRA_COOKIE_DIR} ]]; then
+      export ZEBRA_RPC__COOKIE_DIR="${ZEBRA_COOKIE_DIR}"
+    fi
+  fi
 
-$( [[ -n ${ZEBRA_RPC_PORT} ]] && cat <<-SUB_EOF
+  # Map metrics variables, if prometheus feature is enabled in the image
+  if [[ " ${FEATURES} " =~ " prometheus " ]]; then
+      export ZEBRA_METRICS__ENDPOINT_ADDR="${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
+  fi
 
-[rpc]
-listen_addr = "${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
-enable_cookie_auth = ${ENABLE_COOKIE_AUTH:=true}
-$( [[ -n ${ZEBRA_COOKIE_DIR} ]] && echo "cookie_dir = \"${ZEBRA_COOKIE_DIR}\"" )
-SUB_EOF
-)
+  # Map tracing variables
+  if [[ -n ${USE_JOURNALD} ]]; then
+    export ZEBRA_TRACING__USE_JOURNALD="${USE_JOURNALD}"
+  fi
+  if [[ " ${FEATURES} " =~ " filter-reload " ]]; then
+    export ZEBRA_TRACING__ENDPOINT_ADDR="${TRACING_ENDPOINT_ADDR:=0.0.0.0}:${TRACING_ENDPOINT_PORT:=3000}"
+  fi
+  if [[ -n ${LOG_FILE} ]]; then
+    export ZEBRA_TRACING__LOG_FILE="${LOG_FILE}"
+  fi
+  if [[ ${LOG_COLOR} == "true" ]]; then
+    export ZEBRA_TRACING__FORCE_USE_COLOR="true"
+  elif [[ ${LOG_COLOR} == "false" ]]; then
+    export ZEBRA_TRACING__USE_COLOR="false"
+  fi
 
-$( ( ! [[ " ${FEATURES} " =~ " prometheus " ]] ) && cat <<-SUB_EOF
-
-[metrics]
-# endpoint_addr = "${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
-SUB_EOF
-)
-
-$( [[ " ${FEATURES} " =~ " prometheus " ]] && cat <<-SUB_EOF
-
-[metrics]
-endpoint_addr = "${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
-SUB_EOF
-)
-
-$( [[ -n ${LOG_FILE} || -n ${LOG_COLOR} || -n ${TRACING_ENDPOINT_ADDR} || -n ${USE_JOURNALD} ]] && cat <<-SUB_EOF
-
-[tracing]
-$( [[ -n ${USE_JOURNALD} ]] && echo "use_journald = ${USE_JOURNALD}" )
-$( [[ " ${FEATURES} " =~ " filter-reload " ]] && echo "endpoint_addr = \"${TRACING_ENDPOINT_ADDR:=0.0.0.0}:${TRACING_ENDPOINT_PORT:=3000}\"" )
-$( [[ -n ${LOG_FILE} ]] && echo "log_file = \"${LOG_FILE}\"" )
-$( [[ ${LOG_COLOR} == "true" ]] && echo "force_use_color = true" )
-$( [[ ${LOG_COLOR} == "false" ]] && echo "use_color = false" )
-SUB_EOF
-)
-
-$( [[ -n ${MINER_ADDRESS} ]] && cat <<-SUB_EOF
-
-[mining]
-miner_address = "${MINER_ADDRESS}"
-SUB_EOF
-)
-EOF
-
-# Ensure the config file itself has the correct ownership
-#
-# This is safe in this context because prepare_conf_file is called only when
-# ZEBRA_CONF_PATH is not set, and there's no file mounted at that path.
-chown "${UID}:${GID}" "${ZEBRA_CONF_PATH}" || exit_error "Failed to secure config file: ${ZEBRA_CONF_PATH}"
-
+  # Map mining variables, if MINER_ADDRESS is set
+  if [[ -n ${MINER_ADDRESS} ]]; then
+    export ZEBRA_MINING__MINER_ADDRESS="${MINER_ADDRESS}"
+  fi
 }
 
 # Helper function
