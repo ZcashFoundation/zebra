@@ -45,6 +45,7 @@ where
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
+        let span = Span::current();
         let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
         let mut chain_tip_change = self.chain_tip_change.clone();
@@ -61,12 +62,17 @@ where
                     .send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)))
                     .await
                 {
-                    tracing::info!(?error, "failed to send chain tip change, dropping task");
+                    span.in_scope(|| {
+                        tracing::info!(?error, "failed to send chain tip change, dropping task");
+                    });
                     return;
                 }
             }
 
-            tracing::warn!("chain_tip_change channel has closed");
+            span.in_scope(|| {
+                tracing::warn!("chain_tip_change channel has closed");
+            });
+
             let _ = response_sender
                 .send(Err(Status::unavailable(
                     "chain_tip_change channel has closed",
@@ -144,6 +150,7 @@ where
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::MempoolChangeStream>, Status> {
+        let span = Span::current();
         let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
         let mut mempool_change = self.mempool_change.subscribe();
@@ -152,7 +159,9 @@ where
             // Notify the client of chain tip changes until the channel is closed
             while let Ok(change) = mempool_change.recv().await {
                 for tx_id in change.tx_ids() {
-                    tracing::debug!("mempool change: {:?}", change);
+                    span.in_scope(|| {
+                        tracing::debug!("mempool change: {:?}", change);
+                    });
 
                     if let Err(error) = response_sender
                         .send(Ok(MempoolChangeMessage {
@@ -169,13 +178,18 @@ where
                         }))
                         .await
                     {
-                        tracing::info!(?error, "failed to send mempool change, dropping task");
+                        span.in_scope(|| {
+                            tracing::info!(?error, "failed to send mempool change, dropping task");
+                        });
                         return;
                     }
                 }
             }
 
-            tracing::warn!("mempool_change channel has closed");
+            span.in_scope(|| {
+                tracing::warn!("mempool_change channel has closed");
+            });
+
             let _ = response_sender
                 .send(Err(Status::unavailable(
                     "mempool_change channel has closed",
