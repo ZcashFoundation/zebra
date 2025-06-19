@@ -145,10 +145,10 @@ lightwalletd-grpc-tests = ["tonic-build"]
 tokio-console = ["console-subscriber"]
 
 # TODO: replace with environmental variables that skip the tests when not set (part of #2995)
-test_sync_to_mandatory_checkpoint_mainnet = []
-test_sync_to_mandatory_checkpoint_testnet = []
-test_sync_past_mandatory_checkpoint_mainnet = []
-test_sync_past_mandatory_checkpoint_testnet = []
+sync_to_mandatory_checkpoint_mainnet = []
+sync_to_mandatory_checkpoint_testnet = []
+sync_past_mandatory_checkpoint_mainnet = []
+sync_past_mandatory_checkpoint_testnet = []
 
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 
