@@ -43,62 +43,6 @@ where
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentRandomness(pallas::Scalar);
 
-/// Note commitments for the output notes.
-#[derive(Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
-pub struct NoteCommitment(#[serde(with = "serde_helpers::Affine")] pub pallas::Affine);
-
-impl fmt::Debug for NoteCommitment {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut d = f.debug_struct("NoteCommitment");
-
-        let option: Option<Coordinates<pallas::Affine>> = self.0.coordinates().into();
-
-        match option {
-            Some(coordinates) => d
-                .field("x", &hex::encode(coordinates.x().to_repr()))
-                .field("y", &hex::encode(coordinates.y().to_repr()))
-                .finish(),
-            None => d
-                .field("x", &hex::encode(pallas::Base::zero().to_repr()))
-                .field("y", &hex::encode(pallas::Base::zero().to_repr()))
-                .finish(),
-        }
-    }
-}
-
-impl From<pallas::Point> for NoteCommitment {
-    fn from(projective_point: pallas::Point) -> Self {
-        Self(pallas::Affine::from(projective_point))
-    }
-}
-
-impl From<NoteCommitment> for [u8; 32] {
-    fn from(cm: NoteCommitment) -> [u8; 32] {
-        cm.0.to_bytes()
-    }
-}
-
-impl TryFrom<[u8; 32]> for NoteCommitment {
-    type Error = &'static str;
-
-    fn try_from(bytes: [u8; 32]) -> Result<Self, Self::Error> {
-        let possible_point = pallas::Affine::from_bytes(&bytes);
-
-        if possible_point.is_some().into() {
-            Ok(Self(possible_point.unwrap()))
-        } else {
-            Err("Invalid pallas::Affine value")
-        }
-    }
-}
-
-impl NoteCommitment {
-    /// Extract the x coordinate of the note commitment.
-    pub fn extract_x(&self) -> pallas::Base {
-        extract_p(self.0.into())
-    }
-}
-
 /// A homomorphic Pedersen commitment to the net value of a _note_, used in
 /// Action descriptions.
 ///

@@ -9,9 +9,7 @@ use reddsa::{orchard::SpendAuth, Signature, SigningKey, VerificationKey, Verific
 
 use proptest::{array, collection::vec, prelude::*};
 
-use super::{
-    keys::*, note, tree, Action, AuthorizedAction, Flags, NoteCommitment, ValueCommitment,
-};
+use super::{keys::*, note, tree, Action, AuthorizedAction, Flags, ValueCommitment};
 
 impl Arbitrary for Action {
     type Parameters = ();
@@ -27,7 +25,8 @@ impl Arbitrary for Action {
                 cv: ValueCommitment(pallas::Affine::identity()),
                 nullifier,
                 rk: rk.0,
-                cm_x: NoteCommitment(pallas::Affine::identity()).extract_x(),
+                // TODO: Replace with `ExtractedNoteCommitment` type from `orchard`.
+                cm_x: pallas::Base::zero(),
                 ephemeral_key: EphemeralPublicKey(pallas::Affine::generator()),
                 enc_ciphertext,
                 out_ciphertext,
