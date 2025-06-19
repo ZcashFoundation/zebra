@@ -27,8 +27,8 @@ pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
-pub use sapling::FieldNotPresent;
 use redjubjub::{Binding, Signature};
+pub use sapling::FieldNotPresent;
 pub use serialize::{
     SerializedTransaction, MIN_TRANSPARENT_TX_SIZE, MIN_TRANSPARENT_TX_V4_SIZE,
     MIN_TRANSPARENT_TX_V5_SIZE,

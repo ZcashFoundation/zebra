@@ -181,15 +181,15 @@ pub struct TransactionObject {
     pub shielded_outputs: Option<Vec<ShieldedOutput>>,
 
     /// Sapling binding signature of the transaction.
-    #[serde(rename = "bindingSig", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub binding_sig: Option<Signature<Binding>>,
 
     /// JoinSplit public key of the transaction.
-    #[serde(rename = "joinSplitPubKey", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub joinsplit_pub_key: Option<ed25519::VerificationKeyBytes>,
 
     /// JoinSplit signature of the transaction.
-    #[serde(rename = "joinSplitSig", skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub joinsplit_sig: Option<ed25519::Signature>,
 
     /// Orchard actions of the transaction.
