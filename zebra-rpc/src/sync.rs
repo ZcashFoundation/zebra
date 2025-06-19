@@ -3,7 +3,7 @@
 use std::{net::SocketAddr, ops::RangeInclusive, sync::Arc, time::Duration};
 
 use futures::{stream::FuturesOrdered, StreamExt};
-use tokio::task::JoinHandle;
+use tokio::{sync::Mutex, task::JoinHandle};
 use tower::BoxError;
 use tracing::info;
 use zebra_chain::{
@@ -21,23 +21,23 @@ use zebra_state::{
 use zebra_chain::diagnostic::task::WaitForPanics;
 
 use crate::{
+    indexer::{self, indexer_client::IndexerClient, BlockHashAndHeight, Empty},
     methods::{hex_data::HexData, GetBlockHeightAndHash},
     server,
 };
 
-/// How long to wait between calls to `getbestblockheightandhash` when it:
-/// - Returns an error, or
-/// - Returns the block hash of a block that the read state already contains,
-///   (so that there's nothing for the syncer to do except wait for the next chain tip change).
-///
-/// See the [`TrustedChainSync::wait_for_chain_tip_change()`] method documentation for more information.
+/// How long to wait between calls to `getbestblockheightandhash` when it returns an error.
 const POLL_DELAY: Duration = Duration::from_millis(200);
 
 /// Syncs non-finalized blocks in the best chain from a trusted Zebra node's RPC methods.
 #[derive(Debug)]
-struct TrustedChainSync {
+pub struct TrustedChainSync {
     /// RPC client for calling Zebra's RPC methods.
     rpc_client: RpcRequestClient,
+    /// gRPC client for calling Zebra's indexer methods.
+    pub indexer_rpc_client: IndexerClient<tonic::transport::Channel>,
+    /// A stream of best chain tip changes from the indexer RPCs `chain_tip_change` method.
+    chain_tip_change: Option<Mutex<tonic::Streaming<indexer::BlockHashAndHeight>>>,
     /// The read state service.
     db: ZebraDb,
     /// The non-finalized state - currently only contains the best chain.
@@ -55,16 +55,22 @@ impl TrustedChainSync {
     /// Returns the [`LatestChainTip`], [`ChainTipChange`], and a [`JoinHandle`] for the sync task.
     pub async fn spawn(
         rpc_address: SocketAddr,
+        indexer_rpc_address: SocketAddr,
         db: ZebraDb,
         non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
-    ) -> (LatestChainTip, ChainTipChange, JoinHandle<()>) {
+    ) -> Result<(LatestChainTip, ChainTipChange, JoinHandle<()>), BoxError> {
         let rpc_client = RpcRequestClient::new(rpc_address);
+        let indexer_rpc_client =
+            IndexerClient::connect(format!("http://{indexer_rpc_address}")).await?;
+
         let non_finalized_state = NonFinalizedState::new(&db.network());
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(None, &db.network());
 
         let mut syncer = Self {
             rpc_client,
+            indexer_rpc_client,
+            chain_tip_change: None,
             db,
             non_finalized_state,
             chain_tip_sender,
@@ -75,7 +81,7 @@ impl TrustedChainSync {
             syncer.sync().await;
         });
 
-        (latest_chain_tip, chain_tip_change, sync_task)
+        Ok((latest_chain_tip, chain_tip_change, sync_task))
     }
 
     /// Starts syncing blocks from the node's non-finalized best chain and checking for chain tip changes in the finalized state.
@@ -84,19 +90,50 @@ impl TrustedChainSync {
     /// gets any unavailable blocks in Zebra's best chain from the RPC server, adds them to the local non-finalized state, then
     /// sends the updated chain tip block and non-finalized state to the [`ChainTipSender`] and non-finalized state sender.
     async fn sync(&mut self) {
+        let mut should_reset_non_finalized_state = false;
         self.try_catch_up_with_primary().await;
-        let mut last_chain_tip_hash =
-            if let Some(finalized_tip_block) = self.finalized_chain_tip_block().await {
-                let last_chain_tip_hash = finalized_tip_block.hash;
-                self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
-                last_chain_tip_hash
-            } else {
-                GENESIS_PREVIOUS_BLOCK_HASH
-            };
+        if let Some(finalized_tip_block) = self.finalized_chain_tip_block().await {
+            self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
+        }
 
         loop {
-            let (target_tip_height, target_tip_hash) =
-                self.wait_for_chain_tip_change(last_chain_tip_hash).await;
+            tracing::info!(
+                ?should_reset_non_finalized_state,
+                "waiting for a chain tip change"
+            );
+
+            let (target_tip_hash, target_tip_height) = if !should_reset_non_finalized_state {
+                self.wait_for_tip_change().await
+            } else {
+                match self.rpc_client.get_best_block_height_and_hash().await {
+                    Ok((height, hash)) => {
+                        info!(
+                            ?height,
+                            ?hash,
+                            "got best height and hash from jsonrpc after resetting non-finalized state"
+                        );
+
+                        self.try_catch_up_with_primary().await;
+                        let block: ChainTipBlock = self.finalized_chain_tip_block().await.expect(
+                            "should have genesis block after successful bestblockheightandhash response",
+                        );
+
+                        self.non_finalized_state =
+                            NonFinalizedState::new(&self.non_finalized_state.network);
+
+                        self.update_channels(block);
+
+                        should_reset_non_finalized_state = false;
+                        (hash, height)
+                    }
+                    Err(error) => {
+                        tracing::warn!(?error, "failed to get best block height and hash");
+                        // If the RPC server is unavailable, wait for the next chain tip change.
+                        tokio::time::sleep(POLL_DELAY).await;
+                        continue;
+                    }
+                }
+            };
 
             info!(
                 ?target_tip_height,
@@ -105,114 +142,160 @@ impl TrustedChainSync {
             );
 
             if self.is_finalized_tip_change(target_tip_hash).await {
-                let block = self.finalized_chain_tip_block().await.expect(
-                    "should have genesis block after successful bestblockheightandhash response",
-                );
+                let block = self
+                    .finalized_chain_tip_block()
+                    .await
+                    .expect("should have genesis block after a chain tip change");
 
-                last_chain_tip_hash = block.hash;
                 self.chain_tip_sender.set_finalized_tip(block);
                 continue;
             }
 
-            // If the new best chain tip is unavailable in the finalized state, start syncing non-finalized blocks from
-            // the non-finalized best chain tip height or finalized tip height.
-            let (next_block_height, mut current_tip_hash) =
-                self.next_block_height_and_prev_hash().await;
+            should_reset_non_finalized_state =
+                self.sync_once(target_tip_hash, target_tip_height).await;
 
-            last_chain_tip_hash = current_tip_hash;
+            info!(?should_reset_non_finalized_state, "finished sync_once");
+        }
+    }
 
-            let rpc_client = self.rpc_client.clone();
-            let mut block_futs =
-                rpc_client.block_range_ordered(next_block_height..=target_tip_height);
+    /// Returns a bool indicating whether there was an unexpected block hash at some height indicating that
+    /// there was a chain reorg in the connected zebrad instance.
+    async fn sync_once(&mut self, target_tip_hash: block::Hash, target_tip_height: Height) -> bool {
+        let rpc_client = self.rpc_client.clone();
 
-            let should_reset_non_finalized_state = loop {
-                let block = match block_futs.next().await {
-                    Some(Ok(Some(block)))
-                        if block.header.previous_block_hash == current_tip_hash =>
-                    {
-                        SemanticallyVerifiedBlock::from(block)
-                    }
-                    // Clear the non-finalized state and re-fetch every block past the finalized tip if:
-                    // - the next block's previous block hash doesn't match the expected hash,
-                    // - the next block is missing
-                    // - the target tip hash is missing from the blocks in `block_futs`
-                    // because there was likely a chain re-org/fork.
-                    Some(Ok(_)) | None => break true,
-                    // If calling the `getblock` RPC method fails with an unexpected error, wait for the next chain tip change
-                    // without resetting the non-finalized state.
-                    Some(Err(err)) => {
-                        tracing::warn!(
-                            ?err,
-                            "encountered an unexpected error while calling getblock method"
-                        );
+        // If the new best chain tip is unavailable in the finalized state, start syncing non-finalized blocks from
+        // the non-finalized best chain tip height or finalized tip height.
+        let (next_block_height, mut current_tip_hash) =
+            self.next_block_height_and_prev_hash().await;
 
-                        break false;
-                    }
-                };
+        info!(
+            ?next_block_height,
+            ?current_tip_hash,
+            "syncing non-finalized blocks from the best chain"
+        );
 
-                // # Correctness
-                //
-                // Ensure that the secondary rocksdb instance has caught up to the primary instance
-                // before attempting to commit the new block to the non-finalized state. It is sufficient
-                // to call this once here, as a new chain tip block has already been retrieved and so
-                // we know that the primary rocksdb instance has already been updated.
-                self.try_catch_up_with_primary().await;
+        let mut block_futs = rpc_client.block_range_ordered(next_block_height..=target_tip_height);
 
-                let block_hash = block.hash;
-                let commit_result = if self.non_finalized_state.chain_count() == 0 {
-                    self.non_finalized_state
-                        .commit_new_chain(block.clone(), &self.db)
-                } else {
-                    self.non_finalized_state
-                        .commit_block(block.clone(), &self.db)
-                };
+        loop {
+            let block = match block_futs.next().await {
+                Some(Ok(Some(block))) if block.header.previous_block_hash == current_tip_hash => {
+                    SemanticallyVerifiedBlock::from(block)
+                }
+                // Clear the non-finalized state and re-fetch every block past the finalized tip if:
+                // - the next block's previous block hash doesn't match the expected hash,
+                // - the next block is missing
+                // - the target tip hash is missing from the blocks in `block_futs`
+                // because there was likely a chain re-org/fork.
+                Some(Ok(_)) | None => {
+                    info!("mismatch between block hash and prev hash of next expected block");
 
-                // The previous block hash is checked above, if committing the block fails for some reason, try again.
-                if let Err(error) = commit_result {
+                    break true;
+                }
+                // If calling the `getblock` RPC method fails with an unexpected error, wait for the next chain tip change
+                // without resetting the non-finalized state.
+                Some(Err(err)) => {
                     tracing::warn!(
-                        ?error,
-                        ?block_hash,
-                        "failed to commit block to non-finalized state"
+                        ?err,
+                        "encountered an unexpected error while calling getblock method"
                     );
 
                     break false;
                 }
-
-                // TODO: Check the finalized tip height and finalize blocks from the non-finalized state until
-                //       all non-finalized state chain root previous block hashes match the finalized tip hash.
-                while self
-                    .non_finalized_state
-                    .best_chain_len()
-                    .expect("just successfully inserted a non-finalized block above")
-                    > MAX_BLOCK_REORG_HEIGHT
-                {
-                    tracing::trace!("finalizing block past the reorg limit");
-                    self.non_finalized_state.finalize();
-                }
-
-                self.update_channels(block);
-                current_tip_hash = block_hash;
-                last_chain_tip_hash = current_tip_hash;
-
-                // If the block hash matches the output from the `getbestblockhash` RPC method, we can wait until
-                // the best block hash changes to get the next block.
-                if block_hash == target_tip_hash {
-                    break false;
-                }
             };
 
-            if should_reset_non_finalized_state {
-                self.try_catch_up_with_primary().await;
-                let block = self.finalized_chain_tip_block().await.expect(
-                    "should have genesis block after successful bestblockheightandhash response",
+            // # Correctness
+            //
+            // Ensure that the secondary rocksdb instance has caught up to the primary instance
+            // before attempting to commit the new block to the non-finalized state. It is sufficient
+            // to call this once here, as a new chain tip block has already been retrieved and so
+            // we know that the primary rocksdb instance has already been updated.
+            self.try_catch_up_with_primary().await;
+
+            let block_hash = block.hash;
+            let commit_result = if self.non_finalized_state.chain_count() == 0 {
+                self.non_finalized_state
+                    .commit_new_chain(block.clone(), &self.db)
+            } else {
+                self.non_finalized_state
+                    .commit_block(block.clone(), &self.db)
+            };
+
+            // The previous block hash is checked above, if committing the block fails for some reason, try again.
+            if let Err(error) = commit_result {
+                tracing::warn!(
+                    ?error,
+                    ?block_hash,
+                    "failed to commit block to non-finalized state"
                 );
 
-                last_chain_tip_hash = block.hash;
-                self.non_finalized_state =
-                    NonFinalizedState::new(&self.non_finalized_state.network);
-                self.update_channels(block);
+                break false;
+            }
+
+            // TODO: Check the finalized tip height and finalize blocks from the non-finalized state until
+            //       all non-finalized state chain root previous block hashes match the finalized tip hash.
+            while self
+                .non_finalized_state
+                .best_chain_len()
+                .expect("just successfully inserted a non-finalized block above")
+                > MAX_BLOCK_REORG_HEIGHT
+            {
+                tracing::trace!("finalizing block past the reorg limit");
+                self.non_finalized_state.finalize();
+            }
+
+            self.update_channels(block);
+            current_tip_hash = block_hash;
+
+            // If the block hash matches the output from the `getbestblockhash` RPC method, we can wait until
+            // the best block hash changes to get the next block.
+            if block_hash == target_tip_hash {
+                break false;
             }
         }
+    }
+
+    async fn wait_for_tip_change(&mut self) -> (block::Hash, block::Height) {
+        loop {
+            self.subscribe_to_chain_tip_change(false).await;
+
+            if let Some(stream) = self.chain_tip_change.as_mut() {
+                if let Some(block_hash_and_height) = stream
+                    .lock()
+                    .await
+                    .message()
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(BlockHashAndHeight::try_into_hash_and_height)
+                {
+                    return block_hash_and_height;
+                }
+            }
+
+            // wait [`POLL_DELAY`], then try again, if:
+            // - calling `chain_tip_change()` fails,
+            // - it closes the stream, or
+            // - it returns an error.
+            tokio::time::sleep(POLL_DELAY).await;
+        }
+    }
+
+    /// If `should_replace` is true or if it is false and there is no existing chain tip change stream,
+    /// calls `chain_tip_change()` on the indexer RPC client to subscribe to chain tip changes and sets
+    /// the `chain_tip_change` field as the new stream if it succeeds.
+    async fn subscribe_to_chain_tip_change(&mut self, should_replace: bool) {
+        if !should_replace && self.chain_tip_change.is_some() {
+            return;
+        }
+
+        self.chain_tip_change = self
+            .indexer_rpc_client
+            .clone()
+            .chain_tip_change(Empty {})
+            .await
+            .map(|a| Mutex::new(a.into_inner()))
+            .ok()
+            .or(self.chain_tip_change.take());
     }
 
     /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
@@ -277,32 +360,6 @@ impl TrustedChainSync {
         .await
     }
 
-    /// Accepts a block hash.
-    ///
-    /// Polls `getbestblockheightandhash` RPC method until it successfully returns a block hash that is different from the last chain tip hash.
-    ///
-    /// Returns the node's best block hash.
-    async fn wait_for_chain_tip_change(
-        &self,
-        last_chain_tip_hash: block::Hash,
-    ) -> (block::Height, block::Hash) {
-        loop {
-            let Some(target_height_and_hash) = self
-                .rpc_client
-                .get_best_block_height_and_hash()
-                .await
-                .filter(|&(_height, hash)| hash != last_chain_tip_hash)
-            else {
-                // If `get_best_block_height_and_hash()` returns an error, or returns
-                // the current chain tip hash, wait [`POLL_DELAY`], then try again.
-                tokio::time::sleep(POLL_DELAY).await;
-                continue;
-            };
-
-            break target_height_and_hash;
-        }
-    }
-
     /// Sends the new chain tip and non-finalized state to the latest chain channels.
     fn update_channels(&mut self, best_tip: impl Into<ChainTipBlock>) {
         // If the final receiver was just dropped, ignore the error.
@@ -326,6 +383,7 @@ pub fn init_read_state_with_syncer(
     config: zebra_state::Config,
     network: &Network,
     rpc_address: SocketAddr,
+    indexer_rpc_address: SocketAddr,
 ) -> tokio::task::JoinHandle<
     Result<
         (
@@ -345,14 +403,21 @@ pub fn init_read_state_with_syncer(
 
         let (read_state, db, non_finalized_state_sender) =
             spawn_init_read_only(config, &network).await?;
-        let (latest_chain_tip, chain_tip_change, sync_task) =
-            TrustedChainSync::spawn(rpc_address, db, non_finalized_state_sender).await;
+        let (latest_chain_tip, chain_tip_change, sync_task) = TrustedChainSync::spawn(
+            rpc_address,
+            indexer_rpc_address,
+            db,
+            non_finalized_state_sender,
+        )
+        .await?;
         Ok((read_state, latest_chain_tip, chain_tip_change, sync_task))
     })
 }
 
 trait SyncerRpcMethods {
-    async fn get_best_block_height_and_hash(&self) -> Option<(block::Height, block::Hash)>;
+    async fn get_best_block_height_and_hash(
+        &self,
+    ) -> Result<(block::Height, block::Hash), BoxError>;
     async fn get_block(&self, height: u32) -> Result<Option<Arc<Block>>, BoxError>;
     fn block_range_ordered(
         &self,
@@ -372,11 +437,12 @@ trait SyncerRpcMethods {
 }
 
 impl SyncerRpcMethods for RpcRequestClient {
-    async fn get_best_block_height_and_hash(&self) -> Option<(block::Height, block::Hash)> {
+    async fn get_best_block_height_and_hash(
+        &self,
+    ) -> Result<(block::Height, block::Hash), BoxError> {
         self.json_result_from_call("getbestblockheightandhash", "[]")
             .await
             .map(|GetBlockHeightAndHash { height, hash }| (height, hash))
-            .ok()
     }
 
     async fn get_block(&self, height: u32) -> Result<Option<Arc<Block>>, BoxError> {

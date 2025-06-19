@@ -967,7 +967,7 @@ async fn setup(
     // which is called by the gossip_best_tip_block_hashes task once the chain tip changes.
 
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
-    let (mut mempool_service, transaction_receiver) = Mempool::new(
+    let (mut mempool_service, transaction_subscriber) = Mempool::new(
         &MempoolConfig::default(),
         buffered_peer_set.clone(),
         state_service.clone(),
@@ -993,7 +993,7 @@ async fn setup(
     );
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
-        transaction_receiver,
+        transaction_subscriber.subscribe(),
         peer_set.clone(),
     ));
 

@@ -123,6 +123,24 @@ pub enum RejectionError {
     SameEffectsChain(#[from] SameEffectsChainRejectionError),
 }
 
+/// Represents a set of transactions that have been removed from the mempool, either because
+/// they were mined, or because they were invalidated by another transaction that was mined.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemovedTransactionIds {
+    /// A list of ids for transactions that were removed mined onto the best chain.
+    pub mined: HashSet<UnminedTxId>,
+    /// A list of ids for transactions that were invalidated by other transactions
+    /// that were mined onto the best chain.
+    pub invalidated: HashSet<UnminedTxId>,
+}
+
+impl RemovedTransactionIds {
+    /// Returns the total number of transactions that were removed from the mempool.
+    pub fn total_len(&self) -> usize {
+        self.mined.len() + self.invalidated.len()
+    }
+}
+
 /// Hold mempool verified and rejected mempool transactions.
 pub struct Storage {
     /// The set of verified transactions in the mempool.
@@ -313,6 +331,7 @@ impl Storage {
     pub fn remove_exact(&mut self, exact_wtxids: &HashSet<UnminedTxId>) -> usize {
         self.verified
             .remove_all_that(|tx| exact_wtxids.contains(&tx.transaction.id))
+            .len()
     }
 
     /// Clears a list of mined transaction ids from the verified set's tracked transaction dependencies.
@@ -338,8 +357,8 @@ impl Storage {
         &mut self,
         mined_ids: &HashSet<transaction::Hash>,
         transactions: Vec<Arc<Transaction>>,
-    ) -> usize {
-        let num_removed_mined = self
+    ) -> RemovedTransactionIds {
+        let removed_mined = self
             .verified
             .remove_all_that(|tx| mined_ids.contains(&tx.transaction.id.mined_id()));
 
@@ -381,7 +400,7 @@ impl Storage {
             })
             .collect();
 
-        let num_removed_duplicate_spend = self
+        let removed_duplicate_spend = self
             .verified
             .remove_all_that(|tx| duplicate_spend_ids.contains(&tx.transaction.id));
 
@@ -403,7 +422,10 @@ impl Storage {
 
         self.pending_outputs.prune();
 
-        num_removed_mined + num_removed_duplicate_spend
+        RemovedTransactionIds {
+            mined: removed_mined,
+            invalidated: removed_duplicate_spend,
+        }
     }
 
     /// Clears the whole mempool storage.
@@ -665,13 +687,15 @@ impl Storage {
     pub fn remove_expired_transactions(
         &mut self,
         tip_height: zebra_chain::block::Height,
-    ) -> HashSet<transaction::Hash> {
+    ) -> HashSet<UnminedTxId> {
         let mut tx_ids = HashSet::new();
+        let mut unmined_tx_ids = HashSet::new();
 
         for (&tx_id, tx) in self.transactions() {
             if let Some(expiry_height) = tx.transaction.transaction.expiry_height() {
                 if tip_height >= expiry_height {
                     tx_ids.insert(tx_id);
+                    unmined_tx_ids.insert(tx.transaction.id);
                 }
             }
         }
@@ -681,7 +705,7 @@ impl Storage {
             .remove_all_that(|tx| tx_ids.contains(&tx.transaction.id.mined_id()));
 
         // also reject it
-        for &id in &tx_ids {
+        for id in tx_ids {
             self.reject(
                 // It's okay to omit the auth digest here as we know that `reject()` will always
                 // use mined ids for `SameEffectsChainRejectionError`s.
@@ -690,7 +714,7 @@ impl Storage {
             );
         }
 
-        tx_ids
+        unmined_tx_ids
     }
 
     /// Check if transaction should be downloaded and/or verified.

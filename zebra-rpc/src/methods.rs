@@ -304,20 +304,13 @@ pub trait Rpc {
     ///
     /// - `txid`: (string, required, example="mytxid") The transaction ID of the transaction to be returned.
     /// - `verbose`: (number, optional, default=0, example=1) If 0, return a string of hex-encoded data, otherwise return a JSON object.
-    ///
-    /// # Notes
-    ///
-    /// We don't currently support the `blockhash` parameter since lightwalletd does not
-    /// use it.
-    ///
-    /// In verbose mode, we only expose the `hex` and `height` fields since
-    /// lightwalletd uses only those:
-    /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L119>
+    /// - `blockhash` (string, optional) The block in which to look for the transaction
     #[method(name = "getrawtransaction")]
     async fn get_raw_transaction(
         &self,
         txid: String,
         verbose: Option<u8>,
+        block_hash: Option<String>,
     ) -> Result<GetRawTransaction>;
 
     /// Returns the transaction ids made by the provided transparent addresses.
@@ -1290,6 +1283,9 @@ where
                                         )),
                                         &network,
                                         Some(block_time),
+                                        Some(hash.0),
+                                        Some(true),
+                                        tx.hash(),
                                     ),
                                 ))
                             })
@@ -1581,6 +1577,7 @@ where
         &self,
         txid: String,
         verbose: Option<u8>,
+        block_hash: Option<String>,
     ) -> Result<GetRawTransaction> {
         let mut mempool = self.mempool.clone();
         let verbose = verbose.unwrap_or(0) != 0;
@@ -1591,32 +1588,69 @@ where
             .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
 
         // Check the mempool first.
-        match mempool
-            .ready()
-            .and_then(|service| {
-                service.call(mempool::Request::TransactionsByMinedId([txid].into()))
-            })
-            .await
-            .map_misc_error()?
-        {
-            mempool::Response::Transactions(txns) => {
-                if let Some(tx) = txns.first() {
-                    return Ok(if verbose {
-                        GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
-                            tx.transaction.clone(),
-                            None,
-                            None,
-                            &self.network,
-                            None,
-                        )))
-                    } else {
-                        let hex = tx.transaction.clone().into();
-                        GetRawTransaction::Raw(hex)
-                    });
+        if block_hash.is_none() {
+            match mempool
+                .ready()
+                .and_then(|service| {
+                    service.call(mempool::Request::TransactionsByMinedId([txid].into()))
+                })
+                .await
+                .map_misc_error()?
+            {
+                mempool::Response::Transactions(txns) => {
+                    if let Some(tx) = txns.first() {
+                        return Ok(if verbose {
+                            GetRawTransaction::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.transaction.clone(),
+                                    None,
+                                    None,
+                                    &self.network,
+                                    None,
+                                    None,
+                                    Some(false),
+                                    txid,
+                                ),
+                            ))
+                        } else {
+                            let hex = tx.transaction.clone().into();
+                            GetRawTransaction::Raw(hex)
+                        });
+                    }
                 }
-            }
 
-            _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+            };
+        }
+
+        // TODO: this should work for blocks in side chains
+        let txid = if let Some(block_hash) = block_hash {
+            let block_hash = block::Hash::from_hex(block_hash)
+                .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+            match self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::TransactionIdsForBlock(
+                    block_hash.into(),
+                ))
+                .await
+                .map_misc_error()?
+            {
+                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => *tx_ids
+                    .ok_or_error(
+                        server::error::LegacyCode::InvalidAddressOrKey,
+                        "block not found",
+                    )?
+                    .iter()
+                    .find(|id| **id == txid)
+                    .ok_or_error(
+                        server::error::LegacyCode::InvalidAddressOrKey,
+                        "txid not found",
+                    )?,
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+            }
+        } else {
+            txid
         };
 
         // If the tx wasn't in the mempool, check the state.
@@ -1628,6 +1662,17 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
+                let block_hash = match self
+                    .read_state
+                    .clone()
+                    .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
+                    .await
+                    .map_misc_error()?
+                {
+                    zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
+                    _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+                };
+
                 GetRawTransaction::Object(Box::new(TransactionObject::from_transaction(
                     tx.tx.clone(),
                     Some(tx.height),
@@ -1636,6 +1681,9 @@ where
                     // TODO: Performance gain:
                     // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
                     Some(tx.block_time),
+                    block_hash,
+                    Some(true),
+                    txid,
                 )))
             } else {
                 let hex = tx.tx.into();
@@ -3363,25 +3411,25 @@ pub enum GetBlock {
 
         /// The merkle root of the requested block.
         #[serde(with = "opthex", rename = "merkleroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         merkle_root: Option<block::merkle::Root>,
 
         /// The blockcommitments field of the requested block. Its interpretation changes
         /// depending on the network and height.
         #[serde(with = "opthex", rename = "blockcommitments")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         block_commitments: Option<[u8; 32]>,
 
         // `authdataroot` would be here. Undocumented. TODO: decide if we want to support it
         //
         /// The root of the Sapling commitment tree after applying this block.
         #[serde(with = "opthex", rename = "finalsaplingroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         final_sapling_root: Option<[u8; 32]>,
 
         /// The root of the Orchard commitment tree after applying this block.
         #[serde(with = "opthex", rename = "finalorchardroot")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         final_orchard_root: Option<[u8; 32]>,
 
         // `chainhistoryroot` would be here. Undocumented. TODO: decide if we want to support it
@@ -3396,18 +3444,18 @@ pub enum GetBlock {
 
         /// The nonce of the requested block header.
         #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         nonce: Option<[u8; 32]>,
 
         /// The Equihash solution in the requested block header.
         /// Note: presence of this field in getblock is not documented in zcashd.
         #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         solution: Option<Solution>,
 
         /// The difficulty threshold of the requested block header displayed in compact form.
         #[serde(with = "opthex")]
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(skip_serializing_if = "Option::is_none", default)]
         bits: Option<CompactDifficulty>,
 
         /// Floating point number that represents the difficulty limit for this block as a multiple

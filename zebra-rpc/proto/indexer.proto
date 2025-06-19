@@ -4,7 +4,42 @@ package zebra.indexer.rpc;
 // Used by methods that take no arguments.
 message Empty {};
 
+// A block hash and height.
+message BlockHashAndHeight {
+  // The hash of the block in display order.
+  bytes hash = 1;
+  
+  // The height of the block in the chain.
+  uint32 height = 2;
+};
+
+// Represents a change in the mempool.
+message MempoolChangeMessage {
+  // The type of change that occurred.
+  enum ChangeType {
+    // Represents a transaction being added to the mempool.
+    ADDED = 0;
+    // Represents a transaction being invalidated and rejected from the mempool.
+    INVALIDATED  = 1;
+    // Represents a transaction being mined into a block on the best chain and 
+    // removed from the mempool.
+    MINED = 2;
+  }
+
+  // The type of change that occurred.
+  ChangeType change_type = 1;
+
+  // The hash of the transaction that changed.
+  bytes tx_hash = 2;
+
+  // The transaction auth digest.
+  bytes auth_digest = 3;
+};
+
 service Indexer {
   // Notifies listeners of chain tip changes
-  rpc ChainTipChange(Empty) returns (stream Empty);
+  rpc ChainTipChange(Empty) returns (stream BlockHashAndHeight);
+
+  // Notifies listeners of mempool changes
+  rpc MempoolChange(Empty) returns (stream MempoolChangeMessage);
 }

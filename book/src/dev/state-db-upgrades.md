@@ -257,7 +257,7 @@ simulates typical user behaviour.
 
 And ideally:
 - An upgrade from the earliest supported Zebra version
-  (the CI sync-past-checkpoint tests do this on every PR)
+  (the CI sync-past-mandatory-checkpoint tests do this on every PR)
 
 #### Manually Triggering a Format Upgrade
 [manual-upgrade]: #manual-upgrade

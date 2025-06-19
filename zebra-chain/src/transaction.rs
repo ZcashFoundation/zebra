@@ -38,10 +38,15 @@ pub use unmined::{
 };
 use zcash_protocol::consensus;
 
+#[cfg(feature = "tx_v6")]
+use crate::parameters::TX_V6_VERSION_GROUP_ID;
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{
+        Network, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
+        TX_V5_VERSION_GROUP_ID,
+    },
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize,
@@ -1403,6 +1408,21 @@ impl Transaction {
     /// Does this transaction have shielded inputs or outputs?
     pub fn has_shielded_data(&self) -> bool {
         self.has_shielded_inputs() || self.has_shielded_outputs()
+    }
+
+    /// Get the version group ID for this transaction, if any.
+    pub fn version_group_id(&self) -> Option<u32> {
+        // We could store the parsed version group ID and return that,
+        // but since the consensus rules constraint it, we can just return
+        // the value that must have been parsed.
+        match self {
+            Transaction::V1 { .. } | Transaction::V2 { .. } => None,
+            Transaction::V3 { .. } => Some(OVERWINTER_VERSION_GROUP_ID),
+            Transaction::V4 { .. } => Some(SAPLING_VERSION_GROUP_ID),
+            Transaction::V5 { .. } => Some(TX_V5_VERSION_GROUP_ID),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { .. } => Some(TX_V6_VERSION_GROUP_ID),
+        }
     }
 }
 
