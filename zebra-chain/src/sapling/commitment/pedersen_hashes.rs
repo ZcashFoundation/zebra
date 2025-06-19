@@ -97,16 +97,3 @@ pub fn pedersen_hash_to_point(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::
 pub fn pedersen_hash(domain: [u8; 8], M: &BitVec<u8, Lsb0>) -> jubjub::Fq {
     jubjub::AffinePoint::from(pedersen_hash_to_point(domain, M)).get_u()
 }
-
-/// Construct a 'windowed' Pedersen commitment by reusing a Pederson hash
-/// construction, and adding a randomized point on the Jubjub curve.
-///
-/// WindowedPedersenCommit_r (s) := \
-///   PedersenHashToPoint("Zcash_PH", s) + \[r\]FindGroupHash^J^(r)("Zcash_PH", "r")
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#concretewindowedcommit>
-pub fn windowed_pedersen_commitment(r: jubjub::Fr, s: &BitVec<u8, Lsb0>) -> jubjub::ExtendedPoint {
-    const D: [u8; 8] = *b"Zcash_PH";
-
-    pedersen_hash_to_point(D, s) + find_group_hash(D, b"r") * r
-}
