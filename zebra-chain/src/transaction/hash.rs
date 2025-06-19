@@ -95,6 +95,12 @@ impl From<[u8; 32]> for Hash {
     }
 }
 
+impl From<&[u8; 32]> for Hash {
+    fn from(bytes: &[u8; 32]) -> Self {
+        Self::from(*bytes)
+    }
+}
+
 impl From<Hash> for [u8; 32] {
     fn from(hash: Hash) -> Self {
         hash.0
