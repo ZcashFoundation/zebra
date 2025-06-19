@@ -45,6 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
+    response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -858,6 +859,49 @@ impl ReadStateService {
     #[allow(dead_code)]
     fn latest_best_chain(&self) -> Option<Arc<Chain>> {
         self.latest_non_finalized_state().best_chain().cloned()
+    }
+
+    /// Spawns a task to listen for changes in the non-finalized state and sends any blocks in the non-finalized state
+    /// to the caller that have not already been sent.
+    ///
+    /// Returns a receiver for the caller to listen for new blocks in the non-finalized state.
+    fn non_finalized_state_change(&self) -> NonFinalizedBlocksListener {
+        let network = self.network.clone();
+        let mut non_finalized_state_receiver = self.non_finalized_state_receiver.clone();
+        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(100);
+
+        tokio::spawn(async move {
+            // Start with an empty non-finalized state with the expectation that the caller doesn't yet have
+            // any blocks from the non-finalized state.
+            let mut prev_non_finalized_state = NonFinalizedState::new(&network);
+
+            loop {
+                let latest_finalized_state = non_finalized_state_receiver.cloned_watch_data();
+
+                let new_blocks = latest_finalized_state
+                    .chain_iter()
+                    .flat_map(|chain| chain.blocks.values())
+                    .filter(|cv_block| !prev_non_finalized_state.any_chain_contains(&cv_block.hash))
+                    .map(|cv_block| (cv_block.hash, cv_block.block.clone()));
+
+                for new_block_with_hash in new_blocks {
+                    if response_sender.send(new_block_with_hash).await.is_err() {
+                        tracing::debug!("non-finalized state change receiver closed, ending task");
+                        return;
+                    }
+                }
+
+                prev_non_finalized_state = latest_finalized_state;
+
+                // Wait for the next update to the non-finalized state
+                if let Err(error) = non_finalized_state_receiver.changed().await {
+                    warn!(?error, "non-finalized state receiver closed, ending task");
+                    break;
+                }
+            }
+        });
+
+        NonFinalizedBlocksListener::new(response_receiver)
     }
 
     /// Test-only access to the inner database.
@@ -2126,6 +2170,25 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .wait_for_panics()
+            }
+
+            ReadRequest::NonFinalizedBlocksListener => {
+                // The non-finalized blocks listener is used to notify the state service
+                // about new blocks that have been added to the non-finalized state.
+                let non_finalized_blocks_listener = self.non_finalized_state_change();
+
+                async move {
+                    timer.finish(
+                        module_path!(),
+                        line!(),
+                        "ReadRequest::NonFinalizedBlocksListener",
+                    );
+
+                    Ok(ReadResponse::NonFinalizedBlocksListener(
+                        non_finalized_blocks_listener,
+                    ))
+                }
+                .boxed()
             }
         }
     }

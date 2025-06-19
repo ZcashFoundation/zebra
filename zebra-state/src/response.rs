@@ -153,6 +153,31 @@ impl MinedTx {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct NonFinalizedBlocksListener(
+    pub Arc<tokio::sync::mpsc::Receiver<(zebra_chain::block::Hash, Arc<zebra_chain::block::Block>)>>,
+);
+
+impl NonFinalizedBlocksListener {
+    /// Creates a new [`NonFinalizedBlocksListener`] from a receiver.
+    pub fn new(
+        receiver: tokio::sync::mpsc::Receiver<(
+            zebra_chain::block::Hash,
+            Arc<zebra_chain::block::Block>,
+        )>,
+    ) -> Self {
+        Self(Arc::new(receiver))
+    }
+}
+
+impl PartialEq for NonFinalizedBlocksListener {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for NonFinalizedBlocksListener {}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].
@@ -292,6 +317,9 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
+
+    /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
+    NonFinalizedBlocksListener(NonFinalizedBlocksListener),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -383,7 +411,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
-            | ReadResponse::ChainInfo(_) => {
+            | ReadResponse::ChainInfo(_)
+            | ReadResponse::NonFinalizedBlocksListener(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
