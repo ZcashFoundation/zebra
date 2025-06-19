@@ -168,6 +168,18 @@ impl NonFinalizedBlocksListener {
     ) -> Self {
         Self(Arc::new(receiver))
     }
+
+    /// Consumes `self`, unwrapping the inner [`Arc`] and returning the non-finalized state change channel receiver.
+    ///
+    /// # Panics
+    ///
+    /// If the `Arc` has more than one strong reference, this will panic.
+    pub fn unwrap(
+        self,
+    ) -> tokio::sync::mpsc::Receiver<(zebra_chain::block::Hash, Arc<zebra_chain::block::Block>)>
+    {
+        Arc::try_unwrap(self.0).unwrap()
+    }
 }
 
 impl PartialEq for NonFinalizedBlocksListener {
