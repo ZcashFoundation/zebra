@@ -10,6 +10,10 @@ use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER},
     parameters::Network,
+    primitives::{
+        ed25519::{self},
+        redjubjub::{Binding, Signature},
+    },
     sapling::NotSmallOrderValueCommitment,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
@@ -170,6 +174,18 @@ pub struct TransactionObject {
     /// Sapling outputs of the transaction.
     #[serde(rename = "vShieldedOutput", skip_serializing_if = "Option::is_none")]
     pub shielded_outputs: Option<Vec<ShieldedOutput>>,
+
+    /// Sapling binding signature of the transaction.
+    #[serde(rename = "bindingSig", skip_serializing_if = "Option::is_none")]
+    pub binding_sig: Option<Signature<Binding>>,
+
+    /// JoinSplit public key of the transaction.
+    #[serde(rename = "joinSplitPubKey", skip_serializing_if = "Option::is_none")]
+    pub joinsplit_pub_key: Option<ed25519::VerificationKeyBytes>,
+
+    /// JoinSplit signature of the transaction.
+    #[serde(rename = "joinSplitSig", skip_serializing_if = "Option::is_none")]
+    pub joinsplit_sig: Option<ed25519::Signature>,
 
     /// Orchard actions of the transaction.
     #[serde(rename = "orchard", skip_serializing_if = "Option::is_none")]
@@ -377,6 +393,9 @@ impl Default for TransactionObject {
             shielded_spends: None,
             shielded_outputs: None,
             orchard: None,
+            binding_sig: None,
+            joinsplit_pub_key: None,
+            joinsplit_sig: None,
             value_balance: None,
             value_balance_zat: None,
             size: None,
@@ -512,7 +531,6 @@ impl TransactionObject {
             ),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-
             orchard: if !tx.has_orchard_shielded_data() {
                 None
             } else {
@@ -562,6 +580,9 @@ impl TransactionObject {
                     value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
                 })
             },
+            binding_sig: tx.sapling_binding_sig(),
+            joinsplit_pub_key: tx.joinsplit_pub_key(),
+            joinsplit_sig: tx.joinsplit_sig(),
             size: tx.as_bytes().len().try_into().ok(),
             time: block_time.map(|bt| bt.timestamp()),
         }

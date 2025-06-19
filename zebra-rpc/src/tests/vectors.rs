@@ -19,6 +19,9 @@ pub fn test_transaction_serialization() {
         value_balance: None,
         value_balance_zat: None,
         orchard: None,
+        binding_sig: None,
+        joinsplit_pub_key: None,
+        joinsplit_sig: None,
         size: None,
         time: None,
     }));
@@ -39,6 +42,9 @@ pub fn test_transaction_serialization() {
         value_balance: None,
         value_balance_zat: None,
         orchard: None,
+        binding_sig: None,
+        joinsplit_pub_key: None,
+        joinsplit_sig: None,
         size: None,
         time: None,
     }));

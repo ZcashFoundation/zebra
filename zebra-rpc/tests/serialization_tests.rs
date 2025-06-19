@@ -382,6 +382,9 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let shielded_spends = tx.shielded_spends.clone();
     let shielded_outputs = tx.shielded_outputs.clone();
     let orchard = tx.orchard.clone();
+    let binding_sig = tx.binding_sig;
+    let joinsplit_pub_key = tx.joinsplit_pub_key;
+    let joinsplit_sig = tx.joinsplit_sig;
     let value_balance = tx.value_balance;
     let value_balance_zat = tx.value_balance_zat;
     let size = tx.size;
@@ -398,6 +401,9 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         shielded_spends,
         shielded_outputs,
         orchard,
+        binding_sig,
+        joinsplit_pub_key,
+        joinsplit_sig,
         value_balance,
         value_balance_zat,
         size,
