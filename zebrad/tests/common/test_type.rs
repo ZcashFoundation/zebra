@@ -9,10 +9,13 @@ use std::{
 use color_eyre::eyre::Result;
 use indexmap::IndexSet;
 
-use zebra_chain::{common::default_cache_dir, parameters::Network};
+use zebra_chain::{
+    common::default_cache_dir,
+    parameters::Network::{self, Mainnet},
+};
 use zebra_network::CacheDir;
 use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
-use zebrad::{components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT, config::ZebradConfig};
+use zebrad::config::ZebradConfig;
 
 use super::{
     config::{default_test_config, random_known_rpc_port_config},
@@ -149,6 +152,37 @@ impl TestType {
         }
     }
 
+    /// Returns the Zebra state path for this test, if configured and needed.
+    #[allow(clippy::print_stderr)]
+    pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
+        let test_name = test_name.as_ref();
+
+        // Only return a path if this test type needs a cached state
+        if !self.needs_zebra_cached_state() {
+            return None;
+        }
+
+        // Create a config to check if a cache dir is configured
+        let config = match self.zebrad_config(test_name, true, None, &Mainnet) {
+            Some(Ok(config)) => config,
+            Some(Err(_)) | None => {
+                // Config creation failed or test should be skipped
+                return None;
+            }
+        };
+
+        // Check if a non-default cache dir is configured
+        if config.state.cache_dir != default_cache_dir() {
+            Some(config.state.cache_dir)
+        } else {
+            eprintln!(
+                "skipped {test_name:?} {self:?} test, \
+                 set the ZEBRA_STATE__CACHE_DIR environment variable to run the test",
+            );
+            None
+        }
+    }
+
     /// Returns a Zebra config for this test.
     ///
     /// `replace_cache_dir` replaces any cached or ephemeral state.
@@ -191,25 +225,17 @@ impl TestType {
         }
 
         // If we have a cached state, or we don't want to be ephemeral, update the config to use it
-        if let Some(path) = replace_cache_dir {
-            config.state.ephemeral = false;
-            config.state.cache_dir = path.to_path_buf();
-        } else if self.needs_zebra_cached_state() {
-            if config.state.cache_dir == default_cache_dir() {
-                let test_name = test_name.as_ref();
-                eprintln!(
-                    "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the ZEBRA_STATE__CACHE_DIR environment variable to run the test",
-                );
-                return None;
-            }
-            // A cache dir was configured, so use it.
-            config.state.ephemeral = false;
-        }
+        if replace_cache_dir.is_some() || self.needs_zebra_cached_state() {
+            let zebra_state_path = replace_cache_dir
+                .map(|path| path.to_owned())
+                .or_else(|| self.zebrad_state_path(test_name))?;
 
-        // Reset concurrency limit if using a persistent state
-        if !config.state.ephemeral {
-            config.sync.checkpoint_verify_concurrency_limit = DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
+            config.state.ephemeral = false;
+            config.state.cache_dir = zebra_state_path;
+
+            // And reset the concurrency to the default value
+            config.sync.checkpoint_verify_concurrency_limit =
+                zebrad::components::sync::DEFAULT_CHECKPOINT_CONCURRENCY_LIMIT;
         }
 
         Some(Ok(config))
