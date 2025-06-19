@@ -112,16 +112,17 @@ pub async fn run() -> Result<()> {
 
     // Start zebrad with no peers, we want to send transactions without blocks coming in. If `wallet_grpc_test`
     // runs before this test (as it does in `lightwalletd_test_suite`), then we are the most up to date with tip we can.
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) = spawn_zebrad_for_rpc(
+    let (mut zebrad, zebra_rpc_address, _config) = match spawn_zebrad_for_rpc(
         network.clone(),
         test_name,
         test_type,
         use_internet_connection,
     )? {
-        zebrad_and_address
-    } else {
-        // Skip the test, we don't have the required cached state
-        return Ok(());
+        Some(zebrad_and_address) => zebrad_and_address,
+        None => {
+            // Skip the test, we don't have the required cached state
+            return Ok(());
+        }
     };
 
     let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");
