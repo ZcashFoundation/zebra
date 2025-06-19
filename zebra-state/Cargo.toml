@@ -15,6 +15,7 @@ keywords = ["zebra", "zcash"]
 categories = ["asynchronous", "caching", "cryptography::cryptocurrencies"]
 
 [features]
+default = []
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -43,6 +44,11 @@ elasticsearch = [
     "dep:elasticsearch",
     "dep:serde_json",
     "zebra-chain/elasticsearch",
+]
+
+# Support for transaction version 6
+tx-v6 = [
+    "zebra-chain/tx-v6"
 ]
 
 [dependencies]

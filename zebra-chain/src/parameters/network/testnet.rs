@@ -206,6 +206,9 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU6` network upgrade.
     #[serde(rename = "NU6")]
     pub nu6: Option<u32>,
+    /// Activation height for `NU7` network upgrade.
+    #[serde(rename = "NU7")]
+    pub nu7: Option<u32>,
 }
 
 /// Builder for the [`Parameters`] struct.
@@ -336,6 +339,7 @@ impl ParametersBuilder {
             canopy,
             nu5,
             nu6,
+            nu7,
         }: ConfiguredActivationHeights,
     ) -> Self {
         use NetworkUpgrade::*;
@@ -358,6 +362,7 @@ impl ParametersBuilder {
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
             .chain(nu5.into_iter().map(|h| (h, Nu5)))
             .chain(nu6.into_iter().map(|h| (h, Nu6)))
+            .chain(nu7.into_iter().map(|h| (h, Nu7)))
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();
 
@@ -588,6 +593,7 @@ impl Parameters {
     pub fn new_regtest(
         nu5_activation_height: Option<u32>,
         nu6_activation_height: Option<u32>,
+        nu7_activation_height: Option<u32>,
     ) -> Self {
         #[cfg(any(test, feature = "proptest-impl"))]
         let nu5_activation_height = nu5_activation_height.or(Some(100));
@@ -604,6 +610,7 @@ impl Parameters {
                 canopy: Some(1),
                 nu5: nu5_activation_height,
                 nu6: nu6_activation_height,
+                nu7: nu7_activation_height,
                 ..Default::default()
             })
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
@@ -647,7 +654,7 @@ impl Parameters {
             disable_pow,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
-        } = Self::new_regtest(None, None);
+        } = Self::new_regtest(None, None, None);
 
         self.network_name == network_name
             && self.genesis_hash == genesis_hash
