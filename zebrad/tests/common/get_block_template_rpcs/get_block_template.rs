@@ -12,9 +12,12 @@ use futures::FutureExt;
 
 use zebra_chain::{parameters::Network, serialization::ZcashSerialize};
 use zebra_node_services::rpc_client::RpcRequestClient;
-use zebra_rpc::methods::types::get_block_template::{
-    proposal::proposal_block_from_template, GetBlockTemplate, JsonParameters, ProposalResponse,
-    TimeSource,
+use zebra_rpc::{
+    client::{
+        BlockProposalResponse, BlockTemplateResponse, BlockTemplateTimeSource,
+        GetBlockTemplateParameters,
+    },
+    proposal_block_from_template,
 };
 
 use crate::common::{
@@ -155,7 +158,7 @@ pub(crate) async fn run() -> Result<()> {
 /// If the response result cannot be deserialized to `GetBlockTemplate` in 'template' mode
 /// or `ProposalResponse` in 'proposal' mode.
 async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
-    let mut response_json_result: GetBlockTemplate = client
+    let mut response_json_result: BlockTemplateResponse = client
         .json_result_from_call("getblocktemplate", "[]")
         .await
         .expect("response should be success output with a serialized `GetBlockTemplate`");
@@ -166,18 +169,22 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
 
     {
         let client = client.clone();
-        let mut long_poll_id = response_json_result.long_poll_id;
+        let mut long_poll_id = response_json_result.long_poll_id();
 
         tokio::spawn(async move {
             loop {
                 let long_poll_request = async {
-                    let long_poll_json_params = serde_json::to_string(&vec![JsonParameters {
-                        long_poll_id: Some(long_poll_id),
-                        ..Default::default()
-                    }])
-                    .expect("JsonParameters should serialize successfully");
+                    let long_poll_json_params =
+                        serde_json::to_string(&vec![GetBlockTemplateParameters::new(
+                            Default::default(),
+                            Default::default(),
+                            Default::default(),
+                            Some(long_poll_id),
+                            Default::default(),
+                        )])
+                        .expect("JsonParameters should serialize successfully");
 
-                    let result: GetBlockTemplate = client
+                    let result: BlockTemplateResponse = client
                             .json_result_from_call("getblocktemplate", long_poll_json_params)
                             .await
                             .expect(
@@ -193,9 +200,9 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
                     }
 
                     long_poll_result = long_poll_request => {
-                        long_poll_id = long_poll_result.long_poll_id;
+                        long_poll_id = long_poll_result.long_poll_id();
 
-                        if let Some(false) = long_poll_result.submit_old {
+                        if let Some(false) = long_poll_result.submit_old() {
                             let _ = long_poll_result_tx.send(long_poll_result);
                         }
                     }
@@ -207,7 +214,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
     loop {
         let mut proposal_requests = vec![];
 
-        for time_source in TimeSource::valid_sources() {
+        for time_source in BlockTemplateTimeSource::valid_sources() {
             // Propose a new block with an empty solution and nonce field
 
             let raw_proposal_block = hex::encode(
@@ -248,9 +255,9 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
                 let _ = done_tx.send(()).await;
                 for (proposal_result, template, time_source) in proposal_results {
                     let proposal_result = proposal_result
-                        .expect("response should be success output with a serialized `ProposalResponse`");
+                        .expect("response should be success output with a serialized `BlockProposalResponse`");
 
-                    if let ProposalResponse::Rejected(reject_reason) = proposal_result {
+                    if let BlockProposalResponse::Rejected(reject_reason) = proposal_result {
                         tracing::info!(
                             ?reject_reason,
                             ?template,
@@ -262,7 +269,7 @@ async fn try_validate_block_template(client: &RpcRequestClient) -> Result<()> {
                             "unsuccessful block proposal validation, reason: {reject_reason:?}"
                         ))?;
                     } else {
-                        assert_eq!(ProposalResponse::Valid, proposal_result);
+                        assert_eq!(BlockProposalResponse::Valid, proposal_result);
                     }
                 }
 

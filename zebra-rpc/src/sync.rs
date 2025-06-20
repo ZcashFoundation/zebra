@@ -22,7 +22,7 @@ use zebra_chain::diagnostic::task::WaitForPanics;
 
 use crate::{
     indexer::{self, indexer_client::IndexerClient, BlockHashAndHeight, Empty},
-    methods::{hex_data::HexData, GetBlockHeightAndHash},
+    methods::{hex_data::HexData, GetBlockHeightAndHashResponse},
     server,
 };
 
@@ -442,7 +442,7 @@ impl SyncerRpcMethods for RpcRequestClient {
     ) -> Result<(block::Height, block::Hash), BoxError> {
         self.json_result_from_call("getbestblockheightandhash", "[]")
             .await
-            .map(|GetBlockHeightAndHash { height, hash }| (height, hash))
+            .map(|r: GetBlockHeightAndHashResponse| (r.height(), r.hash()))
     }
 
     async fn get_block(&self, height: u32) -> Result<Option<Arc<Block>>, BoxError> {

@@ -10,6 +10,8 @@ mod tests;
 
 use std::{collections::HashMap, fmt, iter, sync::Arc};
 
+use derive_getters::Getters;
+use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use tokio::sync::watch::{self, error::SendError};
@@ -42,36 +44,36 @@ use zebra_state::GetBlockTemplateChainInfo;
 
 use crate::{
     config,
-    methods::{
-        types::{
-            default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
-            transaction::TransactionTemplate,
-        },
-        GetBlockHash,
+    methods::types::{
+        default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
+        transaction::TransactionTemplate,
     },
     server::error::OkOrError,
 };
 
-pub use constants::{
-    CAPABILITIES_FIELD, DEFAULT_SOLUTION_RATE_WINDOW_SIZE,
-    MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, MEMPOOL_LONG_POLL_INTERVAL, MUTABLE_FIELD,
-    NONCE_RANGE_FIELD, NOT_SYNCED_ERROR_CODE, ZCASHD_FUNDING_STREAM_ORDER,
+use constants::{
+    CAPABILITIES_FIELD, MAX_ESTIMATED_DISTANCE_TO_NETWORK_CHAIN_TIP, MUTABLE_FIELD,
+    NONCE_RANGE_FIELD, NOT_SYNCED_ERROR_CODE,
 };
-pub use parameters::{GetBlockTemplateRequestMode, JsonParameters};
-pub use proposal::{ProposalResponse, TimeSource};
+pub use parameters::{
+    GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
+};
+pub use proposal::{BlockProposalResponse, BlockTemplateTimeSource};
 
 /// An alias to indicate that a usize value represents the depth of in-block dependencies of a
 /// transaction.
 ///
 /// See the `dependencies_depth()` function in [`zip317`] for more details.
-pub type InBlockTxDependenciesDepth = usize;
+#[cfg(test)]
+type InBlockTxDependenciesDepth = usize;
 
 /// A serialized `getblocktemplate` RPC response in template mode.
 ///
 /// This is the output of the `getblocktemplate` RPC in the default 'template' mode. See
-/// [`ProposalResponse`] for the output in 'proposal' mode.
-#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct GetBlockTemplate {
+/// [`BlockProposalResponse`] for the output in 'proposal' mode.
+#[allow(clippy::too_many_arguments)]
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct BlockTemplateResponse {
     /// The getblocktemplate RPC capabilities supported by Zebra.
     ///
     /// At the moment, Zebra does not support any of the extra capabilities from the specification:
@@ -80,95 +82,105 @@ pub struct GetBlockTemplate {
     /// - `serverlist`: <https://en.bitcoin.it/wiki/BIP_0023#Logical_Services>
     ///
     /// By the above, Zebra will always return an empty vector here.
-    pub capabilities: Vec<String>,
+    pub(crate) capabilities: Vec<String>,
 
     /// The version of the block format.
     /// Always 4 for new Zcash blocks.
-    pub version: u32,
+    pub(crate) version: u32,
 
     /// The hash of the previous block.
     #[serde(rename = "previousblockhash")]
-    pub previous_block_hash: GetBlockHash,
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    pub(crate) previous_block_hash: block::Hash,
 
     /// The block commitment for the new block's header.
     ///
     /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
     #[serde(rename = "blockcommitmentshash")]
     #[serde(with = "hex")]
-    pub block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
+    #[getter(copy)]
+    pub(crate) block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
     /// Legacy backwards-compatibility header root field.
     ///
     /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
     #[serde(rename = "lightclientroothash")]
     #[serde(with = "hex")]
-    pub light_client_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
+    #[getter(copy)]
+    pub(crate) light_client_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
     /// Legacy backwards-compatibility header root field.
     ///
     /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
     #[serde(rename = "finalsaplingroothash")]
     #[serde(with = "hex")]
-    pub final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
+    #[getter(copy)]
+    pub(crate) final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
     /// The block header roots for [`GetBlockTemplate.transactions`].
     ///
     /// If the transactions in the block template are modified, these roots must be recalculated
     /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).
     #[serde(rename = "defaultroots")]
-    pub default_roots: DefaultRoots,
+    pub(crate) default_roots: DefaultRoots,
 
     /// The non-coinbase transactions selected for this block template.
-    pub transactions: Vec<TransactionTemplate<amount::NonNegative>>,
+    pub(crate) transactions: Vec<TransactionTemplate<amount::NonNegative>>,
 
     /// The coinbase transaction generated from `transactions` and `height`.
     #[serde(rename = "coinbasetxn")]
-    pub coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
+    pub(crate) coinbase_txn: TransactionTemplate<amount::NegativeOrZero>,
 
     /// An ID that represents the chain tip and mempool contents for this template.
     #[serde(rename = "longpollid")]
-    pub long_poll_id: LongPollId,
+    #[getter(copy)]
+    pub(crate) long_poll_id: LongPollId,
 
     /// The expected difficulty for the new block displayed in expanded form.
     #[serde(with = "hex")]
-    pub target: ExpandedDifficulty,
+    #[getter(copy)]
+    pub(crate) target: ExpandedDifficulty,
 
     /// > For each block other than the genesis block, nTime MUST be strictly greater than
     /// > the median-time-past of that block.
     ///
     /// <https://zips.z.cash/protocol/protocol.pdf#blockheader>
     #[serde(rename = "mintime")]
-    pub min_time: DateTime32,
+    #[getter(copy)]
+    pub(crate) min_time: DateTime32,
 
     /// Hardcoded list of block fields the miner is allowed to change.
-    pub mutable: Vec<String>,
+    pub(crate) mutable: Vec<String>,
 
     /// A range of valid nonces that goes from `u32::MIN` to `u32::MAX`.
     #[serde(rename = "noncerange")]
-    pub nonce_range: String,
+    pub(crate) nonce_range: String,
 
     /// Max legacy signature operations in the block.
     #[serde(rename = "sigoplimit")]
-    pub sigop_limit: u64,
+    pub(crate) sigop_limit: u64,
 
     /// Max block size in bytes
     #[serde(rename = "sizelimit")]
-    pub size_limit: u64,
+    pub(crate) size_limit: u64,
 
     /// > the current time as seen by the server (recommended for block time).
     /// > note this is not necessarily the system clock, and must fall within the mintime/maxtime rules
     ///
     /// <https://en.bitcoin.it/wiki/BIP_0022#Block_Template_Request>
     #[serde(rename = "curtime")]
-    pub cur_time: DateTime32,
+    #[getter(copy)]
+    pub(crate) cur_time: DateTime32,
 
     /// The expected difficulty for the new block displayed in compact form.
     #[serde(with = "hex")]
-    pub bits: CompactDifficulty,
+    #[getter(copy)]
+    pub(crate) bits: CompactDifficulty,
 
     /// The height of the next block in the best chain.
     // Optional TODO: use Height type, but check that deserialized heights are within Height::MAX
-    pub height: u32,
+    pub(crate) height: u32,
 
     /// > the maximum time allowed
     ///
@@ -184,7 +196,8 @@ pub struct GetBlockTemplate {
     /// Some miners don't check the maximum time. This can cause invalid blocks after network downtime,
     /// a significant drop in the hash rate, or after the testnet minimum difficulty interval.
     #[serde(rename = "maxtime")]
-    pub max_time: DateTime32,
+    #[getter(copy)]
+    pub(crate) max_time: DateTime32,
 
     /// > only relevant for long poll responses:
     /// > indicates if work received prior to this response remains potentially valid (default)
@@ -200,10 +213,11 @@ pub struct GetBlockTemplate {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(default)]
     #[serde(rename = "submitold")]
-    pub submit_old: Option<bool>,
+    #[getter(copy)]
+    pub(crate) submit_old: Option<bool>,
 }
 
-impl fmt::Debug for GetBlockTemplate {
+impl fmt::Debug for BlockTemplateResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // A block with a lot of transactions can be extremely long in logs.
         let mut transactions_truncated = self.transactions.clone();
@@ -240,17 +254,17 @@ impl fmt::Debug for GetBlockTemplate {
     }
 }
 
-impl GetBlockTemplate {
+impl BlockTemplateResponse {
     /// Returns a `Vec` of capabilities supported by the `getblocktemplate` RPC
-    pub fn capabilities() -> Vec<String> {
+    pub fn all_capabilities() -> Vec<String> {
         CAPABILITIES_FIELD.iter().map(ToString::to_string).collect()
     }
 
-    /// Returns a new [`GetBlockTemplate`] struct, based on the supplied arguments and defaults.
+    /// Returns a new [`BlockTemplateResponse`] struct, based on the supplied arguments and defaults.
     ///
     /// The result of this method only depends on the supplied arguments and constants.
     #[allow(clippy::too_many_arguments)]
-    pub fn new(
+    pub(crate) fn new_internal(
         network: &Network,
         miner_address: &Address,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
@@ -319,7 +333,7 @@ impl GetBlockTemplate {
             .expect("state always returns a valid difficulty value");
 
         // Convert default values
-        let capabilities: Vec<String> = Self::capabilities();
+        let capabilities: Vec<String> = Self::all_capabilities();
         let mutable: Vec<String> = MUTABLE_FIELD.iter().map(ToString::to_string).collect();
 
         tracing::debug!(
@@ -330,12 +344,12 @@ impl GetBlockTemplate {
             "creating template ... "
         );
 
-        GetBlockTemplate {
+        BlockTemplateResponse {
             capabilities,
 
             version: ZCASH_BLOCK_VERSION,
 
-            previous_block_hash: GetBlockHash(chain_tip_and_local_time.tip_hash),
+            previous_block_hash: chain_tip_and_local_time.tip_hash,
             block_commitments_hash: default_roots.block_commitments_hash,
             light_client_root_hash: default_roots.block_commitments_hash,
             final_sapling_root_hash: default_roots.block_commitments_hash,
@@ -375,28 +389,28 @@ impl GetBlockTemplate {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
 /// A `getblocktemplate` RPC response.
-pub enum Response {
+pub enum GetBlockTemplateResponse {
     /// `getblocktemplate` RPC request in template mode.
-    TemplateMode(Box<GetBlockTemplate>),
+    TemplateMode(Box<BlockTemplateResponse>),
 
     /// `getblocktemplate` RPC request in proposal mode.
-    ProposalMode(ProposalResponse),
+    ProposalMode(BlockProposalResponse),
 }
 
-impl Response {
+impl GetBlockTemplateResponse {
     /// Returns the inner template, if the response is in template mode.
-    pub fn try_into_template(self) -> Option<GetBlockTemplate> {
+    pub fn try_into_template(self) -> Option<BlockTemplateResponse> {
         match self {
-            Response::TemplateMode(template) => Some(*template),
-            Response::ProposalMode(_) => None,
+            Self::TemplateMode(template) => Some(*template),
+            Self::ProposalMode(_) => None,
         }
     }
 
     /// Returns the inner proposal, if the response is in proposal mode.
-    pub fn try_into_proposal(self) -> Option<ProposalResponse> {
+    pub fn try_into_proposal(self) -> Option<BlockProposalResponse> {
         match self {
-            Response::TemplateMode(_) => None,
-            Response::ProposalMode(proposal) => Some(proposal),
+            Self::TemplateMode(_) => None,
+            Self::ProposalMode(proposal) => Some(proposal),
         }
     }
 }
@@ -549,24 +563,24 @@ where
 /// Checks that `data` is omitted in `Template` mode or provided in `Proposal` mode,
 ///
 /// Returns an error if there's a mismatch between the mode and whether `data` is provided.
-pub fn check_parameters(parameters: &Option<JsonParameters>) -> RpcResult<()> {
+pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcResult<()> {
     let Some(parameters) = parameters else {
         return Ok(());
     };
 
     match parameters {
-        JsonParameters {
+        GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Template,
             data: None,
             ..
         }
-        | JsonParameters {
+        | GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: Some(_),
             ..
         } => Ok(()),
 
-        JsonParameters {
+        GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             data: None,
             ..
@@ -577,7 +591,7 @@ pub fn check_parameters(parameters: &Option<JsonParameters>) -> RpcResult<()> {
             None,
         )),
 
-        JsonParameters {
+        GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Template,
             data: Some(_),
             ..
@@ -593,14 +607,14 @@ pub fn check_parameters(parameters: &Option<JsonParameters>) -> RpcResult<()> {
 /// Attempts to validate block proposal against all of the server's
 /// usual acceptance rules (except proof-of-work).
 ///
-/// Returns a `getblocktemplate` [`Response`].
+/// Returns a [`GetBlockTemplateResponse`].
 pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
     block_proposal_bytes: Vec<u8>,
     network: Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
-) -> RpcResult<Response>
+) -> RpcResult<GetBlockTemplateResponse>
 where
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -620,9 +634,11 @@ where
                 "error response from block parser in CheckProposal request"
             );
 
-            return Ok(
-                ProposalResponse::rejected("invalid proposal format", parse_error.into()).into(),
-            );
+            return Ok(BlockProposalResponse::rejected(
+                "invalid proposal format",
+                parse_error.into(),
+            )
+            .into());
         }
     };
 
@@ -634,14 +650,14 @@ where
         .await;
 
     Ok(block_verifier_router_response
-        .map(|_hash| ProposalResponse::Valid)
+        .map(|_hash| BlockProposalResponse::Valid)
         .unwrap_or_else(|verify_chain_error| {
             tracing::info!(
                 ?verify_chain_error,
                 "error response from block_verifier_router in CheckProposal request"
             );
 
-            ProposalResponse::rejected("invalid proposal", verify_chain_error)
+            BlockProposalResponse::rejected("invalid proposal", verify_chain_error)
         })
         .into())
 }

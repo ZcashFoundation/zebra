@@ -26,16 +26,16 @@ use zebra_chain::{
 };
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
-use zebra_rpc::methods::{
-    hex_data::HexData,
-    types::get_block_template::{
-        self,
-        parameters::GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
-        proposal::proposal_block_from_template,
+use zebra_rpc::{
+    client::{
+        BlockTemplateTimeSource,
+        GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
+        GetBlockTemplateParameters,
         GetBlockTemplateRequestMode::Template,
-        TimeSource,
+        HexData,
     },
-    RpcImpl, RpcServer,
+    methods::{RpcImpl, RpcServer},
+    proposal_block_from_template,
 };
 use zebra_state::WatchReceiver;
 
@@ -154,8 +154,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: change this to `config.internal_miner_threads` when internal miner feature is added back.
-    //       https://github.com/ZcashFoundation/zebra/issues/8183
+    // TODO: change this to `config.internal_miner_threads` once mining tasks are cancelled when the best tip changes (#8797)
     let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
@@ -275,13 +274,8 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Pass the correct arguments, even if Zebra currently ignores them.
-    let mut parameters = get_block_template::JsonParameters {
-        mode: Template,
-        data: None,
-        capabilities: vec![LongPoll, CoinbaseTxn],
-        long_poll_id: None,
-        _work_id: None,
-    };
+    let mut parameters =
+        GetBlockTemplateParameters::new(Template, None, vec![LongPoll, CoinbaseTxn], None, None);
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
@@ -309,15 +303,21 @@ where
             .expect("invalid RPC response: proposal in response to a template request");
 
         info!(
-            height = ?template.height,
-            transactions = ?template.transactions.len(),
+            height = ?template.height(),
+            transactions = ?template.transactions().len(),
             "mining with an updated block template",
         );
 
         // Tell the next get_block_template() call to wait until the template has changed.
-        parameters.long_poll_id = Some(template.long_poll_id);
+        parameters = GetBlockTemplateParameters::new(
+            Template,
+            None,
+            vec![LongPoll, CoinbaseTxn],
+            Some(template.long_poll_id()),
+            None,
+        );
 
-        let block = proposal_block_from_template(&template, TimeSource::CurTime)?;
+        let block = proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime)?;
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {
