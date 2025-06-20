@@ -691,6 +691,7 @@ async fn mempool_request_with_unmined_output_spends_is_accepted() {
     let crate::transaction::Response::Mempool {
         transaction: _,
         spent_mempool_outpoints,
+        ..
     } = verifier_response.expect("already checked that response is ok")
     else {
         panic!("unexpected response variant from transaction verifier for Mempool request")
@@ -816,6 +817,7 @@ async fn skips_verification_of_block_transactions_in_mempool() {
     let crate::transaction::Response::Mempool {
         transaction,
         spent_mempool_outpoints,
+        ..
     } = verifier_response.expect("already checked that response is ok")
     else {
         panic!("unexpected response variant from transaction verifier for Mempool request")

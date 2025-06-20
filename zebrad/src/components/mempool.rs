@@ -42,7 +42,7 @@ use zebra_node_services::mempool::{Gossip, MempoolChange, MempoolTxSubscriber, R
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
-use crate::components::sync::SyncStatus;
+use crate::components::sync::{SyncStatus, BLOCK_VERIFY_TIMEOUT};
 
 pub mod config;
 mod crawler;
@@ -81,7 +81,12 @@ type TxVerifier = Buffer<
     BoxService<transaction::Request, transaction::Response, TransactionError>,
     transaction::Request,
 >;
-type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
+type BlockRouterVerifier = Buffer<
+    BoxService<zebra_consensus::Request, block::Hash, zebra_consensus::RouterError>,
+    zebra_consensus::Request,
+>;
+type InboundTxDownloads =
+    TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, Timeout<BlockRouterVerifier>, State>;
 
 /// The state of the mempool.
 ///
@@ -236,6 +241,10 @@ pub struct Mempool {
     /// Used to construct the transaction downloader.
     tx_verifier: TxVerifier,
 
+    /// Handle to the block router verifier service.
+    /// Used to construct the transaction downloader.
+    block_router_verifier: BlockRouterVerifier,
+
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
     transaction_sender: broadcast::Sender<MempoolChange>,
@@ -273,6 +282,7 @@ impl Mempool {
         outbound: Outbound,
         state: State,
         tx_verifier: TxVerifier,
+        block_router_verifier: BlockRouterVerifier,
         sync_status: SyncStatus,
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
@@ -292,6 +302,7 @@ impl Mempool {
             outbound,
             state,
             tx_verifier,
+            block_router_verifier,
             transaction_sender,
             misbehavior_sender,
             #[cfg(feature = "progress-bar")]
@@ -362,6 +373,7 @@ impl Mempool {
                 let tx_downloads = Box::pin(TxDownloads::new(
                     Timeout::new(self.outbound.clone(), TRANSACTION_DOWNLOAD_TIMEOUT),
                     Timeout::new(self.tx_verifier.clone(), TRANSACTION_VERIFY_TIMEOUT),
+                    Timeout::new(self.block_router_verifier.clone(), BLOCK_VERIFY_TIMEOUT),
                     self.state.clone(),
                 ));
                 self.active_state = ActiveState::Enabled {

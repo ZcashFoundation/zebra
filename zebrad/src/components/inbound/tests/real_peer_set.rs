@@ -693,6 +693,10 @@ async fn setup(
     let buffered_tx_verifier = ServiceBuilder::new()
         .buffer(10)
         .service(BoxService::new(mock_tx_verifier.clone()));
+    let mock_block_router_verifier = MockService::build().for_unit_tests();
+    let buffered_block_router_verifier = ServiceBuilder::new()
+        .buffer(10)
+        .service(BoxService::new(mock_block_router_verifier.clone()));
 
     // Mempool
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
@@ -702,6 +706,7 @@ async fn setup(
         peer_set.clone(),
         state_service.clone(),
         buffered_tx_verifier.clone(),
+        buffered_block_router_verifier,
         sync_status.clone(),
         latest_chain_tip.clone(),
         chain_tip_change.clone(),
