@@ -3101,7 +3101,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
         let height = block.coinbase_height().unwrap();
         let auth_root = block.auth_data_root();
-        let hist_root = chain_info.chain_history_root.unwrap_or(Default::default());
+        let hist_root = chain_info.chain_history_root.unwrap_or_default();
         let header = Arc::make_mut(&mut block.header);
 
         header.commitment_bytes = match NetworkUpgrade::current(&net, height) {
