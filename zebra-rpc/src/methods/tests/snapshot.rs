@@ -137,7 +137,8 @@ async fn test_z_get_treestate() {
         .map(|(_, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
-    let (_, state, tip, _) = zebra_state::populated_state(blocks.clone(), &custom_testnet).await;
+    let (state, read_state, tip, _) =
+        zebra_state::populated_state(blocks.clone(), &custom_testnet).await;
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
         custom_testnet,
@@ -147,6 +148,7 @@ async fn test_z_get_treestate() {
         "RPC test",
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         state,
+        read_state,
         Buffer::new(MockService::build().for_unit_tests::<_, _, BoxError>(), 1),
         MockSyncStatus::default(),
         tip,
@@ -231,6 +233,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     test_mining_rpcs(
         network,
         mempool.clone(),
+        state.clone(),
         read_state.clone(),
         block_verifier_router.clone(),
         settings.clone(),
@@ -246,6 +249,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state,
         read_state,
         block_verifier_router,
         MockSyncStatus::default(),
@@ -428,7 +432,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     // - a request to get all mempool transactions will be made by `getrawmempool` behind the scenes.
     // - as we have the mempool mocked we need to expect a request and wait for a response,
     // which will be an empty mempool in this case.
-    // Note: this depends on `SHOULD_USE_ZCASHD_ORDER` being true.
     let mempool_req = mempool
         .expect_request_that(|request| matches!(request, mempool::Request::FullTransactions))
         .map(|responder| {
@@ -439,16 +442,29 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             });
         });
 
-    // make the api call
-    let get_raw_mempool = rpc.get_raw_mempool(None);
-    let (response, _) = futures::join!(get_raw_mempool, mempool_req);
-    let GetRawMempool::TxIds(get_raw_mempool) =
-        response.expect("We should have a GetRawTransaction struct")
-    else {
-        panic!("should return TxIds for non verbose");
-    };
+    let (rsp, _) = futures::join!(rpc.get_raw_mempool(Some(true)), mempool_req);
 
-    snapshot_rpc_getrawmempool(get_raw_mempool, &settings);
+    match rsp {
+        Ok(GetRawMempool::Verbose(rsp)) => {
+            settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool_verbose", rsp));
+        }
+        _ => panic!("getrawmempool RPC must return `GetRawMempool::Verbose`"),
+    }
+
+    let mempool_req = mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::TransactionIds))
+        .map(|responder| {
+            responder.respond(mempool::Response::TransactionIds(Default::default()));
+        });
+
+    let (rsp, _) = futures::join!(rpc.get_raw_mempool(Some(false)), mempool_req);
+
+    match rsp {
+        Ok(GetRawMempool::TxIds(ref rsp)) => {
+            settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", rsp));
+        }
+        _ => panic!("getrawmempool RPC must return `GetRawMempool::TxIds`"),
+    }
 
     // `getrawtransaction` verbosity=0
     //
@@ -465,7 +481,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     let txid = first_block_first_tx.hash().encode_hex::<String>();
 
-    let rpc_req = rpc.get_raw_transaction(txid.clone(), Some(0u8));
+    let rpc_req = rpc.get_raw_transaction(txid.clone(), Some(0u8), None);
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_verbosity=0"), rsp));
     mempool.expect_no_requests().await;
@@ -479,7 +495,7 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             responder.respond(mempool::Response::Transactions(vec![]));
         });
 
-    let rpc_req = rpc.get_raw_transaction(txid, Some(1u8));
+    let rpc_req = rpc.get_raw_transaction(txid, Some(1u8), None);
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_verbosity=1"), rsp));
     mempool.expect_no_requests().await;
@@ -493,14 +509,15 @@ async fn test_rpc_response_data_for_network(network: &Network) {
             responder.respond(mempool::Response::Transactions(vec![]));
         });
 
-    let rpc_req = rpc.get_raw_transaction(transaction::Hash::from([0; 32]).encode_hex(), Some(1));
+    let rpc_req =
+        rpc.get_raw_transaction(transaction::Hash::from([0; 32]).encode_hex(), Some(1), None);
     let (rsp, _) = futures::join!(rpc_req, mempool_req);
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_unknown_txid"), rsp));
     mempool.expect_no_requests().await;
 
     // `getrawtransaction` with an invalid TXID
     let rsp = rpc
-        .get_raw_transaction("aBadC0de".to_owned(), Some(1))
+        .get_raw_transaction("aBadC0de".to_owned(), Some(1), None)
         .await;
     settings.bind(|| insta::assert_json_snapshot!(format!("getrawtransaction_invalid_txid"), rsp));
     mempool.expect_no_requests().await;
@@ -570,7 +587,8 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     settings.set_snapshot_suffix(network_string(network));
 
     let (latest_chain_tip, _) = MockChainTip::new();
-    let mut state = MockService::build().for_unit_tests();
+    let state = MockService::build().for_unit_tests();
+    let mut read_state = MockService::build().for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -581,6 +599,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
         "RPC test",
         MockService::build().for_unit_tests(),
         state.clone(),
+        read_state.clone(),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         latest_chain_tip,
@@ -601,7 +620,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     }
 
     // Prepare the response.
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::SaplingSubtrees { .. }))
         .map(|responder| responder.respond(ReadResponse::SaplingSubtrees(subtrees)));
 
@@ -629,7 +648,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
     }
 
     // Prepare the response.
-    let rsp = state
+    let rsp = read_state
         .expect_request_that(|req| matches!(req, ReadRequest::OrchardSubtrees { .. }))
         .map(|responder| responder.respond(ReadResponse::OrchardSubtrees(subtrees)));
 
@@ -747,11 +766,6 @@ fn snapshot_rpc_getblock_invalid(
 /// Snapshot `getbestblockhash` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getbestblockhash(tip_hash: GetBlockHash, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_best_block_hash", tip_hash));
-}
-
-/// Snapshot `getrawmempool` response, using `cargo insta` and JSON serialization.
-fn snapshot_rpc_getrawmempool(raw_mempool: Vec<String>, settings: &insta::Settings) {
-    settings.bind(|| insta::assert_json_snapshot!("get_raw_mempool", raw_mempool));
 }
 
 /// Snapshot valid `getaddressbalance` response, using `cargo insta` and JSON serialization.
@@ -916,7 +930,7 @@ fn network_string(network: &Network) -> String {
     net_suffix
 }
 
-pub async fn test_mining_rpcs<ReadState>(
+pub async fn test_mining_rpcs<State, ReadState>(
     network: &Network,
     mempool: MockService<
         mempool::Request,
@@ -924,10 +938,20 @@ pub async fn test_mining_rpcs<ReadState>(
         PanicAssertion,
         zebra_node_services::BoxError,
     >,
+    state: State,
     read_state: ReadState,
     block_verifier_router: Buffer<BoxService<Request, Hash, RouterError>, Request>,
     settings: Settings,
 ) where
+    State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
     ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
@@ -943,12 +967,11 @@ pub async fn test_mining_rpcs<ReadState>(
 
     #[allow(clippy::unnecessary_struct_initialization)]
     let mining_conf = crate::config::mining::Config {
-        miner_address: Some(ZcashAddress::from_transparent_p2pkh(
+        miner_address: Some(ZcashAddress::from_transparent_p2sh(
             NetworkType::from(NetworkKind::from(network)),
             [0x7e; 20],
         )),
         extra_coinbase_data: None,
-        debug_like_zcashd: true,
         // TODO: Use default field values when optional features are enabled in tests #8183
         internal_miner: true,
     };
@@ -996,6 +1019,7 @@ pub async fn test_mining_rpcs<ReadState>(
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state,
         read_state,
         block_verifier_router.clone(),
         mock_sync_status.clone(),
@@ -1086,6 +1110,7 @@ pub async fn test_mining_rpcs<ReadState>(
     // `getblocktemplate` - the following snapshots use a mock read_state
 
     // get a new empty state
+    let state = MockService::build().for_unit_tests();
     let read_state = MockService::build().for_unit_tests();
 
     let make_mock_read_state_request_handler = || {
@@ -1133,6 +1158,7 @@ pub async fn test_mining_rpcs<ReadState>(
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         read_state.clone(),
         block_verifier_router,
         mock_sync_status.clone(),
@@ -1250,6 +1276,7 @@ pub async fn test_mining_rpcs<ReadState>(
         "0.0.1",
         "RPC test",
         Buffer::new(mempool, 1),
+        state.clone(),
         read_state.clone(),
         mock_block_verifier_router.clone(),
         mock_sync_status,

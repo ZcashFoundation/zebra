@@ -49,14 +49,14 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  test-fake-activation-heights:
+  state-fake-activation-heights:
     name: Unit tests / Test with fake activation heights
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  test-empty-sync:
+  sync-large-checkpoints-empty:
     name: Unit tests / Test checkpoint sync from empty state
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
@@ -82,70 +82,77 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  test-stateful-sync:
+  sync-past-mandatory-checkpoint:
     name: Integration tests / Zebra checkpoint update / Run sync-past-checkpoint test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  test-update-sync:
+  sync-update-mainnet:
     name: Integration tests / Zebra tip update / Run update-to-tip test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  checkpoints-mainnet:
+  generate-checkpoints-mainnet:
     name: Integration tests / Generate checkpoints mainnet / Run checkpoints-mainnet test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  lightwalletd-rpc-test:
+  generate-checkpoints-testnet:
+    name: Integration tests / Generate checkpoints testnet / Run checkpoints-testnet test
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "Skipping job on fork"'
+
+  rpc-fully-synced-test:
     name: Integration tests / Zebra tip JSON-RPC / Run fully-synced-rpc test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  lightwalletd-transactions-test:
+  lwd-rpc-send-tx:
     name: Integration tests / lightwalletd tip send / Run lwd-send-transactions test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  get-block-template-test:
+  rpc-get-template:
     name: Integration tests / get block template / Run get-block-template test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  submit-block-test:
-    name:  Integration tests / submit block / Run submit-block test
+  rpc-submit-block:
+    name: Integration tests / submit block / Run submit-block test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  lightwalletd-full-sync:
+  lwd-sync-full:
     name: Integration tests / lightwalletd tip / Run lwd-full-sync test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  lightwalletd-update-sync:
+  lwd-sync-update:
     name: Integration tests / lightwalletd tip update / Run lwd-update-sync test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
       - run: 'echo "No build required"'
 
-  lightwalletd-grpc-test:
+  lwd-grpc-wallet:
     name: Integration tests / lightwalletd GRPC tests / Run lwd-grpc-wallet test
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
