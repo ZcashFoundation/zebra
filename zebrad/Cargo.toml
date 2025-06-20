@@ -247,6 +247,7 @@ proptest-derive = { workspace = true, optional = true }
 
 # test feature tokio-console
 console-subscriber = { workspace = true, optional = true }
+figment = { workspace = true }
 
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
@@ -262,6 +263,7 @@ jsonrpsee-types = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 insta = { workspace = true, features = ["json"] }
+figment = { workspace = true, features = ["test"] }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }

@@ -121,11 +121,9 @@ impl Runnable for ZebradCmd {
 impl Configurable<ZebradConfig> for ZebradCmd {
     /// Location of the configuration file
     fn config_path(&self) -> Option<PathBuf> {
-        let if_exists = |f: PathBuf| if f.exists() { Some(f) } else { None };
-
-        dirs::preference_dir()
-            .map(|path| path.join(CONFIG_FILE))
-            .and_then(if_exists)
+        // Return the default config path if it exists, otherwise None
+        // ZebradConfig::load() will handle file existence and fallback to defaults
+        dirs::preference_dir().map(|path| path.join(CONFIG_FILE))
 
         // Note: Changes in how configuration is loaded may need usage
         // edits in generate.rs

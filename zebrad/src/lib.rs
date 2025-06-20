@@ -55,6 +55,10 @@
 //!
 //! See [`config::ZebradConfig`] for other OSes default locations or more information about how to configure Zebra.
 //!
+//! **Environment variable overrides:**
+//! - Any config field can be overridden by an environment variable using the `ZEBRA_` prefix and double underscores (`__`) for nested fields (e.g., `ZEBRA_RPC__LISTEN_ADDR`).
+//! - See the documentation in [`config`] and the integration tests for details and examples.
+//!
 //! ## Zebra Feature Flags
 //!
 //! The following [Cargo

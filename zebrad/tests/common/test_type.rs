@@ -6,15 +6,18 @@ use std::{
     time::Duration,
 };
 
+use color_eyre::eyre::Result;
 use indexmap::IndexSet;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{
+    common::default_cache_dir,
+    parameters::Network::{self, Mainnet},
+};
 use zebra_network::CacheDir;
 use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
-    cached_state::ZEBRA_CACHE_DIR,
     config::{default_test_config, random_known_rpc_port_config},
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
@@ -149,20 +152,34 @@ impl TestType {
         }
     }
 
-    /// Returns the Zebra state path for this test, if set.
+    /// Returns the Zebra state path for this test, if configured and needed.
     #[allow(clippy::print_stderr)]
     pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
-        match env::var_os(ZEBRA_CACHE_DIR) {
-            Some(path) => Some(path.into()),
-            None => {
-                let test_name = test_name.as_ref();
-                eprintln!(
-                    "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {ZEBRA_CACHE_DIR:?} environment variable to run the test",
-                );
+        let test_name = test_name.as_ref();
 
-                None
+        // Only return a path if this test type needs a cached state
+        if !self.needs_zebra_cached_state() {
+            return None;
+        }
+
+        // Create a config to check if a cache dir is configured
+        let config = match self.zebrad_config(test_name, true, None, &Mainnet) {
+            Some(Ok(config)) => config,
+            Some(Err(_)) | None => {
+                // Config creation failed or test should be skipped
+                return None;
             }
+        };
+
+        // Check if a non-default cache dir is configured
+        if config.state.cache_dir != default_cache_dir() {
+            Some(config.state.cache_dir)
+        } else {
+            eprintln!(
+                "skipped {test_name:?} {self:?} test, \
+                 set the ZEBRA_STATE__CACHE_DIR environment variable to run the test",
+            );
+            None
         }
     }
 

@@ -1,10 +1,14 @@
 //! Test registering keys, subscribing to their results, and deleting keys in the scan task while zebrad is running.
 //!
 //! This test requires a cached chain state that is partially synchronized past the
-//! Sapling activation height and [`REQUIRED_MIN_TIP_HEIGHT`]
+//! Sapling activation height and [`REQUIRED_MIN_TIP_HEIGHT`].
+//! The `state.cache_dir` config option must be set, for example, by setting the
+//! `ZEBRA_STATE__CACHE_DIR` environment variable.
 //!
-//! export ZEBRA_CACHE_DIR="/path/to/zebra/state"
+//! ```sh
+//! export ZEBRA_STATE__CACHE_DIR="/path/to/zebra/state"
 //! cargo test scan_task_commands --features="shielded-scan" -- --ignored --nocapture
+//! ```
 #![allow(dead_code, non_local_definitions)]
 
 use std::{fs, time::Duration};
@@ -12,10 +16,12 @@ use std::{fs, time::Duration};
 use color_eyre::Result;
 use tokio::sync::mpsc::error::TryRecvError;
 use tower::{util::BoxService, Service};
+use zebrad::config::ZebradConfig;
 
 use zebra_chain::{
     block::Height,
     chain_tip::ChainTip,
+    common::default_cache_dir,
     parameters::{Network, NetworkUpgrade},
 };
 
@@ -59,13 +65,17 @@ pub(crate) async fn run() -> Result<()> {
     // This is currently needed for the 'Check startup logs' step in CI to pass.
     tracing::info!("Zcash network: {network}");
 
-    let zebrad_state_path = match std::env::var_os("ZEBRA_CACHE_DIR") {
-        None => {
-            tracing::warn!("env var ZEBRA_CACHE_DIR is not set, skipping test");
-            return Ok(());
-        }
-        Some(path) => std::path::PathBuf::from(path),
-    };
+    // Load the full config to respect env vars and config files
+    let zebrad_config = ZebradConfig::load(None).expect("config should load");
+    let zebrad_state_path = zebrad_config.state.cache_dir;
+
+    if zebrad_state_path == default_cache_dir() {
+        tracing::warn!(
+            "`state.cache_dir` is not configured, skipping test. \
+             Set the `ZEBRA_STATE__CACHE_DIR` env var to run this test."
+        );
+        return Ok(());
+    }
 
     // Remove the scan directory before starting.
     let scan_db_path = zebrad_state_path.join(SCANNER_DATABASE_KIND);
