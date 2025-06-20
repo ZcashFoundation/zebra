@@ -13,12 +13,15 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_rpc::client::zebra_chain::{
-    sapling::NotSmallOrderValueCommitment,
-    serialization::{ZcashDeserialize, ZcashSerialize},
-    subtree::NoteCommitmentSubtreeIndex,
-    transparent::{OutputIndex, Script},
-    work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+use zebra_rpc::client::{
+    zebra_chain::{
+        sapling::NotSmallOrderValueCommitment,
+        serialization::{ZcashDeserialize, ZcashSerialize},
+        subtree::NoteCommitmentSubtreeIndex,
+        transparent::{OutputIndex, Script},
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty},
+    },
+    GetBlockchainInfoBalance,
 };
 use zebra_rpc::client::{
     BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
@@ -223,6 +226,17 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: should we expose the u32 value?
     let bits = block.bits().map(|d| d.bytes_in_display_order());
     let difficulty = block.difficulty();
+    let chain_supply = block.chain_supply().as_ref().map(|b| {
+        GetBlockchainInfoBalance::new(
+            b.id().clone(),
+            b.chain_value(),
+            b.chain_value_zat(),
+            b.monitored(),
+            b.value_delta(),
+            b.value_delta_zat(),
+        )
+    });
+    let value_pools = block.value_pools().clone();
     let trees = block.trees();
     let trees_sapling = trees.sapling();
     let trees_orchard = trees.orchard();
@@ -252,6 +266,8 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
                 .expect("must work since it was just read")
         }),
         difficulty,
+        chain_supply,
+        value_pools,
         GetBlockTrees::new(trees_sapling, trees_orchard),
         previous_block_hash,
         next_block_hash,
@@ -299,6 +315,8 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let solution = block.solution();
     let bits = block.bits();
     let difficulty = block.difficulty();
+    let chain_supply = block.chain_supply().clone();
+    let value_pools = block.value_pools().clone();
     let trees = block.trees();
     let previous_block_hash = block.previous_block_hash();
     let next_block_hash = block.next_block_hash();
@@ -322,6 +340,8 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
         solution,
         bits,
         difficulty,
+        chain_supply,
+        value_pools,
         trees,
         previous_block_hash,
         next_block_hash,
@@ -733,8 +753,19 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let value_balance_zat = tx.value_balance_zat();
     let size = tx.size();
     let time = tx.time();
+    let txid = tx.txid();
+    let in_active_chain = tx.in_active_chain();
+    let auth_digest = tx.auth_digest();
+    let overwintered = tx.overwintered();
+    let version = tx.version();
+    let version_group_id = tx.version_group_id().clone();
+    let lock_time = tx.lock_time();
+    let expiry_height = tx.expiry_height();
+    let block_hash = tx.block_hash();
+    let block_time = tx.block_time();
 
     let new_obj = GetRawTransactionResponse::Object(Box::new(TransactionObject::new(
+        in_active_chain,
         hex.into(),
         height,
         confirmations,
@@ -747,6 +778,15 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         value_balance_zat,
         size,
         time,
+        txid,
+        auth_digest,
+        overwintered,
+        version,
+        version_group_id,
+        lock_time,
+        expiry_height,
+        block_hash,
+        block_time,
     )));
 
     assert_eq!(obj, new_obj);

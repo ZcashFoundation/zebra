@@ -60,7 +60,7 @@ use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_primitives::consensus::Parameters;
 
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
@@ -76,6 +76,7 @@ use zebra_chain::{
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
     transparent::{self, Address, OutputIndex},
+    value_balance::ValueBalance,
     work::{
         difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty, U256},
         equihash::Solution,
@@ -344,20 +345,13 @@ pub trait Rpc {
     ///
     /// - `txid`: (string, required, example="mytxid") The transaction ID of the transaction to be returned.
     /// - `verbose`: (number, optional, default=0, example=1) If 0, return a string of hex-encoded data, otherwise return a JSON object.
-    ///
-    /// # Notes
-    ///
-    /// We don't currently support the `blockhash` parameter since lightwalletd does not
-    /// use it.
-    ///
-    /// In verbose mode, we only expose the `hex` and `height` fields since
-    /// lightwalletd uses only those:
-    /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L119>
+    /// - `blockhash` (string, optional) The block in which to look for the transaction
     #[method(name = "getrawtransaction")]
     async fn get_raw_transaction(
         &self,
         txid: String,
         verbose: Option<u8>,
+        block_hash: Option<String>,
     ) -> Result<GetRawTransactionResponse>;
 
     /// Returns the transaction ids made by the provided transparent addresses.
@@ -1114,7 +1108,7 @@ where
             best_block_hash: tip_hash,
             estimated_height,
             chain_supply: GetBlockchainInfoBalance::chain_supply(value_balance),
-            value_pools: GetBlockchainInfoBalance::value_pools(value_balance),
+            value_pools: GetBlockchainInfoBalance::value_pools(value_balance, None),
             upgrades,
             consensus,
             headers: tip_height,
@@ -1311,6 +1305,9 @@ where
                 transactions_request,
                 // Orchard trees
                 zebra_state::ReadRequest::OrchardTree(hash_or_height),
+                // Block info
+                zebra_state::ReadRequest::BlockInfo(previous_block_hash.into()),
+                zebra_state::ReadRequest::BlockInfo(hash_or_height),
             ];
 
             let mut futs = FuturesOrdered::new();
@@ -1346,6 +1343,9 @@ where
                                         )),
                                         &network,
                                         Some(block_time),
+                                        Some(hash),
+                                        Some(true),
+                                        tx.hash(),
                                     ),
                                 ))
                             })
@@ -1385,6 +1385,29 @@ where
 
             let trees = GetBlockTrees { sapling, orchard };
 
+            let block_info_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::BlockInfo(prev_block_info) =
+                block_info_response.map_misc_error()?
+            else {
+                unreachable!("unmatched response to a BlockInfo request");
+            };
+            let block_info_response = futs.next().await.expect("`futs` should not be empty");
+            let zebra_state::ReadResponse::BlockInfo(block_info) =
+                block_info_response.map_misc_error()?
+            else {
+                unreachable!("unmatched response to a BlockInfo request");
+            };
+
+            let delta = block_info.as_ref().and_then(|d| {
+                let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
+                let prev_value_pools = prev_block_info
+                    .map(|d| d.value_pools().constrain::<NegativeAllowed>())
+                    .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
+                    .ok()?;
+                (value_pools - prev_value_pools).ok()
+            });
+            let size = size.or(block_info.as_ref().map(|d| d.size() as usize));
+
             Ok(GetBlockResponse::Object(Box::new(BlockObject {
                 hash,
                 confirmations,
@@ -1398,6 +1421,11 @@ where
                 difficulty: Some(difficulty),
                 tx,
                 trees,
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
                 size: size.map(|size| size as i64),
                 block_commitments: Some(block_commitments),
                 final_sapling_root: Some(final_sapling_root),
@@ -1637,6 +1665,7 @@ where
         &self,
         txid: String,
         verbose: Option<u8>,
+        block_hash: Option<String>,
     ) -> Result<GetRawTransactionResponse> {
         let mut mempool = self.mempool.clone();
         let verbose = verbose.unwrap_or(0) != 0;
@@ -1647,34 +1676,69 @@ where
             .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
 
         // Check the mempool first.
-        match mempool
-            .ready()
-            .and_then(|service| {
-                service.call(mempool::Request::TransactionsByMinedId([txid].into()))
-            })
-            .await
-            .map_misc_error()?
-        {
-            mempool::Response::Transactions(txns) => {
-                if let Some(tx) = txns.first() {
-                    return Ok(if verbose {
-                        GetRawTransactionResponse::Object(Box::new(
-                            TransactionObject::from_transaction(
-                                tx.transaction.clone(),
-                                None,
-                                None,
-                                &self.network,
-                                None,
-                            ),
-                        ))
-                    } else {
-                        let hex = tx.transaction.clone().into();
-                        GetRawTransactionResponse::Raw(hex)
-                    });
+        if block_hash.is_none() {
+            match mempool
+                .ready()
+                .and_then(|service| {
+                    service.call(mempool::Request::TransactionsByMinedId([txid].into()))
+                })
+                .await
+                .map_misc_error()?
+            {
+                mempool::Response::Transactions(txns) => {
+                    if let Some(tx) = txns.first() {
+                        return Ok(if verbose {
+                            GetRawTransactionResponse::Object(Box::new(
+                                TransactionObject::from_transaction(
+                                    tx.transaction.clone(),
+                                    None,
+                                    None,
+                                    &self.network,
+                                    None,
+                                    None,
+                                    Some(false),
+                                    txid,
+                                ),
+                            ))
+                        } else {
+                            let hex = tx.transaction.clone().into();
+                            GetRawTransactionResponse::Raw(hex)
+                        });
+                    }
                 }
-            }
 
-            _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+            };
+        }
+
+        // TODO: this should work for blocks in side chains
+        let txid = if let Some(block_hash) = block_hash {
+            let block_hash = block::Hash::from_hex(block_hash)
+                .map_error(server::error::LegacyCode::InvalidAddressOrKey)?;
+            match self
+                .read_state
+                .clone()
+                .oneshot(zebra_state::ReadRequest::TransactionIdsForBlock(
+                    block_hash.into(),
+                ))
+                .await
+                .map_misc_error()?
+            {
+                zebra_state::ReadResponse::TransactionIdsForBlock(tx_ids) => *tx_ids
+                    .ok_or_error(
+                        server::error::LegacyCode::InvalidAddressOrKey,
+                        "block not found",
+                    )?
+                    .iter()
+                    .find(|id| **id == txid)
+                    .ok_or_error(
+                        server::error::LegacyCode::InvalidAddressOrKey,
+                        "txid not found",
+                    )?,
+                _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+            }
+        } else {
+            txid
         };
 
         // If the tx wasn't in the mempool, check the state.
@@ -1686,6 +1750,17 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::Transaction(Some(tx)) => Ok(if verbose {
+                let block_hash = match self
+                    .read_state
+                    .clone()
+                    .oneshot(zebra_state::ReadRequest::BestChainBlockHash(tx.height))
+                    .await
+                    .map_misc_error()?
+                {
+                    zebra_state::ReadResponse::BlockHash(block_hash) => block_hash,
+                    _ => unreachable!("unmatched response to a `TransactionsByMinedId` request"),
+                };
+
                 GetRawTransactionResponse::Object(Box::new(TransactionObject::from_transaction(
                     tx.tx.clone(),
                     Some(tx.height),
@@ -1694,6 +1769,9 @@ where
                     // TODO: Performance gain:
                     // https://github.com/ZcashFoundation/zebra/pull/9458#discussion_r2059352752
                     Some(tx.block_time),
+                    block_hash,
+                    Some(true),
+                    txid,
                 )))
             } else {
                 let hex = tx.tx.into();
@@ -3424,6 +3502,8 @@ impl Default for GetBlockResponse {
             nonce: None,
             bits: None,
             difficulty: None,
+            chain_supply: None,
+            value_pools: None,
             previous_block_hash: None,
             next_block_hash: None,
             solution: None,
@@ -3524,9 +3604,17 @@ pub struct BlockObject {
 
     // `chainwork` would be here, but we don't plan on supporting it
     // `anchor` would be here. Not planned to be supported.
-    // `chainSupply` would be here, TODO: implement
-    // `valuePools` would be here, TODO: implement
     //
+    /// Chain supply balance
+    #[serde(rename = "chainSupply")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    chain_supply: Option<GetBlockchainInfoBalance>,
+
+    /// Value pool balances
+    #[serde(rename = "valuePools")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    value_pools: Option<[GetBlockchainInfoBalance; 5]>,
+
     /// Information about the note commitment trees.
     #[getter(copy)]
     trees: GetBlockTrees,

@@ -13,6 +13,7 @@ use zcash_transparent::address::TransparentAddress;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{Block, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    block_info::BlockInfo,
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
@@ -117,7 +118,14 @@ async fn get_block_data(
     read_state: &ReadStateService,
     block: Arc<Block>,
     height: usize,
-) -> ([u8; 32], [u8; 32], [u8; 32]) {
+    prev_block_info: Option<BlockInfo>,
+) -> (
+    [u8; 32],
+    [u8; 32],
+    [u8; 32],
+    Option<BlockInfo>,
+    Option<ValueBalance<NegativeAllowed>>,
+) {
     let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
         .clone()
         .oneshot(zebra_state::ReadRequest::SaplingTree(HashOrHeight::Height(
@@ -150,10 +158,33 @@ async fn get_block_data(
         Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
         Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
     };
+
+    let zebra_state::ReadResponse::BlockInfo(block_info) = read_state
+        .clone()
+        .oneshot(zebra_state::ReadRequest::BlockInfo(HashOrHeight::Height(
+            (height as u32).try_into().unwrap(),
+        )))
+        .await
+        .expect("should have block info for block hash")
+    else {
+        panic!("unexpected response to BlockInfo request")
+    };
+
+    let delta = block_info.as_ref().and_then(|d| {
+        let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
+        let prev_value_pools = prev_block_info
+            .map(|d| d.value_pools().constrain::<NegativeAllowed>())
+            .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
+            .ok()?;
+        (value_pools - prev_value_pools).ok()
+    });
+
     (
         expected_nonce,
         expected_final_sapling_root,
         expected_block_commitments,
+        block_info,
+        delta,
     )
 }
 
@@ -249,14 +280,21 @@ async fn rpc_getblock() {
     let trees = GetBlockTrees { sapling, orchard };
 
     // Make height calls with verbosity=1 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), Some(1u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
@@ -271,7 +309,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -288,19 +326,32 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(block.header.previous_block_hash),
                 next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
         );
     }
 
     // Make hash calls with verbosity=1 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(1u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
@@ -315,7 +366,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -332,19 +383,31 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(block.header.previous_block_hash),
                 next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
         );
     }
 
     // Make height calls with verbosity=2 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), Some(2u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         // partially compare the expected and actual GetBlock structs
         if let GetBlockResponse::Object(obj) = &get_block {
@@ -367,16 +430,15 @@ async fn rpc_getblock() {
                 previous_block_hash,
                 next_block_hash,
                 solution,
+                chain_supply,
+                value_pools,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(
-                size,
-                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
-            );
+            assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -396,6 +458,16 @@ async fn rpc_getblock() {
             assert_eq!(previous_block_hash, &Some(block.header.previous_block_hash));
             assert_eq!(next_block_hash, &blocks.get(i + 1).map(|b| b.hash()));
             assert_eq!(solution, &Some(block.header.solution));
+            assert_eq!(
+                *chain_supply,
+                block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *value_pools,
+                block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
+            );
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
@@ -419,14 +491,21 @@ async fn rpc_getblock() {
     }
 
     // Make hash calls with verbosity=2 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(2u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         // partially compare the expected and actual GetBlock structs
         if let GetBlockResponse::Object(obj) = &get_block {
@@ -449,16 +528,15 @@ async fn rpc_getblock() {
                 previous_block_hash,
                 next_block_hash,
                 solution,
+                chain_supply,
+                value_pools,
             } = &**obj;
             assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(
-                size,
-                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
-            );
+            assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -478,6 +556,16 @@ async fn rpc_getblock() {
             assert_eq!(previous_block_hash, &Some(block.header.previous_block_hash));
             assert_eq!(next_block_hash, &blocks.get(i + 1).map(|b| b.hash()));
             assert_eq!(solution, &Some(block.header.solution));
+            assert_eq!(
+                *chain_supply,
+                block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *value_pools,
+                block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
+            );
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
@@ -501,14 +589,21 @@ async fn rpc_getblock() {
     }
 
     // Make height calls with no verbosity (defaults to 1) and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), None)
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
@@ -523,7 +618,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -540,19 +635,31 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(block.header.previous_block_hash),
                 next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
         );
     }
 
     // Make hash calls with no verbosity (defaults to 1) and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), None)
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
@@ -567,7 +674,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -584,6 +691,11 @@ async fn rpc_getblock() {
                 previous_block_hash: Some(block.header.previous_block_hash),
                 next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
             }))
         );
     }
@@ -944,7 +1056,7 @@ async fn rpc_getrawtransaction() {
                     }]));
                 });
 
-            let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
+            let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8), None);
 
             let (rsp, _) = futures::join!(rpc_req, mempool_req);
             let get_tx = rsp.expect("we should have a `GetRawTransaction` struct");
@@ -979,8 +1091,8 @@ async fn rpc_getrawtransaction() {
         let txid = tx.hash();
         let hex_txid = txid.encode_hex::<String>();
 
-        let get_tx_verbose_0_req = rpc.get_raw_transaction(hex_txid.clone(), Some(0u8));
-        let get_tx_verbose_1_req = rpc.get_raw_transaction(hex_txid, Some(1u8));
+        let get_tx_verbose_0_req = rpc.get_raw_transaction(hex_txid.clone(), Some(0u8), None);
+        let get_tx_verbose_1_req = rpc.get_raw_transaction(hex_txid, Some(1u8), None);
 
         async move {
             let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(txid));

@@ -26,9 +26,9 @@
 //! This file has sync tests that are marked as ignored because they take too much time to run.
 //! Some of them require environment variables or directories to be present:
 //!
-//! - `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
+//! - `SYNC_FULL_MAINNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
 //!   will allow this test to run or give up. Value for the Mainnet full sync tests.
-//! - `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
+//! - `SYNC_FULL_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
 //!   will allow this test to run or give up. Value for the Testnet full sync tests.
 //! - `ZEBRA_CACHE_DIR` env variable: The path to a Zebra cached state directory.
 //!   If not set, it defaults to `/zebrad-cache`. For some sync tests, this directory needs to be
@@ -37,21 +37,21 @@
 //! Here are some examples on how to run each of the tests:
 //!
 //! ```console
-//! $ cargo test sync_large_checkpoints_mainnet -- --ignored --nocapture
+//! $ cargo test sync_large_checkpoints_empty -- --ignored --nocapture
 //!
 //! $ cargo test sync_large_checkpoints_mempool_mainnet -- --ignored --nocapture
 //!
 //! $ export ZEBRA_CACHE_DIR="/zebrad-cache"
 //! $ sudo mkdir -p "$ZEBRA_CACHE_DIR"
 //! $ sudo chmod 777 "$ZEBRA_CACHE_DIR"
-//! $ export FULL_SYNC_MAINNET_TIMEOUT_MINUTES=600
-//! $ cargo test full_sync_mainnet -- --ignored --nocapture
+//! $ export SYNC_FULL_MAINNET_TIMEOUT_MINUTES=600
+//! $ cargo test sync_full_mainnet -- --ignored --nocapture
 //!
 //! $ export ZEBRA_CACHE_DIR="/zebrad-cache"
 //! $ sudo mkdir -p "$ZEBRA_CACHE_DIR"
 //! $ sudo chmod 777 "$ZEBRA_CACHE_DIR"
-//! $ export FULL_SYNC_TESTNET_TIMEOUT_MINUTES=600
-//! $ cargo test full_sync_testnet -- --ignored --nocapture
+//! $ export SYNC_FULL_TESTNET_TIMEOUT_MINUTES=600
+//! $ cargo test sync_full_testnet -- --ignored --nocapture
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
@@ -79,41 +79,41 @@
 //!
 //! ```console
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ cargo test lightwalletd_integration -- --nocapture
+//! $ cargo test lwd_integration -- --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 //! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test lightwalletd_update_sync -- --nocapture
+//! $ cargo test lwd_sync_update -- --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ cargo test lightwalletd_full_sync -- --ignored --nocapture
+//! $ cargo test lwd_sync_full -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ cargo test lightwalletd_test_suite -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ cargo test fully_synced_rpc_test -- --ignored --nocapture
+//! $ cargo test lwd_rpc_test -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 //! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test sending_transactions_using_lightwalletd --features lightwalletd-grpc-tests -- --ignored --nocapture
+//! $ cargo test lwd_rpc_send_tx --features lightwalletd-grpc-tests -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 //! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test lightwalletd_wallet_grpc_tests --features lightwalletd-grpc-tests -- --ignored --nocapture
+//! $ cargo test lwd_grpc_wallet --features lightwalletd-grpc-tests -- --ignored --nocapture
 //! ```
 //!
 //! ## Getblocktemplate tests
 //!
-//! Example of how to run the get_block_template test:
+//! Example of how to run the rpc_get_block_template test:
 //!
 //! ```console
-//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test get_block_template --release -- --ignored --nocapture
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test rpc_get_block_template --release -- --ignored --nocapture
 //! ```
 //!
 //! Example of how to run the submit_block test:
@@ -191,13 +191,12 @@ use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_c
 use zebra_test::{
     args,
     command::{to_regex::CollectRegexSet, ContextFrom},
+    net::random_known_port,
     prelude::*,
 };
 
 #[cfg(not(target_os = "windows"))]
 use zebra_network::constants::PORT_IN_USE_ERROR;
-#[cfg(not(target_os = "windows"))]
-use zebra_test::net::random_known_port;
 
 use common::{
     cached_state::{
@@ -1164,7 +1163,7 @@ fn activate_mempool_mainnet() -> Result<()> {
 /// our 10 second target time for default tests.
 #[test]
 #[ignore]
-fn sync_large_checkpoints_mainnet() -> Result<()> {
+fn sync_large_checkpoints_empty() -> Result<()> {
     let reuse_tempdir = sync_until(
         LARGE_CHECKPOINT_TEST_HEIGHT,
         &Mainnet,
@@ -1192,7 +1191,7 @@ fn sync_large_checkpoints_mainnet() -> Result<()> {
     Ok(())
 }
 
-// TODO: We had `sync_large_checkpoints_testnet` and `sync_large_checkpoints_mempool_testnet`,
+// TODO: We had `sync_large_checkpoints_empty` and `sync_large_checkpoints_mempool_testnet`,
 // but they were removed because the testnet is unreliable (#1222).
 // We should re-add them after we have more testnet instances (#1791).
 
@@ -1293,7 +1292,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 
 /// Sync up to the mandatory checkpoint height on mainnet and stop.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_mainnet", test)]
+#[cfg_attr(feature = "sync_to_mandatory_checkpoint_mainnet", test)]
 fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -1302,7 +1301,7 @@ fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
 
 /// Sync to the mandatory checkpoint height testnet and stop.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_to_mandatory_checkpoint_testnet", test)]
+#[cfg_attr(feature = "sync_to_mandatory_checkpoint_testnet", test)]
 fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Network::new_default_testnet();
@@ -1315,7 +1314,7 @@ fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
 /// activation on mainnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_mainnet", test)]
+#[cfg_attr(feature = "sync_past_mandatory_checkpoint_mainnet", test)]
 fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Mainnet;
@@ -1328,7 +1327,7 @@ fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
 /// activation on testnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "test_sync_past_mandatory_checkpoint_testnet", test)]
+#[cfg_attr(feature = "sync_past_mandatory_checkpoint_testnet", test)]
 fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
     let _init_guard = zebra_test::init();
     let network = Network::new_default_testnet();
@@ -1338,27 +1337,27 @@ fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
 /// Test if `zebrad` can fully sync the chain on mainnet.
 ///
 /// This test takes a long time to run, so we don't run it by default. This test is only executed
-/// if there is an environment variable named `FULL_SYNC_MAINNET_TIMEOUT_MINUTES` set with the number
+/// if there is an environment variable named `SYNC_FULL_MAINNET_TIMEOUT_MINUTES` set with the number
 /// of minutes to wait for synchronization to complete before considering that the test failed.
 #[test]
 #[ignore]
-fn full_sync_mainnet() -> Result<()> {
+fn sync_full_mainnet() -> Result<()> {
     // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
-    full_sync_test(Mainnet, "FULL_SYNC_MAINNET_TIMEOUT_MINUTES")
+    full_sync_test(Mainnet, "SYNC_FULL_MAINNET_TIMEOUT_MINUTES")
 }
 
 /// Test if `zebrad` can fully sync the chain on testnet.
 ///
 /// This test takes a long time to run, so we don't run it by default. This test is only executed
-/// if there is an environment variable named `FULL_SYNC_TESTNET_TIMEOUT_MINUTES` set with the number
+/// if there is an environment variable named `SYNC_FULL_TESTNET_TIMEOUT_MINUTES` set with the number
 /// of minutes to wait for synchronization to complete before considering that the test failed.
 #[test]
 #[ignore]
-fn full_sync_testnet() -> Result<()> {
+fn sync_full_testnet() -> Result<()> {
     // TODO: add "ZEBRA" at the start of this env var, to avoid clashes
     full_sync_test(
         Network::new_default_testnet(),
-        "FULL_SYNC_TESTNET_TIMEOUT_MINUTES",
+        "SYNC_FULL_TESTNET_TIMEOUT_MINUTES",
     )
 }
 
@@ -1771,8 +1770,8 @@ fn non_blocking_logger() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[cfg(not(target_os = "windows"))]
-fn lightwalletd_integration() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState {
+fn lwd_integration() -> Result<()> {
+    lwd_integration_test(LaunchWithEmptyState {
         launches_lightwalletd: true,
     })
 }
@@ -1783,8 +1782,8 @@ fn lightwalletd_integration() -> Result<()> {
 ///
 /// This test might work on Windows.
 #[test]
-fn zebrad_update_sync() -> Result<()> {
-    lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)
+fn sync_update_mainnet() -> Result<()> {
+    lwd_integration_test(UpdateZebraCachedStateNoRpc)
 }
 
 /// Make sure `lightwalletd` can sync from Zebra, in update sync mode.
@@ -1798,8 +1797,8 @@ fn zebrad_update_sync() -> Result<()> {
 #[test]
 #[cfg(not(target_os = "windows"))]
 #[cfg(feature = "lightwalletd-grpc-tests")]
-fn lightwalletd_update_sync() -> Result<()> {
-    lightwalletd_integration_test(UpdateCachedState)
+fn lwd_sync_update() -> Result<()> {
+    lwd_integration_test(UpdateCachedState)
 }
 
 /// Make sure `lightwalletd` can fully sync from genesis using Zebra.
@@ -1814,8 +1813,8 @@ fn lightwalletd_update_sync() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 #[cfg(feature = "lightwalletd-grpc-tests")]
-fn lightwalletd_full_sync() -> Result<()> {
-    lightwalletd_integration_test(FullSyncFromGenesis {
+fn lwd_sync_full() -> Result<()> {
+    lwd_integration_test(FullSyncFromGenesis {
         allow_lightwalletd_cached_state: false,
     })
 }
@@ -1838,12 +1837,12 @@ fn lightwalletd_full_sync() -> Result<()> {
 #[ignore]
 #[cfg(not(target_os = "windows"))]
 async fn lightwalletd_test_suite() -> Result<()> {
-    lightwalletd_integration_test(LaunchWithEmptyState {
+    lwd_integration_test(LaunchWithEmptyState {
         launches_lightwalletd: true,
     })?;
 
     // Only runs when ZEBRA_CACHE_DIR is set.
-    lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)?;
+    lwd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
     // These tests need the compile-time gRPC feature
     #[cfg(feature = "lightwalletd-grpc-tests")]
@@ -1851,7 +1850,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
         // Do the quick tests first
 
         // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
-        lightwalletd_integration_test(UpdateCachedState)?;
+        lwd_integration_test(UpdateCachedState)?;
 
         // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
         common::lightwalletd::wallet_grpc_test::run().await?;
@@ -1860,7 +1859,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 
         // Only runs when ZEBRA_CACHE_DIR is set.
         // When manually running the test suite, allow cached state in the full sync test.
-        lightwalletd_integration_test(FullSyncFromGenesis {
+        lwd_integration_test(FullSyncFromGenesis {
             allow_lightwalletd_cached_state: true,
         })?;
 
@@ -1888,13 +1887,13 @@ async fn lightwalletd_test_suite() -> Result<()> {
 /// If the `test_type` requires `--features=lightwalletd-grpc-tests`,
 /// but Zebra was not compiled with that feature.
 #[tracing::instrument]
-fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
+fn lwd_integration_test(test_type: TestType) -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We run these sync tests with a network connection, for better test coverage.
     let use_internet_connection = true;
     let network = Mainnet;
-    let test_name = "lightwalletd_integration_test";
+    let test_name = "lwd_integration_test";
 
     if test_type.launches_lightwalletd() && !can_spawn_lightwalletd_for_rpc(test_name, test_type) {
         tracing::info!("skipping test due to missing lightwalletd network or cached state");
@@ -1934,28 +1933,30 @@ fn lightwalletd_integration_test(test_type: TestType) -> Result<()> {
     //
     // If incompletely upgraded states get written to the CI cache,
     // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
-    if test_type.launches_lightwalletd() && !DATABASE_FORMAT_UPGRADE_IS_LONG {
-        tracing::info!(
-            ?test_type,
-            ?zebra_rpc_address,
-            "waiting for zebrad to open its RPC port..."
-        );
-        wait_for_state_version_upgrade(
-            &mut zebrad,
-            &state_version_message,
-            state_database_format_version_in_code(),
-            [format!(
-                "Opened RPC endpoint at {}",
-                zebra_rpc_address.expect("lightwalletd test must have RPC port")
-            )],
-        )?;
-    } else {
-        wait_for_state_version_upgrade(
-            &mut zebrad,
-            &state_version_message,
-            state_database_format_version_in_code(),
-            None,
-        )?;
+    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
+        if test_type.launches_lightwalletd() {
+            tracing::info!(
+                ?test_type,
+                ?zebra_rpc_address,
+                "waiting for zebrad to open its RPC port..."
+            );
+            wait_for_state_version_upgrade(
+                &mut zebrad,
+                &state_version_message,
+                state_database_format_version_in_code(),
+                [format!(
+                    "Opened RPC endpoint at {}",
+                    zebra_rpc_address.expect("lightwalletd test must have RPC port")
+                )],
+            )?;
+        } else {
+            wait_for_state_version_upgrade(
+                &mut zebrad,
+                &state_version_message,
+                state_database_format_version_in_code(),
+                None,
+            )?;
+        }
     }
 
     // Wait for zebrad to sync the genesis block before launching lightwalletd,
@@ -2390,7 +2391,7 @@ where
 
 #[tokio::test]
 #[ignore]
-async fn fully_synced_rpc_test() -> Result<()> {
+async fn lwd_rpc_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     // We're only using cached Zebra state here, so this test type is the most similar
@@ -2398,7 +2399,7 @@ async fn fully_synced_rpc_test() -> Result<()> {
     let network = Network::Mainnet;
 
     let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
-        spawn_zebrad_for_rpc(network, "fully_synced_rpc_test", test_type, false)?
+        spawn_zebrad_for_rpc(network, "lwd_rpc_test", test_type, false)?
     {
         tracing::info!("running fully synced zebrad RPC test");
 
@@ -2515,7 +2516,7 @@ fn delete_old_databases() -> Result<()> {
 #[ignore]
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
-async fn sending_transactions_using_lightwalletd() -> Result<()> {
+async fn lwd_rpc_send_tx() -> Result<()> {
     common::lightwalletd::send_transaction_test::run().await
 }
 
@@ -2528,7 +2529,7 @@ async fn sending_transactions_using_lightwalletd() -> Result<()> {
 #[ignore]
 #[cfg(feature = "lightwalletd-grpc-tests")]
 #[cfg(not(target_os = "windows"))]
-async fn lightwalletd_wallet_grpc_tests() -> Result<()> {
+async fn lwd_grpc_wallet() -> Result<()> {
     common::lightwalletd::wallet_grpc_test::run().await
 }
 
@@ -2544,7 +2545,7 @@ async fn get_peer_info() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::get_block_template`] for more information.
 #[tokio::test]
-async fn get_block_template() -> Result<()> {
+async fn rpc_get_block_template() -> Result<()> {
     common::get_block_template_rpcs::get_block_template::run().await
 }
 
@@ -2552,7 +2553,7 @@ async fn get_block_template() -> Result<()> {
 ///
 /// See [`common::get_block_template_rpcs::submit_block`] for more information.
 #[tokio::test]
-async fn submit_block() -> Result<()> {
+async fn rpc_submit_block() -> Result<()> {
     common::get_block_template_rpcs::submit_block::run().await
 }
 
@@ -2808,7 +2809,7 @@ async fn state_format_test(
 
 /// Snapshot the `z_getsubtreesbyindex` method in a synchronized chain.
 ///
-/// This test name must have the same prefix as the `fully_synced_rpc_test`, so they can be run in the same test job.
+/// This test name must have the same prefix as the `lwd_rpc_test`, so they can be run in the same test job.
 #[tokio::test]
 #[ignore]
 async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
@@ -2987,12 +2988,14 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
     config.state.ephemeral = false;
+    config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
     let network = config.network.network.clone();
 
     let test_dir = testdir()?.with_config(&mut config)?;
 
     let mut child = test_dir.spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
+    let indexer_listen_addr = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
 
     tracing::info!("waiting for Zebra state cache to be opened");
 
@@ -3005,6 +3008,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             config.state,
             &config.network.network,
             rpc_address,
+            indexer_listen_addr,
         )
         .await?
         .map_err(|err| eyre!(err))?;
@@ -3202,7 +3206,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let mut config = random_known_rpc_port_config(false, &Network::Mainnet)?;
     config.state.ephemeral = false;
+    config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from((
+        [127, 0, 0, 1],
+        random_known_port(),
+    )));
+
     let rpc_address = config.rpc.listen_addr.unwrap();
+    let indexer_listen_addr = config.rpc.indexer_listen_addr.unwrap();
 
     let test_dir = testdir()?.with_config(&mut config)?;
 
@@ -3219,6 +3229,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             config.state,
             &config.network.network,
             rpc_address,
+            indexer_listen_addr,
         )
         .await?
         .map_err(|err| eyre!(err))?;
@@ -3825,7 +3836,7 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
 /// Check that Zebra does not depend on any crates from git sources.
 #[test]
 #[ignore]
-fn check_no_git_refs_in_cargo_lock() {
+fn check_no_git_dependencies() {
     let cargo_lock_contents =
         fs::read_to_string("../Cargo.lock").expect("should have Cargo.lock file in root dir");
 

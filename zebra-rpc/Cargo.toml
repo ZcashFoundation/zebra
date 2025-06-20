@@ -21,15 +21,6 @@ categories = [
 
 [features]
 
-indexer-rpcs = [
-    "tonic-build",
-    "tonic",
-    "tonic-reflection",
-    "prost",
-    "tokio-stream",
-    "zebra-state/indexer"
-]
-
 # Production features that activate extra dependencies, or extra features in
 # dependencies
 
@@ -71,11 +62,11 @@ color-eyre = { workspace = true }
 tokio = { workspace = true, features = ["time", "rt-multi-thread", "macros", "tracing"] }
 tower = { workspace = true }
 
-# indexer-rpcs dependencies
-tonic = { workspace = true, optional = true }
-tonic-reflection = { workspace = true, optional = true }
-prost = { workspace = true, optional = true }
-tokio-stream = { workspace = true, optional = true }
+# gRPC server dependencies
+tonic = { workspace = true }
+tonic-reflection = { workspace = true }
+prost = { workspace = true }
+tokio-stream = { workspace = true }
 
 tracing = { workspace = true }
 
@@ -106,7 +97,7 @@ zebra-script = { path = "../zebra-script", version = "1.0.0-beta.46" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46" }
 
 [build-dependencies]
-tonic-build = { workspace = true, optional = true }
+tonic-build = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["redactions", "json", "ron"] }

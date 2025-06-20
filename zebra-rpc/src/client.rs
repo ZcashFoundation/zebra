@@ -21,6 +21,7 @@ pub use crate::methods::{
             GetBlockTemplateCapability, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
             GetBlockTemplateResponse,
         },
+        get_blockchain_info::GetBlockchainInfoBalance,
         get_mining_info::GetMiningInfoResponse,
         get_raw_mempool::{GetRawMempoolResponse, MempoolObject},
         peer_info::{GetPeerInfoResponse, PeerInfo},

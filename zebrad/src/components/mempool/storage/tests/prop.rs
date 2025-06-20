@@ -384,13 +384,13 @@ proptest! {
         match &input {
             RemoveExact { wtx_ids_to_remove, .. } => storage.remove_exact(wtx_ids_to_remove),
             RejectAndRemoveSameEffects { mined_ids_to_remove, .. } => {
-                let num_removals = storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]);
-                    for &removed_transaction_id in mined_ids_to_remove.iter() {
-                        prop_assert_eq!(
-                            storage.rejection_error(&UnminedTxId::Legacy(removed_transaction_id)),
-                            Some(SameEffectsChainRejectionError::Mined.into())
-                        );
-                    }
+                let num_removals = storage.reject_and_remove_same_effects(mined_ids_to_remove, vec![]).total_len();
+                for &removed_transaction_id in mined_ids_to_remove.iter() {
+                    prop_assert_eq!(
+                        storage.rejection_error(&UnminedTxId::Legacy(removed_transaction_id)),
+                        Some(SameEffectsChainRejectionError::Mined.into())
+                    );
+                }
                 num_removals
             },
         };
