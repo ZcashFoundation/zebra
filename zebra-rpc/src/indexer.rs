@@ -1,6 +1,8 @@
 //! A tonic RPC server for Zebra's indexer API.
 
-use zebra_chain::block;
+use std::sync::Arc;
+
+use zebra_chain::{block, serialization::ZcashSerialize};
 
 #[cfg(test)]
 mod tests;
@@ -34,5 +36,21 @@ impl BlockHashAndHeight {
             })
             .ok()
             .and_then(|hash| self.height.try_into().ok().map(|height| (hash, height)))
+    }
+}
+
+impl BlockAndHash {
+    /// Create a new [`BlockHashAndHeight`] from a [`block::Hash`] and [`block::Height`].
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the block serialization fails (if the header version is invalid).
+    pub fn new(hash: block::Hash, block: Arc<block::Block>) -> Self {
+        BlockAndHash {
+            hash: hash.bytes_in_display_order().to_vec(),
+            data: block
+                .zcash_serialize_to_vec()
+                .expect("block serialization should not fail"),
+        }
     }
 }
