@@ -19,6 +19,11 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
+use zebra_chain::orchard::{OrchardVanilla, ShieldedData, ShieldedDataFlavor};
+
+#[cfg(feature = "tx-v6")]
+use zebra_chain::orchard::OrchardZSA;
+
 use crate::BoxError;
 
 use super::{spawn_fifo, spawn_fifo_and_convert};
@@ -74,8 +79,14 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 pub type ItemVerifyingKey = VerifyingKey;
 
 lazy_static::lazy_static! {
-    /// The halo2 proof verifying key.
-    pub static ref VERIFYING_KEY: ItemVerifyingKey = ItemVerifyingKey::build();
+    /// The halo2 proof verifying key for Orchard Vanilla
+    pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
+}
+
+#[cfg(feature = "tx-v6")]
+lazy_static::lazy_static! {
+    /// The halo2 proof verifying key for OrchardZSA
+    pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardZSA>();
 }
 
 // === TEMPORARY BATCH HALO2 SUBSTITUTE ===
@@ -130,18 +141,14 @@ impl BatchVerifier {
 
 // === END TEMPORARY BATCH HALO2 SUBSTITUTE ===
 
-impl From<&zebra_chain::orchard::ShieldedData> for Item {
-    fn from(shielded_data: &zebra_chain::orchard::ShieldedData) -> Item {
+impl<V: OrchardVerifier> From<&ShieldedData<V>> for Item {
+    fn from(shielded_data: &ShieldedData<V>) -> Item {
         use orchard::{circuit, note, primitives::redpallas, tree, value};
 
         let anchor = tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
 
-        let enable_spend = shielded_data
-            .flags
-            .contains(zebra_chain::orchard::Flags::ENABLE_SPENDS);
-        let enable_output = shielded_data
-            .flags
-            .contains(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
+        let flags = orchard::bundle::Flags::from_byte(shielded_data.flags.bits())
+            .expect("failed to convert flags: shielded_data.flags contains unexpected bits that are not valid in orchard::bundle::Flags");
 
         let instances = shielded_data
             .actions()
@@ -155,8 +162,7 @@ impl From<&zebra_chain::orchard::ShieldedData> for Item {
                     ))
                     .expect("should be a valid redpallas spendauth verification key"),
                     note::ExtractedNoteCommitment::from_bytes(&action.cm_x.into()).unwrap(),
-                    enable_spend,
-                    enable_output,
+                    flags,
                 )
             })
             .collect();
@@ -193,23 +199,22 @@ impl From<halo2::plonk::Error> for Halo2Error {
     }
 }
 
-/// Global batch verification context for Halo2 proofs of Action statements.
-///
-/// This service transparently batches contemporaneous proof verifications,
-/// handling batch failures by falling back to individual verification.
-///
-/// Note that making a `Service` call requires mutable access to the service, so
-/// you should call `.clone()` on the global handle to create a local, mutable
-/// handle.
-pub static VERIFIER: Lazy<
-    Fallback<
-        Batch<Verifier, Item>,
-        ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
-    >,
-> = Lazy::new(|| {
+type VerificationContext = Fallback<
+    Batch<Verifier, Item>,
+    ServiceFn<fn(Item) -> BoxFuture<'static, Result<(), BoxError>>>,
+>;
+
+pub(crate) trait OrchardVerifier: ShieldedDataFlavor {
+    const ZSA_ENABLED: bool;
+
+    fn get_verifying_key() -> &'static ItemVerifyingKey;
+    fn get_verifier() -> &'static VerificationContext;
+}
+
+fn create_verification_context<V: OrchardVerifier>() -> VerificationContext {
     Fallback::new(
         Batch::new(
-            Verifier::new(&VERIFYING_KEY),
+            Verifier::new(V::get_verifying_key()),
             HALO2_MAX_BATCH_SIZE,
             None,
             super::MAX_BATCH_LATENCY,
@@ -224,11 +229,52 @@ pub static VERIFIER: Lazy<
         // to erase the result type.
         // (We can't use BoxCloneService to erase the service type, because it is !Sync.)
         tower::service_fn(
-            (|item: Item| Verifier::verify_single_spawning(item, &VERIFYING_KEY).boxed())
+            (|item: Item| Verifier::verify_single_spawning(item, V::get_verifying_key()).boxed())
                 as fn(_) -> _,
         ),
     )
-});
+}
+
+/// Global batch verification context for Halo2 proofs of Action statements.
+///
+/// This service transparently batches contemporaneous proof verifications,
+/// handling batch failures by falling back to individual verification.
+///
+/// Note that making a `Service` call requires mutable access to the service, so
+/// you should call `.clone()` on the global handle to create a local, mutable
+/// handle.
+pub static VERIFIER_VANILLA: Lazy<VerificationContext> =
+    Lazy::new(create_verification_context::<OrchardVanilla>);
+
+/// FIXME: copy a doc from VERIFIER_VANILLA or just refer to its doc?
+#[cfg(feature = "tx-v6")]
+pub static VERIFIER_ZSA: Lazy<VerificationContext> =
+    Lazy::new(create_verification_context::<OrchardZSA>);
+
+impl OrchardVerifier for OrchardVanilla {
+    const ZSA_ENABLED: bool = false;
+
+    fn get_verifying_key() -> &'static ItemVerifyingKey {
+        &VERIFYING_KEY_VANILLA
+    }
+
+    fn get_verifier() -> &'static VerificationContext {
+        &VERIFIER_VANILLA
+    }
+}
+
+#[cfg(feature = "tx-v6")]
+impl OrchardVerifier for OrchardZSA {
+    const ZSA_ENABLED: bool = true;
+
+    fn get_verifying_key() -> &'static ItemVerifyingKey {
+        &VERIFYING_KEY_ZSA
+    }
+
+    fn get_verifier() -> &'static VerificationContext {
+        &VERIFIER_ZSA
+    }
+}
 
 /// Halo2 proof verifier implementation
 ///

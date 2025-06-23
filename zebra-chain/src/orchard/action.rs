@@ -11,6 +11,7 @@ use super::{
     commitment::{self, ValueCommitment},
     keys,
     note::{self, Nullifier},
+    ShieldedDataFlavor,
 };
 
 /// An Action description, as described in the [Zcash specification §7.3][actiondesc].
@@ -21,7 +22,7 @@ use super::{
 ///
 /// [actiondesc]: https://zips.z.cash/protocol/nu5.pdf#actiondesc
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Action {
+pub struct Action<Flavor: ShieldedDataFlavor> {
     /// A value commitment to net value of the input note minus the output note
     pub cv: commitment::ValueCommitment,
     /// The nullifier of the input note being spent.
@@ -35,14 +36,14 @@ pub struct Action {
     /// encrypted private key in `out_ciphertext`.
     pub ephemeral_key: keys::EphemeralPublicKey,
     /// A ciphertext component for the encrypted output note.
-    pub enc_ciphertext: note::EncryptedNote,
+    pub enc_ciphertext: Flavor::EncryptedNote,
     /// A ciphertext component that allows the holder of a full viewing key to
     /// recover the recipient diversified transmission key and the ephemeral
     /// private key (and therefore the entire note plaintext).
     pub out_ciphertext: note::WrappedNoteKey,
 }
 
-impl ZcashSerialize for Action {
+impl<Flavor: ShieldedDataFlavor> ZcashSerialize for Action<Flavor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         self.cv.zcash_serialize(&mut writer)?;
         writer.write_all(&<[u8; 32]>::from(self.nullifier)[..])?;
@@ -55,7 +56,7 @@ impl ZcashSerialize for Action {
     }
 }
 
-impl ZcashDeserialize for Action {
+impl<Flavor: ShieldedDataFlavor> ZcashDeserialize for Action<Flavor> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
         // # Consensus
         //
@@ -93,7 +94,7 @@ impl ZcashDeserialize for Action {
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 580 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus
             // See [`note::EncryptedNote::zcash_deserialize`].
-            enc_ciphertext: note::EncryptedNote::zcash_deserialize(&mut reader)?,
+            enc_ciphertext: Flavor::EncryptedNote::zcash_deserialize(&mut reader)?,
             // Type is `Sym.C`, i.e. `𝔹^Y^{\[N\]}`, i.e. arbitrary-sized byte arrays
             // https://zips.z.cash/protocol/protocol.pdf#concretesym but fixed to
             // 80 bytes in https://zips.z.cash/protocol/protocol.pdf#outputencodingandconsensus

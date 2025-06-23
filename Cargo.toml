@@ -22,17 +22,18 @@ resolver = "2"
 # `cargo release` settings
 
 [workspace.dependencies]
-incrementalmerkletree = "0.7.0"
-orchard = "0.9.0"
-sapling-crypto = "0.2.0"
-zcash_address = "0.5.0"
-zcash_client_backend = "0.13.0"
-zcash_encoding = "0.2.1"
+incrementalmerkletree = "0.5.1"
+orchard = "0.8.0"
+sapling-crypto = "0.1.3"
+# The dependency versions below are in accordance with the currently used orchard version.
 zcash_history = "0.4.0"
-zcash_keys = "0.3.0"
-zcash_primitives = "0.17.0"
-zcash_proofs = "0.17.0"
-zcash_protocol = "0.3.0"
+zcash_address = "0.3.2"
+zcash_client_backend = "0.12.1"
+zcash_encoding = "0.2.0"
+zcash_keys = "0.2.0"
+zcash_primitives = "0.15.0"
+zcash_proofs = "0.15.0"
+zcash_protocol = "0.1.1"
 
 [workspace.metadata.release]
 
@@ -103,17 +104,16 @@ panic = "abort"
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
 
-# We can remove this patches after we get out of 2.0 release candidate and upgrade the ECC dependencies above.
-# This revisions are at the commit just before setting mainnet activation heights.
 [patch.crates-io]
-zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
-zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
-zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
-zcash_history = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
-zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "1410f1449100a417bfbc4f6c7167aa9808e38792" }
-sapling-crypto = { git = "https://github.com/zcash/sapling-crypto", rev = "b1ad3694ee13a2fc5d291ad04721a6252da0993c" }
-orchard = { git = "https://github.com/zcash/orchard", rev = "55fb089a335bbbc1cda186c706bc037073df8eb7" }
-incrementalmerkletree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
-shardtree = { git = "https://github.com/zcash/incrementalmerkletree", rev = "ffe4234788fd22662b937ba7c6ea01535fcc1293" }
+halo2_proofs = { version = "0.3.0", git = "https://github.com/QED-it/halo2", branch = "zsa1" }
+halo2_gadgets = { version = "0.3.0", git = "https://github.com/QED-it/halo2", branch = "zsa1" }
+zcash_note_encryption = { version = "0.4.0", git = "https://github.com/QED-it/zcash_note_encryption", branch = "zsa1" }
+sapling-crypto = { version = "0.1.3", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
+orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", rev = "831ca109705a409bc3d3b82e76245e45dd0f0812" }
+zcash_primitives = { version = "0.15.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_protocol = { version = "0.1.1", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_address = { version = "0.3.2", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_encoding = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_history = { version = "0.4.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_client_backend = { version = "0.12.1", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+zcash_keys = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }

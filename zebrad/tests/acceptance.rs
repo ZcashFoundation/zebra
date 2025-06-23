@@ -2907,7 +2907,7 @@ async fn fully_synced_rpc_z_getsubtreesbyindex_snapshot_test() -> Result<()> {
 async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(None, None);
+    let network = Network::new_regtest(None, None, None);
     let state = zebra_state::init_test(&network);
     let (
         block_verifier_router,
@@ -2982,7 +2982,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use zebra_state::{ReadResponse, Response};
 
     let _init_guard = zebra_test::init();
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None))?;
+    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(None, None, None))?;
     config.state.ephemeral = false;
     let network = config.network.network.clone();
 
@@ -3362,6 +3362,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
     };
 
+    // FIXME: Would this work after Nu7 activation?
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
@@ -3459,6 +3460,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         ..(*block_template)
     };
 
+    // FIXME: Would this work after Nu7 activation?
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
     // Submit the invalid block with an excessive coinbase output value
@@ -3502,6 +3504,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         ..block_template
     };
 
+    // FIXME: Would this work after Nu7 activation?
     let proposal_block = proposal_block_from_template(&block_template, None, NetworkUpgrade::Nu6)?;
 
     // Submit the invalid block with an excessive coinbase input value

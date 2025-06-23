@@ -1,5 +1,6 @@
 ---
 source: zebra-rpc/src/methods/tests/snapshot.rs
+assertion_line: 562
 expression: info
 ---
 {
@@ -68,6 +69,11 @@ expression: info
     "c8e71055": {
       "name": "NU6",
       "activationheight": 2976000,
+      "status": "pending"
+    },
+    "77190ad8": {
+      "name": "NU7",
+      "activationheight": 3222000,
       "status": "pending"
     }
   },
