@@ -25,8 +25,8 @@ pub mod constants;
 pub mod arbitrary;
 
 mod error;
-mod request;
-mod response;
+pub mod request;
+pub mod response;
 mod service;
 
 #[cfg(test)]

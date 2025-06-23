@@ -160,6 +160,12 @@ impl From<UsageInfo> for ReadResponse {
         Self::UsageInfo(value.0)
     }
 }
+pub struct Tip(pub Option<(block::Height, block::Hash)>);
+impl From<Tip> for ReadResponse {
+    fn from(value: Tip) -> Self {
+        Self::Tip(value.0)
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only

@@ -1255,25 +1255,9 @@ impl Service<ReadRequest> for ReadStateService {
             }
 
             // Used by the StateService.
-            ReadRequest::Tip => {
-                let state = self.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        let tip = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
-                                read::tip(non_finalized_state.best_chain(), &state.db)
-                            },
-                        );
-
-                        // The work is done in the future.
-                        timer.finish(module_path!(), line!(), "ReadRequest::Tip");
-
-                        Ok(ReadResponse::Tip(tip))
-                    })
-                })
-                .wait_for_panics()
-            }
+            ReadRequest::Tip => Box::pin(self.call(request::Tip).map(|result| match result {
+                Ok(val) => Ok(ReadResponse::from(val)),
+            })),
 
             // Used by `getblockchaininfo` RPC method.
             ReadRequest::TipPoolValues => {
@@ -2151,6 +2135,43 @@ impl Service<request::UsageInfo> for ReadStateService {
                 timer.finish(module_path!(), line!(), "ReadRequest::UsageInfo");
 
                 Ok(response::UsageInfo(db_size))
+            })
+        })
+        .wait_for_panics()
+    }
+}
+impl Service<request::Tip> for ReadStateService {
+    type Response = response::Tip;
+
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    type Error = Infallible;
+
+    fn poll_ready(&mut self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_ready_service(ctx)
+    }
+
+    fn call(&mut self, req: request::Tip) -> Self::Future {
+        req.count_metric();
+        let timer = CodeTimer::start();
+        let span = Span::current();
+        let db = self.db.clone();
+        let state = self.clone();
+
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(move || {
+                let tip =
+                    state
+                        .non_finalized_state_receiver
+                        .with_watch_data(|non_finalized_state| {
+                            read::tip(non_finalized_state.best_chain(), &state.db)
+                        });
+
+                // The work is done in the future.
+                timer.finish(module_path!(), line!(), "ReadRequest::Tip");
+
+                Ok(response::Tip(tip))
             })
         })
         .wait_for_panics()

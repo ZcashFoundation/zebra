@@ -915,6 +915,21 @@ impl Request {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Tip;
+
+impl Tip {
+    /// Counts metric for ReadStateService call
+    pub fn count_metric(&self) {
+        metrics::counter!(
+            "state.requests",
+            "service" => "read_state",
+            "type" => "tip"
+        )
+        .increment(1);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct UsageInfo;
 
 impl UsageInfo {
