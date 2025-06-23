@@ -915,6 +915,20 @@ impl Request {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UsageInfo;
+
+impl UsageInfo {
+    /// Counts metric for ReadStateService call
+    pub fn count_metric(&self) {
+        metrics::counter!(
+            "state.requests",
+            "service" => "read_state",
+            "type" => "usage_info"
+        )
+        .increment(1);
+    }
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
 /// A read-only query about the chain state, via the
 /// [`ReadStateService`](crate::service::ReadStateService).
 pub enum ReadRequest {
@@ -1198,6 +1212,8 @@ pub enum ReadRequest {
     TipBlockSize,
 }
 
+// TODO: once all are supported individually, this can go away entirely,
+// as they will be handled by the individual calls
 impl ReadRequest {
     fn variant_name(&self) -> &'static str {
         match self {

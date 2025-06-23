@@ -153,6 +153,14 @@ impl MinedTx {
     }
 }
 
+pub struct UsageInfo(pub u64);
+
+impl From<UsageInfo> for ReadResponse {
+    fn from(value: UsageInfo) -> Self {
+        Self::UsageInfo(value.0)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
 /// [`ReadStateService`](crate::service::ReadStateService)'s [`ReadRequest`].

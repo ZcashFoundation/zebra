@@ -16,7 +16,7 @@
 
 use std::{
     collections::HashMap,
-    convert,
+    convert::{self, Infallible},
     future::Future,
     pin::Pin,
     sync::Arc,
@@ -45,6 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
+    request, response,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -871,6 +872,31 @@ impl ReadStateService {
     pub fn log_db_metrics(&self) {
         self.db.print_db_metrics();
     }
+
+    fn poll_ready_service<E>(&mut self, _: &mut Context<'_>) -> Poll<Result<(), E>> {
+        // Check for panics in the block write task
+        //
+        // TODO: move into a check_for_panics() method
+        let block_write_task = self.block_write_task.take();
+
+        if let Some(block_write_task) = block_write_task {
+            if block_write_task.is_finished() {
+                if let Some(block_write_task) = Arc::into_inner(block_write_task) {
+                    // We are the last state with a reference to this task, so we can propagate any panics
+                    if let Err(thread_panic) = block_write_task.join() {
+                        std::panic::resume_unwind(thread_panic);
+                    }
+                }
+            } else {
+                // It hasn't finished, so we need to put it back
+                self.block_write_task = Some(block_write_task);
+            }
+        }
+
+        self.db.check_for_panics();
+
+        Poll::Ready(Ok(()))
+    }
 }
 
 impl Service<Request> for StateService {
@@ -881,7 +907,8 @@ impl Service<Request> for StateService {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         // Check for panics in the block write task
-        let poll = self.read_service.poll_ready(cx);
+        let poll =
+            <ReadStateService as Service<ReadRequest>>::poll_ready(&mut self.read_service, cx);
 
         // Prune outdated UTXO requests
         let now = Instant::now();
@@ -1173,9 +1200,8 @@ impl Service<Request> for StateService {
                 let read_service = self.read_service.clone();
 
                 async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
+                    let req =
+                        ReadRequest::try_from(req).expect("ReadRequest conversion should not fail");
 
                     let rsp = read_service.oneshot(req).await?;
                     let rsp = rsp.try_into().expect("Response conversion should not fail");
@@ -1190,9 +1216,8 @@ impl Service<Request> for StateService {
                 let read_service = self.read_service.clone();
 
                 async move {
-                    let req = req
-                        .try_into()
-                        .expect("ReadRequest conversion should not fail");
+                    let req =
+                        ReadRequest::try_from(req).expect("ReadRequest conversion should not fail");
 
                     let rsp = read_service.oneshot(req).await?;
                     let rsp = rsp.try_into().expect("Response conversion should not fail");
@@ -1211,29 +1236,8 @@ impl Service<ReadRequest> for ReadStateService {
     type Future =
         Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
 
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        // Check for panics in the block write task
-        //
-        // TODO: move into a check_for_panics() method
-        let block_write_task = self.block_write_task.take();
-
-        if let Some(block_write_task) = block_write_task {
-            if block_write_task.is_finished() {
-                if let Some(block_write_task) = Arc::into_inner(block_write_task) {
-                    // We are the last state with a reference to this task, so we can propagate any panics
-                    if let Err(thread_panic) = block_write_task.join() {
-                        std::panic::resume_unwind(thread_panic);
-                    }
-                }
-            } else {
-                // It hasn't finished, so we need to put it back
-                self.block_write_task = Some(block_write_task);
-            }
-        }
-
-        self.db.check_for_panics();
-
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_ready_service::<Self::Error>(ctx)
     }
 
     #[instrument(name = "read_state", skip(self, req))]
@@ -1245,20 +1249,9 @@ impl Service<ReadRequest> for ReadStateService {
         match req {
             // Used by the `getblockchaininfo` RPC.
             ReadRequest::UsageInfo => {
-                let db = self.db.clone();
-
-                tokio::task::spawn_blocking(move || {
-                    span.in_scope(move || {
-                        // The work is done in the future.
-
-                        let db_size = db.size();
-
-                        timer.finish(module_path!(), line!(), "ReadRequest::UsageInfo");
-
-                        Ok(ReadResponse::UsageInfo(db_size))
-                    })
-                })
-                .wait_for_panics()
+                Box::pin(self.call(request::UsageInfo).map(|result| match result {
+                    Ok(val) => Ok(ReadResponse::from(val)),
+                }))
             }
 
             // Used by the StateService.
@@ -2128,6 +2121,39 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
         }
+    }
+}
+
+impl Service<request::UsageInfo> for ReadStateService {
+    type Response = response::UsageInfo;
+
+    type Future =
+        Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send + 'static>>;
+
+    type Error = Infallible;
+
+    fn poll_ready(&mut self, ctx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.poll_ready_service(ctx)
+    }
+
+    fn call(&mut self, req: request::UsageInfo) -> Self::Future {
+        req.count_metric();
+        let timer = CodeTimer::start();
+        let span = Span::current();
+        let db = self.db.clone();
+
+        tokio::task::spawn_blocking(move || {
+            span.in_scope(move || {
+                // The work is done in the future.
+
+                let db_size = db.size();
+
+                timer.finish(module_path!(), line!(), "ReadRequest::UsageInfo");
+
+                Ok(response::UsageInfo(db_size))
+            })
+        })
+        .wait_for_panics()
     }
 }
 

@@ -38,7 +38,9 @@ use zebra_chain::{
     transaction::Transaction,
 };
 use zebra_node_services::scan_service::response::ScanResult;
-use zebra_state::{ChainTipChange, ReadStateService, SaplingScannedResult, TransactionIndex};
+use zebra_state::{
+    ChainTipChange, ReadRequest, ReadStateService, SaplingScannedResult, TransactionIndex,
+};
 
 use crate::{
     service::{ScanTask, ScanTaskCommand},
@@ -255,8 +257,7 @@ pub async fn scan_height_and_store_results(
 
     // Get a block from the state.
     // We can't use ServiceExt::oneshot() here, because it causes lifetime errors in init().
-    let block = state
-        .ready()
+    let block = <ReadStateService as ServiceExt<ReadRequest>>::ready(&mut state)
         .await
         .map_err(|e| eyre!(e))?
         .call(zebra_state::ReadRequest::Block(height.into()))
@@ -508,8 +509,7 @@ fn get_min_height(map: &HashMap<String, Height>) -> Option<Height> {
 
 /// Get tip height or return genesis block height if no tip is available.
 async fn tip_height(mut state: State) -> Result<Height, Report> {
-    let tip = state
-        .ready()
+    let tip = <ReadStateService as ServiceExt<ReadRequest>>::ready(&mut state)
         .await
         .map_err(|e| eyre!(e))?
         .call(zebra_state::ReadRequest::Tip)

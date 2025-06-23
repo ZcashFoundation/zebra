@@ -41,8 +41,8 @@ use tokio::time::Instant;
 use tower::{Service, ServiceExt};
 
 use zebra_chain::{block::Height, parameters::Network};
-use zebra_state as old_zs;
-use zebra_state as new_zs;
+use zebra_state::{self as old_zs, ReadRequest};
+use zebra_state::{self as new_zs, ReadStateService};
 
 use crate::{
     application::ZebradApp,
@@ -147,11 +147,12 @@ impl CopyStateCmd {
 
         info!("fetching source and target tip heights");
 
-        let source_tip = source_read_only_state_service
-            .ready()
-            .await?
-            .call(old_zs::ReadRequest::Tip)
-            .await?;
+        let source_tip = <ReadStateService as ServiceExt<ReadRequest>>::ready(
+            &mut source_read_only_state_service,
+        )
+        .await?
+        .call(old_zs::ReadRequest::Tip)
+        .await?;
         let source_tip = match source_tip {
             old_zs::ReadResponse::Tip(Some(source_tip)) => source_tip,
             old_zs::ReadResponse::Tip(None) => Err("empty source state: no blocks to copy")?,
@@ -204,11 +205,12 @@ impl CopyStateCmd {
         let copy_start_time = Instant::now();
         for height in min_target_height..=max_copy_height {
             // Read block from source
-            let source_block = source_read_only_state_service
-                .ready()
-                .await?
-                .call(old_zs::ReadRequest::Block(Height(height).into()))
-                .await?;
+            let source_block = <ReadStateService as ServiceExt<ReadRequest>>::ready(
+                &mut source_read_only_state_service,
+            )
+            .await?
+            .call(old_zs::ReadRequest::Block(Height(height).into()))
+            .await?;
             let source_block = match source_block {
                 old_zs::ReadResponse::Block(Some(source_block)) => {
                     trace!(?height, %source_block, "read source block");
@@ -322,11 +324,12 @@ impl CopyStateCmd {
         let final_target_tip_height = final_target_tip.0 .0;
         let final_target_tip_hash = final_target_tip.1;
 
-        let target_tip_source_depth = source_read_only_state_service
-            .ready()
-            .await?
-            .call(old_zs::ReadRequest::Depth(final_target_tip_hash))
-            .await?;
+        let target_tip_source_depth = <ReadStateService as ServiceExt<ReadRequest>>::ready(
+            &mut source_read_only_state_service,
+        )
+        .await?
+        .call(old_zs::ReadRequest::Depth(final_target_tip_hash))
+        .await?;
         let target_tip_source_depth = match target_tip_source_depth {
             old_zs::ReadResponse::Depth(source_depth) => source_depth,
 
