@@ -151,6 +151,7 @@ impl TestType {
 
     /// Returns the Zebra state path for this test, if configured and needed.
     #[allow(clippy::print_stderr)]
+    #[allow(dead_code)]
     pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
         let test_name = test_name.as_ref();
 
