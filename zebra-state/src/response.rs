@@ -166,6 +166,7 @@ impl MinedTx {
 /// sent to the listener on the next change to the non-finalized state.
 const NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE: usize = 1_000;
 
+/// A listener for changes in the non-finalized state.
 #[derive(Clone, Debug)]
 pub struct NonFinalizedBlocksListener(
     pub Arc<tokio::sync::mpsc::Receiver<(zebra_chain::block::Hash, Arc<zebra_chain::block::Block>)>>,
@@ -200,8 +201,20 @@ impl NonFinalizedBlocksListener {
 
                 let new_blocks = latest_finalized_state
                     .chain_iter()
-                    .flat_map(|chain| chain.blocks.values())
-                    .filter(|cv_block| !prev_non_finalized_state.any_chain_contains(&cv_block.hash))
+                    .flat_map(|chain| {
+                        // Take blocks from the chain in reverse height order until we reach a block that was
+                        // present in the last seen copy of the non-finalized state.
+                        let mut new_blocks: Vec<_> = chain
+                            .blocks
+                            .values()
+                            .rev()
+                            .take_while(|cv_block| {
+                                !prev_non_finalized_state.any_chain_contains(&cv_block.hash)
+                            })
+                            .collect();
+                        new_blocks.reverse();
+                        new_blocks
+                    })
                     .map(|cv_block| (cv_block.hash, cv_block.block.clone()));
 
                 for new_block_with_hash in new_blocks {

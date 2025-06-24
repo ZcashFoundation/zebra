@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use zebra_chain::{block, serialization::ZcashSerialize};
+use zebra_chain::{
+    block,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+};
 
 #[cfg(test)]
 mod tests;
@@ -52,5 +55,26 @@ impl BlockAndHash {
                 .zcash_serialize_to_vec()
                 .expect("block serialization should not fail"),
         }
+    }
+
+    /// Try to convert a [`BlockAndHash`] into a tuple of a decoded block and hash.
+    pub fn decode(self) -> Option<(block::Block, block::Hash)> {
+        self.hash
+            .try_into()
+            .map(|bytes| block::Hash::from_bytes_in_display_order(&bytes))
+            .map_err(|bytes: Vec<_>| {
+                tracing::warn!(
+                    "failed to convert BlockHash to Hash, unexpected len: {}",
+                    bytes.len()
+                )
+            })
+            .ok()
+            .and_then(|hash| {
+                self.data
+                    .zcash_deserialize_into()
+                    .map_err(|err| tracing::warn!(?err, "failed to deserialize block",))
+                    .ok()
+                    .map(|block| (block, hash))
+            })
     }
 }
