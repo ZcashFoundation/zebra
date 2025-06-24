@@ -72,84 +72,82 @@ impl TrustedChainSync {
     /// gets any unavailable blocks in Zebra's best chain from the RPC server, adds them to the local non-finalized state, then
     /// sends the updated chain tip block and non-finalized state to the [`ChainTipSender`] and non-finalized state sender.
     async fn sync(&mut self) {
+        let mut non_finalized_blocks_listener = None;
         self.try_catch_up_with_primary().await;
         if let Some(finalized_tip_block) = self.finalized_chain_tip_block().await {
             self.chain_tip_sender.set_finalized_tip(finalized_tip_block);
         }
 
-        let mut non_finalized_blocks_listener = self
-            .subscribe_to_non_finalized_state_change()
-            .await
-            .expect("call to non_finalized_state_change() failed");
-
         loop {
-            loop {
-                let message = match non_finalized_blocks_listener.message().await {
-                    Ok(Some(block_and_hash)) => block_and_hash,
-                    Ok(None) => {
-                        tracing::warn!("non-finalized state change stream ended unexpectedly");
-                        break;
-                    }
-                    Err(err) => {
-                        tracing::warn!(?err, "error receiving non-finalized state change");
-                        break;
-                    }
-                };
-
-                let Some((block, hash)) = message.decode() else {
-                    tracing::warn!("received malformed non-finalized state change message");
-                    break;
-                };
-
-                if self.non_finalized_state.any_chain_contains(&hash) {
-                    tracing::info!(?hash, "non-finalized state already contains block");
-                    continue;
-                }
-
-                let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
-                match self.try_commit(block.clone()).await {
-                    Ok(()) => {
-                        while self
-                            .non_finalized_state
-                            .root_height()
-                            .expect("just successfully inserted a non-finalized block above")
-                            <= self.db.finalized_tip_height().unwrap_or(Height::MIN)
-                        {
-                            tracing::trace!("finalizing block past the reorg limit");
-                            self.non_finalized_state.finalize();
-                        }
-
-                        self.update_channels(block)
-                    }
-                    Err(error) => {
-                        tracing::warn!(
-                            ?error,
-                            ?hash,
-                            "failed to commit block to non-finalized state"
-                        );
-
-                        // TODO: Investigate whether it would be correct to ignore some errors here instead of
-                        //       trying every block in the non-finalized state again.
-                        break;
-                    }
-                };
-            }
-
-            loop {
+            let Some(ref mut non_finalized_state_change) = non_finalized_blocks_listener else {
                 non_finalized_blocks_listener = match self
                     .subscribe_to_non_finalized_state_change()
                     .await
                 {
-                    Ok(listener) => listener,
+                    Ok(listener) => Some(listener),
                     Err(err) => {
                         tracing::warn!(?err, "failed to subscribe to non-finalized state changes");
                         tokio::time::sleep(POLL_DELAY).await;
-                        continue;
+                        None
                     }
                 };
 
-                break;
+                continue;
+            };
+
+            let message = match non_finalized_state_change.message().await {
+                Ok(Some(block_and_hash)) => block_and_hash,
+                Ok(None) => {
+                    tracing::warn!("non-finalized state change stream ended unexpectedly");
+                    non_finalized_blocks_listener = None;
+                    continue;
+                }
+                Err(err) => {
+                    tracing::warn!(?err, "error receiving non-finalized state change");
+                    non_finalized_blocks_listener = None;
+                    continue;
+                }
+            };
+
+            let Some((block, hash)) = message.decode() else {
+                tracing::warn!("received malformed non-finalized state change message");
+                non_finalized_blocks_listener = None;
+                continue;
+            };
+
+            if self.non_finalized_state.any_chain_contains(&hash) {
+                tracing::info!(?hash, "non-finalized state already contains block");
+                non_finalized_blocks_listener = None;
+                continue;
             }
+
+            let block = SemanticallyVerifiedBlock::with_hash(Arc::new(block), hash);
+            match self.try_commit(block.clone()).await {
+                Ok(()) => {
+                    while self
+                        .non_finalized_state
+                        .root_height()
+                        .expect("just successfully inserted a non-finalized block above")
+                        <= self.db.finalized_tip_height().unwrap_or(Height::MIN)
+                    {
+                        tracing::trace!("finalizing block past the reorg limit");
+                        self.non_finalized_state.finalize();
+                    }
+
+                    self.update_channels(block)
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        ?error,
+                        ?hash,
+                        "failed to commit block to non-finalized state"
+                    );
+
+                    // TODO: Investigate whether it would be correct to ignore some errors here instead of
+                    //       trying every block in the non-finalized state again.
+                    non_finalized_blocks_listener = None;
+                }
+            };
         }
     }
 
