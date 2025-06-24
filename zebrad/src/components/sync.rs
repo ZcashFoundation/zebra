@@ -222,7 +222,7 @@ const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 
 /// Sync configuration section.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
     /// The number of parallel block download requests.
@@ -230,7 +230,6 @@ pub struct Config {
     /// This is set to a low value by default, to avoid task and
     /// network contention. Increasing this value may improve
     /// performance on machines with a fast network connection.
-    #[serde(alias = "max_concurrent_block_requests")]
     pub download_concurrency_limit: usize,
 
     /// The number of blocks submitted in parallel to the checkpoint verifier.
@@ -252,7 +251,6 @@ pub struct Config {
     ///
     /// This is set to a high value by default, to avoid verification pipeline stalls.
     /// Decreasing this value reduces RAM usage.
-    #[serde(alias = "lookahead_limit")]
     pub checkpoint_verify_concurrency_limit: usize,
 
     /// The number of blocks submitted in parallel to the full verifier.

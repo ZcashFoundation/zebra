@@ -302,6 +302,10 @@ if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
   cat "${ZEBRA_CONF_PATH}"
 fi
 
+# Unset ZEBRA_CONF_PATH to prevent figment from trying to parse it as a config field
+# This variable is only used by the entrypoint script to determine the --config flag
+unset ZEBRA_CONF_PATH
+
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
 # - If "$1" is "test":
 #   - and "$2" is "zebrad", run `zebrad` with the remaining params,
