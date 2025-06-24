@@ -5,6 +5,8 @@
 
 use std::{str::FromStr, sync::Arc};
 
+use derive_getters::Getters;
+use derive_new::new;
 use serde::{Deserialize, Serialize};
 
 use zebra_chain::{
@@ -117,7 +119,7 @@ impl LongPollInput {
 ///
 /// `zcashd` IDs are currently 69 hex/decimal digits long.
 /// Since Zebra's IDs are only 46 hex/decimal digits, mining pools should be able to handle them.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize, Getters, new)]
 #[serde(try_from = "String", into = "String")]
 pub struct LongPollId {
     // Fields that invalidate old work:
@@ -129,7 +131,7 @@ pub struct LongPollId {
     ///
     /// The height is technically redundant, but it helps with debugging.
     /// It also reduces the probability of a missed tip change.
-    pub tip_height: u32,
+    pub(crate) tip_height: u32,
 
     /// A checksum of the tip hash used to generate the template containing this long poll ID.
     ///
@@ -139,7 +141,7 @@ pub struct LongPollId {
     ///
     /// It's ok to do a probabilistic check here,
     /// so we choose a 1 in 2^32 chance of missing a block change.
-    pub tip_hash_checksum: u32,
+    pub(crate) tip_hash_checksum: u32,
 
     /// The max time in the same template as this long poll ID.
     ///
@@ -150,7 +152,7 @@ pub struct LongPollId {
     /// the max time. This avoids wasted work.
     ///
     /// Zcash times are limited to 32 bits by the consensus rules.
-    pub max_timestamp: u32,
+    pub(crate) max_timestamp: u32,
 
     // Fields that allow old work:
     //
@@ -165,7 +167,7 @@ pub struct LongPollId {
     ///
     /// Using the number of transactions makes mempool checksum attacks much harder.
     /// It also helps with debugging, and reduces the probability of a missed mempool change.
-    pub mempool_transaction_count: u32,
+    pub(crate) mempool_transaction_count: u32,
 
     /// A checksum of the effecting hashes of the transactions in the mempool,
     /// when the template containing this long poll ID was generated.
@@ -188,7 +190,7 @@ pub struct LongPollId {
     ///
     /// If an attacker could also keep the number of transactions constant,
     /// a new template will be generated when the tip hash changes, or the max time is reached.
-    pub mempool_transaction_content_checksum: u32,
+    pub(crate) mempool_transaction_content_checksum: u32,
 }
 
 impl LongPollId {
