@@ -87,25 +87,23 @@ pub async fn run() -> Result<()> {
 
     // Launch zebra with peers and using a predefined zebrad state path.
     // As this tests are just queries we can have a live chain where blocks are coming.
-    let (mut zebrad, zebra_rpc_address, _config) = match spawn_zebrad_for_rpc(
-        network.clone(),
-        test_name,
-        test_type,
-        use_internet_connection,
-    )? {
-        Some(zebrad_and_address) => {
-            tracing::info!(
-                ?network,
-                ?test_type,
-                "running gRPC query tests using lightwalletd & zebrad...",
-            );
+    let (mut zebrad, zebra_rpc_address, _config) = if let Some(zebrad_and_address) =
+        spawn_zebrad_for_rpc(
+            network.clone(),
+            test_name,
+            test_type,
+            use_internet_connection,
+        )? {
+        tracing::info!(
+            ?network,
+            ?test_type,
+            "running gRPC query tests using lightwalletd & zebrad...",
+        );
 
-            zebrad_and_address
-        }
-        None => {
-            // Skip the test, we don't have the required cached state
-            return Ok(());
-        }
+        zebrad_and_address
+    } else {
+        // Skip the test, we don't have the required cached state
+        return Ok(());
     };
 
     let zebra_rpc_address = zebra_rpc_address.expect("lightwalletd test must have RPC port");

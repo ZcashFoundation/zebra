@@ -9,10 +9,7 @@ use std::{
 use color_eyre::eyre::Result;
 use indexmap::IndexSet;
 
-use zebra_chain::{
-    common::default_cache_dir,
-    parameters::Network::{self, Mainnet},
-};
+use zebra_chain::parameters::Network;
 use zebra_network::CacheDir;
 use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
@@ -162,18 +159,9 @@ impl TestType {
             return None;
         }
 
-        // Create a config to check if a cache dir is configured
-        let config = match self.zebrad_config(test_name, true, None, &Mainnet) {
-            Some(Ok(config)) => config,
-            Some(Err(_)) | None => {
-                // Config creation failed or test should be skipped
-                return None;
-            }
-        };
-
-        // Check if a non-default cache dir is configured
-        if config.state.cache_dir != default_cache_dir() {
-            Some(config.state.cache_dir)
+        // Check environment variable directly to avoid circular dependency
+        if let Ok(cache_dir) = env::var("ZEBRA_STATE__CACHE_DIR") {
+            Some(PathBuf::from(cache_dir))
         } else {
             eprintln!(
                 "skipped {test_name:?} {self:?} test, \
@@ -191,7 +179,7 @@ impl TestType {
     /// and `Some(Err(_))` if the config could not be created.
     pub fn zebrad_config<Str: AsRef<str>>(
         &self,
-        test_name: Str,
+        _test_name: Str,
         use_internet_connection: bool,
         replace_cache_dir: Option<&Path>,
         network: &Network,
@@ -226,9 +214,20 @@ impl TestType {
 
         // If we have a cached state, or we don't want to be ephemeral, update the config to use it
         if replace_cache_dir.is_some() || self.needs_zebra_cached_state() {
-            let zebra_state_path = replace_cache_dir
-                .map(|path| path.to_owned())
-                .or_else(|| self.zebrad_state_path(test_name))?;
+            let zebra_state_path = if let Some(path) = replace_cache_dir {
+                path.to_owned()
+            } else if self.needs_zebra_cached_state() {
+                // Check environment variable directly to avoid circular dependency with zebrad_state_path
+                if let Ok(cache_dir) = env::var("ZEBRA_STATE__CACHE_DIR") {
+                    PathBuf::from(cache_dir)
+                } else {
+                    // Skip test if no cache dir is available
+                    return None;
+                }
+            } else {
+                // This branch should be unreachable given the outer if condition
+                return None;
+            };
 
             config.state.ephemeral = false;
             config.state.cache_dir = zebra_state_path;
