@@ -17,9 +17,10 @@ set -eo pipefail
 # They are set to `${HOME}/.cache/zebra` and `${HOME}/.cache/lwd`
 # respectively, but can be overridden by setting the
 # `ZEBRA_CACHE_DIR` and `LWD_CACHE_DIR` environment variables.
-: "${ZEBRA_CACHE_DIR:=${HOME}/.cache/zebra}"
+#
+# We don't set defaults here - let Figment handle defaults from config.
+# We only set defaults for LWD_CACHE_DIR since it's not managed by Figment.
 : "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
-: "${ZEBRA_COOKIE_DIR:=${HOME}/.cache/zebra}"
 
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
@@ -42,7 +43,8 @@ prepare_conf_file() {
   export ZEBRA_NETWORK__NETWORK="${NETWORK:=Mainnet}"
 
   # Map legacy ZEBRA_CACHE_DIR to ZEBRA_STATE__CACHE_DIR and unset it.
-  if [[ -n ${ZEBRA_CACHE_DIR} ]]; then
+  # Only export if it was explicitly set by the user.
+  if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
     export ZEBRA_STATE__CACHE_DIR="${ZEBRA_CACHE_DIR}"
     unset ZEBRA_CACHE_DIR
   fi
@@ -55,7 +57,8 @@ prepare_conf_file() {
   fi
 
   # ZEBRA_COOKIE_DIR is mapped directly, then unset.
-  if [[ -n ${ZEBRA_COOKIE_DIR} ]]; then
+  # Only export if it was explicitly set by the user.
+  if [[ -n "${ZEBRA_COOKIE_DIR}" ]]; then
     export ZEBRA_RPC__COOKIE_DIR="${ZEBRA_COOKIE_DIR}"
     unset ZEBRA_COOKIE_DIR
   fi
@@ -123,10 +126,11 @@ create_owned_directory() {
 }
 
 # Create and own cache and config directories
-[[ -n ${ZEBRA_CACHE_DIR} ]] && create_owned_directory "${ZEBRA_CACHE_DIR}"
-[[ -n ${LWD_CACHE_DIR} ]] && create_owned_directory "${LWD_CACHE_DIR}"
-[[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
-[[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
+# Only create directories if they were explicitly set by the user
+[[ -n "${ZEBRA_CACHE_DIR}" ]] && create_owned_directory "${ZEBRA_CACHE_DIR}"
+[[ -n "${LWD_CACHE_DIR}" ]] && create_owned_directory "${LWD_CACHE_DIR}"
+[[ -n "${ZEBRA_COOKIE_DIR}" ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
+[[ -n "${LOG_FILE}" ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
 # Runs cargo test with an arbitrary number of arguments.
 #
