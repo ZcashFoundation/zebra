@@ -44,20 +44,83 @@ impl TrustedChainSync {
         db: ZebraDb,
         non_finalized_state_sender: tokio::sync::watch::Sender<NonFinalizedState>,
     ) -> Result<(LatestChainTip, ChainTipChange, JoinHandle<()>), BoxError> {
-        let indexer_rpc_client =
+        let mut indexer_rpc_client =
             IndexerClient::connect(format!("http://{indexer_rpc_address}")).await?;
 
         let non_finalized_state = NonFinalizedState::new(&db.network());
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(None, &db.network());
 
+        let mut finalized_chain_tip_sender = chain_tip_sender.finalized_sender();
+
         let mut syncer = Self {
-            indexer_rpc_client,
-            db,
+            indexer_rpc_client: indexer_rpc_client.clone(),
+            db: db.clone(),
             non_finalized_state,
             chain_tip_sender,
             non_finalized_state_sender,
         };
+
+        // Spawn a task to send finalized chain tip changes to the chain tip change and latest chain tip channels.
+        tokio::spawn(async move {
+            let mut chain_tip_change_stream = None;
+
+            loop {
+                let Some(ref mut chain_tip_change) = chain_tip_change_stream else {
+                    chain_tip_change_stream = match indexer_rpc_client
+                        .chain_tip_change(Empty {})
+                        .await
+                        .map(|a| a.into_inner())
+                    {
+                        Ok(listener) => Some(listener),
+                        Err(err) => {
+                            tracing::warn!(
+                                ?err,
+                                "failed to subscribe to non-finalized state changes"
+                            );
+                            tokio::time::sleep(POLL_DELAY).await;
+                            None
+                        }
+                    };
+
+                    continue;
+                };
+
+                let message = match chain_tip_change.message().await {
+                    Ok(Some(block_hash_and_height)) => block_hash_and_height,
+                    Ok(None) => {
+                        tracing::warn!("chain_tip_change stream ended unexpectedly");
+                        chain_tip_change_stream = None;
+                        continue;
+                    }
+                    Err(err) => {
+                        tracing::warn!(?err, "error receiving chain tip change");
+                        chain_tip_change_stream = None;
+                        continue;
+                    }
+                };
+
+                let Some((hash, _height)) = message.try_into_hash_and_height() else {
+                    tracing::warn!("failed to convert message into a block hash and height");
+                    continue;
+                };
+
+                // Skip the chain tip change if catching up to the primary db instance fails.
+                if db.spawn_try_catch_up_with_primary().await.is_err() {
+                    continue;
+                }
+
+                // End the task and let the `TrustedChainSync::sync()` method send non-finalized chain tip updates if
+                // the latest chain tip hash is not present in the db.
+                let Some(tip_block) = db.block(hash.into()) else {
+                    return;
+                };
+
+                let _ = finalized_chain_tip_sender.set_finalized_tip(Some(
+                    SemanticallyVerifiedBlock::with_hash(tip_block, hash).into(),
+                ));
+            }
+        });
 
         let sync_task = tokio::spawn(async move {
             syncer.sync().await;
@@ -71,6 +134,7 @@ impl TrustedChainSync {
     /// When the best chain tip in Zebra is not available in the finalized state or the local non-finalized state,
     /// gets any unavailable blocks in Zebra's best chain from the RPC server, adds them to the local non-finalized state, then
     /// sends the updated chain tip block and non-finalized state to the [`ChainTipSender`] and non-finalized state sender.
+    #[tracing::instrument(skip_all)]
     async fn sync(&mut self) {
         let mut non_finalized_blocks_listener = None;
         self.try_catch_up_with_primary().await;
@@ -117,7 +181,6 @@ impl TrustedChainSync {
 
             if self.non_finalized_state.any_chain_contains(&hash) {
                 tracing::info!(?hash, "non-finalized state already contains block");
-                non_finalized_blocks_listener = None;
                 continue;
             }
 
@@ -134,7 +197,7 @@ impl TrustedChainSync {
                         self.non_finalized_state.finalize();
                     }
 
-                    self.update_channels(block)
+                    self.update_channels();
                 }
                 Err(error) => {
                     tracing::warn!(
@@ -178,14 +241,7 @@ impl TrustedChainSync {
 
     /// Tries to catch up to the primary db instance for an up-to-date view of finalized blocks.
     async fn try_catch_up_with_primary(&self) {
-        let db = self.db.clone();
-        tokio::task::spawn_blocking(move || {
-            if let Err(catch_up_error) = db.try_catch_up_with_primary() {
-                tracing::warn!(?catch_up_error, "failed to catch up to primary");
-            }
-        })
-        .wait_for_panics()
-        .await
+        let _ = self.db.spawn_try_catch_up_with_primary().await;
     }
 
     /// Reads the finalized tip block from the secondary db instance and converts it to a [`ChainTipBlock`].
@@ -202,13 +258,23 @@ impl TrustedChainSync {
     }
 
     /// Sends the new chain tip and non-finalized state to the latest chain channels.
-    fn update_channels(&mut self, best_tip: impl Into<ChainTipBlock>) {
+    fn update_channels(&mut self) {
         // If the final receiver was just dropped, ignore the error.
         let _ = self
             .non_finalized_state_sender
             .send(self.non_finalized_state.clone());
+
+        let best_chain = self.non_finalized_state.best_chain().expect("unexpected empty non-finalized state: must commit at least one block before updating channels");
+
+        let tip_block = best_chain
+            .tip_block()
+            .expect(
+                "unexpected empty chain: must commit at least one block before updating channels",
+            )
+            .clone();
+
         self.chain_tip_sender
-            .set_best_non_finalized_tip(Some(best_tip.into()));
+            .set_best_non_finalized_tip(Some(tip_block.into()));
     }
 }
 
