@@ -79,11 +79,11 @@ zcash_address.workspace = true
 sapling-crypto.workspace = true
 zip32 = { workspace = true, features = ["std"] }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["shielded-scan"] }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = ["shielded-scan"] }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46", features = ["shielded-scan"] }
-zebra-grpc = { path = "../zebra-grpc", version = "0.1.0-alpha.13" }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.46" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0", features = ["shielded-scan"] }
+zebra-state = { path = "../zebra-state", version = "1.0.0", features = ["shielded-scan"] }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0", features = ["shielded-scan"] }
+zebra-grpc = { path = "../zebra-grpc", version = "0.1.0" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0" }
 
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
 
@@ -98,7 +98,7 @@ jubjub = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 zcash_note_encryption = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46", optional = true }
+zebra-test = { path = "../zebra-test", version = "1.0.0", optional = true }
 
 # zebra-scanner binary dependencies
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
@@ -127,5 +127,5 @@ zcash_note_encryption = { workspace = true }
 toml = { workspace = true }
 tonic = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test", version = "1.0.0-beta.46" }
+zebra-state = { path = "../zebra-state", version = "1.0.0", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test", version = "1.0.0" }

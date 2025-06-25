@@ -5143,7 +5143,7 @@ dependencies = [
 
 [[package]]
 name = "tower-batch-control"
-version = "0.2.41-beta.22"
+version = "0.2.41"
 dependencies = [
  "color-eyre",
  "ed25519-zebra",
@@ -5166,7 +5166,7 @@ dependencies = [
 
 [[package]]
 name = "tower-fallback"
-version = "0.2.41-beta.22"
+version = "0.2.41"
 dependencies = [
  "futures-core",
  "pin-project",
@@ -6361,7 +6361,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-chain"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "bech32",
  "bitflags 2.9.1",
@@ -6428,7 +6428,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-consensus"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6474,7 +6474,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-grpc"
-version = "0.1.0-alpha.13"
+version = "0.1.0"
 dependencies = [
  "color-eyre",
  "futures-util",
@@ -6496,7 +6496,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-network"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "bitflags 2.9.1",
  "byteorder",
@@ -6537,7 +6537,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
@@ -6550,7 +6550,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-rpc"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6646,7 +6646,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-script"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "hex",
  "lazy_static",
@@ -6658,7 +6658,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "bincode",
  "chrono",
@@ -6704,7 +6704,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-test"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "color-eyre",
  "futures",
@@ -6732,7 +6732,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-utils"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 dependencies = [
  "color-eyre",
  "hex",
