@@ -49,6 +49,8 @@ semver = { workspace = true }
 serde_json = { workspace = true, features = ["raw_value"] }
 serde_with = { workspace = true, features = ["hex"] }
 indexmap = { workspace = true, features = ["serde"] }
+derive-getters = { workspace = true, features = ["auto_copy_getters"] }
+derive-new = { workspace = true }
 
 # RPC endpoint basic auth
 base64 = { workspace = true }

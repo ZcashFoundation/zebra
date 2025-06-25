@@ -21,7 +21,7 @@ use zebra_network::{
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
-use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
+use zebra_rpc::SubmitBlockChannel;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -798,7 +798,7 @@ mod submitblock_test {
     use std::sync::{Arc, Mutex};
     use tracing::{Instrument, Level};
     use tracing_subscriber::fmt;
-    use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
+    use zebra_rpc::SubmitBlockChannel;
 
     use super::*;
 

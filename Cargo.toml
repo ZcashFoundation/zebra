@@ -56,6 +56,8 @@ color-eyre = { version = "0.6.3", default-features = false }
 console-subscriber = "0.4"
 criterion = "0.5"
 crossbeam-channel = "0.5.14"
+derive-getters = "0.5"
+derive-new = "0.5"
 dirs = "6.0"
 ed25519-zebra = "4.0.3"
 elasticsearch = { version = "8.17.0-alpha.1", default-features = false }
@@ -114,7 +116,7 @@ rlimit = "0.10"
 rocksdb = { version = "0.22", default-features = false }
 secp256k1 = "0.29"
 semver = "1.0.26"
-sentry = { version = "0.36", default-features = false }
+sentry = { version = "0.40", default-features = false }
 serde = "1.0.219"
 serde-big-array = "0.5"
 serde_json = "1.0.140"
@@ -125,7 +127,7 @@ spandoc = "0.2"
 static_assertions = "1.1"
 structopt = "0.3"
 syn = "2.0.100"
-tempfile = "3.19"
+tempfile = "3.20"
 thiserror = "2.0"
 thread-priority = "1.2"
 tinyvec = "1.9"

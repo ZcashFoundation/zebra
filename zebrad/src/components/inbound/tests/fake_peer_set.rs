@@ -24,7 +24,7 @@ use zebra_network::{
     AddressBook, InventoryResponse, Request, Response,
 };
 use zebra_node_services::mempool;
-use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
+use zebra_rpc::SubmitBlockChannel;
 use zebra_state::{ChainTipChange, Config as StateConfig, CHAIN_TIP_UPDATE_WAIT_LIMIT};
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
