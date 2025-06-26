@@ -37,7 +37,7 @@ jobs:
 
       - name: Get short commit hash
         id: vars
-        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+        run: echo "SHORT_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
 
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
@@ -47,12 +47,12 @@ jobs:
           IMAGE_TAG_COMMIT: ${{ env.SHORT_SHA }}
         run: |
           # Build a docker container
-          docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT -f testnet-single-node-deploy/dockerfile .
+          docker build -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" -t "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT" -f testnet-single-node-deploy/dockerfile .
           
           # Push both tags to ECR
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST"
+          docker push "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT"
 
           # Output the image URIs
-          echo "image_latest=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" >> $GITHUB_OUTPUT
-          echo "image_commit=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT" >> $GITHUB_OUTPUT
+          echo "image_latest=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" >> "$GITHUB_OUTPUT"
+          echo "image_commit=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_COMMIT" >> "$GITHUB_OUTPUT"
