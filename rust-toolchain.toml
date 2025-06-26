@@ -1,0 +1,4 @@
+# TODO: This file does not exist in the original Zebra repo - consider removing it before the final merge.
+[toolchain]
+channel = "1.82.0"
+components = [ "clippy", "rustfmt" ]

@@ -1492,21 +1492,23 @@ impl Chain {
             .zip(transaction_hashes.iter().cloned())
             .enumerate()
         {
-            let (
-                inputs,
-                outputs,
-                joinsplit_data,
-                sapling_shielded_data_per_spend_anchor,
-                sapling_shielded_data_shared_anchor,
-                orchard_shielded_data,
-            ) = match transaction.deref() {
+            let transaction_data = match transaction.deref() {
                 V4 {
                     inputs,
                     outputs,
                     joinsplit_data,
                     sapling_shielded_data,
                     ..
-                } => (inputs, outputs, joinsplit_data, sapling_shielded_data, &None, &None),
+                } => (
+                    inputs,
+                    outputs,
+                    joinsplit_data,
+                    sapling_shielded_data,
+                    &None,
+                    &None,
+                    #[cfg(feature ="tx-v6")]
+                    &None
+                    ),
                 V5 {
                     inputs,
                     outputs,
@@ -1520,11 +1522,50 @@ impl Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                    #[cfg(feature ="tx-v6")]
+                    &None,
+                ),
+                #[cfg(feature ="tx-v6")]
+                V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    &None,
+                    orchard_shielded_data,
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
                 ),
             };
+
+            #[cfg(not(feature = "tx-v6"))]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+            ) = transaction_data;
+
+            #[cfg(feature = "tx-v6")]
+            let (
+                inputs,
+                outputs,
+                joinsplit_data,
+                sapling_shielded_data_per_spend_anchor,
+                sapling_shielded_data_shared_anchor,
+                orchard_shielded_data_vanilla,
+                orchard_shielded_data_zsa,
+            ) = transaction_data;
 
             // add key `transaction.hash` and value `(height, tx_index)` to `tx_loc_by_hash`
             let transaction_location = TransactionLocation::from_usize(height, transaction_index);
@@ -1545,7 +1586,9 @@ impl Chain {
             self.update_chain_tip_with(joinsplit_data)?;
             self.update_chain_tip_with(sapling_shielded_data_per_spend_anchor)?;
             self.update_chain_tip_with(sapling_shielded_data_shared_anchor)?;
-            self.update_chain_tip_with(orchard_shielded_data)?;
+            self.update_chain_tip_with(orchard_shielded_data_vanilla)?;
+            #[cfg(feature = "tx-v6")]
+            self.update_chain_tip_with(orchard_shielded_data_zsa)?;
         }
 
         // update the chain value pool balances
@@ -1681,6 +1724,22 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
                     &None,
                     sapling_shielded_data,
                     orchard_shielded_data,
+                ),
+                #[cfg(feature = "tx-v6")]
+                V6 {
+                    inputs,
+                    outputs,
+                    sapling_shielded_data,
+                    orchard_shielded_data: _,
+                    ..
+                } => (
+                    inputs,
+                    outputs,
+                    &None,
+                    &None,
+                    sapling_shielded_data,
+                    // FIXME: support V6 shielded data?
+                    &None, //orchard_shielded_data,
                 ),
                 V1 { .. } | V2 { .. } | V3 { .. } => unreachable!(
                     "older transaction versions only exist in finalized blocks, because of the mandatory canopy checkpoint",
@@ -2017,11 +2076,13 @@ where
     }
 }
 
-impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
+impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<Flavor>>>
+    for Chain
+{
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2042,7 +2103,7 @@ impl UpdateWith<Option<orchard::ShieldedData>> for Chain {
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
