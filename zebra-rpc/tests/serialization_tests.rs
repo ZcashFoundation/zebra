@@ -15,8 +15,9 @@ use vectors::{
 
 use zebra_rpc::client::{
     zebra_chain::{
+        primitives::{ed25519, redjubjub},
         sapling::NotSmallOrderValueCommitment,
-        serialization::{ZcashDeserialize, ZcashSerialize},
+        serialization::{HexBytes, HexSignature, ZcashDeserialize, ZcashSerialize},
         subtree::NoteCommitmentSubtreeIndex,
         transparent::{OutputIndex, Script},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty},
@@ -1232,12 +1233,10 @@ fn test_hex_field_serialization() {
         raw_joinsplit_sig_bytes,
     )));
 
-    let tx_obj = TransactionObject {
-        binding_sig,
-        joinsplit_pub_key,
-        joinsplit_sig,
-        ..Default::default()
-    };
+    let mut tx_obj = TransactionObject::default();
+    tx_obj.binding_sig = binding_sig;
+    tx_obj.joinsplit_pub_key = joinsplit_pub_key;
+    tx_obj.joinsplit_sig = joinsplit_sig;
 
     let new_json = serde_json::to_string_pretty(&tx_obj).unwrap();
     let expected_binding_sig_hex = "11".repeat(64);
