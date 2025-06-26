@@ -50,8 +50,8 @@ pub use column_family::{TypedColumnFamily, WriteTypedBatch};
 pub use disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk};
 #[allow(unused_imports)]
 pub use disk_format::{
-    FromDisk, IntoDisk, OutputIndex, OutputLocation, RawBytes, TransactionIndex,
-    TransactionLocation, MAX_ON_DISK_HEIGHT,
+    FromDisk, IntoDisk, OutputLocation, RawBytes, TransactionIndex, TransactionLocation,
+    MAX_ON_DISK_HEIGHT,
 };
 pub use zebra_db::ZebraDb;
 

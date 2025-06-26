@@ -112,11 +112,11 @@ echo "$@"
 echo
 
 echo "Querying $ZEBRAD $ZEBRAD_NET chain at height >=$ZEBRAD_HEIGHT..."
-time $ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" "$@" > "$ZEBRAD_RESPONSE"
+time $ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" "$@" | jq -S > "$ZEBRAD_RESPONSE"
 echo
 
 echo "Querying $ZCASHD $ZCASHD_NET chain at height >=$ZCASHD_HEIGHT..."
-time $ZCASH_CLI $ZCASHD_EXTRA_ARGS "$@" > "$ZCASHD_RESPONSE"
+time $ZCASH_CLI $ZCASHD_EXTRA_ARGS "$@" | jq -S > "$ZCASHD_RESPONSE"
 echo
 
 echo
