@@ -10,11 +10,9 @@ use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::Network,
-    primitives::{
-        ed25519::{self},
-        redjubjub::{Binding, Signature},
-    },
+    primitives::redjubjub::Binding,
     sapling::NotSmallOrderValueCommitment,
+    serialization::{HexBytes, HexSignature},
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
@@ -181,16 +179,16 @@ pub struct TransactionObject {
     pub shielded_outputs: Option<Vec<ShieldedOutput>>,
 
     /// Sapling binding signature of the transaction.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub binding_sig: Option<Signature<Binding>>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "opthex", default)]
+    pub binding_sig: Option<HexSignature<Binding>>,
 
     /// JoinSplit public key of the transaction.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub joinsplit_pub_key: Option<ed25519::VerificationKeyBytes>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "opthex", default)]
+    pub joinsplit_pub_key: Option<HexBytes<32>>,
 
     /// JoinSplit signature of the transaction.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub joinsplit_sig: Option<ed25519::Signature>,
+    #[serde(skip_serializing_if = "Option::is_none", with = "opthex", default)]
+    pub joinsplit_sig: Option<HexBytes<64>>,
 
     /// Orchard actions of the transaction.
     #[serde(rename = "orchard", skip_serializing_if = "Option::is_none")]
@@ -651,9 +649,9 @@ impl TransactionObject {
                     value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
                 })
             },
-            binding_sig: tx.sapling_binding_sig(),
-            joinsplit_pub_key: tx.joinsplit_pub_key(),
-            joinsplit_sig: tx.joinsplit_sig(),
+            binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
+            joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| raw_key.into()),
+            joinsplit_sig: tx.joinsplit_sig().map(|raw_sig| raw_sig.into()),
             size: tx.as_bytes().len().try_into().ok(),
             time: block_time,
             txid,

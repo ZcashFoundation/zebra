@@ -1322,7 +1322,7 @@ impl Transaction {
     /// Returns the Sapling binding signature for this transaction.
     ///
     /// Returns `Some(binding_sig)` for transactions that contain Sapling shielded
-    /// data (V4+), or `None` for transations without Sapling components.
+    /// data (V4+), or `None` for transactions without Sapling components.
     pub fn sapling_binding_sig(&self) -> Option<Signature<Binding>> {
         match self {
             Transaction::V4 {

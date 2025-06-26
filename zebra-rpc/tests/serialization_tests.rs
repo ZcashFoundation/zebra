@@ -11,7 +11,11 @@ use vectors::{
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_chain::subtree::NoteCommitmentSubtreeIndex;
+use zebra_chain::{
+    primitives::{ed25519, redjubjub},
+    serialization::{HexBytes, HexSignature},
+    subtree::NoteCommitmentSubtreeIndex,
+};
 use zebra_rpc::methods::{
     trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
     types::{
@@ -791,4 +795,37 @@ fn test_generate() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(obj, new_obj);
 
     Ok(())
+}
+
+#[test]
+fn test_hex_field_serialization() {
+    let raw_binding_sig_bytes = [0x11; 64];
+    let raw_joinsplit_pub_key_bytes = [0x22; 32];
+    let raw_joinsplit_sig_bytes = [0x33; 64];
+
+    let binding_sig = Some(HexSignature::<redjubjub::Binding>::from(
+        redjubjub::Signature::from(raw_binding_sig_bytes),
+    ));
+    let joinsplit_pub_key = Some(HexBytes::<32>::from(ed25519::VerificationKeyBytes::from(
+        raw_joinsplit_pub_key_bytes,
+    )));
+    let joinsplit_sig = Some(HexBytes::<64>::from(ed25519::Signature::from(
+        raw_joinsplit_sig_bytes,
+    )));
+
+    let tx_obj = TransactionObject {
+        binding_sig,
+        joinsplit_pub_key,
+        joinsplit_sig,
+        ..Default::default()
+    };
+
+    let new_json = serde_json::to_string_pretty(&tx_obj).unwrap();
+    let expected_binding_sig_hex = "11".repeat(64);
+    let expected_pub_key_hex = "22".repeat(32);
+    let expected_sig_hex = "33".repeat(64);
+
+    assert!(new_json.contains(&expected_binding_sig_hex));
+    assert!(new_json.contains(&expected_pub_key_hex));
+    assert!(new_json.contains(&expected_sig_hex));
 }
