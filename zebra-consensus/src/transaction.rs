@@ -43,6 +43,8 @@ use zebra_state as zs;
 use crate::{error::TransactionError, groth16::DescriptionWrapper, primitives, script, BoxError};
 
 pub mod check;
+mod mempool_verifier;
+
 #[cfg(test)]
 mod tests;
 
@@ -635,6 +637,19 @@ where
         + 'static,
     Mempool::Future: Send + 'static,
 {
+    /// Internal [`Service::poll_ready()`] method for [`Verifier`].
+    pub(self) fn poll_ready_internal<Error>(&mut self) -> Poll<Result<(), Error>> {
+        // Note: The block verifier expects the transaction verifier to always be ready.
+
+        if self.mempool.is_none() {
+            if let Ok(mempool) = self.mempool_setup_rx.try_recv() {
+                self.mempool = Some(Timeout::new(mempool, MEMPOOL_OUTPUT_LOOKUP_TIMEOUT));
+            }
+        }
+
+        Poll::Ready(Ok(()))
+    }
+
     /// Fetches the median-time-past of the *next* block after the best state tip.
     ///
     /// This is used to verify that the lock times of mempool transactions

@@ -83,6 +83,14 @@ type TxVerifier = Buffer<
 >;
 type InboundTxDownloads = TxDownloads<Timeout<Outbound>, Timeout<TxVerifier>, State>;
 
+// # Verifying mempool transactions as block proposals
+//
+// Note:
+// - Moving the mempool-tx-specific logic to the downloads modules seems suboptimal
+//   because we don't want to add to the pending_outputs struct outpoints that are available
+//   in the state, but we can't await state responses and then do that, so we'd have to make
+//   a request to the mempool after, which requires adding a handle to the mempool in downloads.
+
 /// The state of the mempool.
 ///
 /// Indicates whether it is enabled or disabled and, if enabled, contains

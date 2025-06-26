@@ -550,3 +550,14 @@ pub fn consensus_branch_id(
 
     Ok(())
 }
+
+/// Performs quick checks on a transaction.
+pub fn quick_checks(
+    tx: &Transaction,
+    height: Height,
+    network: &Network,
+) -> Result<(), TransactionError> {
+    has_inputs_and_outputs(tx)?;
+    has_enough_orchard_flags(tx)?;
+    consensus_branch_id(&tx, height, network)
+}
