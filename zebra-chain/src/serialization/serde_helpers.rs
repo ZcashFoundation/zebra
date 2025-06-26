@@ -69,7 +69,7 @@ impl From<Base> for pallas::Base {
     }
 }
 
-/// A wrapper around [`redjubjub::Signature`] to provide hexadecimal 
+/// A wrapper around [`redjubjub::Signature`] to provide hexadecimal
 /// serialization and deserialization
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct HexSignature<T: SigType>(pub redjubjub::Signature<T>);
@@ -110,7 +110,7 @@ impl<T: SigType> From<HexSignature<T>> for redjubjub::Signature<T> {
     }
 }
 
-/// A wrapper for a fixed-size byte array to provide hexadecimal 
+/// A wrapper for a fixed-size byte array to provide hexadecimal
 /// serialization and deserialization.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct HexBytes<const N: usize>(pub [u8; N]);
