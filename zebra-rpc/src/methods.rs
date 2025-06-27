@@ -89,6 +89,7 @@ use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, Trans
 
 use crate::{
     config,
+    methods::types::validate_address::validate_address,
     queue::Queue,
     server::{
         self,
@@ -2620,38 +2621,7 @@ where
     async fn validate_address(&self, raw_address: String) -> Result<ValidateAddressResponse> {
         let network = self.network.clone();
 
-        let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
-            return Ok(ValidateAddressResponse::invalid());
-        };
-
-        let address = match address.convert::<primitives::Address>() {
-            Ok(address) => address,
-            Err(err) => {
-                tracing::debug!(?err, "conversion error");
-                return Ok(ValidateAddressResponse::invalid());
-            }
-        };
-
-        // we want to match zcashd's behaviour
-        if !address.is_transparent() {
-            return Ok(ValidateAddressResponse::invalid());
-        }
-
-        if address.network() == network.kind() {
-            Ok(ValidateAddressResponse {
-                address: Some(raw_address),
-                is_valid: true,
-                is_script: Some(address.is_script_hash()),
-            })
-        } else {
-            tracing::info!(
-                ?network,
-                address_network = ?address.network(),
-                "invalid address in validateaddress RPC: Zebra's configured network must match address network"
-            );
-
-            Ok(ValidateAddressResponse::invalid())
-        }
+        validate_address(network, raw_address)
     }
 
     async fn z_validate_address(&self, raw_address: String) -> Result<ZValidateAddressResponse> {
