@@ -82,10 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let current_path = env!("CARGO_MANIFEST_DIR");
 
     // Define the paths to the Zebra RPC methods
-    let paths = vec![(
-        format!("{}/../zebra-rpc/src/methods.rs", current_path),
-        "Rpc",
-    )];
+    let paths = vec![(format!("{current_path}/../zebra-rpc/src/methods.rs"), "Rpc")];
 
     // Create an indexmap to store the method names and configuration
     let mut methods = IndexMap::new();
@@ -154,7 +151,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         );
 
                         // Add the method name and configuration to the indexmap
-                        methods.insert(format!("/{}", method_name), methods_config.clone());
+                        methods.insert(format!("/{method_name}"), methods_config.clone());
                     }
                 }
             }
@@ -185,8 +182,8 @@ info:
         - [The Zebra repository](https://github.com/ZcashFoundation/zebra)
         - [The latests API spec](https://github.com/ZcashFoundation/zebra/blob/main/openapi.yaml)
 servers:
-  - url: {}
-", SERVER)
+  - url: {SERVER}
+")
 }
 
 // Extract the method name from the trait item
@@ -295,7 +292,7 @@ fn get_params(method_doc: &[String]) -> Result<(String, String), Box<dyn Error>>
             if param_line.trim().starts_with("# [doc = \" -") {
                 // Extract parameter name and description
                 if let Some((name, description)) = extract_param_info(param_line) {
-                    param_descriptions.push(format!("- `{}` - {}", name, description));
+                    param_descriptions.push(format!("- `{name}` - {description}"));
 
                     // Extract parameter example if available
                     if let Some(example) = extract_param_example(param_line) {

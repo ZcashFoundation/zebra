@@ -43,7 +43,7 @@ where
 
                     thread_output
                 } else {
-                    panic!("thread unexpectedly exited with: {:?}", thread_output)
+                    panic!("thread unexpectedly exited with: {thread_output:?}")
                 }
             }
 

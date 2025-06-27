@@ -238,10 +238,7 @@ where
         }
 
         if keys.len() > MAX_KEYS_PER_REQUEST {
-            let msg = format!(
-                "must provide at most {} keys to register keys",
-                MAX_KEYS_PER_REQUEST
-            );
+            let msg = format!("must provide at most {MAX_KEYS_PER_REQUEST} keys to register keys");
             return Err(Status::invalid_argument(msg));
         }
 
@@ -283,10 +280,7 @@ where
         }
 
         if keys.len() > MAX_KEYS_PER_REQUEST {
-            let msg = format!(
-                "must provide at most {} keys to clear results",
-                MAX_KEYS_PER_REQUEST
-            );
+            let msg = format!("must provide at most {MAX_KEYS_PER_REQUEST} keys to clear results");
             return Err(Status::invalid_argument(msg));
         }
 
@@ -318,10 +312,7 @@ where
         }
 
         if keys.len() > MAX_KEYS_PER_REQUEST {
-            let msg = format!(
-                "must provide at most {} keys to delete",
-                MAX_KEYS_PER_REQUEST
-            );
+            let msg = format!("must provide at most {MAX_KEYS_PER_REQUEST} keys to delete");
             return Err(Status::invalid_argument(msg));
         }
 
@@ -353,10 +344,7 @@ where
         }
 
         if keys.len() > MAX_KEYS_PER_REQUEST {
-            let msg = format!(
-                "must provide at most {} keys to get results",
-                MAX_KEYS_PER_REQUEST
-            );
+            let msg = format!("must provide at most {MAX_KEYS_PER_REQUEST} keys to get results");
             return Err(Status::invalid_argument(msg));
         }
 

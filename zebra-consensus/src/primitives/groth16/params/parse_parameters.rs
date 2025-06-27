@@ -110,7 +110,7 @@ impl<R: Read> HashReader<R> {
 
         let mut s = String::new();
         for c in hash.as_bytes().iter() {
-            write!(&mut s, "{:02x}", c).expect("writing to a string never fails");
+            write!(&mut s, "{c:02x}").expect("writing to a string never fails");
         }
 
         s
@@ -181,10 +181,9 @@ fn verify_hash<R: io::Read, W: io::Write>(
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             format!(
-                "{} failed validation:\n\
-                 expected: {} hashing {} bytes,\n\
-                 actual:   {} hashing {} bytes from {:?}",
-                name, expected_hash, expected_bytes, hash, byte_count, params_source,
+                "{name} failed validation:\n\
+                 expected: {expected_hash} hashing {expected_bytes} bytes,\n\
+                 actual:   {hash} hashing {byte_count} bytes from {params_source:?}",
             ),
         ));
     }
