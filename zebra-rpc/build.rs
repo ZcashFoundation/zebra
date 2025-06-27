@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("failed to build external binary");
 
         fs::copy(
-            build_dir.join(format!("target/{}/zallet", profile)),
+            build_dir.join(format!("target/{profile}/zallet")),
             target_dir.join("zallet"),
         )
         .unwrap_or_else(|_| {

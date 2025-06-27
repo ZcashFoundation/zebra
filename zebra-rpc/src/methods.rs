@@ -1939,7 +1939,7 @@ where
         } else {
             Err(ErrorObject::owned(
                 server::error::LegacyCode::Misc.into(),
-                format!("invalid pool name, must be one of: {:?}", POOL_LIST).as_str(),
+                format!("invalid pool name, must be one of: {POOL_LIST:?}").as_str(),
                 None::<()>,
             ))
         }
@@ -2060,7 +2060,7 @@ where
                 Ok(_) => Ok("Zebra server stopping".to_string()),
                 Err(error) => Err(ErrorObject::owned(
                     ErrorCode::InternalError.code(),
-                    format!("Failed to shut down: {}", error).as_str(),
+                    format!("Failed to shut down: {error}").as_str(),
                     None::<()>,
                 )),
             }
@@ -4200,7 +4200,7 @@ pub mod arrayhex {
             type Value = [u8; N];
 
             fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                write!(formatter, "a hex string representing exactly {} bytes", N)
+                write!(formatter, "a hex string representing exactly {N} bytes")
             }
 
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -4209,7 +4209,7 @@ pub mod arrayhex {
             {
                 let vec = hex::decode(v).map_err(E::custom)?;
                 vec.clone().try_into().map_err(|_| {
-                    E::invalid_length(vec.len(), &format!("expected {} bytes", N).as_str())
+                    E::invalid_length(vec.len(), &format!("expected {N} bytes").as_str())
                 })
             }
         }
