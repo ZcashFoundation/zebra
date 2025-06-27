@@ -139,10 +139,15 @@ async fn scan_binary_starts() -> Result<()> {
 
 /// Test that the scanner can continue scanning where it was left when zebrad restarts.
 ///
-/// Needs a cache state close to the tip. A possible way to run it locally is:
+/// Needs a cache state close to the tip. This can be configured via the
+/// `state.cache_dir` config option or the `ZEBRA_STATE__CACHE_DIR` environment variable.
 ///
-/// export ZEBRA_CACHE_DIR="/path/to/zebra/state"
+/// A possible way to run it locally is:
+///
+/// ```sh
+/// export ZEBRA_STATE__CACHE_DIR="/path/to/zebra/state"
 /// cargo test scan_start_where_left -- --ignored --nocapture
+/// ```
 ///
 /// The test will run zebrad with a key to scan, scan the first few blocks after sapling and then stops.
 /// Then it will restart zebrad and check that it resumes scanning where it was left.
@@ -150,14 +155,25 @@ async fn scan_binary_starts() -> Result<()> {
 #[tokio::test]
 #[cfg(not(target_os = "windows"))]
 async fn scan_start_where_left() -> Result<()> {
+    use zebra_chain::common::default_cache_dir;
+    use zebrad::config::ZebradConfig;
     let _init_guard = zebra_test::init();
 
-    let Ok(zebrad_cache_dir) = std::env::var("ZEBRA_CACHE_DIR") else {
-        tracing::warn!("env var ZEBRA_CACHE_DIR is not set, skipping test");
-        return Ok(());
-    };
+    let zebrad_config = ZebradConfig::load(None).expect("config should load");
+    let zebrad_cache_dir = zebrad_config.state.cache_dir;
 
-    if !Path::new(&zebrad_cache_dir).join("state").is_dir() {
+    if zebrad_cache_dir == default_cache_dir() {
+        tracing::warn!(
+            "`state.cache_dir` is not configured, skipping test. \
+             Set the `ZEBRA_STATE__CACHE_DIR` env var to run this test."
+        );
+        return Ok(());
+    }
+
+    if !Path::new(&zebrad_cache_dir.to_str().unwrap())
+        .join("state")
+        .is_dir()
+    {
         tracing::warn!("cache dir does not contain cached state, skipping test");
         return Ok(());
     }
@@ -175,7 +191,7 @@ async fn scan_start_where_left() -> Result<()> {
     let rpc_listen_addr = "127.0.0.1:18232";
     let args = args![
         "--zebrad-cache-dir",
-        zebrad_cache_dir,
+        zebrad_cache_dir.to_str().unwrap(),
         "--scanning-cache-dir",
         scanning_cache_dir.to_str().unwrap(),
         "--sapling-keys-to-scan",
