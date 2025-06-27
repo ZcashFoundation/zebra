@@ -242,10 +242,10 @@ impl DiskFormatUpgrade for Upgrade {
         for height in start_height.0..=tip_height.0 {
             if let Some(block_info) = db.block_info_cf().zs_get(&Height(height)) {
                 if block_info == Default::default() {
-                    return Ok(Err(format!("zero block info for height: {}", height)));
+                    return Ok(Err(format!("zero block info for height: {height}")));
                 }
             } else {
-                return Ok(Err(format!("missing block info for height: {}", height)));
+                return Ok(Err(format!("missing block info for height: {height}")));
             }
         }
 
