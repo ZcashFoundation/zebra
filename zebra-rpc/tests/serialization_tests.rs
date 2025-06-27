@@ -749,6 +749,9 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         let value_balance_zat = bundle.value_balance_zat();
         Orchard::new(actions, value_balance, value_balance_zat)
     });
+    let binding_sig = tx.binding_sig();
+    let joinsplit_pub_key = tx.joinsplit_pub_key();
+    let joinsplit_sig = tx.joinsplit_sig();
     let value_balance = tx.value_balance();
     let value_balance_zat = tx.value_balance_zat();
     let size = tx.size();
@@ -773,6 +776,9 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         outputs,
         shielded_spends,
         shielded_outputs,
+        binding_sig,
+        joinsplit_pub_key,
+        joinsplit_sig,
         orchard,
         value_balance,
         value_balance_zat,
