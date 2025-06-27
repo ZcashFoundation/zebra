@@ -30,7 +30,6 @@ pub use constraint::AtLeastOne;
 pub use date_time::{DateTime32, Duration32};
 pub use error::SerializationError;
 pub use read_zcash::ReadZcashExt;
-pub use serde_helpers::{HexBytes, HexSignature};
 pub use write_zcash::WriteZcashExt;
 pub use zcash_deserialize::{
     zcash_deserialize_bytes_external_count, zcash_deserialize_external_count,

@@ -15,9 +15,8 @@ use vectors::{
 
 use zebra_rpc::client::{
     zebra_chain::{
-        primitives::{ed25519, redjubjub},
         sapling::NotSmallOrderValueCommitment,
-        serialization::{HexBytes, HexSignature, ZcashDeserialize, ZcashSerialize},
+        serialization::{ZcashDeserialize, ZcashSerialize},
         subtree::NoteCommitmentSubtreeIndex,
         transparent::{OutputIndex, Script},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty},
@@ -750,9 +749,9 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         let value_balance_zat = bundle.value_balance_zat();
         Orchard::new(actions, value_balance, value_balance_zat)
     });
-    let binding_sig = tx.binding_sig;
-    let joinsplit_pub_key = tx.joinsplit_pub_key;
-    let joinsplit_sig = tx.joinsplit_sig;
+    let binding_sig = tx.binding_sig();
+    let joinsplit_pub_key = tx.joinsplit_pub_key();
+    let joinsplit_sig = tx.joinsplit_sig();
     let value_balance = tx.value_balance();
     let value_balance_zat = tx.value_balance_zat();
     let size = tx.size();
@@ -1215,35 +1214,4 @@ fn test_generate() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(obj, new_obj);
 
     Ok(())
-}
-
-#[test]
-fn test_hex_field_serialization() {
-    let raw_binding_sig_bytes = [0x11; 64];
-    let raw_joinsplit_pub_key_bytes = [0x22; 32];
-    let raw_joinsplit_sig_bytes = [0x33; 64];
-
-    let binding_sig = Some(HexSignature::<redjubjub::Binding>::from(
-        redjubjub::Signature::from(raw_binding_sig_bytes),
-    ));
-    let joinsplit_pub_key = Some(HexBytes::<32>::from(ed25519::VerificationKeyBytes::from(
-        raw_joinsplit_pub_key_bytes,
-    )));
-    let joinsplit_sig = Some(HexBytes::<64>::from(ed25519::Signature::from(
-        raw_joinsplit_sig_bytes,
-    )));
-
-    let mut tx_obj = TransactionObject::default();
-    tx_obj.binding_sig = binding_sig;
-    tx_obj.joinsplit_pub_key = joinsplit_pub_key;
-    tx_obj.joinsplit_sig = joinsplit_sig;
-
-    let new_json = serde_json::to_string_pretty(&tx_obj).unwrap();
-    let expected_binding_sig_hex = "11".repeat(64);
-    let expected_pub_key_hex = "22".repeat(32);
-    let expected_sig_hex = "33".repeat(64);
-
-    assert!(new_json.contains(&expected_binding_sig_hex));
-    assert!(new_json.contains(&expected_pub_key_hex));
-    assert!(new_json.contains(&expected_sig_hex));
 }

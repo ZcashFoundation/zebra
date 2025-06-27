@@ -12,9 +12,8 @@ use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::Network,
-    primitives::redjubjub::Binding,
+    primitives::ed25519,
     sapling::NotSmallOrderValueCommitment,
-    serialization::{HexBytes, HexSignature},
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
@@ -188,16 +187,34 @@ pub struct TransactionObject {
     pub(crate) shielded_outputs: Vec<ShieldedOutput>,
 
     /// Sapling binding signature of the transaction.
-    #[serde(skip_serializing_if = "Option::is_none", with = "opthex", default)]
-    pub binding_sig: Option<HexSignature<Binding>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "opthex",
+        default,
+        rename = "bindingSig"
+    )]
+    #[getter(copy)]
+    pub(crate) binding_sig: Option<[u8; 64]>,
 
     /// JoinSplit public key of the transaction.
-    #[serde(skip_serializing_if = "Option::is_none", with = "opthex", default)]
-    pub joinsplit_pub_key: Option<HexBytes<32>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "opthex",
+        default,
+        rename = "joinSplitPubKey"
+    )]
+    #[getter(copy)]
+    pub(crate) joinsplit_pub_key: Option<[u8; 32]>,
 
     /// JoinSplit signature of the transaction.
-    #[serde(skip_serializing_if = "Option::is_none", with = "opthex", default)]
-    pub joinsplit_sig: Option<HexBytes<64>>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "opthex",
+        default,
+        rename = "joinSplitSig"
+    )]
+    #[getter(copy)]
+    pub(crate) joinsplit_sig: Option<[u8; ed25519::Signature::BYTE_SIZE]>,
 
     /// Orchard actions of the transaction.
     #[serde(rename = "orchard", skip_serializing_if = "Option::is_none")]
@@ -664,7 +681,17 @@ impl TransactionObject {
                 })
             },
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
-            joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| raw_key.into()),
+            joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
+                // Display order is reversed in the RPC output.
+                raw_key
+                    .as_ref()
+                    .iter()
+                    .rev()
+                    .copied()
+                    .collect::<Vec<_>>()
+                    .try_into()
+                    .unwrap()
+            }),
             joinsplit_sig: tx.joinsplit_sig().map(|raw_sig| raw_sig.into()),
             size: tx.as_bytes().len().try_into().ok(),
             time: block_time,
