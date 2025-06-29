@@ -96,7 +96,7 @@ fn main() -> Result<()> {
     let template: BlockTemplateResponse = serde_json::from_value(template)?;
 
     // generate proposal according to arguments
-    let proposal = proposal_block_from_template(&template, time_source)?;
+    let proposal = proposal_block_from_template(&template, time_source, &args.net)?;
     eprintln!("{proposal:#?}");
 
     let proposal = proposal
