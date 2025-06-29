@@ -2987,9 +2987,9 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let mut config = os_assigned_rpc_port_config(false, &net)?;
 
     config.state.ephemeral = false;
+    config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
 
     let test_dir = testdir()?.with_config(&mut config)?;
-
     let mut child = test_dir.spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     let indexer_listen_addr = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
