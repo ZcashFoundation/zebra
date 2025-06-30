@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use color_eyre::eyre::{Context, Result, eyre};
+use color_eyre::eyre::{eyre, Context, Result};
 use tower::BoxError;
 
 use zebra_chain::{
@@ -24,7 +24,7 @@ use zebra_test::args;
 
 use crate::common::{
     config::{os_assigned_rpc_port_config, read_listen_addr_from_logs, testdir},
-    launch::{LAUNCH_DELAY, ZebradTestDirExt},
+    launch::{ZebradTestDirExt, LAUNCH_DELAY},
 };
 
 /// Number of blocks that should be submitted before the test is considered successful.
