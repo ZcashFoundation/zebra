@@ -6939,8 +6939,3 @@ dependencies = [
  "zcash_address",
  "zcash_protocol",
 ]
-
-[[patch.unused]]
-name = "zcash_script"
-version = "0.3.1"
-source = "git+https://github.com/ZcashFoundation/zcash_script?branch=impl-display-derive-error#8b85850ae456690e324ea6e3eac30912e770e6e1"
