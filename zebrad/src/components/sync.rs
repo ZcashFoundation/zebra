@@ -222,8 +222,7 @@ const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 
 /// Sync configuration section.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Config {
     /// The number of parallel block download requests.
     ///
@@ -265,6 +264,47 @@ pub struct Config {
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Temp {
+            #[serde(alias = "max_concurrent_block_requests")]
+            download_concurrency_limit: Option<usize>,
+            #[serde(alias = "lookahead_limit")]
+            checkpoint_verify_concurrency_limit: Option<usize>,
+            full_verify_concurrency_limit: Option<usize>,
+            parallel_cpu_threads: Option<usize>,
+        }
+
+        let temp = Temp::deserialize(deserializer)?;
+        let defaults = Config::default();
+
+        let download_concurrency_limit = temp
+            .download_concurrency_limit
+            .unwrap_or(defaults.download_concurrency_limit);
+        let checkpoint_verify_concurrency_limit = temp
+            .checkpoint_verify_concurrency_limit
+            .unwrap_or(defaults.checkpoint_verify_concurrency_limit);
+        let full_verify_concurrency_limit = temp
+            .full_verify_concurrency_limit
+            .unwrap_or(defaults.full_verify_concurrency_limit);
+        let parallel_cpu_threads = temp
+            .parallel_cpu_threads
+            .unwrap_or(defaults.parallel_cpu_threads);
+
+        Ok(Config {
+            download_concurrency_limit,
+            checkpoint_verify_concurrency_limit,
+            full_verify_concurrency_limit,
+            parallel_cpu_threads,
+        })
+    }
 }
 
 impl Default for Config {
