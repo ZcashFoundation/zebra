@@ -580,6 +580,8 @@ impl TransactionObject {
             shielded_outputs: tx
                 .sapling_outputs()
                 .map(|output| {
+                    let mut cm_u: [u8; 32] = output.cm_u.to_bytes();
+                    cm_u.reverse();
                     let mut ephemeral_key: [u8; 32] = output.ephemeral_key.into();
                     ephemeral_key.reverse();
                     let enc_ciphertext: [u8; 580] = output.enc_ciphertext.into();
@@ -587,7 +589,7 @@ impl TransactionObject {
 
                     ShieldedOutput {
                         cv: output.cv,
-                        cm_u: output.cm_u.to_bytes(),
+                        cm_u,
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
