@@ -122,7 +122,7 @@ impl VerifyBlockError {
 ///
 /// See:
 /// <https://github.com/zcash/zcash/blob/bad7f7eadbbb3466bebe3354266c7f69f607fcfd/src/consensus/consensus.h#L30>
-pub const MAX_BLOCK_SIGOPS: u64 = 20_000;
+pub const MAX_BLOCK_SIGOPS: u32 = 20_000;
 
 impl<S, V> SemanticBlockVerifier<S, V>
 where
@@ -273,7 +273,7 @@ where
             // Get the transaction results back from the transaction verifier.
 
             // Sum up some block totals from the transaction responses.
-            let mut legacy_sigop_count = 0;
+            let mut sigops = 0;
             let mut block_miner_fees = Ok(Amount::zero());
 
             use futures::StreamExt;
@@ -288,7 +288,7 @@ where
                     "unexpected response from transaction verifier: {response:?}"
                 );
 
-                legacy_sigop_count += response.legacy_sigop_count();
+                sigops += response.sigops();
 
                 // Coinbase transactions consume the miner fee,
                 // so they don't add any value to the block's total miner fee.
@@ -299,11 +299,11 @@ where
 
             // Check the summed block totals
 
-            if legacy_sigop_count > MAX_BLOCK_SIGOPS {
+            if sigops > MAX_BLOCK_SIGOPS {
                 Err(BlockError::TooManyTransparentSignatureOperations {
                     height,
                     hash,
-                    legacy_sigop_count,
+                    sigops,
                 })?;
             }
 
