@@ -9,7 +9,7 @@
 use std::{cmp::min, sync::Arc, thread::available_parallelism, time::Duration};
 
 use color_eyre::Report;
-use futures::{StreamExt, stream::FuturesUnordered};
+use futures::{stream::FuturesUnordered, StreamExt};
 use thread_priority::{ThreadBuilder, ThreadPriority};
 use tokio::{select, sync::watch, task::JoinHandle, time::sleep};
 use tower::Service;
