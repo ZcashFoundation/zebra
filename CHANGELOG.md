@@ -63,37 +63,6 @@ This release has the following breaking changes:
 - fix(rpc): `z_gettreestate` optional fields ([#9451](https://github.com/ZcashFoundation/zebra/pull/9451))
 - fix: Pad script in V5 coinbase ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
 
-### Excluded *TODO:* put this in a PR comment, not the CHANGELOG
-
-- feat(ci): Enable stateful MIGs and fix release deployment skipping ([#9516](https://github.com/ZcashFoundation/zebra/pull/9516))
-- fix link in docs ([#9628](https://github.com/ZcashFoundation/zebra/pull/9628))
-- fix(ci): delete scan-test ([#9530](https://github.com/ZcashFoundation/zebra/pull/9530))
-- fix(rpc): Use `RawValue` instead of `Value` ([#9474](https://github.com/ZcashFoundation/zebra/pull/9474))
-- fix(rpc): reuse txid in getrawtransaction ([#9650](https://github.com/ZcashFoundation/zebra/pull/9650))
-- refactor(ci): Simplify cached disk selection logic ([#9545](https://github.com/ZcashFoundation/zebra/pull/9545))
-- refactor(test)!: standardize naming conventions across CI and Rust ([#9621](https://github.com/ZcashFoundation/zebra/pull/9621))
-- rpc: add deserialization tests ([#9550](https://github.com/ZcashFoundation/zebra/pull/9550))
-- tower-batch-control: Fix `Batch::new` compilation with `tokio_unstable` ([#9547](https://github.com/ZcashFoundation/zebra/pull/9547))
-- update README with Arch build patch ([#9513](https://github.com/ZcashFoundation/zebra/pull/9513))
-- change(deps): Allow Zebra crates to be compiled with alternative versions of their dependencies ([#9484](https://github.com/ZcashFoundation/zebra/pull/9484))
-- refactor(ci): Run standard GitHub runners in forks and clones ([#9362](https://github.com/ZcashFoundation/zebra/pull/9362))
-- feat(ci): Enable stateful MIGs and fix release deployment skipping ([#9516](https://github.com/ZcashFoundation/zebra/pull/9516))
-- fix(ci): handle tests that save state without requiring a cached disk ([#9582](https://github.com/ZcashFoundation/zebra/pull/9582))
-- fix(ci): mark `sync-to-checkpoint` test as long-running ([#9595](https://github.com/ZcashFoundation/zebra/pull/9595))
-- fix(ci): pin lightwalletd to `v0.4.17` to prevent CI failures ([#9575](https://github.com/ZcashFoundation/zebra/pull/9575))
-- fix(ci): prevent Google Cloud workflow failures on fork PRs ([#9573](https://github.com/ZcashFoundation/zebra/pull/9573))
-- refactor(ci): Run standard GitHub runners in forks and clones ([#9362](https://github.com/ZcashFoundation/zebra/pull/9362))
-- refactor(ci): simplify GCP integration with `create-with-container` ([#9479](https://github.com/ZcashFoundation/zebra/pull/9479))
--
-- Update `CONTRIBUTING.md` ([#9561](https://github.com/ZcashFoundation/zebra/pull/9561))
-- add(process): Add hotfix release checklist ([#9544](https://github.com/ZcashFoundation/zebra/pull/9544))
-- build(deps): bump the devops group across 1 directory with 6 updates ([#9476](https://github.com/ZcashFoundation/zebra/pull/9476))
-- build(deps): bump the ecc group across 1 directory with 3 updates ([#9577](https://github.com/ZcashFoundation/zebra/pull/9577))
-- build(deps): bump the prod group across 1 directory with 12 updates ([#9651](https://github.com/ZcashFoundation/zebra/pull/9651))
-- fix(ci): mark `sync-to-checkpoint` test as long-running ([#9595](https://github.com/ZcashFoundation/zebra/pull/9595))
-- fix(clippy, build): fix latest Clippy lints introduced in v1.87.0 and migrate from vergen to vergen\_git ([#9531](https://github.com/ZcashFoundation/zebra/pull/9531))
-- fix(rpc): Regroup imports ([#9521](https://github.com/ZcashFoundation/zebra/pull/9521))
-- refactor(ci): Run standard GitHub runners in forks and clones ([#9362](https://github.com/ZcashFoundation/zebra/pull/9362))
 
 ### Contributors
 
