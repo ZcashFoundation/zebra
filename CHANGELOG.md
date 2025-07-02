@@ -9,7 +9,97 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### Breaking Changes
 
-- The `debug_like_zcashd` config option for mining is no longer available.
+This release has the following breaking changes:
+- *TODO*: Check the `Removed` and `Deprecated` sections for any breaking changes
+- *TODO*: Add a short description of the user impact of each breaking change, and any actions users need to take
+
+- This release contains a major database upgrade. It will upgrade an existing
+  database, automatically moving it from the `v26/` folder to a new `v27/`
+  folder. However, downgrading is not possible. If you want to keep the
+  possibility of reverting Zebra in case of an unexpected issue, backup the
+  `v26/` folder _before_ running the upgraded Zebra. Note that the upgrade takes
+  around 4~6 hours to complete depending on the machine capabilites. Zebra will
+  operate normally during that time; the only difference is that some RPC
+  responses might return empty or not accurate data (pool values for arbitrary
+  block heights and received balances for addresses).
+- The `debug_like_zcashd` config option for mining is no longer available. It
+  was not enabled by default; if it is now present in the config file, Zebra
+  will panic. Simply delete the config option to fix.
+
+
+### Security
+
+- fix: Pad script in V5 coinbase ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
+
+### Added
+
+- Transaction and block deserialization ([#9522](https://github.com/ZcashFoundation/zebra/pull/9522))
+- tests(wallet): Add initial framework to test zallet RPC methods ([#9554](https://github.com/ZcashFoundation/zebra/pull/9554))
+- change(rpc): Update `getaddressbalance` RPC to return `received` field ([#9295](https://github.com/ZcashFoundation/zebra/pull/9295))
+- add(rpc): Add a `mempool_change()` RPC method for listening to changes in the mempool ([#9494](https://github.com/ZcashFoundation/zebra/pull/9494))
+- Add `raw_value` feature to serde\_json ([#9538](https://github.com/ZcashFoundation/zebra/pull/9538))
+- feat(config): Modify config to use IPv6 listen\_addr by default ([#9609](https://github.com/ZcashFoundation/zebra/pull/9609))
+- feat(rpc): Add `invalidateblock` and `reconsiderblock` RPC methods ([#9551](https://github.com/ZcashFoundation/zebra/pull/9551))
+- feat(rpc): Update `(z_)validateaddress` to validate TEX addresses ([#9483](https://github.com/ZcashFoundation/zebra/pull/9483))
+- feat(rpc): `addnode` method ([#9604](https://github.com/ZcashFoundation/zebra/pull/9604))
+- feat(rpc): add missing fields to getrawtransaction ([#9636](https://github.com/ZcashFoundation/zebra/pull/9636))
+- feat(rpc): add value pools to getblock ([#9432](https://github.com/ZcashFoundation/zebra/pull/9432))
+- add: Support configuring shielded addresses for mining ([#9574](https://github.com/ZcashFoundation/zebra/pull/9574))
+
+### Changed
+
+- rpc: API cleanup ([#9568](https://github.com/ZcashFoundation/zebra/pull/9568))
+- change(state): Upgrade db format to support new fields in RPC outputs ([#9539](https://github.com/ZcashFoundation/zebra/pull/9539))
+- change(rpc): Move GBT RPCs into the main RPC server ([#9459](https://github.com/ZcashFoundation/zebra/pull/9459))
+- change(consensus): Adds a `Nu6_1` variant to `NetworkUpgrade` ([#9526](https://github.com/ZcashFoundation/zebra/pull/9526))
+- Use zcash\_script’s new `Script` trait ([#8751](https://github.com/ZcashFoundation/zebra/pull/8751))
+- Remove `debug_like_zcashd` config option ([#9627](https://github.com/ZcashFoundation/zebra/pull/9627))
+
+### Fixed
+
+- fix(consensus): reuse sighasher when validating txs ([#9594](https://github.com/ZcashFoundation/zebra/pull/9594))
+- zebra-rpc: Correctly set optional `scriptPubKey` fields of transactions ([#9536](https://github.com/ZcashFoundation/zebra/pull/9536))
+- fix(network): Allow local outbound connections on Regtest ([#9580](https://github.com/ZcashFoundation/zebra/pull/9580))
+- fix(rpc): `z_gettreestate` optional fields ([#9451](https://github.com/ZcashFoundation/zebra/pull/9451))
+- fix: Pad script in V5 coinbase ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
+
+### Excluded *TODO:* put this in a PR comment, not the CHANGELOG
+
+- feat(ci): Enable stateful MIGs and fix release deployment skipping ([#9516](https://github.com/ZcashFoundation/zebra/pull/9516))
+- fix link in docs ([#9628](https://github.com/ZcashFoundation/zebra/pull/9628))
+- fix(ci): delete scan-test ([#9530](https://github.com/ZcashFoundation/zebra/pull/9530))
+- fix(rpc): Use `RawValue` instead of `Value` ([#9474](https://github.com/ZcashFoundation/zebra/pull/9474))
+- fix(rpc): reuse txid in getrawtransaction ([#9650](https://github.com/ZcashFoundation/zebra/pull/9650))
+- refactor(ci): Simplify cached disk selection logic ([#9545](https://github.com/ZcashFoundation/zebra/pull/9545))
+- refactor(test)!: standardize naming conventions across CI and Rust ([#9621](https://github.com/ZcashFoundation/zebra/pull/9621))
+- rpc: add deserialization tests ([#9550](https://github.com/ZcashFoundation/zebra/pull/9550))
+- tower-batch-control: Fix `Batch::new` compilation with `tokio_unstable` ([#9547](https://github.com/ZcashFoundation/zebra/pull/9547))
+- update README with Arch build patch ([#9513](https://github.com/ZcashFoundation/zebra/pull/9513))
+- change(deps): Allow Zebra crates to be compiled with alternative versions of their dependencies ([#9484](https://github.com/ZcashFoundation/zebra/pull/9484))
+- refactor(ci): Run standard GitHub runners in forks and clones ([#9362](https://github.com/ZcashFoundation/zebra/pull/9362))
+- feat(ci): Enable stateful MIGs and fix release deployment skipping ([#9516](https://github.com/ZcashFoundation/zebra/pull/9516))
+- fix(ci): handle tests that save state without requiring a cached disk ([#9582](https://github.com/ZcashFoundation/zebra/pull/9582))
+- fix(ci): mark `sync-to-checkpoint` test as long-running ([#9595](https://github.com/ZcashFoundation/zebra/pull/9595))
+- fix(ci): pin lightwalletd to `v0.4.17` to prevent CI failures ([#9575](https://github.com/ZcashFoundation/zebra/pull/9575))
+- fix(ci): prevent Google Cloud workflow failures on fork PRs ([#9573](https://github.com/ZcashFoundation/zebra/pull/9573))
+- refactor(ci): Run standard GitHub runners in forks and clones ([#9362](https://github.com/ZcashFoundation/zebra/pull/9362))
+- refactor(ci): simplify GCP integration with `create-with-container` ([#9479](https://github.com/ZcashFoundation/zebra/pull/9479))
+-
+- Update `CONTRIBUTING.md` ([#9561](https://github.com/ZcashFoundation/zebra/pull/9561))
+- add(process): Add hotfix release checklist ([#9544](https://github.com/ZcashFoundation/zebra/pull/9544))
+- build(deps): bump the devops group across 1 directory with 6 updates ([#9476](https://github.com/ZcashFoundation/zebra/pull/9476))
+- build(deps): bump the ecc group across 1 directory with 3 updates ([#9577](https://github.com/ZcashFoundation/zebra/pull/9577))
+- build(deps): bump the prod group across 1 directory with 12 updates ([#9651](https://github.com/ZcashFoundation/zebra/pull/9651))
+- fix(ci): mark `sync-to-checkpoint` test as long-running ([#9595](https://github.com/ZcashFoundation/zebra/pull/9595))
+- fix(clippy, build): fix latest Clippy lints introduced in v1.87.0 and migrate from vergen to vergen\_git ([#9531](https://github.com/ZcashFoundation/zebra/pull/9531))
+- fix(rpc): Regroup imports ([#9521](https://github.com/ZcashFoundation/zebra/pull/9521))
+- refactor(ci): Run standard GitHub runners in forks and clones ([#9362](https://github.com/ZcashFoundation/zebra/pull/9362))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@ala-mode, @arya2, @conradoplg, @dependabot[bot], @elijahhampton, @gustavovalverde, @idky137, @mpguerra, @oxarbitrage, @sellout, @str4d and @upbqdn
+
 
 ## [Zebra 2.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.3.0) - 2025-05-06
 
@@ -41,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Use read-only db instance when running `tip-height` or `copy-state` commands ([#9359](https://github.com/ZcashFoundation/zebra/pull/9359))
 - Refactor format upgrades into trait ([#9263](https://github.com/ZcashFoundation/zebra/pull/9263))
 - Remove the `getblocktemplate-rpcs` Cargo feature ([#9401](https://github.com/ZcashFoundation/zebra/pull/9401))
-- Improve cache dir and database startup panics ([#9441](https://github.com/ZcashFoundation/zebra/pull/9441)) 
+- Improve cache dir and database startup panics ([#9441](https://github.com/ZcashFoundation/zebra/pull/9441))
 - Added `txid` field to `TransactionObject` ([#9617](https://github.com/ZcashFoundation/zebra/issues/9617))
 ### Fixed
 
@@ -53,7 +143,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ### RPCs
 
-- Add `time` and `size` fields to `TransactionObject` ([#9458](https://github.com/ZcashFoundation/zebra/pull/9458)) 
+- Add `time` and `size` fields to `TransactionObject` ([#9458](https://github.com/ZcashFoundation/zebra/pull/9458))
 - Add inbound peers to `getpeerinfo` response ([#9214](https://github.com/ZcashFoundation/zebra/pull/9214))
 - Extend `getinfo` ([#9261](https://github.com/ZcashFoundation/zebra/pull/9261))
 - Add fields to `getblockchaininfo` RPC output ([#9215](https://github.com/ZcashFoundation/zebra/pull/9215))
@@ -124,10 +214,10 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 
 ## [Zebra 2.1.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.1.0) - 2024-12-06
 
-This release adds a check to verify that V5 transactions in the mempool have the correct consensus branch ID; 
+This release adds a check to verify that V5 transactions in the mempool have the correct consensus branch ID;
 Zebra would previously accept those and return a transaction ID (indicating success) even though they would
 be eventually rejected by the block consensus checks. Similarly, Zebra also now returns an error when trying
-to submit transactions that would eventually fail some consensus checks (e.g. double spends) but would also 
+to submit transactions that would eventually fail some consensus checks (e.g. double spends) but would also
 return a transaction ID indicating success.  The release also bumps
 Zebra's initial minimum protocol version such that this release of Zebra will always reject connections with peers advertising
 a network protocol version below 170,120 on Mainnet and 170,110 on Testnet instead of accepting those connections until Zebra's

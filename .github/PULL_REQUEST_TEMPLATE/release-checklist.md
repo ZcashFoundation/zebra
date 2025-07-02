@@ -78,8 +78,6 @@ Choose a release level for `zebrad`. Release levels are based on user-visible ch
 - significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
 - otherwise, it is a `patch` release
 
-Zebra's Rust API doesn't have any support or stability guarantees, so we keep all the `zebra-*` and `tower-*` crates on a beta `pre-release` version.
-
 ### Update Crate Versions
 
 If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
