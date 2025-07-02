@@ -526,7 +526,7 @@ impl ZebraDb {
                     // Address balances are updated with the `fetch_add_balance_and_received` merge operator, so
                     // the values must represent the changes to the balance, not the final balance.
                     let addr_loc = self.address_balance_location(&address)?.into_new_change();
-                    Some((address.clone(), addr_loc))
+                    Some((address, addr_loc))
                 })
                 .collect();
 
