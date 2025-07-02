@@ -505,7 +505,7 @@ pub trait Rpc {
     /// tags: mining
     #[method(name = "getnetworksolps")]
     async fn get_network_sol_ps(&self, num_blocks: Option<i32>, height: Option<i32>)
-    -> Result<u64>;
+        -> Result<u64>;
 
     /// Returns the estimated network solutions per second based on the last `num_blocks` before
     /// `height`.
@@ -1842,8 +1842,7 @@ where
         let time = u32::try_from(block.header.time.timestamp())
             .expect("Timestamps of valid blocks always fit into u32.");
 
-        let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
-        let sapling = if network.is_nu_active(sapling_nu, height.into()) {
+        let sapling = if network.is_nu_active(consensus::NetworkUpgrade::Sapling, height.into()) {
             match read_state
                 .ready()
                 .and_then(|service| {
@@ -1859,8 +1858,7 @@ where
             None
         };
 
-        let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
-        let orchard = if network.is_nu_active(orchard_nu, height.into()) {
+        let orchard = if network.is_nu_active(consensus::NetworkUpgrade::Nu5, height.into()) {
             match read_state
                 .ready()
                 .and_then(|service| {
