@@ -11,6 +11,7 @@ use crate::{
 #[cfg(test)]
 use proptest::prelude::*;
 use zcash_address::{ToAddress, ZcashAddress};
+use zcash_transparent::address::TransparentAddress;
 
 /// Transparent Zcash Addresses
 ///
@@ -71,6 +72,20 @@ impl From<Address> for ZcashAddress {
                 network_kind,
                 validating_key_hash,
             } => ZcashAddress::from_tex(network_kind.into(), validating_key_hash),
+        }
+    }
+}
+
+impl TryFrom<Address> for TransparentAddress {
+    type Error = &'static str;
+
+    fn try_from(taddr: Address) -> Result<Self, Self::Error> {
+        match taddr {
+            Address::PayToScriptHash { script_hash, .. } => Ok(Self::ScriptHash(script_hash)),
+            Address::PayToPublicKeyHash { pub_key_hash, .. } => {
+                Ok(Self::PublicKeyHash(pub_key_hash))
+            }
+            Address::Tex { .. } => Err("TransparentAddress can't be a Tex address"),
         }
     }
 }
