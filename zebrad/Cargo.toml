@@ -254,6 +254,9 @@ jsonrpsee-types = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 insta = { workspace = true, features = ["json"] }
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper-util = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }
