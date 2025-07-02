@@ -1,10 +1,17 @@
 //! The `DefaultRoots` type is part of the `getblocktemplate` RPC method output.
 
+use std::iter;
+
 use derive_getters::Getters;
 use derive_new::new;
-use zebra_chain::block::{
-    merkle::{self, AuthDataRoot},
-    ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash,
+use zebra_chain::{
+    amount::NegativeOrZero,
+    block::{
+        merkle::{self, AuthDataRoot, AUTH_DIGEST_PLACEHOLDER},
+        ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
+    },
+    parameters::{Network, NetworkUpgrade},
+    transaction::VerifiedUnminedTx,
 };
 
 /// The block header roots for the transactions in a block template.
@@ -41,4 +48,51 @@ pub struct DefaultRoots {
     #[serde(with = "hex")]
     #[getter(copy)]
     pub(crate) block_commitments_hash: ChainHistoryBlockTxAuthCommitmentHash,
+}
+
+impl DefaultRoots {
+    /// Creates a new [`DefaultRoots`] instance from the given coinbase tx template.
+    pub fn from_coinbase(
+        net: &Network,
+        height: Height,
+        coinbase: &TransactionTemplate<NegativeOrZero>,
+        chain_history_root: Option<ChainHistoryMmrRootHash>,
+        mempool_txs: &[VerifiedUnminedTx],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let chain_history_root = chain_history_root
+            .or_else(|| {
+                (NetworkUpgrade::Heartwood.activation_height(net) == Some(height))
+                    .then_some([0; 32].into())
+            })
+            .ok_or("chain history root is required")?;
+
+        // TODO:
+        // Computing `auth_data_root` and `merkle_root` gets more expensive as `mempool_txs` grows.
+        // It might be worth doing it in rayon.
+
+        let auth_data_root = iter::once(coinbase.auth_digest)
+            .chain(mempool_txs.iter().map(|tx| {
+                tx.transaction
+                    .id
+                    .auth_digest()
+                    .unwrap_or(AUTH_DIGEST_PLACEHOLDER)
+            }))
+            .collect();
+
+        Ok(Self {
+            merkle_root: iter::once(coinbase.hash)
+                .chain(mempool_txs.iter().map(|tx| tx.transaction.id.mined_id()))
+                .collect(),
+            chain_history_root,
+            auth_data_root,
+            block_commitments_hash: if chain_history_root == [0; 32].into() {
+                [0; 32].into()
+            } else {
+                ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
+                    &chain_history_root,
+                    &auth_data_root,
+                )
+            },
+        })
+    }
 }
