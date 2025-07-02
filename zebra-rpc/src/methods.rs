@@ -59,6 +59,7 @@ use tracing::Instrument;
 use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_primitives::consensus::Parameters;
 
+use zcash_protocol::consensus;
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
