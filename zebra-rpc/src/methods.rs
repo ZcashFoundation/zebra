@@ -59,6 +59,7 @@ use tracing::Instrument;
 use zcash_address::{unified::Encoding, TryFromAddress};
 use zcash_primitives::consensus::Parameters;
 
+use zcash_protocol::consensus;
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
@@ -504,7 +505,7 @@ pub trait Rpc {
     /// tags: mining
     #[method(name = "getnetworksolps")]
     async fn get_network_sol_ps(&self, num_blocks: Option<i32>, height: Option<i32>)
-        -> Result<u64>;
+    -> Result<u64>;
 
     /// Returns the estimated network solutions per second based on the last `num_blocks` before
     /// `height`.

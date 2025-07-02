@@ -5106,20 +5106,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tonic-build"
-version = "0.13.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eac6f67be712d12f0b41328db3137e0d0757645d8904b4cb7d51cd9c2279e847"
-dependencies = [
- "prettyplease",
- "proc-macro2",
- "prost-build",
- "prost-types",
- "quote",
- "syn 2.0.103",
-]
-
-[[package]]
 name = "tonic-reflection"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6199,8 +6185,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c020e943fc2df6303d22b2bcbb3c0fd25f9d2419cbec508d13e66dcd77e354a6"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "bech32",
  "bs58",
@@ -6213,8 +6198,7 @@ dependencies = [
 [[package]]
 name = "zcash_client_backend"
 version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a592f64533251e0e65526b2f456c1f113cd2840492be532858c1a5b501238760"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -6273,8 +6257,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20664d96a0e4de98f41b6b7a3b40a527e5f5428ca7f34758a084e60778d3b824"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -6313,8 +6296,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "781008a606498a54871ceb5be0f6a597cf69bb2816f66dbab31d161cd3742050"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6355,8 +6337,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "655f14667be58b93c4105cddb1b39a9ab94c862c0fff83b42fba55e85ca9159d"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6379,8 +6360,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0525851dd97796f47537e9b15e504888cd214b2c6d021731fdfa0e7cb941a21e"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "core2",
  "document-features",
@@ -6418,8 +6398,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b1302cf726e88326c2c6e9bbd2634064bb344df7740e0b6bacf2245abd1eebe"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6953,8 +6932,7 @@ dependencies = [
 [[package]]
 name = "zip321"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41f92f290c86ae1bdcdc4c41ce67fdabf8cd2a75bc89be8235cd5b1354efae06"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "base64 0.22.1",
  "nom",
