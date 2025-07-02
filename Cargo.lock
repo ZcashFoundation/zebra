@@ -6505,8 +6505,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c984ae01367a4a3d20e9d34ae4e4cc0dca004b22d9a10a51eec43f43934612e"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8086b5583be0588b5d188bb548276f580aedae09"
 dependencies = [
  "bech32",
  "bs58",
@@ -6540,8 +6539,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e401b87caabf016a414786749c9386e9ae934a4c40abaaeb901a338b7d3ef5fd"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8086b5583be0588b5d188bb548276f580aedae09"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -6553,6 +6551,7 @@ dependencies = [
  "memuse",
  "nonempty",
  "rand_core 0.6.4",
+ "sapling-crypto",
  "secrecy",
  "subtle",
  "tracing",
@@ -6579,8 +6578,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a0c26140f2e6b760dcf052d22bd01f1a8773cdefb650ff5829430798a21b85b"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8086b5583be0588b5d188bb548276f580aedae09"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6621,8 +6619,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f90d9521161f7308c2fe6bddf771947f1a0fcd01b9e8a3b624c30a5661ad945"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8086b5583be0588b5d188bb548276f580aedae09"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6645,8 +6642,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9cfe9e3fb08e6851efe3d0ced457e4cb2c305daa928f64cb0d70c040f8f8336"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8086b5583be0588b5d188bb548276f580aedae09"
 dependencies = [
  "core2",
  "document-features",
@@ -6684,8 +6680,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a7c162a8aa6f708e842503ed5157032465dadfb1d7f63adf9db2d45213a0b11"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8086b5583be0588b5d188bb548276f580aedae09"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6912,6 +6907,7 @@ dependencies = [
  "zcash_address",
  "zcash_keys",
  "zcash_primitives",
+ "zcash_proofs",
  "zcash_protocol",
  "zcash_transparent",
  "zebra-chain",
