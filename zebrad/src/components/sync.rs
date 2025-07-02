@@ -274,10 +274,10 @@ impl<'de> Deserialize<'de> for Config {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Temp {
-            #[serde(alias = "max_concurrent_block_requests")]
             download_concurrency_limit: Option<usize>,
-            #[serde(alias = "lookahead_limit")]
+            max_concurrent_block_requests: Option<usize>,
             checkpoint_verify_concurrency_limit: Option<usize>,
+            lookahead_limit: Option<usize>,
             full_verify_concurrency_limit: Option<usize>,
             parallel_cpu_threads: Option<usize>,
         }
@@ -287,9 +287,11 @@ impl<'de> Deserialize<'de> for Config {
 
         let download_concurrency_limit = temp
             .download_concurrency_limit
+            .or(temp.max_concurrent_block_requests)
             .unwrap_or(defaults.download_concurrency_limit);
         let checkpoint_verify_concurrency_limit = temp
             .checkpoint_verify_concurrency_limit
+            .or(temp.lookahead_limit)
             .unwrap_or(defaults.checkpoint_verify_concurrency_limit);
         let full_verify_concurrency_limit = temp
             .full_verify_concurrency_limit
