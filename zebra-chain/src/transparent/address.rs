@@ -26,7 +26,7 @@ use zcash_transparent::address::TransparentAddress;
 /// <https://zips.z.cash/protocol/protocol.pdf#transparentaddrencoding>
 // TODO Remove this type and move to `TransparentAddress` in `zcash-transparent`.
 #[derive(
-    Clone, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
+    Clone, Copy, Eq, PartialEq, Hash, serde_with::SerializeDisplay, serde_with::DeserializeFromStr,
 )]
 pub enum Address {
     /// P2SH (Pay to Script Hash) addresses

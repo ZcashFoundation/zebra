@@ -835,7 +835,7 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .map(|utxo| {
             // Address extractability was checked manually
-            let address = utxo.address().clone();
+            let address = utxo.address();
             // Hash extractability was checked in other test
             let txid = utxo.txid();
             let output_index = utxo.output_index().index();
@@ -846,7 +846,7 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
             let height = utxo.height();
 
             Utxo::new(
-                address,
+                *address,
                 txid,
                 OutputIndex::from_index(output_index),
                 script,
@@ -1151,9 +1151,9 @@ fn test_get_block_subsidy() -> Result<(), Box<dyn std::error::Error>> {
             let specification = stream.specification().clone();
             let value = stream.value();
             let value_zat = stream.value_zat();
-            let address = stream.address().clone();
+            let address = stream.address();
 
-            FundingStream::new(recipient, specification, value, value_zat, address)
+            FundingStream::new(recipient, specification, value, value_zat, *address)
         })
         .collect::<Vec<_>>();
     let lockbox_streams = obj.lockbox_streams().clone();
