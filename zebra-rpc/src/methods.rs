@@ -4058,7 +4058,7 @@ impl Utxo {
         Height,
     ) {
         (
-            self.address.clone(),
+            self.address,
             self.txid,
             self.output_index,
             self.script.clone(),
