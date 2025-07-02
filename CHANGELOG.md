@@ -17,8 +17,8 @@ This release has the following breaking changes:
   database, automatically moving it from the `v26/` folder to a new `v27/`
   folder. However, downgrading is not possible. If you want to keep the
   possibility of reverting Zebra in case of an unexpected issue, backup the
-  `v26/` folder _before_ running the upgraded Zebra. Note that the upgrade takes
-  around 4~6 hours to complete depending on the machine capabilites. Zebra will
+  `v26/` folder _before_ running the upgraded Zebra. Note that the upgrade is slow
+  and could take several hours or more to complete on smaller machines. Zebra will
   operate normally during that time; the only difference is that some RPC
   responses might return empty or not accurate data (pool values for arbitrary
   block heights and received balances for addresses).
@@ -33,22 +33,21 @@ This release has the following breaking changes:
 
 ### Added
 
-- Transaction and block deserialization ([#9522](https://github.com/ZcashFoundation/zebra/pull/9522))
-- tests(wallet): Add initial framework to test zallet RPC methods ([#9554](https://github.com/ZcashFoundation/zebra/pull/9554))
-- change(rpc): Update `getaddressbalance` RPC to return `received` field ([#9295](https://github.com/ZcashFoundation/zebra/pull/9295))
-- add(rpc): Add a `mempool_change()` RPC method for listening to changes in the mempool ([#9494](https://github.com/ZcashFoundation/zebra/pull/9494))
+- Implemented deserialization for Zebra's block and transaction types ([#9522](https://github.com/ZcashFoundation/zebra/pull/9522))
+- Update `getaddressbalance` RPC to return `received` field ([#9295](https://github.com/ZcashFoundation/zebra/pull/9295), [#9539](https://github.com/ZcashFoundation/zebra/pull/9539))
+- Added a `mempool_change()` gRPC method for listening to changes in the mempool ([#9494](https://github.com/ZcashFoundation/zebra/pull/9494))
 - Add `raw_value` feature to serde\_json ([#9538](https://github.com/ZcashFoundation/zebra/pull/9538))
-- feat(config): Modify config to use IPv6 listen\_addr by default ([#9609](https://github.com/ZcashFoundation/zebra/pull/9609))
+- Modify `zebra_network::Config` type to use IPv6 listen\_addr by default ([#9609](https://github.com/ZcashFoundation/zebra/pull/9609))
 - feat(rpc): Add `invalidateblock` and `reconsiderblock` RPC methods ([#9551](https://github.com/ZcashFoundation/zebra/pull/9551))
 - feat(rpc): Update `(z_)validateaddress` to validate TEX addresses ([#9483](https://github.com/ZcashFoundation/zebra/pull/9483))
-- feat(rpc): `addnode` method ([#9604](https://github.com/ZcashFoundation/zebra/pull/9604))
+- Added a `addnode` RPC method ([#9604](https://github.com/ZcashFoundation/zebra/pull/9604))
 - feat(rpc): add missing fields to getrawtransaction ([#9636](https://github.com/ZcashFoundation/zebra/pull/9636))
-- feat(rpc): add value pools to getblock ([#9432](https://github.com/ZcashFoundation/zebra/pull/9432))
+- Added value pool balances to `getblock` RPC output ([#9432](https://github.com/ZcashFoundation/zebra/pull/9432), [#9539](https://github.com/ZcashFoundation/zebra/pull/9539))
 - add: Support configuring shielded addresses for mining ([#9574](https://github.com/ZcashFoundation/zebra/pull/9574))
 
 ### Changed
 
-- rpc: API cleanup ([#9568](https://github.com/ZcashFoundation/zebra/pull/9568))
+- Renamed and moved exports in `zebra-rpc` ([#9568](https://github.com/ZcashFoundation/zebra/pull/9568))
 - change(state): Upgrade db format to support new fields in RPC outputs ([#9539](https://github.com/ZcashFoundation/zebra/pull/9539))
 - change(rpc): Move GBT RPCs into the main RPC server ([#9459](https://github.com/ZcashFoundation/zebra/pull/9459))
 - change(consensus): Adds a `Nu6_1` variant to `NetworkUpgrade` ([#9526](https://github.com/ZcashFoundation/zebra/pull/9526))
@@ -57,17 +56,17 @@ This release has the following breaking changes:
 
 ### Fixed
 
-- fix(consensus): reuse sighasher when validating txs ([#9594](https://github.com/ZcashFoundation/zebra/pull/9594))
-- zebra-rpc: Correctly set optional `scriptPubKey` fields of transactions ([#9536](https://github.com/ZcashFoundation/zebra/pull/9536))
+- fix(consensus): Avoid repeatedly converting transactions to librustzcash types when computing sighashes ([#9594](https://github.com/ZcashFoundation/zebra/pull/9594))
+- Correctly set optional `scriptPubKey` fields of transactions in `getblock` and `getrawtransaction` RPC outputs ([#9536](https://github.com/ZcashFoundation/zebra/pull/9536))
 - fix(network): Allow local outbound connections on Regtest ([#9580](https://github.com/ZcashFoundation/zebra/pull/9580))
-- fix(rpc): `z_gettreestate` optional fields ([#9451](https://github.com/ZcashFoundation/zebra/pull/9451))
+- Allow for parsing `z_gettreestate` output type where optional fields are omitted ([#9451](https://github.com/ZcashFoundation/zebra/pull/9451))
 - fix: Pad script in V5 coinbase ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
 
 
 ### Contributors
 
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
-@ala-mode, @arya2, @conradoplg, @dependabot[bot], @elijahhampton, @gustavovalverde, @idky137, @mpguerra, @oxarbitrage, @sellout, @str4d and @upbqdn
+@ala-mode, @arya2, @conradoplg, @elijahhampton, @gustavovalverde, @idky137, @mpguerra, @oxarbitrage, @sellout, @str4d and @upbqdn
 
 
 ## [Zebra 2.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.3.0) - 2025-05-06
