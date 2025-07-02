@@ -1,6 +1,7 @@
 //! Tests for ZIP-317 transaction selection for block template production
 
 use zcash_keys::address::Address;
+use zcash_transparent::address::TransparentAddress;
 
 use zcash_transparent::address::TransparentAddress;
 use zebra_chain::{block::Height, parameters::Network, transaction, transparent::OutPoint};
