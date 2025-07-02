@@ -16,10 +16,9 @@ use rand::{
 use zcash_keys::address::Address;
 
 use zebra_chain::{
-    amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, VerifiedUnminedTx},
+    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
@@ -31,8 +30,6 @@ mod tests;
 
 #[cfg(test)]
 use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
-
-use super::standard_coinbase_outputs;
 
 /// Used in the return type of [`select_mempool_transactions()`] for test compilations.
 #[cfg(test)]
@@ -55,19 +52,16 @@ type SelectedMempoolTx = VerifiedUnminedTx;
 pub fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
-    miner_address: &Address,
+    miner_addr: &Address,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
-    extra_coinbase_data: Vec<u8>,
+    miner_data: Vec<u8>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
-    let fake_coinbase_tx = fake_coinbase_transaction(
-        network,
-        next_block_height,
-        miner_address,
-        extra_coinbase_data,
-    );
+    let fake_coinbase_tx =
+        TransactionTemplate::new_coinbase(network, next_block_height, miner_addr, miner_data, &[])
+            .expect("valid coinbase transaction template");
 
     let tx_dependencies = mempool_tx_deps.dependencies();
     let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
