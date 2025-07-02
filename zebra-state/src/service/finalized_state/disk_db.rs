@@ -1589,7 +1589,7 @@ impl DiskDb {
                     "No space left on device creating {cache_dir:?}. \
                      Hint: check if the disk is full."
                 ),
-                _ => panic!("Could not create cache dir {:?}: {}", cache_dir, e),
+                _ => panic!("Could not create cache dir {cache_dir:?}: {e}"),
             }
         }
     }

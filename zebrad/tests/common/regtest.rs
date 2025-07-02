@@ -113,7 +113,7 @@ impl MiningRpcMethods for RpcRequestClient {
 
     async fn get_block(&self, height: i32) -> Result<Option<Arc<Block>>, BoxError> {
         match self
-            .json_result_from_call("getblock", format!(r#"["{}", 0]"#, height))
+            .json_result_from_call("getblock", format!(r#"["{height}", 0]"#))
             .await
         {
             Ok(HexData(raw_block)) => {

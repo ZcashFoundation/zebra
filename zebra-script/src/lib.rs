@@ -42,7 +42,7 @@ impl fmt::Display for Error {
             Error::TxCoinbase => {
                 "tx is a coinbase transaction and should not be verified".to_owned()
             }
-            Error::Unknown(e) => format!("unknown error from zcash_script: {:?}", e),
+            Error::Unknown(e) => format!("unknown error from zcash_script: {e:?}"),
             Error::TxInvalid(e) => format!("tx is invalid: {e}"),
         })
     }

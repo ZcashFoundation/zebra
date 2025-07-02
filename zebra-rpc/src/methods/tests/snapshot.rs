@@ -206,8 +206,8 @@ async fn test_rpc_response_data_for_network(network: &Network) {
     let block_data = network.blockchain_map();
 
     let blocks: Vec<Arc<Block>> = block_data
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let mut mempool: MockService<_, _, _, zebra_node_services::BoxError> =
