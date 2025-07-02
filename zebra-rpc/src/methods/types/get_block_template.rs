@@ -822,17 +822,6 @@ pub fn new_coinbase_with_roots(
     Ok((tx, roots))
 }
 
-/// Returns the total miner fee for `mempool_txs`.
-pub fn calculate_miner_fee(mempool_txs: &[VerifiedUnminedTx]) -> Amount<NonNegative> {
-    let miner_fee: amount::Result<Amount<NonNegative>> =
-        mempool_txs.iter().map(|tx| tx.miner_fee).sum();
-
-    miner_fee.expect(
-        "invalid selected transactions: \
-         fees in a valid block can not be more than MAX_MONEY",
-    )
-}
-
 /// Returns the standard funding stream and miner reward transparent output scripts
 /// for `network`, `height` and `miner_fee`.
 ///
