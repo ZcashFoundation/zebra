@@ -11,7 +11,10 @@ use hex::ToHex;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
-    parameters::Network,
+    parameters::{
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
+        Network,
+    },
     primitives::ed25519,
     sapling::NotSmallOrderValueCommitment,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
