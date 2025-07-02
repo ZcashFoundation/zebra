@@ -172,6 +172,16 @@ zcash_script = "0.4.2"
 config = { version = "0.15.14", features = ["toml"] }
 which = "8.0.0"
 
+[patch.crates-io]
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
