@@ -6636,6 +6636,7 @@ dependencies = [
  "zcash_address",
  "zcash_keys",
  "zcash_primitives",
+ "zcash_proofs",
  "zcash_protocol",
  "zcash_transparent",
  "zebra-chain",
