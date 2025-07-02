@@ -7,8 +7,15 @@ use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
-
 use serde_with::serde_as;
+use rand::rngs::OsRng;
+
+use zcash_keys::address::Address;
+use zcash_primitives::transaction::{
+    builder::{BuildConfig, Builder},
+    fees::fixed::FeeRule,
+};
+use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
@@ -20,10 +27,13 @@ use zebra_chain::{
     primitives::ed25519,
     sapling::NotSmallOrderValueCommitment,
     serialization::ZcashSerialize,
-    transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
+    transaction::{self, SerializedTransaction, Transaction, VerifiedUnminedTx},
     transparent::Script,
 };
-use zebra_consensus::groth16::Description;
+use zebra_consensus::{
+    funding_stream_address,
+    groth16::{self, Description as _},
+};
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
@@ -114,37 +124,83 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 }
 
 impl TransactionTemplate<NegativeOrZero> {
-    /// Convert from a generated coinbase transaction into a coinbase transaction template.
-    ///
-    /// `miner_fee` is the total miner fees for the block, excluding newly created block rewards.
-    //
-    // TODO: use a different type for generated coinbase transactions?
-    pub fn from_coinbase(tx: &UnminedTx, miner_fee: Amount<NonNegative>) -> Self {
-        assert!(
-            tx.transaction.is_coinbase(),
-            "invalid generated coinbase transaction: \
-             must have exactly one input, which must be a coinbase input",
+    /// Constructs a transaction template containing a coinbase transaction.
+    pub fn new_coinbase(
+        net: &Network,
+        height: Height,
+        miner_addr: &Address,
+        miner_data: Vec<u8>,
+        mempool_txs: &[VerifiedUnminedTx],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let block_subsidy = block_subsidy(height, net)?;
+
+        let miner_fee = mempool_txs
+            .iter()
+            .map(|tx| tx.miner_fee)
+            .sum::<amount::Result<Amount<NonNegative>>>()?;
+
+        let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fee;
+        let miner_reward = Zatoshis::try_from(u64::from(miner_reward?))?;
+
+        let miner_addr = miner_addr
+            // TODO Support shielded addresses.
+            .to_transparent_address()
+            .ok_or("address must have a transparent component")?;
+
+        let mut coinbase_builder = Builder::new(
+            net,
+            BlockHeight::from(height.0),
+            BuildConfig::Coinbase {
+                miner_data,
+                sequence: 0,
+            },
         );
 
-        let miner_fee = (-miner_fee)
-            .constrain()
-            .expect("negating a NonNegative amount always results in a valid NegativeOrZero");
+        coinbase_builder.add_transparent_output(&miner_addr, miner_reward)?;
 
-        Self {
-            data: tx.transaction.as_ref().into(),
-            hash: tx.id.mined_id(),
-            auth_digest: tx.id.auth_digest().unwrap_or(AUTH_DIGEST_PLACEHOLDER),
+        let mut funding_streams = funding_stream_values(height, net, block_subsidy)?
+            .into_iter()
+            .filter_map(|(receiver, amount)| {
+                Some((
+                    Zatoshis::try_from(u64::from(amount)).ok()?,
+                    (*funding_stream_address(height, net, receiver)?)
+                        .try_into()
+                        .ok()?,
+                ))
+            })
+            .collect::<Vec<_>>();
 
+        funding_streams.sort();
+
+        for (fs_amount, fs_addr) in funding_streams {
+            coinbase_builder.add_transparent_output(&fs_addr, fs_amount)?;
+        }
+
+        let build_result = coinbase_builder.build(
+            &Default::default(),
+            &[],
+            &[],
+            OsRng,
+            &*groth16::SAPLING,
+            &*groth16::SAPLING,
+            &FeeRule::non_standard(Zatoshis::ZERO),
+        )?;
+
+        let tx = build_result.transaction();
+        let mut data = vec![];
+        tx.write(&mut data)?;
+
+        Ok(Self {
+            data: data.into(),
+            hash: tx.txid().as_ref().into(),
+            auth_digest: tx.auth_commitment().as_ref().try_into()?,
             // Always empty, coinbase transactions never have inputs.
             depends: Vec::new(),
-
-            fee: miner_fee,
-
-            sigops: tx.sigops().expect("sigops count should be valid"),
-
+            fee: (-miner_fee).constrain()?,
+            sigops: tx.sigops()?,
             // Zcash requires a coinbase transaction.
             required: true,
-        }
+        })
     }
 }
 
