@@ -171,9 +171,9 @@ use zebra_rpc::{
         BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
         GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
     },
-    fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+    fetch_state_tip_and_local_time,
     methods::{RpcImpl, RpcServer},
-    proposal_block_from_template,
+    new_coinbase_with_roots, proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
     SubmitBlockChannel,
 };
@@ -3356,7 +3356,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let default_test_config = default_test_config(&network)?;
     let mining_config = default_test_config.mining;
-    let miner_address = Address::try_from_zcash_address(
+    let miner_addr = Address::try_from_zcash_address(
         &network,
         mining_config
             .miner_address
@@ -3525,13 +3525,13 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .to_network()
         .expect("failed to build configured network");
 
-    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
         &network,
         Height(block_template.height()),
-        &miner_address,
+        &miner_addr,
+        vec![],
         &[],
         chain_history_root,
-        vec![],
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
@@ -3586,13 +3586,13 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .to_network()
         .expect("failed to build configured network");
 
-    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
         &network,
         Height(block_template.height()),
-        &miner_address,
+        &miner_addr,
+        vec![],
         &[],
         chain_history_root,
-        vec![],
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     )
