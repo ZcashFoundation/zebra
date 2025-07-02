@@ -43,10 +43,10 @@ use std::{
 use chrono::Utc;
 use derive_getters::Getters;
 use derive_new::new;
-use futures::{StreamExt, TryFutureExt, future::OptionFuture, stream::FuturesOrdered};
+use futures::{future::OptionFuture, stream::FuturesOrdered, StreamExt, TryFutureExt};
 use hex::{FromHex, ToHex};
 use indexmap::IndexMap;
-use jsonrpsee::core::{RpcResult as Result, async_trait};
+use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
 use tokio::{
@@ -56,20 +56,20 @@ use tokio::{
 use tower::{Service, ServiceExt};
 use tracing::Instrument;
 
-use zcash_address::{TryFromAddress, unified::Encoding};
-use zcash_primitives::consensus::Parameters;
+use zcash_address::{unified::Encoding, TryFromAddress};
 
+use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
     chain_sync_status::ChainSyncStatus,
     chain_tip::{ChainTip, NetworkChainTipHeightEstimator},
     parameters::{
-        ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
         subsidy::{
-            FundingStreamReceiver, ParameterSubsidy, block_subsidy, funding_stream_values,
-            miner_subsidy,
+            block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver,
+            ParameterSubsidy,
         },
+        ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
     primitives,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
@@ -82,8 +82,8 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{ParameterCheckpoint, RouterError, funding_stream_address};
-use zebra_network::{PeerSocketAddr, address_book_peers::AddressBookPeers};
+use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
+use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
 
@@ -104,13 +104,13 @@ use hex_data::HexData;
 use trees::{GetSubtreesByIndexResponse, GetTreestateResponse, SubtreeRpcData};
 use types::{
     get_block_template::{
-        BlockTemplateResponse, BlockTemplateTimeSource, GetBlockTemplateHandler,
-        GetBlockTemplateParameters, GetBlockTemplateResponse,
         constants::{
             DEFAULT_SOLUTION_RATE_WINDOW_SIZE, MEMPOOL_LONG_POLL_INTERVAL,
             ZCASHD_FUNDING_STREAM_ORDER,
         },
         proposal::proposal_block_from_template,
+        BlockTemplateResponse, BlockTemplateTimeSource, GetBlockTemplateHandler,
+        GetBlockTemplateParameters, GetBlockTemplateResponse,
     },
     get_blockchain_info::GetBlockchainInfoBalance,
     get_mining_info::GetMiningInfoResponse,
@@ -4150,7 +4150,7 @@ pub fn height_from_signed_int(index: i32, tip_height: Height) -> Result<Height> 
 /// A helper module to serialize and deserialize `Option<T: ToHex>` as a hex string.
 pub mod opthex {
     use hex::{FromHex, ToHex};
-    use serde::{Deserialize, Deserializer, Serializer, de};
+    use serde::{de, Deserialize, Deserializer, Serializer};
 
     #[allow(missing_docs)]
     pub fn serialize<S, T>(data: &Option<T>, serializer: S) -> Result<S::Ok, S::Error>
