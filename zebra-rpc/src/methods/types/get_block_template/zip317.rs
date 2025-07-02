@@ -139,51 +139,6 @@ pub fn select_mempool_transactions(
     selected_txs
 }
 
-/// Returns a fake coinbase transaction that can be used during transaction selection.
-///
-/// This avoids a data dependency loop involving the selected transactions, the miner fee,
-/// and the coinbase transaction.
-///
-/// This transaction's serialized size and sigops must be at least as large as the real coinbase
-/// transaction with the correct height and fee.
-pub fn fake_coinbase_transaction(
-    net: &Network,
-    height: Height,
-    miner_address: &Address,
-    extra_coinbase_data: Vec<u8>,
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
-        Amount<NonNegative>,
-    >,
-) -> TransactionTemplate<NegativeOrZero> {
-    // Block heights are encoded as variable-length (script) and `u32` (lock time, expiry height).
-    // They can also change the `u32` consensus branch id.
-    // We use the template height here, which has the correct byte length.
-    // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-    // https://github.com/zcash/zips/blob/main/zip-0203.rst#changes-for-nu5
-    //
-    // Transparent amounts are encoded as `i64`,
-    // so one zat has the same size as the real amount:
-    // https://developer.bitcoin.org/reference/transactions.html#txout-a-transaction-output
-    let miner_fee = 1.try_into().expect("amount is valid and non-negative");
-    let outputs = standard_coinbase_outputs(net, height, miner_address, miner_fee);
-
-    #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
-    let coinbase = Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into();
-
-    #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-    let coinbase = {
-        let network_upgrade = NetworkUpgrade::current(net, height);
-        if network_upgrade < NetworkUpgrade::Nu7 {
-            Transaction::new_v5_coinbase(net, height, outputs, extra_coinbase_data).into()
-        } else {
-            Transaction::new_v6_coinbase(net, height, outputs, extra_coinbase_data, zip233_amount)
-                .into()
-        }
-    };
-
-    TransactionTemplate::from_coinbase(&coinbase, miner_fee)
-}
-
 /// Returns a fee-weighted index and the total weight of `transactions`.
 ///
 /// Returns `None` if there are no transactions, or if the weights are invalid.
