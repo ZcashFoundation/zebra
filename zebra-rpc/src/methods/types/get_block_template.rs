@@ -30,10 +30,10 @@ use zebra_chain::{
     chain_tip::ChainTip,
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
-        Network, NetworkUpgrade,
+        Network,
     },
     serialization::{DateTime32, ZcashDeserializeInto},
-    transaction::{Transaction, UnminedTx, VerifiedUnminedTx},
+    transaction::{UnminedTx, VerifiedUnminedTx},
     transparent::{
         self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
     },
@@ -327,10 +327,11 @@ impl BlockTemplateResponse {
         // Generate the coinbase transaction and default roots
         //
         // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-        let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+        let (coinbase_txn, default_roots) = new_coinbase_with_roots(
             network,
             next_block_height,
             miner_address,
+            extra_coinbase_data,
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
             extra_coinbase_data,
@@ -438,7 +439,7 @@ where
     /// Address for receiving miner subsidy and tx fees.
     miner_address: Option<Address>,
 
-    /// Extra data to include in coinbase transaction inputs.
+    /// Optional data to include in the coinbase input script.
     /// Limited to around 95 bytes by the consensus rules.
     extra_coinbase_data: Vec<u8>,
 
@@ -796,51 +797,29 @@ where
 // - Response processing
 
 /// Generates and returns the coinbase transaction and default roots.
-#[allow(clippy::too_many_arguments)]
-pub fn generate_coinbase_and_roots(
-    network: &Network,
+pub fn new_coinbase_with_roots(
+    net: &Network,
     height: Height,
-    miner_address: &Address,
+    miner_addr: &Address,
+    miner_data: Vec<u8>,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
-    miner_data: Vec<u8>,
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
         Amount<NonNegative>,
     >,
-) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
-    let miner_fee = calculate_miner_fee(mempool_txs);
-    let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
-    let current_nu = NetworkUpgrade::current(network, height);
-
-    let tx = match current_nu {
-        NetworkUpgrade::Canopy => Transaction::new_v4_coinbase(height, outputs, miner_data),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 => {
-            Transaction::new_v5_coinbase(network, height, outputs, miner_data)
-        }
-        #[cfg(not(all(zcash_unstable = "nu7", feature = "tx_v6")))]
-        NetworkUpgrade::Nu7 => Transaction::new_v5_coinbase(network, height, outputs, miner_data),
+) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), Box<dyn std::error::Error>> {
+    let tx = TransactionTemplate::new_coinbase(
+        net,
+        height,
+        miner_addr,
+        miner_data,
+        mempool_txs,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
-        NetworkUpgrade::Nu7 => {
-            Transaction::new_v6_coinbase(network, height, outputs, miner_data, zip233_amount)
-        }
-        _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
-    }
-    .into();
+        zip233_amount,
+    )?;
+    let roots = DefaultRoots::from_coinbase(net, height, &tx, chain_history_root, mempool_txs)?;
 
-    // Calculate block default roots
-    //
-    // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
-    let chain_history_root = chain_history_root
-        .or_else(|| {
-            (NetworkUpgrade::Heartwood.activation_height(network) == Some(height))
-                .then_some(block::CHAIN_HISTORY_ACTIVATION_RESERVED.into())
-        })
-        .expect("history tree can't be empty");
-
-    Ok((
-        TransactionTemplate::from_coinbase(&tx, miner_fee),
-        calculate_default_root_hashes(current_nu, &tx, mempool_txs, chain_history_root),
-    ))
+    Ok((tx, roots))
 }
 
 /// Returns the total miner fee for `mempool_txs`.
