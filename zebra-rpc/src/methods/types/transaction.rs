@@ -13,7 +13,10 @@ use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     orchard,
-    parameters::Network,
+    parameters::{
+        subsidy::{block_subsidy, funding_stream_values, miner_subsidy},
+        Network,
+    },
     primitives::ed25519,
     sapling::ValueCommitment,
     serialization::ZcashSerialize,
