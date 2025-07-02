@@ -798,35 +798,3 @@ pub fn new_coinbase_with_roots(
 
     Ok((tx, roots))
 }
-
-// - Transaction roots processing
-
-/// Returns the default block roots for the supplied coinbase and mempool transactions,
-/// and the supplied history tree.
-///
-/// This function runs expensive cryptographic operations.
-pub fn calculate_default_root_hashes(
-    coinbase_txn: &UnminedTx,
-    mempool_txs: &[VerifiedUnminedTx],
-    chain_history_root: ChainHistoryMmrRootHash,
-) -> DefaultRoots {
-    let block_txs = || iter::once(coinbase_txn).chain(mempool_txs.iter().map(|tx| &tx.transaction));
-    let merkle_root = block_txs().cloned().collect();
-    let auth_data_root = block_txs().cloned().collect();
-
-    let block_commitments_hash = if chain_history_root == [0; 32].into() {
-        [0; 32].into()
-    } else {
-        ChainHistoryBlockTxAuthCommitmentHash::from_commitments(
-            &chain_history_root,
-            &auth_data_root,
-        )
-    };
-
-    DefaultRoots {
-        merkle_root,
-        chain_history_root,
-        auth_data_root,
-        block_commitments_hash,
-    }
-}
