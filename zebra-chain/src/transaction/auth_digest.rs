@@ -1,6 +1,6 @@
 //! Authorizing digests for Zcash transactions.
 
-use std::{fmt, sync::Arc};
+use std::{array::TryFromSliceError, fmt, sync::Arc};
 
 use hex::{FromHex, ToHex};
 
@@ -86,6 +86,14 @@ impl From<Arc<Transaction>> for AuthDigest {
 impl From<[u8; 32]> for AuthDigest {
     fn from(bytes: [u8; 32]) -> Self {
         Self(bytes)
+    }
+}
+
+impl TryFrom<&[u8]> for AuthDigest {
+    type Error = TryFromSliceError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(AuthDigest(bytes.try_into()?))
     }
 }
 
