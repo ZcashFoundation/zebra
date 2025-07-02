@@ -16,10 +16,9 @@ use rand::{
 use zcash_keys::address::Address;
 
 use zebra_chain::{
-    amount::NegativeOrZero,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
-    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, Transaction, VerifiedUnminedTx},
+    transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::TransactionDependencies;
@@ -37,8 +36,6 @@ mod tests;
 
 #[cfg(test)]
 use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
-
-use super::standard_coinbase_outputs;
 
 /// Used in the return type of [`select_mempool_transactions()`] for test compilations.
 #[cfg(test)]
@@ -62,7 +59,7 @@ type SelectedMempoolTx = VerifiedUnminedTx;
 pub fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
-    miner_address: &Address,
+    miner_addr: &Address,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
     extra_coinbase_data: Vec<u8>,
@@ -75,7 +72,7 @@ pub fn select_mempool_transactions(
     let fake_coinbase_tx = fake_coinbase_transaction(
         network,
         next_block_height,
-        miner_address,
+        miner_addr,
         extra_coinbase_data,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         zip233_amount,
