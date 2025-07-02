@@ -109,7 +109,7 @@ serde_json = { workspace = true }
 jsonrpc = { workspace = true, optional = true }
 hex = { workspace = true, optional = true }
 
-zebrad = { path = "../zebrad", version = "2.3.0" }
+zebrad = { path = "../zebrad", version = "2.4.0" }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["ron", "redactions"] }
