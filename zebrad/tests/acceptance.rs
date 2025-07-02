@@ -166,9 +166,9 @@ use zebra_rpc::{
         BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
         GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
     },
-    fetch_state_tip_and_local_time, generate_coinbase_and_roots,
+    fetch_state_tip_and_local_time,
     methods::{RpcImpl, RpcServer},
-    proposal_block_from_template,
+    new_coinbase_with_roots, proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
     SubmitBlockChannel,
 };
@@ -3486,13 +3486,13 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
-    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
         &network,
         Height(block_template.height()),
         &miner_address,
+        vec![],
         &[],
         chain_history_root,
-        vec![],
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
@@ -3544,13 +3544,13 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
-    let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
+    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
         &network,
         Height(block_template.height()),
         &miner_address,
+        vec![],
         &[],
         chain_history_root,
-        vec![],
     )
     .expect("coinbase transaction should be valid under the given parameters");
 
