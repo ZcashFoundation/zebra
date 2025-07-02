@@ -25,16 +25,16 @@ V5(
       lock_script: Script("a9147e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e87"),
     ),
     Output(
+      value: 15625000,
+      lock_script: Script("a914d45cb1adffb5215a42720532a076f02c7c778c9087"),
+    ),
+    Output(
       value: 21875000,
       lock_script: Script("a91469a9f95a98fe581b6eb52841ef4806dc4402eb9087"),
     ),
     Output(
       value: 25000000,
       lock_script: Script("a914931fec54c1fea86e574462cc32013f5400b8912987"),
-    ),
-    Output(
-      value: 15625000,
-      lock_script: Script("a914d45cb1adffb5215a42720532a076f02c7c778c9087"),
     ),
   ],
   sapling_shielded_data: None,
