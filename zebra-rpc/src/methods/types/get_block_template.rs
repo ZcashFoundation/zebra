@@ -8,7 +8,7 @@ pub mod zip317;
 #[cfg(test)]
 mod tests;
 
-use std::{collections::HashMap, fmt, iter, sync::Arc};
+use std::{fmt, sync::Arc};
 
 use derive_getters::Getters;
 use derive_new::new;
@@ -21,31 +21,24 @@ use zcash_protocol::PoolType;
 use zcash_script::script::Evaluable;
 
 use zebra_chain::{
-    amount::{self, Amount, NegativeOrZero, NonNegative},
+    amount::{self, NegativeOrZero},
     block::{
         self, Block, ChainHistoryBlockTxAuthCommitmentHash, ChainHistoryMmrRootHash, Height,
         MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION,
     },
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
-    parameters::{
-        subsidy::{block_subsidy, funding_stream_values, miner_subsidy, FundingStreamReceiver},
-        Network,
-    },
+    parameters::Network,
     serialization::{DateTime32, ZcashDeserializeInto},
-    transaction::{UnminedTx, VerifiedUnminedTx},
-    transparent::{
-        self, EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN,
-    },
+    transaction::VerifiedUnminedTx,
+    transparent::{EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
 #[allow(unused_imports)]
 use zebra_chain::serialization::BytesInDisplayOrder;
 
-use zebra_consensus::{
-    funding_stream_address, router::service_trait::BlockVerifierService, MAX_BLOCK_SIGOPS,
-};
+use zebra_consensus::MAX_BLOCK_SIGOPS;
 use zebra_node_services::mempool::{self, TransactionDependencies};
 use zebra_state::GetBlockTemplateChainInfo;
 
