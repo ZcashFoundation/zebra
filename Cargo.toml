@@ -154,6 +154,16 @@ x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.3.2"
 
+[patch.crates-io]
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+
 [workspace.metadata.release]
 
 # We always do releases from the main branch
