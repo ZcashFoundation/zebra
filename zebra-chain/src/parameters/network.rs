@@ -285,18 +285,18 @@ impl Network {
         };
 
         match self {
-            Self::Mainnet => subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENT_TOTAL_MAINNET,
+            Self::Mainnet => subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET,
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENT_TOTAL_TESTNET
+                subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET
             }
-            Self::Testnet(_params) => 0,
+            Self::Testnet(_params) => Amount::zero(),
         }
         .try_into()
         .expect("hard-coded value should be valid")
     }
 
     /// Returns the expected NU6.1 lockbox disbursement outputs for this network at the provided height.
-    pub fn lockbox_disbursement(
+    pub fn lockbox_disbursements(
         &self,
         height: Height,
     ) -> Vec<(transparent::Address, Amount<NonNegative>)> {
@@ -305,9 +305,9 @@ impl Network {
         };
 
         let expected_lockbox_disbursements = match self {
-            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENT_MAINNET,
+            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET,
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::NU6_1_LOCKBOX_DISBURSEMENT_TESTNET
+                subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET
             }
             Self::Testnet(_params) => return Vec::new(),
         };
@@ -317,9 +317,7 @@ impl Network {
             .map(|(addr, amount)| {
                 (
                     addr.parse().expect("hard-coded address must deserialize"),
-                    amount
-                        .try_into()
-                        .expect("hard-coded values should be valid"),
+                    amount,
                 )
             })
             .collect()

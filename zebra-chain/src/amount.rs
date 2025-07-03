@@ -63,6 +63,19 @@ impl<C> fmt::Debug for Amount<C> {
     }
 }
 
+impl Amount<NonNegative> {
+    /// Create a new non-negative [`Amount`] from a provided value in ZEC.
+    pub const fn new_from_zec(zec_value: i64) -> Self {
+        Self::new(zec_value.checked_mul(COIN).expect("should fit in i64"))
+    }
+
+    /// Create a new non-negative [`Amount`] from a provided value in zatoshis.
+    pub const fn new(zatoshis: i64) -> Self {
+        assert!(zatoshis <= MAX_MONEY && zatoshis >= 0);
+        Self(zatoshis, PhantomData)
+    }
+}
+
 impl<C> Amount<C> {
     /// Convert this amount to a different Amount type if it satisfies the new constraint
     pub fn constrain<C2>(self) -> Result<Amount<C2>>

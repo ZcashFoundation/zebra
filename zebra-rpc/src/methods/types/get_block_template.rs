@@ -918,7 +918,7 @@ pub fn standard_coinbase_outputs(
     let miner_reward =
         miner_reward.expect("reward calculations are valid for reasonable chain heights");
 
-    let one_time_lockbox_disbursements = network.lockbox_disbursement(height);
+    let one_time_lockbox_disbursements = network.lockbox_disbursements(height);
 
     combine_coinbase_outputs(
         funding_streams,

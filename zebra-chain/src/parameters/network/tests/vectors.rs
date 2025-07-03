@@ -449,22 +449,22 @@ fn check_configured_funding_stream_constraints() {
         .expect_err("should panic when recipient addresses are for Mainnet");
 }
 
-// #[test]
-// fn sum_of_one_time_lockbox_disbursements_is_correct() {
-//     for network in Network::iter() {
-//         let nu6_1_activation_height = NetworkUpgrade::Nu6_1
-//             .activation_height(&network)
-//             .expect("must have activation height");
-//         let total_disbursement_output_value = network
-//             .lockbox_disbursement(nu6_1_activation_height)
-//             .into_iter()
-//             .map(|(_addr, expected_amount)| expected_amount)
-//             .try_fold(crate::amount::Amount::zero(), |a, b| a + b)
-//             .expect("sum of output values should be valid Amount");
-//         assert_eq!(
-//             total_disbursement_output_value,
-//             network.lockbox_disbursement_total_amount(nu6_1_activation_height),
-//             "sum of lockbox disbursement output values should match expected total"
-//         );
-//     }
-// }
+#[test]
+fn sum_of_one_time_lockbox_disbursements_is_correct() {
+    for network in Network::iter() {
+        let nu6_1_activation_height = NetworkUpgrade::Nu6_1
+            .activation_height(&network)
+            .expect("must have activation height");
+        let total_disbursement_output_value = network
+            .lockbox_disbursements(nu6_1_activation_height)
+            .into_iter()
+            .map(|(_addr, expected_amount)| expected_amount)
+            .try_fold(crate::amount::Amount::zero(), |a, b| a + b)
+            .expect("sum of output values should be valid Amount");
+        assert_eq!(
+            total_disbursement_output_value,
+            network.lockbox_disbursement_total_amount(nu6_1_activation_height),
+            "sum of lockbox disbursement output values should match expected total"
+        );
+    }
+}

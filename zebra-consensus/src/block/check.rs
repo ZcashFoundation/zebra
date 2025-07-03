@@ -210,7 +210,7 @@ pub fn subsidy_is_valid(
 
         // TODO: Add references to the one-time lockbox disbursement & community coinholder funding model ZIPs
         //       (https://zips.z.cash/draft-ecc-lockbox-disbursement, https://zips.z.cash/draft-ecc-community-and-coinholder)
-        let expected_one_time_lockbox_disbursements = network.lockbox_disbursement(height);
+        let expected_one_time_lockbox_disbursements = network.lockbox_disbursements(height);
         for (address, expected_amount) in &expected_one_time_lockbox_disbursements {
             if !has_expected_output(address, *expected_amount) {
                 Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
