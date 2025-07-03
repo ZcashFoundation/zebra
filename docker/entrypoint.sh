@@ -51,7 +51,8 @@ prepare_conf_file() {
   # Map RPC variables
   # ZEBRA_RPC_PORT is used to build the listen address, then unset.
   if [[ -n ${ZEBRA_RPC_PORT} ]]; then
-    export ZEBRA_RPC__LISTEN_ADDR="${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
+    # Only set RPC_LISTEN_ADDR default if it wasn't already provided
+    export ZEBRA_RPC__LISTEN_ADDR="${RPC_LISTEN_ADDR:-0.0.0.0}:${ZEBRA_RPC_PORT}"
     unset ZEBRA_RPC_PORT
   fi
 
@@ -64,13 +65,16 @@ prepare_conf_file() {
 
   # ENABLE_COOKIE_AUTH is not prefixed with ZEBRA_, so it's safe.
   # It's used to set the new variable.
-  export ZEBRA_RPC__ENABLE_COOKIE_AUTH="${ENABLE_COOKIE_AUTH:=true}"
+  # Only export if it was explicitly set by the user.
+  if [[ -n "${ENABLE_COOKIE_AUTH}" ]]; then
+    export ZEBRA_RPC__ENABLE_COOKIE_AUTH="${ENABLE_COOKIE_AUTH}"
+  fi
 
   # Map metrics variables, if prometheus feature is enabled in the image
   if [[ " ${FEATURES} " =~ " prometheus " ]]; then
       # Only set metrics endpoint if explicitly configured by user
       if [[ -n "${METRICS_ENDPOINT_ADDR}" ]] || [[ -n "${METRICS_ENDPOINT_PORT}" ]]; then
-          export ZEBRA_METRICS__ENDPOINT_ADDR="${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
+          export ZEBRA_METRICS__ENDPOINT_ADDR="${METRICS_ENDPOINT_ADDR:-0.0.0.0}:${METRICS_ENDPOINT_PORT:-9999}"
       fi
   fi
 
@@ -81,16 +85,19 @@ prepare_conf_file() {
   if [[ " ${FEATURES} " =~ " filter-reload " ]]; then
     # Only set tracing endpoint if explicitly configured by user
     if [[ -n "${TRACING_ENDPOINT_ADDR}" ]] || [[ -n "${TRACING_ENDPOINT_PORT}" ]]; then
-        export ZEBRA_TRACING__ENDPOINT_ADDR="${TRACING_ENDPOINT_ADDR:=0.0.0.0}:${TRACING_ENDPOINT_PORT:=3000}"
+        export ZEBRA_TRACING__ENDPOINT_ADDR="${TRACING_ENDPOINT_ADDR:-0.0.0.0}:${TRACING_ENDPOINT_PORT:-3000}"
     fi
   fi
   if [[ -n ${LOG_FILE} ]]; then
     export ZEBRA_TRACING__LOG_FILE="${LOG_FILE}"
   fi
-  if [[ ${LOG_COLOR} == "true" ]]; then
-    export ZEBRA_TRACING__FORCE_USE_COLOR="true"
-  elif [[ ${LOG_COLOR} == "false" ]]; then
-    export ZEBRA_TRACING__USE_COLOR="false"
+  # Only export LOG_COLOR settings if explicitly set by user
+  if [[ -n "${LOG_COLOR}" ]]; then
+    if [[ ${LOG_COLOR} == "true" ]]; then
+      export ZEBRA_TRACING__FORCE_USE_COLOR="true"
+    elif [[ ${LOG_COLOR} == "false" ]]; then
+      export ZEBRA_TRACING__USE_COLOR="false"
+    fi
   fi
 
   # Map mining variables, if MINER_ADDRESS is set
