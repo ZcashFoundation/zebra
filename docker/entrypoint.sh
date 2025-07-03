@@ -69,7 +69,10 @@ prepare_conf_file() {
 
   # Map metrics variables, if prometheus feature is enabled in the image
   if [[ " ${FEATURES} " =~ " prometheus " ]]; then
-      export ZEBRA_METRICS__ENDPOINT_ADDR="${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
+      # Only set metrics endpoint if explicitly configured by user
+      if [[ -n "${METRICS_ENDPOINT_ADDR}" ]] || [[ -n "${METRICS_ENDPOINT_PORT}" ]]; then
+          export ZEBRA_METRICS__ENDPOINT_ADDR="${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
+      fi
   fi
 
   # Map tracing variables
@@ -77,7 +80,10 @@ prepare_conf_file() {
     export ZEBRA_TRACING__USE_JOURNALD="${USE_JOURNALD}"
   fi
   if [[ " ${FEATURES} " =~ " filter-reload " ]]; then
-    export ZEBRA_TRACING__ENDPOINT_ADDR="${TRACING_ENDPOINT_ADDR:=0.0.0.0}:${TRACING_ENDPOINT_PORT:=3000}"
+    # Only set tracing endpoint if explicitly configured by user
+    if [[ -n "${TRACING_ENDPOINT_ADDR}" ]] || [[ -n "${TRACING_ENDPOINT_PORT}" ]]; then
+        export ZEBRA_TRACING__ENDPOINT_ADDR="${TRACING_ENDPOINT_ADDR:=0.0.0.0}:${TRACING_ENDPOINT_PORT:=3000}"
+    fi
   fi
   if [[ -n ${LOG_FILE} ]]; then
     export ZEBRA_TRACING__LOG_FILE="${LOG_FILE}"
