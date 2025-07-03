@@ -289,7 +289,7 @@ impl Network {
             Self::Testnet(params) if params.is_default_testnet() => {
                 subsidy::EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET
             }
-            Self::Testnet(_params) => Amount::zero(),
+            Self::Testnet(params) => params.lockbox_disbursement_total_amount(),
         }
         .try_into()
         .expect("hard-coded value should be valid")
@@ -309,7 +309,7 @@ impl Network {
             Self::Testnet(params) if params.is_default_testnet() => {
                 subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET
             }
-            Self::Testnet(_params) => return Vec::new(),
+            Self::Testnet(params) => return params.lockbox_disbursements(),
         };
 
         expected_lockbox_disbursements

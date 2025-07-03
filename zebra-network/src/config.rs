@@ -16,7 +16,10 @@ use tracing::Span;
 use zebra_chain::{
     common::atomic_write,
     parameters::{
-        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+        testnet::{
+            self, ConfiguredActivationHeights, ConfiguredFundingStreams,
+            ConfiguredLockboxDisbursement,
+        },
         Magic, Network, NetworkKind,
     },
     work::difficulty::U256,
@@ -595,6 +598,7 @@ struct DTestnetParameters {
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     pre_blossom_halving_interval: Option<u32>,
+    lockbox_disbursements: Vec<ConfiguredLockboxDisbursement>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -649,6 +653,11 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
                     .try_into()
                     .expect("should convert"),
             ),
+            lockbox_disbursements: params
+                .lockbox_disbursements()
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }
@@ -745,6 +754,7 @@ impl<'de> Deserialize<'de> for Config {
                     pre_nu6_funding_streams,
                     post_nu6_funding_streams,
                     pre_blossom_halving_interval,
+                    lockbox_disbursements,
                 }),
             ) => {
                 let mut params_builder = testnet::Parameters::build();
@@ -797,6 +807,8 @@ impl<'de> Deserialize<'de> for Config {
                 if let Some(funding_streams) = post_nu6_funding_streams {
                     params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
                 }
+
+                params_builder = params_builder.with_lockbox_disbursements(lockbox_disbursements);
 
                 // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
                 // peers and the configured network parameters are incompatible with the default public Testnet.
