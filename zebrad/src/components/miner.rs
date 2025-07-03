@@ -16,11 +16,10 @@ use tower::Service;
 use tracing::{Instrument, Span};
 
 use zebra_chain::{
-    block::{self, Block, Height},
+    block::{self, Block},
     chain_sync_status::ChainSyncStatus,
     chain_tip::ChainTip,
     diagnostic::task::WaitForPanics,
-    parameters::{Network, NetworkUpgrade},
     serialization::{AtLeastOne, ZcashSerialize},
     shutdown::is_shutting_down,
     work::equihash::{Solution, SolverCancelled},
@@ -28,20 +27,19 @@ use zebra_chain::{
 use zebra_network::AddressBookPeers;
 use zebra_node_services::mempool;
 use zebra_rpc::{
-    config::mining::Config,
-    methods::{
-        hex_data::HexData,
-        types::get_block_template::{
-            self,
-            parameters::GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
-            proposal::proposal_block_from_template,
-            GetBlockTemplateRequestMode::Template,
-            TimeSource,
-        },
-        RpcImpl, RpcServer,
+    client::{
+        BlockTemplateTimeSource,
+        GetBlockTemplateCapability::{CoinbaseTxn, LongPoll},
+        GetBlockTemplateParameters,
+        GetBlockTemplateRequestMode::Template,
+        HexData,
     },
+    methods::{RpcImpl, RpcServer},
+    proposal_block_from_template,
 };
 use zebra_state::WatchReceiver;
+
+use crate::components::metrics::Config;
 
 /// The amount of time we wait between block template retries.
 pub const BLOCK_TEMPLATE_WAIT_TIME: Duration = Duration::from_secs(20);
@@ -61,10 +59,9 @@ pub const BLOCK_MINING_WAIT_TIME: Duration = Duration::from_secs(3);
 /// mining thread.
 ///
 /// See [`run_mining_solver()`] for more details.
-pub fn spawn_init<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>(
-    network: &Network,
+pub fn spawn_init<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>(
     config: &Config,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> JoinHandle<Result<(), Report>>
 // TODO: simplify or avoid repeating these generics (how?)
 where
@@ -78,6 +75,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -85,7 +91,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -96,11 +102,8 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    let network = network.clone();
-    let config = config.clone();
-
     // TODO: spawn an entirely new executor here, so mining is isolated from higher priority tasks.
-    tokio::spawn(init(network, config, rpc).in_current_span())
+    tokio::spawn(init(config.clone(), rpc).in_current_span())
 }
 
 /// Initialize the miner based on its config.
@@ -109,10 +112,9 @@ where
 /// mining thread.
 ///
 /// See [`run_mining_solver()`] for more details.
-pub async fn init<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
-    network: Network,
+pub async fn init<Mempool, State, ReadState, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
     _config: Config,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -125,6 +127,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -132,7 +143,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -143,8 +154,7 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
-    // TODO: change this to `config.internal_miner_threads` when internal miner feature is added back.
-    //       https://github.com/ZcashFoundation/zebra/issues/8183
+    // TODO: change this to `config.internal_miner_threads` once mining tasks are cancelled when the best tip changes (#8797)
     let configured_threads = 1;
     // If we can't detect the number of cores, use the configured number.
     let available_threads = available_parallelism()
@@ -167,7 +177,7 @@ where
     let mut abort_handles = Vec::new();
 
     let template_generator = tokio::task::spawn(
-        generate_block_templates(network, rpc.clone(), template_sender).in_current_span(),
+        generate_block_templates(rpc.clone(), template_sender).in_current_span(),
     );
     abort_handles.push(template_generator.abort_handle());
     let template_generator = template_generator.wait_for_panics();
@@ -212,17 +222,17 @@ where
 }
 
 /// Generates block templates using `rpc`, and sends them to mining threads using `template_sender`.
-#[instrument(skip(rpc, template_sender, network))]
+#[instrument(skip(rpc, template_sender))]
 pub async fn generate_block_templates<
     Mempool,
     State,
+    ReadState,
     Tip,
     BlockVerifierRouter,
     SyncStatus,
     AddressBook,
 >(
-    network: Network,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
     template_sender: watch::Sender<Option<Arc<Block>>>,
 ) -> Result<(), Report>
 where
@@ -236,6 +246,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -243,7 +262,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone
@@ -255,13 +274,8 @@ where
     AddressBook: AddressBookPeers + Clone + Send + Sync + 'static,
 {
     // Pass the correct arguments, even if Zebra currently ignores them.
-    let mut parameters = get_block_template::JsonParameters {
-        mode: Template,
-        data: None,
-        capabilities: vec![LongPoll, CoinbaseTxn],
-        long_poll_id: None,
-        _work_id: None,
-    };
+    let mut parameters =
+        GetBlockTemplateParameters::new(Template, None, vec![LongPoll, CoinbaseTxn], None, None);
 
     // Shut down the task when all the template receivers are dropped, or Zebra shuts down.
     while !template_sender.is_closed() && !is_shutting_down() {
@@ -289,20 +303,21 @@ where
             .expect("invalid RPC response: proposal in response to a template request");
 
         info!(
-            height = ?template.height,
-            transactions = ?template.transactions.len(),
+            height = ?template.height(),
+            transactions = ?template.transactions().len(),
             "mining with an updated block template",
         );
 
         // Tell the next get_block_template() call to wait until the template has changed.
-        parameters.long_poll_id = Some(template.long_poll_id);
+        parameters = GetBlockTemplateParameters::new(
+            Template,
+            None,
+            vec![LongPoll, CoinbaseTxn],
+            Some(template.long_poll_id()),
+            None,
+        );
 
-        let block = proposal_block_from_template(
-            &template,
-            TimeSource::CurTime,
-            NetworkUpgrade::current(&network, Height(template.height)),
-        )
-        .expect("unexpected invalid block template");
+        let block = proposal_block_from_template(&template, BlockTemplateTimeSource::CurTime)?;
 
         // If the template has actually changed, send an updated template.
         template_sender.send_if_modified(|old_block| {
@@ -330,10 +345,18 @@ where
 /// It can run for minutes or hours if the network difficulty is high. Mining uses a thread with
 /// low CPU priority.
 #[instrument(skip(template_receiver, rpc))]
-pub async fn run_mining_solver<Mempool, State, Tip, BlockVerifierRouter, SyncStatus, AddressBook>(
+pub async fn run_mining_solver<
+    Mempool,
+    State,
+    ReadState,
+    Tip,
+    BlockVerifierRouter,
+    SyncStatus,
+    AddressBook,
+>(
     solver_id: u8,
     mut template_receiver: WatchReceiver<Option<Arc<Block>>>,
-    rpc: RpcImpl<Mempool, State, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
+    rpc: RpcImpl<Mempool, State, ReadState, Tip, AddressBook, BlockVerifierRouter, SyncStatus>,
 ) -> Result<(), Report>
 where
     Mempool: Service<
@@ -346,6 +369,15 @@ where
         + 'static,
     Mempool::Future: Send,
     State: Service<
+            zebra_state::Request,
+            Response = zebra_state::Response,
+            Error = zebra_state::BoxError,
+        > + Clone
+        + Send
+        + Sync
+        + 'static,
+    <State as Service<zebra_state::Request>>::Future: Send,
+    ReadState: Service<
             zebra_state::ReadRequest,
             Response = zebra_state::ReadResponse,
             Error = zebra_state::BoxError,
@@ -353,7 +385,7 @@ where
         + Send
         + Sync
         + 'static,
-    <State as Service<zebra_state::ReadRequest>>::Future: Send,
+    <ReadState as Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
     BlockVerifierRouter: Service<zebra_consensus::Request, Response = block::Hash, Error = zebra_consensus::BoxError>
         + Clone

@@ -37,11 +37,11 @@ use crate::{
 #[test]
 fn test_block_db_round_trip() {
     let mainnet_test_cases = MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block)| block.zcash_deserialize_into().unwrap());
+        .values()
+        .map(|block| block.zcash_deserialize_into().unwrap());
     let testnet_test_cases = TESTNET_BLOCKS
-        .iter()
-        .map(|(_height, block)| block.zcash_deserialize_into().unwrap());
+        .values()
+        .map(|block| block.zcash_deserialize_into().unwrap());
 
     test_block_db_round_trip_with(&Mainnet, mainnet_test_cases);
     test_block_db_round_trip_with(&Network::new_default_testnet(), testnet_test_cases);

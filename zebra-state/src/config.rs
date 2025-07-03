@@ -122,7 +122,7 @@ fn gen_temp_path(prefix: &str) -> PathBuf {
         .prefix(prefix)
         .tempdir()
         .expect("temporary directory is created successfully")
-        .into_path()
+        .keep()
 }
 
 impl Config {
@@ -135,7 +135,7 @@ impl Config {
         network: &Network,
     ) -> PathBuf {
         let db_kind = db_kind.as_ref();
-        let major_version = format!("v{}", major_version);
+        let major_version = format!("v{major_version}");
         let net_dir = network.lowercase_name();
 
         if self.ephemeral {

@@ -86,8 +86,8 @@ async fn scanning_zecpages_from_populated_zebra_state() -> Result<()> {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // Create a populated state service.

@@ -1,23 +1,19 @@
 //! getblocktemplate proposal mode implementation.
 //!
-//! `ProposalResponse` is the output of the `getblocktemplate` RPC method in 'proposal' mode.
+//! `BlockProposalResponse` is the output of the `getblocktemplate` RPC method in 'proposal' mode.
 
 use std::{num::ParseIntError, str::FromStr, sync::Arc};
 
 use zebra_chain::{
     block::{self, Block, Height},
-    parameters::NetworkUpgrade,
     serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
     work::equihash::Solution,
 };
 use zebra_node_services::BoxError;
 
-use crate::methods::{
-    types::{
-        default_roots::DefaultRoots,
-        get_block_template::{GetBlockTemplate, Response},
-    },
-    GetBlockHash,
+use crate::methods::types::{
+    default_roots::DefaultRoots,
+    get_block_template::{BlockTemplateResponse, GetBlockTemplateResponse},
 };
 
 /// Response to a `getblocktemplate` RPC request in proposal mode.
@@ -30,7 +26,7 @@ use crate::methods::{
 /// implementation instead, which returns a single raw string.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged, rename_all = "kebab-case")]
-pub enum ProposalResponse {
+pub enum BlockProposalResponse {
     /// Block proposal was rejected as invalid.
     /// Contains the reason that the proposal was invalid.
     ///
@@ -41,7 +37,7 @@ pub enum ProposalResponse {
     Valid,
 }
 
-impl ProposalResponse {
+impl BlockProposalResponse {
     /// Return a rejected response containing an error kind and detailed error info.
     ///
     /// Note: Error kind is currently ignored to match zcashd error format (`kebab-case` string).
@@ -57,30 +53,30 @@ impl ProposalResponse {
         // Trim any leading or trailing `-` characters.
         let final_error = error_kebab2.trim_matches('-');
 
-        ProposalResponse::Rejected(final_error.to_string())
+        BlockProposalResponse::Rejected(final_error.to_string())
     }
 
-    /// Returns true if self is [`ProposalResponse::Valid`]
+    /// Returns true if self is [`BlockProposalResponse::Valid`]
     pub fn is_valid(&self) -> bool {
         matches!(self, Self::Valid)
     }
 }
 
-impl From<ProposalResponse> for Response {
-    fn from(proposal_response: ProposalResponse) -> Self {
+impl From<BlockProposalResponse> for GetBlockTemplateResponse {
+    fn from(proposal_response: BlockProposalResponse) -> Self {
         Self::ProposalMode(proposal_response)
     }
 }
 
-impl From<GetBlockTemplate> for Response {
-    fn from(template: GetBlockTemplate) -> Self {
+impl From<BlockTemplateResponse> for GetBlockTemplateResponse {
+    fn from(template: BlockTemplateResponse) -> Self {
         Self::TemplateMode(Box::new(template))
     }
 }
 
 /// The source of the time in the block proposal header.
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
-pub enum TimeSource {
+pub enum BlockTemplateTimeSource {
     /// The `curtime` field in the template.
     /// This is the default time source.
     #[default]
@@ -109,10 +105,10 @@ pub enum TimeSource {
     RawNow,
 }
 
-impl TimeSource {
+impl BlockTemplateTimeSource {
     /// Returns the time from `template` using this time source.
-    pub fn time_from_template(&self, template: &GetBlockTemplate) -> DateTime32 {
-        use TimeSource::*;
+    pub fn time_from_template(&self, template: &BlockTemplateResponse) -> DateTime32 {
+        use BlockTemplateTimeSource::*;
 
         match self {
             CurTime => template.cur_time,
@@ -127,7 +123,7 @@ impl TimeSource {
 
     /// Returns true if this time source uses `max_time` in any way, including clamping.
     pub fn uses_max_time(&self) -> bool {
-        use TimeSource::*;
+        use BlockTemplateTimeSource::*;
 
         match self {
             CurTime | MinTime => false,
@@ -137,18 +133,18 @@ impl TimeSource {
     }
 
     /// Returns an iterator of time sources that are valid according to the consensus rules.
-    pub fn valid_sources() -> impl IntoIterator<Item = TimeSource> {
-        use TimeSource::*;
+    pub fn valid_sources() -> impl IntoIterator<Item = BlockTemplateTimeSource> {
+        use BlockTemplateTimeSource::*;
 
         [CurTime, MinTime, MaxTime, ClampedNow].into_iter()
     }
 }
 
-impl FromStr for TimeSource {
+impl FromStr for BlockTemplateTimeSource {
     type Err = ParseIntError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use TimeSource::*;
+        use BlockTemplateTimeSource::*;
 
         match s.to_lowercase().as_str() {
             "curtime" => Ok(CurTime),
@@ -167,23 +163,21 @@ impl FromStr for TimeSource {
     }
 }
 
-/// Returns a block proposal generated from a [`GetBlockTemplate`] RPC response.
+/// Returns a block proposal generated from a [`BlockTemplateResponse`] RPC response.
 ///
 /// If `time_source` is not supplied, uses the current time from the template.
 pub fn proposal_block_from_template(
-    template: &GetBlockTemplate,
-    time_source: impl Into<Option<TimeSource>>,
-    network_upgrade: NetworkUpgrade,
+    template: &BlockTemplateResponse,
+    time_source: impl Into<Option<BlockTemplateTimeSource>>,
 ) -> Result<Block, SerializationError> {
-    let GetBlockTemplate {
+    let BlockTemplateResponse {
         version,
         height,
-        previous_block_hash: GetBlockHash(previous_block_hash),
+        previous_block_hash,
         default_roots:
             DefaultRoots {
                 merkle_root,
                 block_commitments_hash,
-                chain_history_root,
                 ..
             },
         bits: difficulty_threshold,
@@ -209,18 +203,7 @@ pub fn proposal_block_from_template(
         transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
     }
 
-    let commitment_bytes = match network_upgrade {
-        NetworkUpgrade::Genesis
-        | NetworkUpgrade::BeforeOverwinter
-        | NetworkUpgrade::Overwinter
-        | NetworkUpgrade::Sapling
-        | NetworkUpgrade::Blossom
-        | NetworkUpgrade::Heartwood => panic!("pre-Canopy block templates not supported"),
-        NetworkUpgrade::Canopy => chain_history_root.bytes_in_serialized_order().into(),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
-            block_commitments_hash.bytes_in_serialized_order().into()
-        }
-    };
+    let commitment_bytes = block_commitments_hash.bytes_in_serialized_order().into();
 
     Ok(Block {
         header: Arc::new(block::Header {

@@ -1,6 +1,6 @@
 //! Transactions and transaction-related structures.
 
-use std::{collections::HashMap, fmt, iter};
+use std::{collections::HashMap, fmt, iter, sync::Arc};
 
 use halo2::pasta::pallas;
 
@@ -38,10 +38,15 @@ pub use unmined::{
 };
 use zcash_protocol::consensus;
 
+#[cfg(feature = "tx_v6")]
+use crate::parameters::TX_V6_VERSION_GROUP_ID;
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{
+        Network, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
+        TX_V5_VERSION_GROUP_ID,
+    },
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize,
@@ -51,6 +56,7 @@ use crate::{
         CoinbaseSpendRestriction::{self, *},
     },
     value_balance::{ValueBalance, ValueBalanceError},
+    Error,
 };
 
 /// A Zcash transaction.
@@ -245,19 +251,19 @@ impl Transaction {
         &self,
         nu: NetworkUpgrade,
         hash_type: sighash::HashType,
-        all_previous_outputs: &[transparent::Output],
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
         input_index_script_code: Option<(usize, Vec<u8>)>,
-    ) -> SigHash {
-        sighash::SigHasher::new(self, nu, all_previous_outputs)
-            .sighash(hash_type, input_index_script_code)
+    ) -> Result<SigHash, Error> {
+        Ok(sighash::SigHasher::new(self, nu, all_previous_outputs)?
+            .sighash(hash_type, input_index_script_code))
     }
 
     /// Return a [`SigHasher`] for this transaction.
-    pub fn sighasher<'a>(
-        &'a self,
+    pub fn sighasher(
+        &self,
         nu: NetworkUpgrade,
-        all_previous_outputs: &'a [transparent::Output],
-    ) -> sighash::SigHasher<'a> {
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
+    ) -> Result<sighash::SigHasher, Error> {
         sighash::SigHasher::new(self, nu, all_previous_outputs)
     }
 
@@ -1402,6 +1408,21 @@ impl Transaction {
     /// Does this transaction have shielded inputs or outputs?
     pub fn has_shielded_data(&self) -> bool {
         self.has_shielded_inputs() || self.has_shielded_outputs()
+    }
+
+    /// Get the version group ID for this transaction, if any.
+    pub fn version_group_id(&self) -> Option<u32> {
+        // We could store the parsed version group ID and return that,
+        // but since the consensus rules constraint it, we can just return
+        // the value that must have been parsed.
+        match self {
+            Transaction::V1 { .. } | Transaction::V2 { .. } => None,
+            Transaction::V3 { .. } => Some(OVERWINTER_VERSION_GROUP_ID),
+            Transaction::V4 { .. } => Some(SAPLING_VERSION_GROUP_ID),
+            Transaction::V5 { .. } => Some(TX_V5_VERSION_GROUP_ID),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { .. } => Some(TX_V6_VERSION_GROUP_ID),
+        }
     }
 }
 

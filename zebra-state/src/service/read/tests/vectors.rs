@@ -51,8 +51,8 @@ async fn populated_read_state_responds_correctly() -> Result<()> {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let (_state, read_state, _latest_chain_tip, _chain_tip_change) =

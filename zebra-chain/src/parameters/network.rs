@@ -36,8 +36,14 @@ pub enum NetworkKind {
 }
 
 impl From<Network> for NetworkKind {
-    fn from(network: Network) -> Self {
-        network.kind()
+    fn from(net: Network) -> Self {
+        NetworkKind::from(&net)
+    }
+}
+
+impl From<&Network> for NetworkKind {
+    fn from(net: &Network) -> Self {
+        net.kind()
     }
 }
 

@@ -217,7 +217,7 @@ pub async fn show_block_chain_progress(
 
                 // TODO: use add_warn(), but only add each warning once
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: sync has stalled", network_upgrade));
+                block_bar.desc(format!("{network_upgrade}: sync has stalled"));
             } else if is_syncer_stopped && remaining_sync_blocks > MIN_SYNC_WARNING_BLOCKS {
                 // We've stopped syncing blocks, but we estimate we're a long way from the tip.
                 //
@@ -236,8 +236,7 @@ pub async fn show_block_chain_progress(
 
                 #[cfg(feature = "progress-bar")]
                 block_bar.desc(format!(
-                    "{}: sync is very slow, or estimated tip is wrong",
-                    network_upgrade
+                    "{network_upgrade}: sync is very slow, or estimated tip is wrong"
                 ));
             } else if is_syncer_stopped && current_height <= after_checkpoint_height {
                 // We've stopped syncing blocks,
@@ -262,7 +261,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: sync is very slow", network_upgrade));
+                block_bar.desc(format!("{network_upgrade}: sync is very slow"));
             } else if is_syncer_stopped {
                 // We've stayed near the tip for a while, and we've stopped syncing lots of blocks.
                 // So we're mostly using gossiped blocks now.
@@ -276,7 +275,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: waiting for next block", network_upgrade));
+                block_bar.desc(format!("{network_upgrade}: waiting for next block"));
             } else if remaining_sync_blocks <= MAX_CLOSE_TO_TIP_BLOCKS {
                 // We estimate we're near the tip, but we have been syncing lots of blocks recently.
                 // We might also be using some gossiped blocks.
@@ -291,7 +290,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: finishing initial sync", network_upgrade));
+                block_bar.desc(format!("{network_upgrade}: finishing initial sync"));
             } else {
                 // We estimate we're far from the tip, and we've been syncing lots of blocks.
                 info!(
@@ -304,7 +303,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: syncing blocks", network_upgrade));
+                block_bar.desc(format!("{network_upgrade}: syncing blocks"));
             }
         } else {
             let sync_percent = format!("{:.SYNC_PERCENT_FRAC_DIGITS$} %", 0.0f64,);
@@ -323,7 +322,7 @@ pub async fn show_block_chain_progress(
                 );
 
                 #[cfg(feature = "progress-bar")]
-                block_bar.desc(format!("{}: can't download genesis block", network_upgrade));
+                block_bar.desc(format!("{network_upgrade}: can't download genesis block"));
             } else {
                 // We're waiting for the genesis block to be committed to the state,
                 // before we can estimate the best chain tip.
@@ -335,8 +334,7 @@ pub async fn show_block_chain_progress(
 
                 #[cfg(feature = "progress-bar")]
                 block_bar.desc(format!(
-                    "{}: waiting to download genesis block",
-                    network_upgrade
+                    "{network_upgrade}: waiting to download genesis block"
                 ));
             }
         }

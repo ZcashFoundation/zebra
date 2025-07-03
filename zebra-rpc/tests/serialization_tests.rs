@@ -6,27 +6,36 @@
 
 mod vectors;
 
+use std::{io::Cursor, ops::Deref};
+
 use vectors::{
     GET_BLOCKCHAIN_INFO_RESPONSE, GET_BLOCK_RESPONSE_1, GET_BLOCK_RESPONSE_2,
     GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE, GET_RAW_TRANSACTION_RESPONSE_TRUE,
 };
 
-use zebra_chain::subtree::NoteCommitmentSubtreeIndex;
-use zebra_rpc::methods::{
-    trees::{GetSubtrees, GetTreestate, SubtreeRpcData},
-    types::{
-        get_block_template::{self, GetBlockTemplate},
-        get_mining_info,
-        get_raw_mempool::GetRawMempool,
-        peer_info::PeerInfo,
-        submit_block,
-        subsidy::BlockSubsidy,
-        transaction::TransactionObject,
-        unified_address, validate_address, z_validate_address,
+use zebra_rpc::client::{
+    zebra_chain::{
+        sapling::NotSmallOrderValueCommitment,
+        serialization::{ZcashDeserialize, ZcashSerialize},
+        subtree::NoteCommitmentSubtreeIndex,
+        transparent::{OutputIndex, Script},
+        work::difficulty::{CompactDifficulty, ExpandedDifficulty},
     },
-    AddressBalance, AddressStrings, GetAddressTxIdsRequest, GetAddressUtxos, GetBlock,
-    GetBlockChainInfo, GetBlockHash, GetBlockHeader, GetBlockHeaderObject, GetBlockHeightAndHash,
-    GetInfo, GetRawTransaction, SentTransactionHash,
+    GetBlockchainInfoBalance,
+};
+use zebra_rpc::client::{
+    BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
+    FundingStream, GetAddressBalanceRequest, GetAddressBalanceResponse, GetAddressTxIdsRequest,
+    GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
+    GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockSubsidyResponse,
+    GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
+    GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
+    GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
+    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject, Orchard,
+    OrchardAction, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
+    ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
+    TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
+    ZListUnifiedReceiversResponse, ZValidateAddressResponse,
 };
 
 #[test]
@@ -46,38 +55,36 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
   "errors": "no errors",
   "errorstimestamp": "2025-05-20 19:33:53.395307694 UTC"
 }"#;
-    let obj: GetInfo = serde_json::from_str(json)?;
+    let obj: GetInfoResponse = serde_json::from_str(json)?;
 
-    let (
+    let version = obj.raw_version();
+    let build = obj.build();
+    let subversion = obj.subversion();
+    let protocol_version = obj.protocol_version();
+    let blocks = obj.blocks();
+    let connections = obj.connections();
+    let proxy = obj.proxy();
+    let difficulty = obj.difficulty();
+    let testnet = obj.testnet();
+    let pay_tx_fee = obj.pay_tx_fee();
+    let relay_fee = obj.relay_fee();
+    let errors = obj.errors();
+    let errors_timestamp = obj.errors_timestamp();
+
+    let new_obj = GetInfoResponse::new(
         version,
-        build,
-        subversion,
+        build.clone(),
+        subversion.clone(),
         protocol_version,
         blocks,
         connections,
-        proxy,
+        proxy.clone(),
         difficulty,
         testnet,
         pay_tx_fee,
         relay_fee,
-        errors,
-        errors_timestamp,
-    ) = obj.clone().into_parts();
-
-    let new_obj = GetInfo::from_parts(
-        version,
-        build,
-        subversion,
-        protocol_version,
-        blocks,
-        connections,
-        proxy,
-        difficulty,
-        testnet,
-        pay_tx_fee,
-        relay_fee,
-        errors,
-        errors_timestamp,
+        errors.clone(),
+        errors_timestamp.clone(),
     );
 
     assert_eq!(obj, new_obj);
@@ -88,9 +95,43 @@ fn test_get_info() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
     let json = GET_BLOCKCHAIN_INFO_RESPONSE;
-    let _obj: GetBlockChainInfo = serde_json::from_str(json)?;
+    let obj: GetBlockchainInfoResponse = serde_json::from_str(json)?;
 
-    // TODO: add new() and getters for all fields
+    let chain = obj.chain();
+    let blocks = obj.blocks();
+    let headers = obj.headers();
+    let difficulty = obj.difficulty();
+    let verification_progress = obj.verification_progress();
+    let chain_work = obj.chain_work();
+    let pruned = obj.pruned();
+    let size_on_disk = obj.size_on_disk();
+    let commitments = obj.commitments();
+    let best_block_hash = obj.best_block_hash();
+    let estimated_height = obj.estimated_height();
+    let chain_supply = obj.chain_supply();
+    let value_pools = obj.value_pools();
+    let upgrades = obj.upgrades();
+    let consensus = obj.consensus();
+
+    let new_obj = GetBlockchainInfoResponse::new(
+        chain.clone(),
+        blocks,
+        best_block_hash,
+        estimated_height,
+        chain_supply.clone(),
+        value_pools.clone(),
+        upgrades.clone(),
+        consensus,
+        headers,
+        difficulty,
+        verification_progress,
+        chain_work,
+        pruned,
+        size_on_disk,
+        commitments,
+    );
+
+    assert_eq!(obj, new_obj);
 
     Ok(())
 }
@@ -99,20 +140,20 @@ fn test_get_blockchain_info() -> Result<(), Box<dyn std::error::Error>> {
 fn test_get_address_balance() -> Result<(), Box<dyn std::error::Error>> {
     // Test request
     let json = r#"{"addresses":["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak"]}"#;
-    let obj = AddressStrings::new_valid(vec![String::from("t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak")])?;
+    let obj =
+        GetAddressBalanceRequest::new(vec![String::from("t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak")]);
     let new_json = serde_json::to_string(&obj)?;
     assert_eq!(json, new_json);
 
     // Test response
     let json = r#"
 {
-  "balance": 11290259389
+  "balance": 11290259389,
+  "received": 11290259390
 }
 "#;
-    let obj: AddressBalance = serde_json::from_str(json)?;
-    let new_obj = AddressBalance {
-        balance: obj.balance,
-    };
+    let obj: GetAddressBalanceResponse = serde_json::from_str(json)?;
+    let new_obj = GetAddressBalanceResponse::new(obj.balance(), obj.received());
 
     assert_eq!(obj, new_obj);
 
@@ -122,11 +163,11 @@ fn test_get_address_balance() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_send_raw_transaction() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#""0000000001695b61dd5c82ae33a326126d6153d1641a3a1759d3f687ea377148""#;
-    let obj: SentTransactionHash = serde_json::from_str(json)?;
+    let obj: SendRawTransactionResponse = serde_json::from_str(json)?;
 
-    let hash = obj.inner();
+    let hash = obj.hash();
 
-    let new_obj = SentTransactionHash::new(hash);
+    let new_obj = SendRawTransactionResponse::new(hash);
 
     assert_eq!(obj, new_obj);
 
@@ -136,9 +177,16 @@ fn test_send_raw_transaction() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_block_0() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#""00000000007bacdb373ca240dc6f044f0a816a407bc1924f82a2d84ebfa6103f""#;
-    let _r: GetBlock = serde_json::from_str(json)?;
+    let obj: GetBlockResponse = serde_json::from_str(json)?;
 
-    // TODO: change GetBlock::Block to have a struct, add getters to it
+    let GetBlockResponse::Raw(raw_block) = &obj else {
+        panic!("Expected GetBlockResponse::Hash");
+    };
+    let raw_block_bytes = raw_block.as_ref();
+
+    // TODO: this is a bit different from the others. Change?
+    let new_obj = GetBlockResponse::Raw(raw_block_bytes.to_vec().into());
+    assert_eq!(obj, new_obj);
 
     Ok(())
 }
@@ -146,9 +194,86 @@ fn test_get_block_0() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let json = GET_BLOCK_RESPONSE_1;
-    let _r: GetBlock = serde_json::from_str(json)?;
+    let obj: GetBlockResponse = serde_json::from_str(json)?;
 
-    // TODO: change GetBlock::Block to have a struct, add getters to it
+    let GetBlockResponse::Object(block) = &obj else {
+        panic!("Expected GetBlockResponse::Block");
+    };
+    let height = block.height();
+    let hash = block.hash().0;
+    let confirmations = block.confirmations();
+    let size = block.size();
+    let version = block.version();
+    let merkle_root = block.merkle_root().map(|r| r.0);
+    let block_commitments = block.block_commitments();
+    let final_sapling_root = block.final_sapling_root();
+    let final_orchard_root = block.final_orchard_root();
+    let tx = block
+        .tx()
+        .iter()
+        .cloned()
+        .map(|tx| {
+            let GetBlockTransaction::Hash(h) = tx else {
+                panic!("Expected GetBlockTransaction::Hash")
+            };
+            h.0
+        })
+        .collect::<Vec<_>>();
+    let time = block.time();
+    let nonce = block.nonce();
+    // We manually checked that Solution is readable, testing would be tricky
+    let solution = block.solution();
+    // TODO: should we expose the u32 value?
+    let bits = block.bits().map(|d| d.bytes_in_display_order());
+    let difficulty = block.difficulty();
+    let chain_supply = block.chain_supply().as_ref().map(|b| {
+        GetBlockchainInfoBalance::new(
+            b.id().clone(),
+            b.chain_value(),
+            b.chain_value_zat(),
+            b.monitored(),
+            b.value_delta(),
+            b.value_delta_zat(),
+        )
+    });
+    let value_pools = block.value_pools().clone();
+    let trees = block.trees();
+    let trees_sapling = trees.sapling();
+    let trees_orchard = trees.orchard();
+    // We already tested that GetBlockHash is readable with `hash`, so we don't
+    // bother unpacking it here
+    let previous_block_hash = block.previous_block_hash();
+    let next_block_hash = block.next_block_hash();
+
+    let new_obj = GetBlockResponse::Object(Box::new(BlockObject::new(
+        zebra_chain::block::Hash(hash),
+        confirmations,
+        size,
+        height,
+        version,
+        merkle_root.map(zebra_chain::block::merkle::Root),
+        block_commitments,
+        final_sapling_root,
+        final_orchard_root,
+        tx.iter()
+            .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
+            .collect(),
+        time,
+        nonce,
+        solution,
+        bits.map(|d| {
+            zebra_chain::work::difficulty::CompactDifficulty::from_bytes_in_display_order(&d)
+                .expect("must work since it was just read")
+        }),
+        difficulty,
+        chain_supply,
+        value_pools,
+        GetBlockTrees::new(trees_sapling, trees_orchard),
+        previous_block_hash,
+        next_block_hash,
+    )));
+
+    assert_eq!(obj, new_obj);
 
     Ok(())
 }
@@ -156,9 +281,73 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let json = GET_BLOCK_RESPONSE_2;
-    let _r: GetBlock = serde_json::from_str(json)?;
+    let obj: GetBlockResponse = serde_json::from_str(json)?;
 
-    // TODO: change GetBlock::Block to have a struct, add getters to it
+    let GetBlockResponse::Object(block) = &obj else {
+        panic!("Expected GetBlockResponse::Block");
+    };
+    // Note that we don't bother unpacking compound types because we already
+    // tested that in the previous test.
+    let height = block.height();
+    let hash = block.hash();
+    let confirmations = block.confirmations();
+    let size = block.size();
+    let version = block.version();
+    let merkle_root = block.merkle_root();
+    let block_commitments = block.block_commitments();
+    let final_sapling_root = block.final_sapling_root();
+    let final_orchard_root = block.final_orchard_root();
+    // We don't unpack the transaction object because we test that in the
+    // get_raw_transaction test.
+    let tx = block
+        .tx()
+        .iter()
+        .cloned()
+        .map(|tx| {
+            let GetBlockTransaction::Object(tx) = tx else {
+                panic!("Expected GetBlockTransaction::Hash")
+            };
+            tx
+        })
+        .collect::<Vec<_>>();
+    let time = block.time();
+    let nonce = block.nonce();
+    let solution = block.solution();
+    let bits = block.bits();
+    let difficulty = block.difficulty();
+    let chain_supply = block.chain_supply().clone();
+    let value_pools = block.value_pools().clone();
+    let trees = block.trees();
+    let previous_block_hash = block.previous_block_hash();
+    let next_block_hash = block.next_block_hash();
+
+    let new_obj = GetBlockResponse::Object(Box::new(BlockObject::new(
+        hash,
+        confirmations,
+        size,
+        height,
+        version,
+        merkle_root,
+        block_commitments,
+        final_sapling_root,
+        final_orchard_root,
+        tx.iter()
+            .cloned()
+            .map(GetBlockTransaction::Object)
+            .collect(),
+        time,
+        nonce,
+        solution,
+        bits,
+        difficulty,
+        chain_supply,
+        value_pools,
+        trees,
+        previous_block_hash,
+        next_block_hash,
+    )));
+
+    assert_eq!(obj, new_obj);
 
     Ok(())
 }
@@ -183,31 +372,49 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
   "nextblockhash": "0000000001d8a2a9c19bc98ecb856c8406ba0b2d7d42654369014e2a14dd9c1d"
 }
 "#;
-    let r: GetBlockHeader = serde_json::from_str(json)?;
+    let obj: GetBlockHeaderResponse = serde_json::from_str(json)?;
 
-    let GetBlockHeader::Object(obj) = &r else {
+    let GetBlockHeaderResponse::Object(header) = &obj else {
         panic!("Expected Object variant");
     };
 
-    let new_obj = GetBlockHeader::Object(Box::new(GetBlockHeaderObject {
-        hash: obj.hash,
-        confirmations: obj.confirmations,
-        height: obj.height,
-        version: obj.version,
-        merkle_root: obj.merkle_root,
-        block_commitments: obj.block_commitments,
-        final_sapling_root: obj.final_sapling_root,
-        sapling_tree_size: obj.sapling_tree_size,
-        time: obj.time,
-        nonce: obj.nonce,
-        solution: obj.solution,
-        bits: obj.bits,
-        difficulty: obj.difficulty,
-        previous_block_hash: obj.previous_block_hash,
-        next_block_hash: obj.next_block_hash,
-    }));
+    // Note that we don't bother unpacking compound types because we already
+    // tested that in the get_block test.
+    let hash = header.hash();
+    let confirmations = header.confirmations();
+    let height = header.height();
+    let version = header.version();
+    let merkle_root = header.merkle_root();
+    let block_commitments = header.block_commitments();
+    let final_sapling_root = header.final_sapling_root();
+    let sapling_tree_size = header.sapling_tree_size();
+    let time = header.time();
+    let nonce = header.nonce();
+    let solution = header.solution();
+    let bits = header.bits();
+    let difficulty = header.difficulty();
+    let previous_block_hash = header.previous_block_hash();
+    let next_block_hash = header.next_block_hash();
 
-    assert_eq!(r, new_obj);
+    let new_obj = GetBlockHeaderResponse::Object(Box::new(BlockHeaderObject::new(
+        hash,
+        confirmations,
+        height,
+        version,
+        merkle_root,
+        block_commitments,
+        final_sapling_root,
+        sapling_tree_size,
+        time,
+        nonce,
+        solution,
+        bits,
+        difficulty,
+        previous_block_hash,
+        next_block_hash,
+    )));
+
+    assert_eq!(obj, new_obj);
 
     Ok(())
 }
@@ -220,11 +427,14 @@ fn test_get_block_height_hash() -> Result<(), Box<dyn std::error::Error>> {
     "hash": [35, 5, 244, 118, 21, 236, 8, 168, 3, 119, 95, 171, 238, 9, 233, 152, 250, 106, 153, 253, 6, 176, 155, 7, 155, 161, 146, 1, 0, 0, 0, 0]
 }
 "#;
-    let obj: GetBlockHeightAndHash = serde_json::from_str(json)?;
-    let new_obj = GetBlockHeightAndHash {
-        height: obj.height,
-        hash: obj.hash,
-    };
+    let obj: GetBlockHeightAndHashResponse = serde_json::from_str(json)?;
+
+    let height = obj.height().0;
+    let hash = obj.hash().0;
+    let new_obj = GetBlockHeightAndHashResponse::new(
+        zebra_chain::block::Height(height),
+        zebra_chain::block::Hash(hash),
+    );
 
     assert_eq!(obj, new_obj);
 
@@ -238,13 +448,13 @@ fn test_get_raw_mempool_false() -> Result<(), Box<dyn std::error::Error>> {
   "77ec13dde45185e99dba408d592c5b30438e8c71af5b6e2d9f4d29cb4da8ccbf"
 ]
 "#;
-    let obj: GetRawMempool = serde_json::from_str(json)?;
+    let obj: GetRawMempoolResponse = serde_json::from_str(json)?;
 
-    let GetRawMempool::TxIds(txids) = &obj else {
+    let GetRawMempoolResponse::TxIds(txids) = &obj else {
         panic!("Expected TxIds variant");
     };
 
-    let new_obj = GetRawMempool::TxIds(txids.clone());
+    let new_obj = GetRawMempoolResponse::TxIds(txids.clone());
 
     assert_eq!(obj, new_obj);
 
@@ -281,15 +491,45 @@ fn test_get_raw_mempool_true() -> Result<(), Box<dyn std::error::Error>> {
   }
 }
 "#;
-    let obj: GetRawMempool = serde_json::from_str(json)?;
+    let obj: GetRawMempoolResponse = serde_json::from_str(json)?;
 
-    let GetRawMempool::Verbose(mempool_map) = &obj else {
+    let GetRawMempoolResponse::Verbose(mempool_map) = &obj else {
         panic!("Expected Verbose variant");
     };
 
-    // TODO: add new()/getters to MempoolObject and test them
+    let mempool_map = mempool_map
+        .iter()
+        .map(|(k, v)| {
+            let size = v.size();
+            let fee: i64 = v.fee().into();
+            let modified_fee: i64 = v.modified_fee().into();
+            let time = v.time();
+            let height = v.height();
+            let descendantcount = v.descendantcount();
+            let descendantsize = v.descendantsize();
+            let descendantfees = v.descendantfees();
+            let depends = v.depends().clone();
 
-    let new_obj = GetRawMempool::Verbose(mempool_map.clone());
+            (
+                k.clone(),
+                MempoolObject::new(
+                    size,
+                    fee.try_into().expect("must work since it was just read"),
+                    modified_fee
+                        .try_into()
+                        .expect("must work since it was just read"),
+                    time,
+                    height,
+                    descendantcount,
+                    descendantsize,
+                    descendantfees,
+                    depends,
+                ),
+            )
+        })
+        .collect();
+
+    let new_obj = GetRawMempoolResponse::Verbose(mempool_map);
 
     assert_eq!(obj, new_obj);
 
@@ -315,12 +555,21 @@ fn test_z_get_treestate() -> Result<(), Box<dyn std::error::Error>> {
   }
 }
 "#;
-    let obj: GetTreestate = serde_json::from_str(json)?;
+    let obj: GetTreestateResponse = serde_json::from_str(json)?;
 
-    let (hash, height, time, sapling_final_state, orchard_final_state) = obj.clone().into_parts();
+    let hash = obj.hash();
+    let height = obj.height();
+    let time = obj.time();
+    let sapling_final_state = obj.sapling().commitments().final_state().clone();
+    let orchard_final_state = obj.orchard().commitments().final_state().clone();
 
-    let new_obj =
-        GetTreestate::from_parts(hash, height, time, sapling_final_state, orchard_final_state);
+    let new_obj = GetTreestateResponse::new(
+        hash,
+        height,
+        time,
+        Treestate::new(Commitments::new(sapling_final_state)),
+        Treestate::new(Commitments::new(orchard_final_state)),
+    );
 
     assert_eq!(obj, new_obj);
 
@@ -342,21 +591,21 @@ fn test_z_get_subtrees_by_index() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 "#;
-    let obj: GetSubtrees = serde_json::from_str(json)?;
+    let obj: GetSubtreesByIndexResponse = serde_json::from_str(json)?;
 
-    let pool = obj.pool.clone();
-    let start_index = obj.start_index.0;
-    let subtree_root = obj.subtrees[0].root.clone();
-    let subtree_end_height = obj.subtrees[0].end_height;
+    let pool = obj.pool().clone();
+    let start_index = obj.start_index().0;
+    let subtree_root = obj.subtrees()[0].root.clone();
+    let subtree_end_height = obj.subtrees()[0].end_height.0;
 
-    let new_obj = GetSubtrees {
+    let new_obj = GetSubtreesByIndexResponse::new(
         pool,
-        start_index: NoteCommitmentSubtreeIndex(start_index),
-        subtrees: vec![SubtreeRpcData {
+        NoteCommitmentSubtreeIndex(start_index),
+        vec![SubtreeRpcData {
             root: subtree_root,
-            end_height: subtree_end_height,
+            end_height: zebra_chain::block::Height(subtree_end_height),
         }],
-    };
+    );
 
     assert_eq!(obj, new_obj);
 
@@ -366,29 +615,158 @@ fn test_z_get_subtrees_by_index() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
     let json = GET_RAW_TRANSACTION_RESPONSE_TRUE;
-    let obj: GetRawTransaction = serde_json::from_str(json)?;
+    let obj: GetRawTransactionResponse = serde_json::from_str(json)?;
 
-    let GetRawTransaction::Object(tx) = &obj else {
+    let GetRawTransactionResponse::Object(tx) = &obj else {
         panic!("Expected GetRawTransaction::Object");
     };
 
-    let hex = tx.hex.clone();
-    let height = tx.height;
-    let confirmations = tx.confirmations;
-    let inputs = tx.inputs.clone();
-    let outputs = tx.outputs.clone();
-    let shielded_spends = tx.shielded_spends.clone();
-    let shielded_outputs = tx.shielded_outputs.clone();
-    let orchard = tx.orchard.clone();
-    let value_balance = tx.value_balance;
-    let value_balance_zat = tx.value_balance_zat;
-    let size = tx.size;
-    let time = tx.time;
+    // TODO: don't use SerializedTransaction?
+    let hex = tx.hex().clone().as_ref().to_vec();
+    let height = tx.height();
+    let confirmations = tx.confirmations();
+    let inputs = tx
+        .inputs()
+        .iter()
+        .map(|input| match input {
+            Input::Coinbase { coinbase, sequence } => Input::Coinbase {
+                coinbase: coinbase.clone(),
+                sequence: *sequence,
+            },
+            Input::NonCoinbase {
+                txid,
+                vout,
+                script_sig,
+                sequence,
+                value,
+                value_zat,
+                address,
+            } => {
+                let asm = script_sig.asm().clone();
+                let hex = script_sig.hex().as_raw_bytes().to_vec();
+                Input::NonCoinbase {
+                    txid: txid.clone(),
+                    vout: *vout,
+                    script_sig: ScriptSig::new(asm, zebra_chain::transparent::Script::new(&hex)),
+                    sequence: *sequence,
+                    value: *value,
+                    value_zat: *value_zat,
+                    address: address.clone(),
+                }
+            }
+        })
+        .collect();
+    let outputs = tx
+        .outputs()
+        .iter()
+        .map(|output| {
+            let value = output.value();
+            let value_zat = output.value_zat();
+            let n = output.n();
+            let script_pubkey = output.script_pub_key().clone();
+            let asm = script_pubkey.asm().clone();
+            let hex = script_pubkey.hex().as_raw_bytes().to_vec();
+            let req_sigs = script_pubkey.req_sigs();
+            let r#type = script_pubkey.r#type().clone();
+            let addresses = script_pubkey.addresses().clone();
+            Output::new(
+                value,
+                value_zat,
+                n,
+                ScriptPubKey::new(asm, Script::new(&hex), req_sigs, r#type, addresses),
+            )
+        })
+        .collect::<Vec<_>>();
+    let shielded_spends = tx
+        .shielded_spends()
+        .iter()
+        .map(|spend| {
+            // TODO: this is very different from all other types. Change?
+            let cv = spend.cv().zcash_serialize_to_vec().expect("should work");
+            let anchor = spend.anchor();
+            let nullifier = spend.nullifier();
+            let rk = spend.rk();
+            let proof = spend.proof();
+            let spend_auth_sig = spend.spend_auth_sig();
+            ShieldedSpend::new(
+                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
+                    .expect("was just serialized"),
+                anchor,
+                nullifier,
+                rk,
+                proof,
+                spend_auth_sig,
+            )
+        })
+        .collect();
+    let shielded_outputs = tx
+        .shielded_outputs()
+        .iter()
+        .map(|output| {
+            let cv = output.cv().zcash_serialize_to_vec().expect("should work");
+            let cm_u = output.cm_u();
+            let ephemeral_key = output.ephemeral_key();
+            let enc_ciphertext = output.enc_ciphertext();
+            let out_ciphertext = output.out_ciphertext();
+            let proof = output.proof();
+            ShieldedOutput::new(
+                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
+                    .expect("was just serialized"),
+                cm_u,
+                ephemeral_key,
+                enc_ciphertext,
+                out_ciphertext,
+                proof,
+            )
+        })
+        .collect();
+    let orchard = tx.orchard().as_ref().map(|bundle| {
+        let actions = bundle
+            .actions()
+            .iter()
+            .map(|action| {
+                let cv = action.cv();
+                let nullifier = action.nullifier();
+                let rk = action.rk();
+                let cm_x = action.cm_x();
+                let ephemeral_key = action.ephemeral_key();
+                let enc_ciphertext = action.enc_ciphertext();
+                let spend_auth_sig = action.spend_auth_sig();
+                let out_ciphertext = action.out_ciphertext();
+                OrchardAction::new(
+                    cv,
+                    nullifier,
+                    rk,
+                    cm_x,
+                    ephemeral_key,
+                    enc_ciphertext,
+                    spend_auth_sig,
+                    out_ciphertext,
+                )
+            })
+            .collect();
+        let value_balance = bundle.value_balance();
+        let value_balance_zat = bundle.value_balance_zat();
+        Orchard::new(actions, value_balance, value_balance_zat)
+    });
+    let value_balance = tx.value_balance();
+    let value_balance_zat = tx.value_balance_zat();
+    let size = tx.size();
+    let time = tx.time();
+    let txid = tx.txid();
+    let in_active_chain = tx.in_active_chain();
+    let auth_digest = tx.auth_digest();
+    let overwintered = tx.overwintered();
+    let version = tx.version();
+    let version_group_id = tx.version_group_id().clone();
+    let lock_time = tx.lock_time();
+    let expiry_height = tx.expiry_height();
+    let block_hash = tx.block_hash();
+    let block_time = tx.block_time();
 
-    // TODO: add test for ShieldedSpend, ShieldedOutput, Orchard
-
-    let new_obj = GetRawTransaction::Object(Box::new(TransactionObject {
-        hex,
+    let new_obj = GetRawTransactionResponse::Object(Box::new(TransactionObject::new(
+        in_active_chain,
+        hex.into(),
         height,
         confirmations,
         inputs,
@@ -400,7 +778,16 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         value_balance_zat,
         size,
         time,
-    }));
+        txid,
+        auth_digest,
+        overwintered,
+        version,
+        version_group_id,
+        lock_time,
+        expiry_height,
+        block_hash,
+        block_time,
+    )));
 
     assert_eq!(obj, new_obj);
 
@@ -412,11 +799,10 @@ fn test_get_address_tx_ids() -> Result<(), Box<dyn std::error::Error>> {
     // Test request only (response is trivial)
     let json =
         r#"{"addresses":["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak"],"start":2931856,"end":2932856}"#;
-    // TODO: allow not passing start or end
-    let obj = GetAddressTxIdsRequest::from_parts(
+    let obj = GetAddressTxIdsRequest::new(
         vec!["t1at7nVNsv6taLRrNRvnQdtfLNRDfsGc3Ak".to_string()],
-        2931856,
-        2932856,
+        Some(2931856),
+        Some(2932856),
     );
     let new_json = serde_json::to_string(&obj)?;
     assert_eq!(json, new_json);
@@ -437,17 +823,32 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
   }
 ]
 "#;
-    let obj: Vec<GetAddressUtxos> = serde_json::from_str(json)?;
-    let (address, txid, output_index, script, satoshis, height) = obj[0].clone().into_parts();
+    let obj: GetAddressUtxosResponse = serde_json::from_str(json)?;
 
-    let new_obj = vec![GetAddressUtxos::from_parts(
-        address,
-        txid,
-        output_index,
-        script,
-        satoshis,
-        height,
-    )];
+    let new_obj = obj
+        .iter()
+        .map(|utxo| {
+            // Address extractability was checked manually
+            let address = utxo.address().clone();
+            // Hash extractability was checked in other test
+            let txid = utxo.txid();
+            let output_index = utxo.output_index().index();
+            // Script extractability was checked in other test
+            let script = utxo.script().clone();
+            let satoshis = utxo.satoshis();
+            // Height extractability was checked in other test
+            let height = utxo.height();
+
+            Utxo::new(
+                address,
+                txid,
+                OutputIndex::from_index(output_index),
+                script,
+                satoshis,
+                height,
+            )
+        })
+        .collect::<Vec<_>>();
 
     assert_eq!(obj, new_obj);
 
@@ -457,11 +858,11 @@ fn test_get_address_utxos() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_block_hash() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#""0000000001695b61dd5c82ae33a326126d6153d1641a3a1759d3f687ea377148""#;
-    let obj: GetBlockHash = serde_json::from_str(json)?;
+    let obj: GetBlockHashResponse = serde_json::from_str(json)?;
 
-    let hash = obj.0;
+    let hash = obj.hash();
 
-    let new_obj = GetBlockHash(hash);
+    let new_obj = GetBlockHashResponse::new(hash);
 
     assert_eq!(obj, new_obj);
 
@@ -472,15 +873,13 @@ fn test_get_block_hash() -> Result<(), Box<dyn std::error::Error>> {
 fn test_get_block_template_request() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#"{"mode":"template"}"#;
 
-    // TODO: add new() method
-
-    let new_obj = get_block_template::parameters::JsonParameters {
-        mode: get_block_template::parameters::GetBlockTemplateRequestMode::Template,
-        data: None,
-        capabilities: vec![],
-        long_poll_id: None,
-        _work_id: None,
-    };
+    let new_obj = GetBlockTemplateParameters::new(
+        GetBlockTemplateRequestMode::Template,
+        None,
+        vec![],
+        None,
+        None,
+    );
     let new_json = serde_json::to_string(&new_obj)?;
     assert_eq!(json, new_json);
 
@@ -490,58 +889,92 @@ fn test_get_block_template_request() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> {
     let json = GET_BLOCK_TEMPLATE_RESPONSE_TEMPLATE;
-    let obj: get_block_template::Response = serde_json::from_str(json)?;
+    let obj: GetBlockTemplateResponse = serde_json::from_str(json)?;
 
-    let get_block_template::Response::TemplateMode(template) = &obj else {
-        panic!("Expected get_block_template::Response::TemplateMode");
+    let GetBlockTemplateResponse::TemplateMode(template) = &obj else {
+        panic!("Expected GetBlockTemplateResponse::TemplateMode");
     };
 
-    let capabilities = template.capabilities.clone();
-    let version = template.version;
-    let previous_block_hash = template.previous_block_hash.0 .0;
-    let block_commitments_hash: [u8; 32] = template.block_commitments_hash.into();
-    let light_client_root_hash: [u8; 32] = template.light_client_root_hash.into();
-    let final_sapling_root_hash: [u8; 32] = template.final_sapling_root_hash.into();
-    let default_roots = template.default_roots.clone();
-    // TODO: test all these types to ensure they can be read fully
-    let transactions = template.transactions.clone();
-    let coinbase_txn = template.coinbase_txn.clone();
-    let long_poll_id = template.long_poll_id;
-    let target = template.target;
-    let min_time = template.min_time;
-    let mutable = template.mutable.clone();
-    let nonce_range = template.nonce_range.clone();
-    let sigop_limit = template.sigop_limit;
-    let size_limit = template.size_limit;
-    let cur_time = template.cur_time;
-    let bits = template.bits;
-    let height = template.height;
-    let max_time = template.max_time;
-    let submit_old = template.submit_old;
+    let capabilities = template.capabilities().clone();
+    let version = template.version();
+    let previous_block_hash = template.previous_block_hash().0;
+    let block_commitments_hash: [u8; 32] = template.block_commitments_hash().into();
+    let light_client_root_hash: [u8; 32] = template.light_client_root_hash().into();
+    let final_sapling_root_hash: [u8; 32] = template.final_sapling_root_hash().into();
+    let default_roots_merkle_root: [u8; 32] = template.default_roots().merkle_root().into();
+    let default_roots_chain_history_root: [u8; 32] =
+        template.default_roots().chain_history_root().into();
+    let default_roots_auth_data_root: [u8; 32] = template.default_roots().auth_data_root().into();
+    let default_roots_block_commitments_hash: [u8; 32] =
+        template.default_roots().block_commitments_hash().into();
+    let default_roots = DefaultRoots::new(
+        default_roots_merkle_root.into(),
+        default_roots_chain_history_root.into(),
+        default_roots_auth_data_root.into(),
+        default_roots_block_commitments_hash.into(),
+    );
+    let transactions = template
+        .transactions()
+        .clone()
+        .iter()
+        .map(|txn| {
+            let data = txn.data().clone().as_ref().to_vec();
+            let hash: [u8; 32] = txn.hash().into();
+            let auth_digest: [u8; 32] = txn.auth_digest().into();
+            let depends = txn.depends().clone();
+            let fee = txn.fee();
+            let sigops = txn.sigops();
+            let required = txn.required();
 
-    let new_obj = get_block_template::Response::TemplateMode(Box::new(GetBlockTemplate {
+            TransactionTemplate::new(
+                data.into(),
+                hash.into(),
+                auth_digest.into(),
+                depends,
+                fee,
+                sigops,
+                required,
+            )
+        })
+        .collect::<Vec<_>>();
+    let coinbase_txn = template.coinbase_txn().clone();
+    // We manually checked all LongPollId fields are extractable
+    let long_poll_id = template.long_poll_id();
+    let target = template.target().bytes_in_display_order();
+    let min_time = template.min_time().timestamp();
+    let mutable = template.mutable().clone();
+    let nonce_range = template.nonce_range().clone();
+    let sigop_limit = template.sigop_limit();
+    let size_limit = template.size_limit();
+    let cur_time = template.cur_time();
+    let bits = template.bits().bytes_in_display_order();
+    let height = template.height();
+    let max_time = template.max_time();
+    let submit_old = template.submit_old();
+
+    let new_obj = GetBlockTemplateResponse::TemplateMode(Box::new(BlockTemplateResponse::new(
         capabilities,
         version,
-        previous_block_hash: GetBlockHash(zebra_chain::block::Hash(previous_block_hash)),
-        block_commitments_hash: block_commitments_hash.into(),
-        light_client_root_hash: light_client_root_hash.into(),
-        final_sapling_root_hash: final_sapling_root_hash.into(),
+        previous_block_hash.into(),
+        block_commitments_hash.into(),
+        light_client_root_hash.into(),
+        final_sapling_root_hash.into(),
         default_roots,
         transactions,
         coinbase_txn,
         long_poll_id,
-        target,
-        min_time,
+        ExpandedDifficulty::from_bytes_in_display_order(&target),
+        min_time.into(),
         mutable,
         nonce_range,
         sigop_limit,
         size_limit,
         cur_time,
-        bits,
+        CompactDifficulty::from_bytes_in_display_order(&bits).expect("was just serialized"),
         height,
         max_time,
         submit_old,
-    }));
+    )));
 
     assert_eq!(obj, new_obj);
 
@@ -551,11 +984,11 @@ fn test_get_block_template_response() -> Result<(), Box<dyn std::error::Error>> 
 #[test]
 fn test_submit_block() -> Result<(), Box<dyn std::error::Error>> {
     let json = r#""duplicate""#;
-    let obj: submit_block::Response = serde_json::from_str(json)?;
+    let obj: SubmitBlockResponse = serde_json::from_str(json)?;
 
     assert_eq!(
         obj,
-        submit_block::Response::ErrorResponse(submit_block::ErrorResponse::Duplicate)
+        SubmitBlockResponse::ErrorResponse(SubmitBlockErrorResponse::Duplicate)
     );
 
     Ok(())
@@ -574,9 +1007,26 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
   "testnet": false
 }
 "#;
-    let _obj: get_mining_info::Response = serde_json::from_str(json)?;
+    let obj: GetMiningInfoResponse = serde_json::from_str(json)?;
 
-    // TODO: add getters
+    let tip_height = obj.tip_height();
+    let current_block_size = obj.current_block_size();
+    let current_block_tx = obj.current_block_tx();
+    let networksolps = obj.networksolps();
+    let networkhashps = obj.networkhashps();
+    let chain = obj.chain().clone();
+    let testnet = obj.testnet();
+
+    let new_obj = GetMiningInfoResponse::new(
+        tip_height,
+        current_block_size,
+        current_block_tx,
+        networksolps,
+        networkhashps,
+        chain,
+        testnet,
+    );
+    assert_eq!(obj, new_obj);
 
     Ok(())
 }
@@ -595,25 +1045,16 @@ fn test_get_peer_info() -> Result<(), Box<dyn std::error::Error>> {
   }
 ]
 "#;
-    let obj: Vec<PeerInfo> = serde_json::from_str(json)?;
+    let obj: GetPeerInfoResponse = serde_json::from_str(json)?;
 
-    let addr0 = obj[0].addr;
-    let inbound0 = obj[0].inbound;
-    let addr1 = obj[1].addr;
-    let inbound1 = obj[1].inbound;
-
-    // TODO: allow getting IP from PeerInfo (change to SocketAddr?)
-    // TODO: add getters, new()
+    let addr0 = *obj[0].addr().deref();
+    let inbound0 = obj[0].inbound();
+    let addr1 = *obj[1].addr().deref();
+    let inbound1 = obj[1].inbound();
 
     let new_obj = vec![
-        PeerInfo {
-            addr: addr0,
-            inbound: inbound0,
-        },
-        PeerInfo {
-            addr: addr1,
-            inbound: inbound1,
-        },
+        PeerInfo::new(addr0.into(), inbound0),
+        PeerInfo::new(addr1.into(), inbound1),
     ];
     assert_eq!(obj, new_obj);
 
@@ -629,17 +1070,13 @@ fn test_validate_address() -> Result<(), Box<dyn std::error::Error>> {
   "isscript": false
 }
 "#;
-    let obj: validate_address::Response = serde_json::from_str(json)?;
+    let obj: ValidateAddressResponse = serde_json::from_str(json)?;
 
-    let is_valid = obj.is_valid;
-    let address = obj.address.clone();
-    let is_script = obj.is_script;
+    let is_valid = obj.is_valid();
+    let address = obj.address().clone();
+    let is_script = obj.is_script();
 
-    let new_obj = validate_address::Response {
-        is_valid,
-        address,
-        is_script,
-    };
+    let new_obj = ValidateAddressResponse::new(is_valid, address, is_script);
 
     assert_eq!(obj, new_obj);
 
@@ -656,19 +1093,14 @@ fn test_z_validate_address() -> Result<(), Box<dyn std::error::Error>> {
   "ismine": false
 }
 "#;
-    let obj: z_validate_address::Response = serde_json::from_str(json)?;
+    let obj: ZValidateAddressResponse = serde_json::from_str(json)?;
 
-    let is_valid = obj.is_valid;
-    let address = obj.address.clone();
-    let address_type = obj.address_type.clone();
-    let is_mine = obj.is_mine;
+    let is_valid = obj.is_valid();
+    let address = obj.address().clone();
+    let address_type = obj.address_type();
+    let is_mine = obj.is_mine();
 
-    let new_obj = z_validate_address::Response {
-        is_valid,
-        address,
-        address_type,
-        is_mine,
-    };
+    let new_obj = ZValidateAddressResponse::new(is_valid, address, address_type, is_mine);
 
     assert_eq!(obj, new_obj);
 
@@ -703,20 +1135,29 @@ fn test_get_block_subsidy() -> Result<(), Box<dyn std::error::Error>> {
   "totalblocksubsidy": 1.5625
 }
 "#;
-    let obj: BlockSubsidy = serde_json::from_str(json)?;
+    let obj: GetBlockSubsidyResponse = serde_json::from_str(json)?;
 
-    let funding_streams = obj.funding_streams.clone();
-    let lockbox_streams = obj.lockbox_streams.clone();
-    // TODO: check if FundingStream can be read and recreated
-    let miner = obj.miner;
-    let founders = obj.founders;
-    let funding_streams_total = obj.funding_streams_total;
-    let lockbox_total = obj.lockbox_total;
-    let total_block_subsidy = obj.total_block_subsidy;
+    let funding_streams = obj
+        .funding_streams()
+        .iter()
+        .map(|stream| {
+            let recipient = stream.recipient().clone();
+            let specification = stream.specification().clone();
+            let value = stream.value();
+            let value_zat = stream.value_zat();
+            let address = stream.address().clone();
 
-    // TODO: add getters, new()
+            FundingStream::new(recipient, specification, value, value_zat, address)
+        })
+        .collect::<Vec<_>>();
+    let lockbox_streams = obj.lockbox_streams().clone();
+    let miner = obj.miner();
+    let founders = obj.founders();
+    let funding_streams_total = obj.funding_streams_total();
+    let lockbox_total = obj.lockbox_total();
+    let total_block_subsidy = obj.total_block_subsidy();
 
-    let new_obj = BlockSubsidy {
+    let new_obj = GetBlockSubsidyResponse::new(
         funding_streams,
         lockbox_streams,
         miner,
@@ -724,7 +1165,7 @@ fn test_get_block_subsidy() -> Result<(), Box<dyn std::error::Error>> {
         funding_streams_total,
         lockbox_total,
         total_block_subsidy,
-    };
+    );
 
     assert_eq!(obj, new_obj);
 
@@ -739,10 +1180,15 @@ fn test_z_list_unified_receivers() -> Result<(), Box<dyn std::error::Error>> {
   "p2pkh": "t1V9mnyk5Z5cTNMCkLbaDwSskgJZucTLdgW"
 }
 "#;
-    // TODO: fix, allow deserializing with missing fields
-    let _obj: unified_address::Response = serde_json::from_str(json)?;
+    let obj: ZListUnifiedReceiversResponse = serde_json::from_str(json)?;
 
-    // TODO: add getters
+    let orchard = obj.orchard().clone();
+    let sapling = obj.sapling().clone();
+    let p2pkh = obj.p2pkh().clone();
+    let p2sh = obj.p2sh().clone();
+
+    let new_obj = ZListUnifiedReceiversResponse::new(orchard, sapling, p2pkh, p2sh);
+    assert_eq!(obj, new_obj);
 
     Ok(())
 }
@@ -755,11 +1201,10 @@ fn test_generate() -> Result<(), Box<dyn std::error::Error>> {
   "0000000001695b61dd5c82ae33a326126d6153d1641a3a1759d3f687ea377149"
 ]
 "#;
-    // TODO: fix, allow deserializing with missing fields
-    let obj: Vec<GetBlockHash> = serde_json::from_str(json)?;
-    let hash0 = obj[0].0;
-    let hash1 = obj[1].0;
-    let new_obj = vec![GetBlockHash(hash0), GetBlockHash(hash1)];
+    let obj: Vec<Hash> = serde_json::from_str(json)?;
+    let hash0 = obj[0].hash();
+    let hash1 = obj[1].hash();
+    let new_obj = vec![Hash::new(hash0), Hash::new(hash1)];
     assert_eq!(obj, new_obj);
 
     Ok(())

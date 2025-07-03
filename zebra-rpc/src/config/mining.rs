@@ -1,19 +1,20 @@
 //! Mining config
 
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, DisplayFromStr};
 
-use zebra_chain::transparent;
+use zcash_address::ZcashAddress;
 
 /// Mining configuration section.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+#[serde_as]
+#[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct Config {
-    /// The address used for miner payouts.
-    /// Zebra currently only supports P2SH and P2PKH transparent addresses.
+    /// Address for receiving miner subsidy and tx fees.
     ///
-    /// Zebra sends mining fees and miner rewards to this address in the
-    /// `getblocktemplate` RPC coinbase transaction.
-    pub miner_address: Option<transparent::Address>,
+    /// Used in coinbase tx constructed in `getblocktemplate` RPC.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    pub miner_address: Option<ZcashAddress>,
 
     // TODO: Internal miner config code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
     // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L18-L38
@@ -25,12 +26,6 @@ pub struct Config {
     /// Otherwise, it will be UTF-8 encoded into bytes.
     pub extra_coinbase_data: Option<String>,
 
-    /// Should Zebra's block templates try to imitate `zcashd`?
-    ///
-    /// This developer-only config is not supported for general use.
-    /// TODO: remove this option as part of zcashd deprecation
-    pub debug_like_zcashd: bool,
-
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
     ///
     /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
@@ -39,19 +34,6 @@ pub struct Config {
     /// The internal miner is off by default.
     #[serde(default)]
     pub internal_miner: bool,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            miner_address: None,
-            // For now, act like `zcashd` as much as possible.
-            // TODO: do we want to default to v5 transactions and Zebra coinbase data?
-            extra_coinbase_data: None,
-            debug_like_zcashd: true,
-            internal_miner: false,
-        }
-    }
 }
 
 impl Config {

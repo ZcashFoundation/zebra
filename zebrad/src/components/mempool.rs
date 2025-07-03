@@ -38,7 +38,7 @@ use zebra_chain::{
 };
 use zebra_consensus::{error::TransactionError, transaction};
 use zebra_network::{self as zn, PeerSocketAddr};
-use zebra_node_services::mempool::{Gossip, Request, Response};
+use zebra_node_services::mempool::{Gossip, MempoolChange, MempoolTxSubscriber, Request, Response};
 use zebra_state as zs;
 use zebra_state::{ChainTipChange, TipAction};
 
@@ -238,7 +238,7 @@ pub struct Mempool {
 
     /// Sender part of a gossip transactions channel.
     /// Used to broadcast transaction ids to peers.
-    transaction_sender: broadcast::Sender<HashSet<UnminedTxId>>,
+    transaction_sender: broadcast::Sender<MempoolChange>,
 
     /// Sender for reporting peer addresses that advertised unexpectedly invalid transactions.
     misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
@@ -277,9 +277,10 @@ impl Mempool {
         latest_chain_tip: zs::LatestChainTip,
         chain_tip_change: ChainTipChange,
         misbehavior_sender: mpsc::Sender<(PeerSocketAddr, u32)>,
-    ) -> (Self, broadcast::Receiver<HashSet<UnminedTxId>>) {
-        let (transaction_sender, transaction_receiver) =
+    ) -> (Self, MempoolTxSubscriber) {
+        let (transaction_sender, _) =
             tokio::sync::broadcast::channel(gossip::MAX_CHANGES_BEFORE_SEND * 2);
+        let transaction_subscriber = MempoolTxSubscriber::new(transaction_sender.clone());
 
         let mut service = Mempool {
             config: config.clone(),
@@ -307,7 +308,7 @@ impl Mempool {
         // Otherwise, it is only updated in `poll_ready`, right before each service call.
         service.update_state(None);
 
-        (service, transaction_receiver)
+        (service, transaction_subscriber)
     }
 
     /// Is the mempool enabled by a debug config option?
@@ -397,11 +398,11 @@ impl Mempool {
     /// Remove expired transaction ids from a given list of inserted ones.
     fn remove_expired_from_peer_list(
         send_to_peers_ids: &HashSet<UnminedTxId>,
-        expired_transactions: &HashSet<zebra_chain::transaction::Hash>,
+        expired_transactions: &HashSet<UnminedTxId>,
     ) -> HashSet<UnminedTxId> {
         send_to_peers_ids
             .iter()
-            .filter(|id| !expired_transactions.contains(&id.mined_id()))
+            .filter(|id| !expired_transactions.contains(id))
             .copied()
             .collect()
     }
@@ -524,6 +525,8 @@ impl Service<Request> for Mempool {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let tip_action = self.chain_tip_change.last_tip_change();
+
+        // TODO: Consider broadcasting a `MempoolChange` when the mempool is disabled.
         let is_state_changed = self.update_state(tip_action.as_ref());
 
         tracing::trace!(is_enabled = ?self.is_enabled(), ?is_state_changed, "started polling the mempool...");
@@ -588,6 +591,8 @@ impl Service<Request> for Mempool {
         {
             // Collect inserted transaction ids.
             let mut send_to_peers_ids = HashSet::<_>::new();
+            let mut invalidated_ids = HashSet::<_>::new();
+            let mut mined_mempool_ids = HashSet::<_>::new();
 
             let best_tip_height = self.latest_chain_tip.best_tip_height();
 
@@ -602,6 +607,7 @@ impl Service<Request> for Mempool {
                         // the best chain changes (which is the only way to stay at the same height), and the
                         // mempool re-verifies all pending tx_downloads when there's a `TipAction::Reset`.
                         if best_tip_height == expected_tip_height {
+                            let tx_id = tx.transaction.id;
                             let insert_result =
                                 storage.insert(tx, spent_mempool_outpoints, best_tip_height);
 
@@ -613,6 +619,8 @@ impl Service<Request> for Mempool {
                             if let Ok(inserted_id) = insert_result {
                                 // Save transaction ids that we will send to peers
                                 send_to_peers_ids.insert(inserted_id);
+                            } else {
+                                invalidated_ids.insert(tx_id);
                             }
 
                             // Send the result to responder channel if one was provided.
@@ -646,13 +654,16 @@ impl Service<Request> for Mempool {
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => error.to_string()).increment(1);
 
+                        invalidated_ids.insert(tx_id);
                         storage.reject_if_needed(tx_id, error);
                     }
                     Err(_elapsed) => {
                         // A timeout happens when the stream hangs waiting for another service,
                         // so there is no specific transaction ID.
 
-                        tracing::info!("mempool transaction failed to verify due to timeout");
+                        // TODO: Return the transaction id that timed out during verification so it can be
+                        //       included in the list of invalidated transactions and change `warn!` to `info!`.
+                        tracing::warn!("mempool transaction failed to verify due to timeout");
 
                         metrics::counter!("mempool.failed.verify.tasks.total", "reason" => "timeout").increment(1);
                     }
@@ -669,11 +680,16 @@ impl Service<Request> for Mempool {
                 let mined_ids = block.transaction_hashes.iter().cloned().collect();
                 tx_downloads.cancel(&mined_ids);
                 storage.clear_mined_dependencies(&mined_ids);
-                storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
+
+                let storage::RemovedTransactionIds { mined, invalidated } =
+                    storage.reject_and_remove_same_effects(&mined_ids, block.transactions);
 
                 // Clear any transaction rejections if they might have become valid after
                 // the new block was added to the tip.
                 storage.clear_tip_rejections();
+
+                mined_mempool_ids.extend(mined);
+                invalidated_ids.extend(invalidated);
             }
 
             // Remove expired transactions from the mempool.
@@ -691,14 +707,42 @@ impl Service<Request> for Mempool {
                         ?expired_transactions,
                         "removed expired transactions from the mempool",
                     );
+
+                    invalidated_ids.extend(expired_transactions);
                 }
             }
 
-            // Send transactions that were not rejected nor expired to peers
+            // Send transactions that were not rejected nor expired to peers and RPC listeners.
             if !send_to_peers_ids.is_empty() {
-                tracing::trace!(?send_to_peers_ids, "sending new transactions to peers");
+                tracing::trace!(
+                    ?send_to_peers_ids,
+                    "sending new transactions to peers and RPC listeners"
+                );
 
-                self.transaction_sender.send(send_to_peers_ids)?;
+                self.transaction_sender
+                    .send(MempoolChange::added(send_to_peers_ids))?;
+            }
+
+            // Send transactions that were rejected to RPC listeners.
+            if !invalidated_ids.is_empty() {
+                tracing::trace!(
+                    ?invalidated_ids,
+                    "sending invalidated transactions to RPC listeners"
+                );
+
+                self.transaction_sender
+                    .send(MempoolChange::invalidated(invalidated_ids))?;
+            }
+
+            // Send transactions that were mined onto the best chain to RPC listeners.
+            if !mined_mempool_ids.is_empty() {
+                tracing::trace!(
+                    ?mined_mempool_ids,
+                    "sending mined transactions to RPC listeners"
+                );
+
+                self.transaction_sender
+                    .send(MempoolChange::mined(mined_mempool_ids))?;
             }
         }
 

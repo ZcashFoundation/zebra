@@ -217,15 +217,15 @@ Our test execution is centralized through our Docker [entrypoint script](http://
 docker run --rm -e RUN_ALL_TESTS=1 zebra-tests
 
 # Specific test suites
-docker run --rm -e TEST_LWD_INTEGRATION=1 zebra-tests
+docker run --rm -e LIGHTWALLETD_INTEGRATION=1 zebra-tests
 ```
 
 #### Test Categories
 
 - Full suite (`RUN_ALL_TESTS`)
-- Integration tests (`TEST_LWD_INTEGRATION`)
-- Network sync (`TEST_ZEBRA_EMPTY_SYNC`, `TEST_UPDATE_SYNC`)
-- State management (`TEST_DISK_REBUILD`)
+- Integration tests (`LIGHTWALLETD_INTEGRATION`)
+- Network sync (`SYNC_LARGE_CHECKPOINTS_EMPTY`, `SYNC_UPDATE`)
+- State management (`SYNC_TO_MANDATORY_CHECKPOINT`)
 
 ### Pull Request Testing
 

@@ -1,21 +1,22 @@
 //! Transparent-related (Bitcoin-inherited) functionality.
 
-use std::{collections::HashMap, fmt, iter};
-
-use crate::{
-    amount::{Amount, NonNegative},
-    block,
-    parameters::Network,
-    primitives::zcash_primitives,
-    transaction,
-};
-
 mod address;
 mod keys;
 mod opcodes;
 mod script;
 mod serialize;
 mod utxo;
+
+use std::{collections::HashMap, fmt, iter, ops::AddAssign};
+
+use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
+
+use crate::{
+    amount::{Amount, NonNegative},
+    block,
+    parameters::Network,
+    transaction,
+};
 
 pub use address::Address;
 pub use script::Script;
@@ -131,6 +132,7 @@ pub struct OutPoint {
 
     /// Identifies which UTXO from that transaction is referenced; the
     /// first output is 0, etc.
+    // TODO: Use OutputIndex here
     pub index: u32,
 }
 
@@ -223,8 +225,17 @@ impl Input {
         data: Option<Vec<u8>>,
         sequence: Option<u32>,
     ) -> Input {
-        // "No extra coinbase data" is the default.
-        let data = data.unwrap_or_default();
+        // `zcashd` includes an extra byte after the coinbase height in the coinbase data. We do
+        // that only if the data is empty to stay compliant with the following consensus rule:
+        //
+        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
+        //
+        // ## Rationale
+        //
+        // Coinbase heights < 17 are serialized as a single byte, and if there is no coinbase data,
+        // the script of a coinbase tx with such a height would consist only of this single byte,
+        // violating the consensus rule.
+        let data = data.map_or(vec![0], |d| if d.is_empty() { vec![0] } else { d });
         let height_size = height.coinbase_zcash_serialized_size();
 
         assert!(
@@ -238,9 +249,8 @@ impl Input {
         Input::Coinbase {
             height,
             data: CoinbaseData(data),
-
-            // If the caller does not specify the sequence number,
-            // use a sequence number that activates the LockTime.
+            // If the caller does not specify the sequence number, use a sequence number that
+            // activates the LockTime.
             sequence: sequence.unwrap_or(0),
         }
     }
@@ -440,7 +450,72 @@ impl Output {
     /// Return the destination address from a transparent output.
     ///
     /// Returns None if the address type is not valid or unrecognized.
-    pub fn address(&self, network: &Network) -> Option<Address> {
-        zcash_primitives::transparent_output_address(self, network)
+    pub fn address(&self, net: &Network) -> Option<Address> {
+        match TxOut::try_from(self).ok()?.recipient_address()? {
+            TransparentAddress::PublicKeyHash(pkh) => {
+                Some(Address::from_pub_key_hash(net.t_addr_kind(), pkh))
+            }
+            TransparentAddress::ScriptHash(sh) => {
+                Some(Address::from_script_hash(net.t_addr_kind(), sh))
+            }
+        }
+    }
+}
+
+/// A transparent output's index in its transaction.
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
+pub struct OutputIndex(u32);
+
+impl OutputIndex {
+    /// Create a transparent output index from the Zcash consensus integer type.
+    ///
+    /// `u32` is also the inner type.
+    pub const fn from_index(output_index: u32) -> OutputIndex {
+        OutputIndex(output_index)
+    }
+
+    /// Returns this index as the inner type.
+    pub const fn index(&self) -> u32 {
+        self.0
+    }
+
+    /// Create a transparent output index from `usize`.
+    #[allow(dead_code)]
+    pub fn from_usize(output_index: usize) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum valid index fits in the inner type"),
+        )
+    }
+
+    /// Return this index as `usize`.
+    #[allow(dead_code)]
+    pub fn as_usize(&self) -> usize {
+        self.0
+            .try_into()
+            .expect("the maximum valid index fits in usize")
+    }
+
+    /// Create a transparent output index from `u64`.
+    #[allow(dead_code)]
+    pub fn from_u64(output_index: u64) -> OutputIndex {
+        OutputIndex(
+            output_index
+                .try_into()
+                .expect("the maximum u64 index fits in the inner type"),
+        )
+    }
+
+    /// Return this index as `u64`.
+    #[allow(dead_code)]
+    pub fn as_u64(&self) -> u64 {
+        self.0.into()
+    }
+}
+
+impl AddAssign<u32> for OutputIndex {
+    fn add_assign(&mut self, rhs: u32) {
+        self.0 += rhs
     }
 }

@@ -21,7 +21,7 @@ use zebra_network::{
     Config as NetworkConfig, InventoryResponse, PeerError, Request, Response, SharedPeerError,
 };
 use zebra_node_services::mempool;
-use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
+use zebra_rpc::SubmitBlockChannel;
 use zebra_state::Config as StateConfig;
 use zebra_test::mock_service::{MockService, PanicAssertion};
 
@@ -697,7 +697,7 @@ async fn setup(
     // Mempool
     let (misbehavior_tx, _misbehavior_rx) = tokio::sync::mpsc::channel(1);
     let mempool_config = MempoolConfig::default();
-    let (mut mempool_service, transaction_receiver) = Mempool::new(
+    let (mut mempool_service, transaction_subscriber) = Mempool::new(
         &mempool_config,
         peer_set.clone(),
         state_service.clone(),
@@ -742,7 +742,7 @@ async fn setup(
     ));
 
     let tx_gossip_task_handle = tokio::spawn(gossip_mempool_transaction_id(
-        transaction_receiver,
+        transaction_subscriber.subscribe(),
         peer_set.clone(),
     ));
 
@@ -798,7 +798,7 @@ mod submitblock_test {
     use std::sync::{Arc, Mutex};
     use tracing::{Instrument, Level};
     use tracing_subscriber::fmt;
-    use zebra_rpc::methods::types::submit_block::SubmitBlockChannel;
+    use zebra_rpc::SubmitBlockChannel;
 
     use super::*;
 

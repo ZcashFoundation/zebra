@@ -8,9 +8,7 @@ use rand::{distributions::Alphanumeric, thread_rng, Rng};
 use serde::Serialize;
 use syn::LitStr;
 
-use zebra_rpc::methods::{trees::GetTreestate, *};
-
-use types::{get_mining_info, submit_block, subsidy, validate_address, z_validate_address};
+use zebra_rpc::client::*;
 
 // The API server
 const SERVER: &str = "http://localhost:8232";
@@ -84,10 +82,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let current_path = env!("CARGO_MANIFEST_DIR");
 
     // Define the paths to the Zebra RPC methods
-    let paths = vec![(
-        format!("{}/../zebra-rpc/src/methods.rs", current_path),
-        "Rpc",
-    )];
+    let paths = vec![(format!("{current_path}/../zebra-rpc/src/methods.rs"), "Rpc")];
 
     // Create an indexmap to store the method names and configuration
     let mut methods = IndexMap::new();
@@ -156,7 +151,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                         );
 
                         // Add the method name and configuration to the indexmap
-                        methods.insert(format!("/{}", method_name), methods_config.clone());
+                        methods.insert(format!("/{method_name}"), methods_config.clone());
                     }
                 }
             }
@@ -187,8 +182,8 @@ info:
         - [The Zebra repository](https://github.com/ZcashFoundation/zebra)
         - [The latests API spec](https://github.com/ZcashFoundation/zebra/blob/main/openapi.yaml)
 servers:
-  - url: {}
-", SERVER)
+  - url: {SERVER}
+")
 }
 
 // Extract the method name from the trait item
@@ -297,7 +292,7 @@ fn get_params(method_doc: &[String]) -> Result<(String, String), Box<dyn Error>>
             if param_line.trim().starts_with("# [doc = \" -") {
                 // Extract parameter name and description
                 if let Some((name, description)) = extract_param_info(param_line) {
-                    param_descriptions.push(format!("- `{}` - {}", name, description));
+                    param_descriptions.push(format!("- `{name}` - {description}"));
 
                     // Extract parameter example if available
                     if let Some(example) = extract_param_example(param_line) {
@@ -478,59 +473,61 @@ fn get_default_properties(method_name: &str) -> Result<IndexMap<String, Property
         // TODO: missing `getblocktemplate`. It's a complex method that requires a lot of parameters.
         "getnetworkhashps" => default_property(type_, items.clone(), u64::default())?,
         "getblocksubsidy" => {
-            default_property(type_, items.clone(), subsidy::BlockSubsidy::default())?
+            default_property(type_, items.clone(), GetBlockSubsidyResponse::default())?
         }
         "getmininginfo" => {
-            default_property(type_, items.clone(), get_mining_info::Response::default())?
+            default_property(type_, items.clone(), GetMiningInfoResponse::default())?
         }
         "getnetworksolps" => default_property(type_, items.clone(), u64::default())?,
-        "submitblock" => default_property(type_, items.clone(), submit_block::Response::default())?,
+        "submitblock" => default_property(type_, items.clone(), SubmitBlockResponse::default())?,
         // util
         "validateaddress" => {
-            default_property(type_, items.clone(), validate_address::Response::default())?
+            default_property(type_, items.clone(), ValidateAddressResponse::default())?
         }
-        "z_validateaddress" => default_property(
-            type_,
-            items.clone(),
-            z_validate_address::Response::default(),
-        )?,
+        "z_validateaddress" => {
+            default_property(type_, items.clone(), ZValidateAddressResponse::default())?
+        }
         // address
-        "getaddressbalance" => default_property(type_, items.clone(), AddressBalance::default())?,
-        "getaddressutxos" => default_property(type_, items.clone(), GetAddressUtxos::default())?,
+        "getaddressbalance" => {
+            default_property(type_, items.clone(), GetAddressBalanceResponse::default())?
+        }
+        "getaddressutxos" => default_property(type_, items.clone(), Utxo::default())?,
         "getaddresstxids" => default_property(type_, items.clone(), Vec::<String>::default())?,
         // network
-        "getpeerinfo" => {
-            default_property(type_, items.clone(), types::peer_info::PeerInfo::default())?
-        }
+        "getpeerinfo" => default_property(type_, items.clone(), vec![PeerInfo::default()])?,
         // blockchain
         "getdifficulty" => default_property(type_, items.clone(), f64::default())?,
         "getblockchaininfo" => {
-            default_property(type_, items.clone(), GetBlockChainInfo::default())?
+            default_property(type_, items.clone(), GetBlockchainInfoResponse::default())?
         }
         "getrawmempool" => default_property(type_, items.clone(), Vec::<String>::default())?,
-        "getblockhash" => default_property(type_, items.clone(), GetBlockHash::default())?,
+        "getblockhash" => default_property(type_, items.clone(), GetBlockHashResponse::default())?,
         "z_getsubtreesbyindex" => {
-            default_property(type_, items.clone(), trees::GetSubtrees::default())?
+            default_property(type_, items.clone(), GetSubtreesByIndexResponse::default())?
         }
-        "z_gettreestate" => default_property(type_, items.clone(), GetTreestate::default())?,
+        "z_gettreestate" => {
+            default_property(type_, items.clone(), GetTreestateResponse::default())?
+        }
         "getblockcount" => default_property(type_, items.clone(), u32::default())?,
-        "getbestblockhash" => default_property(type_, items.clone(), GetBlockHash::default())?,
-        "getblock" => default_property(type_, items.clone(), GetBlock::default())?,
+        "getbestblockhash" => {
+            default_property(type_, items.clone(), GetBlockHashResponse::default())?
+        }
+        "getblock" => default_property(type_, items.clone(), GetBlockResponse::default())?,
         // wallet
         "z_listunifiedreceivers" => default_property(
             type_,
             items.clone(),
-            types::unified_address::Response::default(),
+            ZListUnifiedReceiversResponse::default(),
         )?,
         // control
-        "getinfo" => default_property(type_, items.clone(), GetInfo::default())?,
+        "getinfo" => default_property(type_, items.clone(), GetInfoResponse::default())?,
         "stop" => default_property(type_, items.clone(), ())?,
         // transaction
         "sendrawtransaction" => {
-            default_property(type_, items.clone(), SentTransactionHash::default())?
+            default_property(type_, items.clone(), SendRawTransactionResponse::default())?
         }
         "getrawtransaction" => {
-            default_property(type_, items.clone(), GetRawTransaction::default())?
+            default_property(type_, items.clone(), GetRawTransactionResponse::default())?
         }
         // default
         _ => Property {

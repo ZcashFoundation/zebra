@@ -5,6 +5,12 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 2.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.0) - TODO: add date
+
+### Breaking Changes
+
+- The `debug_like_zcashd` config option for mining is no longer available.
+
 ## [Zebra 2.3.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.3.0) - 2025-05-06
 
 ### Breaking Changes
@@ -36,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - Refactor format upgrades into trait ([#9263](https://github.com/ZcashFoundation/zebra/pull/9263))
 - Remove the `getblocktemplate-rpcs` Cargo feature ([#9401](https://github.com/ZcashFoundation/zebra/pull/9401))
 - Improve cache dir and database startup panics ([#9441](https://github.com/ZcashFoundation/zebra/pull/9441)) 
-
+- Added `txid` field to `TransactionObject` ([#9617](https://github.com/ZcashFoundation/zebra/issues/9617))
 ### Fixed
 
 - Remove a redundant startup warning ([#9397](https://github.com/ZcashFoundation/zebra/pull/9397))

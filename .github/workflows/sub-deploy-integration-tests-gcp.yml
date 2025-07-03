@@ -171,7 +171,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -186,7 +186,7 @@ jobs:
       # defines how the created persistent disk (specified in $DISK_PARAMS)
       # is mounted into the test container using --container-mount-disk.
       #
-      # If the test needs Lightwalletd state (inputs.needs_lwd_state is true or test_id is lwd-full-sync),
+      # If the test needs Lightwalletd state (inputs.needs_lwd_state is true or test_id is lwd-sync-full),
       # the same persistent disk is mounted to both the Zebra state path (inputs.zebra_state_dir)
       # and the Lightwalletd state path (inputs.lwd_state_dir).
       #
@@ -211,7 +211,7 @@ jobs:
           # Mount the disk(s) to the container
           CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
           # Mount the same disk to the lwd path if needed
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-full-sync" ]]; then
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
             CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
           fi
 
@@ -393,7 +393,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -413,8 +413,8 @@ jobs:
               UPDATE_SUFFIX="-u"
           fi
 
-          # TODO: find a better logic for the lwd-full-sync case
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]] && [[ "${{ inputs.app_name }}" == "lightwalletd" ]] && [[ "${{ inputs.test_id }}" != 'lwd-full-sync' ]]; then
+          # TODO: find a better logic for the lwd-sync-full case
+          if [[ "${{ inputs.needs_lwd_state }}" == "true" ]] && [[ "${{ inputs.app_name }}" == "lightwalletd" ]] && [[ "${{ inputs.test_id }}" != 'lwd-sync-full' ]]; then
               UPDATE_SUFFIX="-u"
           fi
 
@@ -693,7 +693,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'

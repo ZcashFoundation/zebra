@@ -61,7 +61,7 @@ default-release-binaries = ["default", "sentry"]
 # Production features that activate extra dependencies, or extra features in dependencies
 
 # Indexer support
-indexer = ["zebra-rpc/indexer-rpcs", "zebra-state/indexer"]
+indexer = ["zebra-state/indexer"]
 
 # TODO: Remove this feature when releasing Zebra 3.0 (#9412).
 getblocktemplate-rpcs = []
@@ -145,12 +145,16 @@ lightwalletd-grpc-tests = ["tonic-build"]
 tokio-console = ["console-subscriber"]
 
 # TODO: replace with environmental variables that skip the tests when not set (part of #2995)
-test_sync_to_mandatory_checkpoint_mainnet = []
-test_sync_to_mandatory_checkpoint_testnet = []
-test_sync_past_mandatory_checkpoint_mainnet = []
-test_sync_past_mandatory_checkpoint_testnet = []
+sync_to_mandatory_checkpoint_mainnet = []
+sync_to_mandatory_checkpoint_testnet = []
+sync_past_mandatory_checkpoint_mainnet = []
+sync_past_mandatory_checkpoint_testnet = []
 
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
+
+# Enable the C++/Rust comparison interpreter. See zebra-script/Cargo.toml for
+# details. This should be only used for testing.
+comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
 zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46" }
@@ -159,6 +163,10 @@ zebra-network = { path = "../zebra-network", version = "1.0.0-beta.46" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.46" }
 zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46" }
+# zebra-script is not used directly, but we list it here to enable the
+# "comparison-interpreter" feature. (Feature unification will take care of
+# enabling it in the other imports of zcash-script.)
+zebra-script = { path = "../zebra-script", version = "1.0.0-beta.46" }
 
 # Required for crates.io publishing, but it's only used in tests
 zebra-utils = { path = "../zebra-utils", version = "1.0.0-beta.46", optional = true }
@@ -264,6 +272,8 @@ tracing-test = { workspace = true, features = ["no-env-filter"] }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-stream = { workspace = true }
+
+zcash_keys = { workspace = true }
 
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }

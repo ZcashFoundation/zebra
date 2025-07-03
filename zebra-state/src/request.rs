@@ -857,6 +857,13 @@ pub enum Request {
     /// Returns [`Response::KnownBlock(None)`](Response::KnownBlock) otherwise.
     KnownBlock(block::Hash),
 
+    /// Invalidates a block in the non-finalized state with the provided hash if one is present, removing it and
+    /// its child blocks, and rejecting it during contextual validation if it's resubmitted to the state.
+    InvalidateBlock(block::Hash),
+
+    /// Reconsiders a previously invalidated block in the non-finalized state with the provided hash if one is present.
+    ReconsiderBlock(block::Hash),
+
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
@@ -887,6 +894,8 @@ impl Request {
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             Request::BestChainBlockHash(_) => "best_chain_block_hash",
             Request::KnownBlock(_) => "known_block",
+            Request::InvalidateBlock(_) => "invalidate_block",
+            Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
@@ -1270,7 +1279,9 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::CommitSemanticallyVerifiedBlock(_)
-            | Request::CommitCheckpointVerifiedBlock(_) => Err("ReadService does not write blocks"),
+            | Request::CommitCheckpointVerifiedBlock(_)
+            | Request::InvalidateBlock(_)
+            | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \
