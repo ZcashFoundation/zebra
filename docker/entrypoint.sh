@@ -39,8 +39,10 @@ exec_as_user() {
 # detect them, and unsets the old ZEBRA_ prefixed variables to avoid conflicts.
 prepare_conf_file() {
   # Map network and state variables
-  # Default to Mainnet if NETWORK is not set. NETWORK is not ZEBRA_ prefixed, so it's safe.
-  export ZEBRA_NETWORK__NETWORK="${NETWORK:=Mainnet}"
+  # Only set network if explicitly configured by user
+  if [[ -n "${NETWORK}" ]]; then
+    export ZEBRA_NETWORK__NETWORK="${NETWORK}"
+  fi
 
   # Map legacy ZEBRA_CACHE_DIR to ZEBRA_STATE__CACHE_DIR and unset it.
   # Only export if it was explicitly set by the user.
