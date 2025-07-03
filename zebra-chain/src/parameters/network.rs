@@ -297,8 +297,6 @@ impl Network {
             }
             Self::Testnet(params) => params.lockbox_disbursement_total_amount(),
         }
-        .try_into()
-        .expect("hard-coded value should be valid")
     }
 
     /// Returns the expected NU6.1 lockbox disbursement outputs for this network at the provided height.

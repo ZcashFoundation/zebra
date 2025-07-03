@@ -508,7 +508,7 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
         return Amount::zero();
     };
 
-    let total_block_subsidy = block_subsidy(height, &network).unwrap();
+    let total_block_subsidy = block_subsidy(height, network).unwrap();
     let &deferred_amount_per_block =
         funding_stream_values(nu6_activation_height, network, total_block_subsidy)
             .expect("we always expect a funding stream hashmap response even if empty")
