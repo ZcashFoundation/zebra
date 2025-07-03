@@ -222,15 +222,13 @@ const SYNC_RESTART_DELAY: Duration = Duration::from_secs(67);
 const GENESIS_TIMEOUT_RETRY: Duration = Duration::from_secs(10);
 
 /// Sync configuration section.
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields, default)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct Config {
     /// The number of parallel block download requests.
     ///
     /// This is set to a low value by default, to avoid task and
     /// network contention. Increasing this value may improve
     /// performance on machines with a fast network connection.
-    #[serde(alias = "max_concurrent_block_requests")]
     pub download_concurrency_limit: usize,
 
     /// The number of blocks submitted in parallel to the checkpoint verifier.
@@ -252,7 +250,6 @@ pub struct Config {
     ///
     /// This is set to a high value by default, to avoid verification pipeline stalls.
     /// Decreasing this value reduces RAM usage.
-    #[serde(alias = "lookahead_limit")]
     pub checkpoint_verify_concurrency_limit: usize,
 
     /// The number of blocks submitted in parallel to the full verifier.
@@ -267,6 +264,49 @@ pub struct Config {
     /// If the number of logical cores can't be detected, Zebra uses one thread.
     /// For details, see [the `rayon` documentation](https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads).
     pub parallel_cpu_threads: usize,
+}
+
+impl<'de> Deserialize<'de> for Config {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Temp {
+            download_concurrency_limit: Option<usize>,
+            max_concurrent_block_requests: Option<usize>,
+            checkpoint_verify_concurrency_limit: Option<usize>,
+            lookahead_limit: Option<usize>,
+            full_verify_concurrency_limit: Option<usize>,
+            parallel_cpu_threads: Option<usize>,
+        }
+
+        let temp = Temp::deserialize(deserializer)?;
+        let defaults = Config::default();
+
+        let download_concurrency_limit = temp
+            .download_concurrency_limit
+            .or(temp.max_concurrent_block_requests)
+            .unwrap_or(defaults.download_concurrency_limit);
+        let checkpoint_verify_concurrency_limit = temp
+            .checkpoint_verify_concurrency_limit
+            .or(temp.lookahead_limit)
+            .unwrap_or(defaults.checkpoint_verify_concurrency_limit);
+        let full_verify_concurrency_limit = temp
+            .full_verify_concurrency_limit
+            .unwrap_or(defaults.full_verify_concurrency_limit);
+        let parallel_cpu_threads = temp
+            .parallel_cpu_threads
+            .unwrap_or(defaults.parallel_cpu_threads);
+
+        Ok(Config {
+            download_concurrency_limit,
+            checkpoint_verify_concurrency_limit,
+            full_verify_concurrency_limit,
+            parallel_cpu_threads,
+        })
+    }
 }
 
 impl Default for Config {

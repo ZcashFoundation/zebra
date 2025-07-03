@@ -70,7 +70,7 @@ pub async fn run(network: Network) -> Result<()> {
     );
 
     // Sync zebrad to the network chain tip
-    let (mut zebrad, zebra_rpc_address) = if let Some(zebrad_and_address) =
+    let (mut zebrad, zebra_rpc_address, _config) = if let Some(zebrad_and_address) =
         spawn_zebrad_for_rpc(network.clone(), test_name, test_type, true)?
     {
         zebrad_and_address
