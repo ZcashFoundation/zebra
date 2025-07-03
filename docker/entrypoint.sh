@@ -39,8 +39,10 @@ exec_as_user() {
 # detect them, and unsets the old ZEBRA_ prefixed variables to avoid conflicts.
 prepare_conf_file() {
   # Map network and state variables
-  # Only set network if explicitly configured by user
-  if [[ -n "${NETWORK}" ]]; then
+  # Only set network if explicitly configured by user, and not running full test suite
+  # The full test suite includes tests that iterate through all networks (Mainnet, Testnet, Regtest)
+  # and setting NETWORK would override the per-test network configurations
+  if [[ -n "${NETWORK}" && "${RUN_ALL_TESTS}" != "1" ]]; then
     export ZEBRA_NETWORK__NETWORK="${NETWORK}"
   fi
 
