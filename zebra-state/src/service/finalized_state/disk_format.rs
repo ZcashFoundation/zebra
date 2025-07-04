@@ -13,20 +13,11 @@ pub mod shielded;
 pub mod transparent;
 pub mod upgrade;
 
-#[cfg(feature = "shielded-scan")]
-pub mod scan;
-
 #[cfg(any(test, feature = "proptest-impl"))]
 mod tests;
 
 pub use block::{TransactionIndex, TransactionLocation, MAX_ON_DISK_HEIGHT};
 pub use transparent::OutputLocation;
-
-#[cfg(feature = "shielded-scan")]
-pub use scan::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
-    SaplingScanningKey,
-};
 
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use tests::KV;

@@ -119,7 +119,6 @@
 //! - [zebra-network](https://docs.rs/zebra-network/latest/zebra_network/)
 //! - [zebra-node-services](https://docs.rs/zebra-node-services/latest/zebra_node_services/)
 //! - [zebra-rpc](https://docs.rs/zebra-rpc/latest/zebra_rpc/)
-//! - [zebra-scan](https://docs.rs/zebra-scan/latest/zebra_scan/)
 //! - [zebra-script](https://docs.rs/zebra-script/latest/zebra_script/)
 //! - [zebra-state](https://docs.rs/zebra-state/latest/zebra_state/)
 //! - [zebra-test](https://docs.rs/zebra-test/latest/zebra_test/)

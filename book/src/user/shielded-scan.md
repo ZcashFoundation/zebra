@@ -1,9 +1,11 @@
 # Zebra Shielded Scanning
 
+**This component is not supported anymore and has been deleted from the repository.**
+
 The `zebra-scanner` binary is a standalone application that utilizes Zebra libraries to scan for transactions associated with specific Sapling viewing keys. It stores the discovered transactions and scanning progress data in a RocksDB database.
 
 For this application to function, it requires access to a Zebra node's RPC server and state cache.
- 
+
 For now, we only support Sapling, and only store transaction IDs in the scanner results database.
 
 Ongoing development is tracked in issue [#7728](https://github.com/ZcashFoundation/zebra/issues/7728).

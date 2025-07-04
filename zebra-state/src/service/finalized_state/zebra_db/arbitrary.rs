@@ -23,8 +23,8 @@ impl Deref for ZebraDb {
 impl ZebraDb {
     /// Returns the inner database.
     ///
-    /// This is a test-only and shielded-scan-only method, because it allows write access
-    /// and raw read access to the RocksDB instance.
+    /// This is a test-only method, because it allows write access and raw read
+    /// access to the RocksDB instance.
     pub fn db(&self) -> &DiskDb {
         &self.db
     }
