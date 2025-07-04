@@ -4,6 +4,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use chrono::{DateTime, Utc};
 
+use mset::MultiSet;
 use zebra_chain::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block::{Block, Hash, Header, Height},
@@ -12,6 +13,7 @@ use zebra_chain::{
         Network, NetworkUpgrade,
     },
     transaction::{self, Transaction},
+    transparent::Output,
     work::{
         difficulty::{ExpandedDifficulty, ParameterDifficulty as _},
         equihash,
@@ -181,6 +183,8 @@ pub fn subsidy_is_valid(
         // But we checkpoint in Canopy so founders reward does not apply for Zebra.
         unreachable!("we cannot verify consensus rules before Canopy activation");
     } else if halving_div < 8 {
+        let mut coinbase_outputs: MultiSet<Output> = coinbase.outputs().iter().cloned().collect();
+
         // Funding streams are paid from Canopy activation to the second halving
         // Note: Canopy activation is at the first halving on mainnet, but not on testnet
         // ZIP-1014 only applies to mainnet, ZIP-214 contains the specific rules for testnet
@@ -193,11 +197,11 @@ pub fn subsidy_is_valid(
         // we always expect a funding stream hashmap response even if empty
         .map_err(|err| BlockError::Other(err.to_string()))?;
 
-        let has_expected_output = |address, expected_amount| {
-            subsidy::funding_streams::filter_outputs_by_address(coinbase, address)
-                .iter()
-                .map(zebra_chain::transparent::Output::value)
-                .any(|value| value == expected_amount)
+        let mut has_expected_output = |address, expected_amount| {
+            coinbase_outputs.remove(&Output::new_coinbase(
+                expected_amount,
+                subsidy::new_coinbase_script(address),
+            ))
         };
 
         // The deferred pool contribution is checked in `miner_fees_are_valid()`
