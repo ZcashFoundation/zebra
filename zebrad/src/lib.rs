@@ -101,8 +101,6 @@
 //!
 //! * `elasticsearch`: save block data into elasticsearch database. Read the [elasticsearch](https://zebra.zfnd.org/user/elasticsearch.html)
 //!   section of the book for more details.
-//! * `shielded-scan`: enable experimental support for scanning shielded transactions. Read the [shielded-scan](https://zebra.zfnd.org/user/shielded-scan.html)
-//!   section of the book for more details.
 //! * `internal-miner`: enable experimental support for mining inside Zebra, without an external
 //!   mining pool. This feature is only supported on testnet. Use a GPU or ASIC on mainnet for
 //!   efficient mining.

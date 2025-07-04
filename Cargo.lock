@@ -6472,28 +6472,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zebra-grpc"
-version = "0.1.0-alpha.13"
-dependencies = [
- "color-eyre",
- "futures-util",
- "insta",
- "prost",
- "serde",
- "tokio",
- "tokio-stream",
- "tonic",
- "tonic-build",
- "tonic-reflection",
- "tower 0.4.13",
- "zcash_primitives",
- "zebra-chain",
- "zebra-node-services",
- "zebra-state",
- "zebra-test",
-]
-
-[[package]]
 name = "zebra-network"
 version = "1.0.0-beta.46"
 dependencies = [
@@ -6776,7 +6754,6 @@ dependencies = [
  "zcash_keys",
  "zebra-chain",
  "zebra-consensus",
- "zebra-grpc",
  "zebra-network",
  "zebra-node-services",
  "zebra-rpc",
