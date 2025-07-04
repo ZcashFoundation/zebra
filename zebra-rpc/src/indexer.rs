@@ -43,7 +43,7 @@ impl BlockHashAndHeight {
 }
 
 impl BlockAndHash {
-    /// Create a new [`BlockHashAndHeight`] from a [`block::Hash`] and [`block::Height`].
+    /// Creates a new [`BlockAndHash`] from a [`block::Hash`] and [`block::Height`].
     ///
     /// # Panics
     ///

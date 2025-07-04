@@ -160,7 +160,7 @@ impl MinedTx {
 /// # Correctness
 ///
 /// This should be large enough to typically avoid blocking the sender when the non-finalized state is full so
-/// that the [`NonFinalizedBlocksListener`] is reliably receives updates whenever the non-finalized state changes.
+/// that the [`NonFinalizedBlocksListener`] reliably receives updates whenever the non-finalized state changes.
 ///
 /// It's okay to occasionally miss updates when the buffer is full, as the new blocks in the missed change will be
 /// sent to the listener on the next change to the non-finalized state.
@@ -197,9 +197,9 @@ impl NonFinalizedBlocksListener {
                 // commits to the non-finalized state.
                 //
                 // See the `NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE` documentation for more details.
-                let latest_finalized_state = non_finalized_state_receiver.cloned_watch_data();
+                let latest_non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
 
-                let new_blocks = latest_finalized_state
+                let new_blocks = latest_non_finalized_state
                     .chain_iter()
                     .flat_map(|chain| {
                         // Take blocks from the chain in reverse height order until we reach a block that was
@@ -224,7 +224,7 @@ impl NonFinalizedBlocksListener {
                     }
                 }
 
-                prev_non_finalized_state = latest_finalized_state;
+                prev_non_finalized_state = latest_non_finalized_state;
 
                 // Wait for the next update to the non-finalized state
                 if let Err(error) = non_finalized_state_receiver.changed().await {
