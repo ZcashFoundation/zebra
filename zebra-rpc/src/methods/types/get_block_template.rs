@@ -465,13 +465,8 @@ where
     ) -> Self {
         // Check that the configured miner address is valid.
         let miner_address = conf.miner_address.map(|addr| {
-            if addr.can_receive_as(PoolType::Transparent) {
-                Address::try_from_zcash_address(net, addr)
-                    .expect("miner_address must be a valid Zcash address")
-            } else {
-                // TODO: Remove this panic once we support mining to shielded addresses.
-                panic!("miner_address can't receive transparent funds")
-            }
+            Address::try_from_zcash_address(net, addr)
+                .expect("miner_address must be a valid Zcash address")
         });
 
         // A limit on the configured extra coinbase data, regardless of the current block height.

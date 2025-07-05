@@ -1510,7 +1510,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.2"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#e0ae2c56c55a54c1f4a41c5f79f8479fad6b5b88"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "blake2b_simd",
  "core2",
@@ -1555,7 +1555,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#e0ae2c56c55a54c1f4a41c5f79f8479fad6b5b88"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "blake2b_simd",
 ]
@@ -6525,7 +6525,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#e0ae2c56c55a54c1f4a41c5f79f8479fad6b5b88"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "core2",
  "nonempty",
@@ -6534,7 +6534,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#e0ae2c56c55a54c1f4a41c5f79f8479fad6b5b88"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6555,6 +6555,7 @@ dependencies = [
  "group",
  "memuse",
  "nonempty",
+ "orchard",
  "rand_core 0.6.4",
  "secrecy",
  "subtle",
@@ -6893,9 +6894,11 @@ dependencies = [
  "jsonrpsee-proc-macros",
  "jsonrpsee-types",
  "nix",
+ "orchard",
  "proptest",
  "prost 0.14.1",
  "rand 0.8.5",
+ "sapling-crypto",
  "semver",
  "serde",
  "serde_json",

@@ -142,21 +142,75 @@ impl TransactionTemplate<NegativeOrZero> {
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fee;
         let miner_reward = Zatoshis::try_from(u64::from(miner_reward?))?;
 
-        let miner_addr = miner_addr
-            // TODO Support shielded addresses.
-            .to_transparent_address()
-            .ok_or("address must have a transparent component")?;
+        let memo = zcash_primitives::memo::MemoBytes::empty();
 
-        let mut coinbase_builder = Builder::new(
+        let mut builder = Builder::new(
             net,
-            BlockHeight::from(height.0),
+            BlockHeight::from(height),
             BuildConfig::Coinbase {
                 miner_data,
                 sequence: 0,
             },
         );
 
-        coinbase_builder.add_transparent_output(&miner_addr, miner_reward)?;
+        macro_rules! trace_err {
+            ($res:expr, $type:expr) => {
+                $res.map_err(|e| tracing::error!("Failed to add {} output: {}", $type, e))
+                    .ok()
+            };
+        }
+
+        let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
+            trace_err!(
+                builder.add_orchard_output::<String>(
+                    Some(orchard::keys::OutgoingViewingKey::from([0u8; 32])),
+                    *addr,
+                    miner_reward,
+                    memo.clone(),
+                ),
+                "Orchard"
+            )
+        };
+
+        let add_sapling_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
+            trace_err!(
+                builder.add_sapling_output::<String>(
+                    Some(sapling_crypto::keys::OutgoingViewingKey([0u8; 32])),
+                    *addr,
+                    miner_reward,
+                    memo.clone(),
+                ),
+                "Sapling"
+            )
+        };
+
+        let add_transparent_reward = |builder: &mut Builder<'_, _, _>, addr| {
+            trace_err!(
+                builder.add_transparent_output(addr, miner_reward),
+                "transparent"
+            )
+        };
+
+        match miner_addr {
+            Address::Unified(addr) => addr
+                .orchard()
+                .and_then(|addr| add_orchard_reward(&mut builder, addr))
+                .or_else(|| {
+                    addr.sapling()
+                        .and_then(|addr| add_sapling_reward(&mut builder, addr))
+                })
+                .or_else(|| {
+                    addr.transparent()
+                        .and_then(|addr| add_transparent_reward(&mut builder, addr))
+                }),
+
+            Address::Sapling(addr) => add_sapling_reward(&mut builder, addr),
+
+            Address::Transparent(addr) => add_transparent_reward(&mut builder, addr),
+
+            _ => Err("Address type not supported for miner reward output")?,
+        }
+        .ok_or("Could not add output with miner reward")?;
 
         let mut funding_streams = funding_stream_values(height, net, block_subsidy)?
             .into_iter()
@@ -173,10 +227,10 @@ impl TransactionTemplate<NegativeOrZero> {
         funding_streams.sort();
 
         for (fs_amount, fs_addr) in funding_streams {
-            coinbase_builder.add_transparent_output(&fs_addr, fs_amount)?;
+            builder.add_transparent_output(&fs_addr, fs_amount)?;
         }
 
-        let build_result = coinbase_builder.build(
+        let build_result = builder.build(
             &Default::default(),
             &[],
             &[],
