@@ -5,6 +5,14 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+### Added
+- RPCs which return value pools now return the pool with id "lockbox" to eventually
+
+### Changed
+- Slice `[GetBlockchainInfoBalance; 6]` type is aliased as `ValuePoolBalances`
+
 ## [Zebra 2.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2) - 2025-07-28
 
 This release fixes a database upgrade bug that was introduced in the 2.4.0
