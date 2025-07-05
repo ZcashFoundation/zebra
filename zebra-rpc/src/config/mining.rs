@@ -16,9 +16,6 @@ pub struct Config {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub miner_address: Option<ZcashAddress>,
 
-    // TODO: Internal miner config code was removed as part of https://github.com/ZcashFoundation/zebra/issues/8180
-    // Find the removed code at https://github.com/ZcashFoundation/zebra/blob/v1.5.1/zebra-rpc/src/config/mining.rs#L18-L38
-    // Restore the code when conditions are met. https://github.com/ZcashFoundation/zebra/issues/8183
     /// Extra data to include in coinbase transaction inputs.
     /// Limited to around 95 bytes by the consensus rules.
     ///
