@@ -113,7 +113,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
 
 
-      - uses: Swatinem/rust-cache@v2.7.8
+      - uses: Swatinem/rust-cache@v2.8.0
         # TODO: change Rust cache target directory on Windows,
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
@@ -228,7 +228,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
-      - uses: Swatinem/rust-cache@v2.7.8
+      - uses: Swatinem/rust-cache@v2.8.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -287,7 +287,7 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
 
       - name: Install cargo-machete
-        uses: baptiste0928/cargo-install@v3.3.0
+        uses: baptiste0928/cargo-install@v3.3.1
         with:
           crate: cargo-machete
 
