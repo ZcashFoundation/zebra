@@ -60,15 +60,8 @@ pub use service::{
     OutputLocation, TransactionIndex, TransactionLocation,
 };
 
-// Allow use in the scanner
-#[cfg(feature = "shielded-scan")]
-pub use service::finalized_state::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
-    SaplingScanningKey,
-};
-
 // Allow use in the scanner and external tests
-#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
 pub use service::{

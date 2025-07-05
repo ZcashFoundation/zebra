@@ -45,7 +45,6 @@ features](https://doc.rust-lang.org/cargo/reference/features.html#command-line-f
 - `prometheus` for [Prometheus metrics](https://zebra.zfnd.org/user/metrics.html)
 - `sentry` for [Sentry monitoring](https://zebra.zfnd.org/user/tracing.html#sentry-production-monitoring)
 - `elasticsearch` for [experimental Elasticsearch support](https://zebra.zfnd.org/user/elasticsearch.html)
-- `shielded-scan` for [experimental shielded scan support](https://zebra.zfnd.org/user/shielded-scan.html)
 
 You can combine multiple features by listing them as parameters of the
 `--features` flag:
@@ -113,11 +112,6 @@ If you're having trouble with:
 ### Dependencies
 
 - use `cargo install` without `--locked` to build with the latest versions of each dependency
-
-## Experimental Shielded Scanning feature
-
-- install the `rocksdb-tools` or `rocksdb` packages to get the `ldb` binary, which allows expert users to
-  [query the scanner database](https://zebra.zfnd.org/user/shielded-scan.html). This binary is sometimes called `rocksdb_ldb`.
 
 ## Optional Tor feature
 

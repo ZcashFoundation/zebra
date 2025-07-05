@@ -36,7 +36,7 @@ pub mod metrics;
 pub mod shielded;
 pub mod transparent;
 
-#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
+#[cfg(any(test, feature = "proptest-impl"))]
 // TODO: when the database is split out of zebra-state, always expose these methods.
 pub mod arbitrary;
 
@@ -114,15 +114,11 @@ impl ZebraDb {
         // Log any format changes before opening the database, in case opening fails.
         let format_change = DbFormatChange::open_database(format_version_in_code, disk_version);
 
-        // Format upgrades try to write to the database, so we always skip them if `read_only` is
-        // `true`.
+        // Format upgrades try to write to the database, so we always skip them
+        // if `read_only` is `true`.
         //
-        // We allow skipping the upgrades by the scanner because it doesn't support them yet and we
-        // also allow skipping them when we are running tests.
-        //
-        // TODO: Make scanner support format upgrades, then remove `shielded-scan` here.
-        let debug_skip_format_upgrades = read_only
-            || ((cfg!(test) || cfg!(feature = "shielded-scan")) && debug_skip_format_upgrades);
+        // We also allow skipping them when we are running tests.
+        let debug_skip_format_upgrades = read_only || (cfg!(test) && debug_skip_format_upgrades);
 
         // Open the database and do initial checks.
         let mut db = ZebraDb {

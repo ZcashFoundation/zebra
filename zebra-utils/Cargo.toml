@@ -58,13 +58,6 @@ search-issue-refs = [
     "tokio"
 ]
 
-shielded-scan = [
-    "itertools",
-    "jsonrpc",
-    "zcash_primitives",
-    "zcash_client_backend",
-]
-
 openapi-generator = [
     "syn",
     "quote",
@@ -96,7 +89,7 @@ itertools = { workspace = true, optional = true }
 
 # These crates are needed for the search-issue-refs binary
 regex = { workspace = true, optional = true }
-# Avoid default openssl dependency to reduce the dependency tree and security alerts. 
+# Avoid default openssl dependency to reduce the dependency tree and security alerts.
 reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries

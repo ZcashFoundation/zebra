@@ -33,9 +33,6 @@ proptest-impl = [
     "zebra-chain/proptest-impl"
 ]
 
-# Experimental shielded blockchain scanning
-shielded-scan = []
-
 # Experimental elasticsearch support
 elasticsearch = [
     "dep:elasticsearch",

@@ -1,5 +1,7 @@
 # Zebra Shielded Scanning gRPC Server
 
+**This component is not supported anymore and has been deleted from the repository.**
+
 ## Get Started
 
 ### Setup
@@ -33,7 +35,7 @@ The response should look like:
 }
 ```
 
-An example request to the `Scan` method with `grpcurl` would look like: 
+An example request to the `Scan` method with `grpcurl` would look like:
 
 ```bash
 grpcurl -plaintext -d '{ "keys": { "key": ["sapling_extended_full_viewing_key"] } }' '127.0.0.1:8231' scanner.Scanner/Scan

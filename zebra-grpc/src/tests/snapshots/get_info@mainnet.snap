@@ -1,7 +1,0 @@
----
-source: zebra-grpc/src/tests/snapshot.rs
-expression: info
----
-{
-  "min_sapling_birthday_height": 419200
-}
