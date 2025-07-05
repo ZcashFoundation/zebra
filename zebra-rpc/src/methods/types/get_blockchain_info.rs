@@ -116,8 +116,8 @@ impl GetBlockchainInfoBalance {
                 delta_balance.map(|b| b.orchard_amount()),
             ),
             Self::lockbox(
-                value_balance.lockbox_amount(), 
-                delta_balance.map(|b| b.lockbox_amount())
+                value_balance.lockbox_amount(),
+                delta_balance.map(|b| b.lockbox_amount()),
             ),
             Self::deferred(
                 value_balance.deferred_amount(),
