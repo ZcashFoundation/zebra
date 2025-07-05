@@ -1,5 +1,5 @@
 [mining]
-miner_address = "u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a"
+miner_address = "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"
 
 [network]
 listen_addr = "127.0.0.1:0"
