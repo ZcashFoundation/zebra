@@ -6921,7 +6921,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#21c497f3afdcfb4c92ad9d461381b47172e82ed1"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "core2",
  "nonempty",
@@ -6930,7 +6930,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#21c497f3afdcfb4c92ad9d461381b47172e82ed1"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6951,6 +6951,7 @@ dependencies = [
  "group",
  "memuse",
  "nonempty",
+ "orchard",
  "rand_core 0.6.4",
  "secrecy",
  "subtle",
@@ -7373,6 +7374,7 @@ dependencies = [
  "nix",
  "openrpsee",
  "phf",
+ "orchard",
  "proptest",
  "prost 0.14.3",
  "rand 0.8.5",
