@@ -167,11 +167,12 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use zcash_keys::address::Address;
+
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     parameters::{
-        testnet::ConfiguredActivationHeights,
         Network::{self, *},
+        NetworkUpgrade,
     },
 };
 use zebra_consensus::ParameterCheckpoint;
@@ -2972,27 +2973,23 @@ async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
 async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     use std::sync::Arc;
 
-    use common::regtest::MiningRpcMethods;
     use eyre::Error;
     use tokio::time::timeout;
     use zebra_chain::{chain_tip::ChainTip, primitives::byte_array::increment_big_endian};
     use zebra_rpc::methods::GetBlockHashResponse;
     use zebra_state::{ReadResponse, Response};
 
+    use common::regtest::MiningRpcMethods;
+
     let _init_guard = zebra_test::init();
 
-    let activation_heights = ConfiguredActivationHeights {
-        nu5: Some(1),
-        ..Default::default()
-    };
+    let net = Network::new_regtest(Default::default());
+    let mut config = os_assigned_rpc_port_config(false, &net)?;
 
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
     config.state.ephemeral = false;
     config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
-    let network = config.network.network.clone();
 
     let test_dir = testdir()?.with_config(&mut config)?;
-
     let mut child = test_dir.spawn_child(args!["start"])?;
     let rpc_address = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
     let indexer_listen_addr = read_listen_addr_from_logs(&mut child, OPENED_RPC_ENDPOINT_MSG)?;
@@ -3027,7 +3024,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client.block_from_template().await?;
+        let (block, height) = rpc_client.block_from_template(&net).await?;
 
         rpc_client.submit_block(block.clone()).await?;
 
@@ -3077,7 +3074,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     }
 
     tracing::info!("getting next block template");
-    let (block_11, _) = rpc_client.block_from_template().await?;
+    let (block_11, _) = rpc_client.block_from_template(&net).await?;
     blocks.push(block_11);
     let next_blocks: Vec<_> = blocks.split_off(5);
 
@@ -3086,7 +3083,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let (state2, read_state2, latest_chain_tip2, _chain_tip_change2) =
         zebra_state::populated_state(
             std::iter::once(genesis_block).chain(blocks.iter().cloned().map(Arc::new)),
-            &network,
+            &net,
         )
         .await;
 
@@ -3101,18 +3098,25 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
             unreachable!("wrong response variant");
         };
 
+        let height = block.coinbase_height().unwrap();
         let auth_root = block.auth_data_root();
-
-        let history_root = chain_info
-            .chain_history_root
-            .expect("chain history root should be present");
-
+        let hist_root = chain_info.chain_history_root.unwrap_or_default();
         let header = Arc::make_mut(&mut block.header);
 
-        header.commitment_bytes =
-            ChainHistoryBlockTxAuthCommitmentHash::from_commitments(&history_root, &auth_root)
-                .bytes_in_serialized_order()
-                .into();
+        header.commitment_bytes = match NetworkUpgrade::current(&net, height) {
+            NetworkUpgrade::Canopy => hist_root.bytes_in_serialized_order(),
+            NetworkUpgrade::Nu5
+            | NetworkUpgrade::Nu6
+            | NetworkUpgrade::Nu6_1
+            | NetworkUpgrade::Nu7 => {
+                ChainHistoryBlockTxAuthCommitmentHash::from_commitments(&hist_root, &auth_root)
+                    .bytes_in_serialized_order()
+            }
+            _ => Err(eyre!(
+                "Zebra does not support generating pre-Canopy block templates"
+            ))?,
+        }
+        .into();
 
         increment_big_endian(header.nonce.as_mut());
 
@@ -3348,7 +3352,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let (_tx, rx) = tokio::sync::watch::channel(None);
 
     let (rpc, _) = RpcImpl::new(
-        network,
+        network.clone(),
         mining_config,
         false,
         "0.0.1",
@@ -3382,10 +3386,12 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let GetBlockTemplateResponse::TemplateMode(block_template) =
         block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
-        panic!("this getblocktemplate call without parameters should return the `TemplateMode` variant of the response")
+        panic!(
+            "this getblocktemplate call without parameters should return the `TemplateMode` variant of the response"
+        )
     };
 
-    let proposal_block = proposal_block_from_template(&block_template, None)?;
+    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
     let hex_proposal_block = HexData(proposal_block.zcash_serialize_to_vec()?);
 
     // Check that the block template is a valid block proposal
@@ -3485,7 +3491,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
-    );
+    )
+    .expect("coinbase transaction should be valid under the given parameters");
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3511,7 +3518,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None)?;
+    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
 
     // Submit the invalid block with an excessive coinbase output value
     let submit_block_response = rpc
@@ -3542,7 +3549,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         &[],
         chain_history_root,
         vec![],
-    );
+    )
+    .expect("coinbase transaction should be valid under the given parameters");
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3568,7 +3576,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         block_template.submit_old(),
     );
 
-    let proposal_block = proposal_block_from_template(&block_template, None)?;
+    let proposal_block = proposal_block_from_template(&block_template, None, &network)?;
 
     // Submit the invalid block with an excessive coinbase input value
     let submit_block_response = rpc
@@ -3584,7 +3592,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     );
 
     // Check that the original block template can be submitted successfully
-    let proposal_block = proposal_block_from_template(&valid_original_block_template, None)?;
+    let proposal_block =
+        proposal_block_from_template(&valid_original_block_template, None, &network)?;
+
     let submit_block_response = rpc
         .submit_block(HexData(proposal_block.zcash_serialize_to_vec()?), None)
         .await?;
@@ -3750,13 +3760,8 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     use common::regtest::MiningRpcMethods;
 
     let _init_guard = zebra_test::init();
-
-    let activation_heights = zebra_chain::parameters::testnet::ConfiguredActivationHeights {
-        nu5: Some(1),
-        ..Default::default()
-    };
-
-    let mut config = os_assigned_rpc_port_config(false, &Network::new_regtest(activation_heights))?;
+    let net = Network::new_regtest(Default::default());
+    let mut config = os_assigned_rpc_port_config(false, &net)?;
     config.state.ephemeral = false;
 
     let test_dir = testdir()?.with_config(&mut config)?;
@@ -3771,7 +3776,7 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..50 {
-        let (block, _) = rpc_client.block_from_template().await?;
+        let (block, _) = rpc_client.block_from_template(&net).await?;
 
         rpc_client.submit_block(block.clone()).await?;
         blocks.push(block);

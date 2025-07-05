@@ -164,7 +164,7 @@ impl Commitment {
 //    - add methods for maintaining the MMR peaks, and calculating the root
 //      hash from the current set of peaks
 //    - move to a separate file
-#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Default)]
 pub struct ChainHistoryMmrRootHash([u8; 32]);
 
 impl fmt::Display for ChainHistoryMmrRootHash {

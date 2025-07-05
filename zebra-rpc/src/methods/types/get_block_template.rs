@@ -324,7 +324,8 @@ impl BlockTemplateResponse {
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
             extra_coinbase_data,
-        );
+        )
+        .expect("coinbase should be valid under the given parameters");
 
         // Convert difficulty
         let target = chain_tip_and_local_time
@@ -790,12 +791,19 @@ pub fn generate_coinbase_and_roots(
     miner_address: &Address,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
-    extra_coinbase_data: Vec<u8>,
-) -> (TransactionTemplate<NegativeOrZero>, DefaultRoots) {
+    miner_data: Vec<u8>,
+) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), &'static str> {
     let miner_fee = calculate_miner_fee(mempool_txs);
     let outputs = standard_coinbase_outputs(network, height, miner_address, miner_fee);
-    let coinbase =
-        Transaction::new_v5_coinbase(network, height, outputs, extra_coinbase_data).into();
+
+    let tx = match NetworkUpgrade::current(network, height) {
+        NetworkUpgrade::Canopy => Transaction::new_v4_coinbase(height, outputs, miner_data),
+        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
+            Transaction::new_v5_coinbase(network, height, outputs, miner_data)
+        }
+        _ => Err("Zebra does not support generating pre-Canopy coinbase transactions")?,
+    }
+    .into();
 
     // Calculate block default roots
     //
@@ -807,10 +815,10 @@ pub fn generate_coinbase_and_roots(
         })
         .expect("history tree can't be empty");
 
-    (
-        TransactionTemplate::from_coinbase(&coinbase, miner_fee),
-        calculate_default_root_hashes(&coinbase, mempool_txs, chain_history_root),
-    )
+    Ok((
+        TransactionTemplate::from_coinbase(&tx, miner_fee),
+        calculate_default_root_hashes(&tx, mempool_txs, chain_history_root),
+    ))
 }
 
 /// Returns the total miner fee for `mempool_txs`.
