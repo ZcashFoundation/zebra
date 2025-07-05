@@ -415,7 +415,7 @@ dependencies = [
  "bitflags 2.9.1",
  "cexpr",
  "clang-sys",
- "itertools 0.12.1",
+ "itertools 0.10.5",
  "lazy_static",
  "lazycell",
  "log",
@@ -439,7 +439,7 @@ dependencies = [
  "hmac",
  "rand_core 0.6.4",
  "ripemd 0.2.0-pre.4",
- "secp256k1 0.29.1",
+ "secp256k1",
  "sha2 0.11.0-pre.4",
  "subtle",
  "zeroize",
@@ -459,22 +459,6 @@ name = "bit-vec"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
-
-[[package]]
-name = "bitcoin-io"
-version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b47c4ab7a93edb0c7198c5535ed9b52b63095f4e9b45279c6736cec4b856baf"
-
-[[package]]
-name = "bitcoin_hashes"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb18c03d0db0247e147a21a6faafd5a7eb851c743db062de72018b6b7e8e4d16"
-dependencies = [
- "bitcoin-io",
- "hex-conservative",
-]
 
 [[package]]
 name = "bitflags"
@@ -1404,7 +1388,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "976dd42dc7e85965fe702eb8164f21f450704bdde31faefd6471dba214cb594e"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1890,15 +1874,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 dependencies = [
  "serde",
-]
-
-[[package]]
-name = "hex-conservative"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5313b072ce3c597065a808dbf612c4c8e8590bdbf8b579508bf7a762c5eae6cd"
-dependencies = [
- "arrayvec",
 ]
 
 [[package]]
@@ -2402,7 +2377,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.0",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2416,15 +2391,6 @@ name = "itertools"
 version = "0.10.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b0fd2260e829bddf4cb6ea802289de2f86d6a7a690192fbe91b3f46e0f2c8473"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "itertools"
-version = "0.12.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
 dependencies = [
  "either",
 ]
@@ -3609,7 +3575,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4057,7 +4023,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4070,7 +4036,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4209,17 +4175,6 @@ checksum = "9465315bc9d4566e1724f0fffcbcc446268cb522e60f9a27bcded6b19c108113"
 dependencies = [
  "secp256k1-sys",
  "serde",
-]
-
-[[package]]
-name = "secp256k1"
-version = "0.30.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b50c5943d326858130af85e049f2661ba3c78b26589b8ab98e65e80ae44a1252"
-dependencies = [
- "bitcoin_hashes",
- "rand 0.8.5",
- "secp256k1-sys",
 ]
 
 [[package]]
@@ -4766,7 +4721,7 @@ dependencies = [
  "getrandom 0.3.2",
  "once_cell",
  "rustix 1.0.5",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5881,7 +5836,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6261,7 +6216,7 @@ dependencies = [
  "redjubjub",
  "ripemd 0.1.3",
  "sapling-crypto",
- "secp256k1 0.29.1",
+ "secp256k1",
  "sha2 0.10.8",
  "subtle",
  "tracing",
@@ -6299,9 +6254,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.5.2"
+version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f116cd111d813b7afc814be013566b16e32a7b887597f906ac42b0f7f6a1681"
+checksum = "0525851dd97796f47537e9b15e504888cd214b2c6d021731fdfa0e7cb941a21e"
 dependencies = [
  "core2",
  "document-features",
@@ -6311,18 +6266,19 @@ dependencies = [
 
 [[package]]
 name = "zcash_script"
-version = "0.3.1"
+version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f19439b8aa5b78e11747ef0d1fdb0fa5d86fe7ad8ccc750fe8104c236623b496"
+checksum = "caf6e76f310bb2d3cc233086a97c1710ba1de7ffbbf8198b8113407d0f427dfc"
 dependencies = [
  "bindgen",
  "bitflags 2.9.1",
  "cc",
  "enum_primitive",
  "ripemd 0.1.3",
- "secp256k1 0.30.0",
+ "secp256k1",
  "sha-1",
  "sha2 0.10.8",
+ "thiserror 2.0.12",
  "tracing",
 ]
 
@@ -6349,7 +6305,7 @@ dependencies = [
  "getset",
  "hex",
  "ripemd 0.1.3",
- "secp256k1 0.29.1",
+ "secp256k1",
  "sha2 0.10.8",
  "subtle",
  "zcash_address",
@@ -6399,7 +6355,7 @@ dependencies = [
  "redjubjub",
  "ripemd 0.1.3",
  "sapling-crypto",
- "secp256k1 0.29.1",
+ "secp256k1",
  "serde",
  "serde-big-array",
  "serde_json",
