@@ -16,16 +16,19 @@ proptest! {
         let sprout = value_balance1.sprout + value_balance2.sprout;
         let sapling = value_balance1.sapling + value_balance2.sapling;
         let orchard = value_balance1.orchard + value_balance2.orchard;
+        let lockbox = value_balance1.lockbox + value_balance2.lockbox;
         let deferred = value_balance1.deferred + value_balance2.deferred;
+        
 
-        match (transparent, sprout, sapling, orchard, deferred) {
-            (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard), Ok(deferred)) => prop_assert_eq!(
+        match (transparent, sprout, sapling, orchard, lockbox, deferred) {
+            (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard), Ok(lockbox), Ok(deferred)) => prop_assert_eq!(
                 value_balance1 + value_balance2,
                 Ok(ValueBalance {
                     transparent,
                     sprout,
                     sapling,
                     orchard,
+                    lockbox,
                     deferred
                 })
             ),
@@ -52,16 +55,18 @@ proptest! {
         let sprout = value_balance1.sprout - value_balance2.sprout;
         let sapling = value_balance1.sapling - value_balance2.sapling;
         let orchard = value_balance1.orchard - value_balance2.orchard;
+        let lockbox = value_balance1.lockbox - value_balance2.lockbox;
         let deferred = value_balance1.deferred - value_balance2.deferred;
 
-        match (transparent, sprout, sapling, orchard, deferred) {
-            (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard), Ok(deferred)) => prop_assert_eq!(
+        match (transparent, sprout, sapling, orchard, lockbox, deferred) {
+            (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard), Ok(lockbox), Ok(deferred)) => prop_assert_eq!(
                 value_balance1 - value_balance2,
                 Ok(ValueBalance {
                     transparent,
                     sprout,
                     sapling,
                     orchard,
+                    lockbox,
                     deferred
                 })
             ),
@@ -71,6 +76,7 @@ proptest! {
                         | ValueBalanceError::Sprout(_)
                         | ValueBalanceError::Sapling(_)
                         | ValueBalanceError::Orchard(_)
+                        | ValueBalanceError::Lockbox(_)
                         | ValueBalanceError::Deferred(_))
                 )),
         }
@@ -89,16 +95,18 @@ proptest! {
         let sprout = value_balance1.sprout + value_balance2.sprout;
         let sapling = value_balance1.sapling + value_balance2.sapling;
         let orchard = value_balance1.orchard + value_balance2.orchard;
+        let lockbox = value_balance1.lockbox + value_balance2.lockbox;
         let deferred = value_balance1.deferred + value_balance2.deferred;
 
-        match (transparent, sprout, sapling, orchard, deferred) {
-            (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard), Ok(deferred)) => prop_assert_eq!(
+        match (transparent, sprout, sapling, orchard, lockbox, deferred) {
+            (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard), Ok(lockbox), Ok(deferred)) => prop_assert_eq!(
                 collection.iter().sum::<Result<ValueBalance<NegativeAllowed>, ValueBalanceError>>(),
                 Ok(ValueBalance {
                     transparent,
                     sprout,
                     sapling,
                     orchard,
+                    lockbox,
                     deferred
                 })
             ),
@@ -108,6 +116,7 @@ proptest! {
                         | ValueBalanceError::Sprout(_)
                         | ValueBalanceError::Sapling(_)
                         | ValueBalanceError::Orchard(_)
+                        | ValueBalanceError::Lockbox(_)
                         | ValueBalanceError::Deferred(_))
                  ))
         }
