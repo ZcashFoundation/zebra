@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 - RPCs which return value pools now return the pool with id "lockbox" to eventually
 
 ### Changed
-- Slice `[GetBlockchainInfoBalance; 6]` type is aliased as `ValuePoolBalances`
+- Slice `[GetBlockchainInfoBalance; 6]` type is aliased as `BlockchainValuePoolBalances`
 
 ## [Zebra 2.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2) - 2025-07-28
 
