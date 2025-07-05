@@ -38,7 +38,7 @@ pub struct GetBlockchainInfoBalance {
 
 impl GetBlockchainInfoBalance {
     /// Returns a list of [`GetBlockchainInfoBalance`]s converted from the default [`ValueBalance`].
-    pub fn zero_pools() -> [Self; 5] {
+    pub fn zero_pools() -> [Self; 6] {
         Self::value_pools(Default::default(), None)
     }
 
@@ -82,7 +82,13 @@ impl GetBlockchainInfoBalance {
         Self::new_internal("orchard", amount, delta)
     }
 
+    /// Creates a [`GetBlockchainInfoBalance`] for the Lockbox pool.
+    pub fn lockbox(amount: Amount<NonNegative>, delta: Option<Amount<NegativeAllowed>>) -> Self {
+        Self::new_internal("lockbox", amount, delta)
+    }
+
     /// Creates a [`GetBlockchainInfoBalance`] for the Deferred pool.
+    /// this value is deprecated in favor of Lockbox
     pub fn deferred(amount: Amount<NonNegative>, delta: Option<Amount<NegativeAllowed>>) -> Self {
         Self::new_internal("deferred", amount, delta)
     }
@@ -91,7 +97,7 @@ impl GetBlockchainInfoBalance {
     pub fn value_pools(
         value_balance: ValueBalance<NonNegative>,
         delta_balance: Option<ValueBalance<NegativeAllowed>>,
-    ) -> [Self; 5] {
+    ) -> [Self; 6] {
         [
             Self::transparent(
                 value_balance.transparent_amount(),
@@ -108,6 +114,10 @@ impl GetBlockchainInfoBalance {
             Self::orchard(
                 value_balance.orchard_amount(),
                 delta_balance.map(|b| b.orchard_amount()),
+            ),
+            Self::lockbox(
+                value_balance.lockbox_amount(), 
+                delta_balance.map(|b| b.lockbox_amount())
             ),
             Self::deferred(
                 value_balance.deferred_amount(),
