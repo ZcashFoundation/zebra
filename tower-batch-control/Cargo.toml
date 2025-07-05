@@ -1,6 +1,6 @@
 [package]
 name = "tower-batch-control"
-version = "0.2.41-beta.22"
+version = "0.2.41"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Tower middleware for batch request processing"
 # # Legal
@@ -43,10 +43,10 @@ rand = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tokio-test = { workspace = true }
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.22" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-test = { workspace = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }
+zebra-test = { path = "../zebra-test/", version = "1.0.0" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
