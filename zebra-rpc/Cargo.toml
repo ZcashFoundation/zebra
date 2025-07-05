@@ -82,8 +82,11 @@ serde = { workspace = true, features = ["serde_derive"] }
 # For the `stop` RPC method.
 nix = { workspace = true, features = ["signal"] }
 
+orchard = { workspace = true }
+sapling-crypto = { workspace = true }
+
 zcash_address = { workspace = true }
-zcash_keys = { workspace = true }
+zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
 zcash_primitives = { workspace = true, features = ["transparent-inputs", "non-standard-fees"] }
 zcash_proofs = { workspace = true }
 zcash_protocol = { workspace = true }
