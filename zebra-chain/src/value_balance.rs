@@ -25,6 +25,7 @@ pub struct ValueBalance<C> {
     sprout: Amount<C>,
     sapling: Amount<C>,
     orchard: Amount<C>,
+    lockbox: Amount<C>,
     deferred: Amount<C>,
 }
 
@@ -116,6 +117,17 @@ where
     }
 
     /// Returns the deferred amount.
+    pub fn lockbox_amount(&self) -> Amount<C> {
+        self.deferred
+    }
+
+    /// Sets the deferred amount without affecting other amounts.
+    pub fn set_lockbox_amount(&mut self, loxbox_amount: Amount<C>) -> &Self {
+        self.lockbox = loxbox_amount;
+        self
+    }
+
+    /// Returns the deferred amount.
     pub fn deferred_amount(&self) -> Amount<C> {
         self.deferred
     }
@@ -134,6 +146,7 @@ where
             sprout: zero,
             sapling: zero,
             orchard: zero,
+            lockbox: zero,
             deferred: zero,
         }
     }
@@ -149,6 +162,7 @@ where
             sprout: self.sprout.constrain().map_err(Sprout)?,
             sapling: self.sapling.constrain().map_err(Sapling)?,
             orchard: self.orchard.constrain().map_err(Orchard)?,
+            lockbox: self.lockbox.constrain().map_err(Lockbox)?,
             deferred: self.deferred.constrain().map_err(Deferred)?,
         })
     }
@@ -376,6 +390,17 @@ impl ValueBalance<NonNegative> {
         )
         .map_err(Orchard)?;
 
+        let lockbox = match bytes_length {
+            32 => Amount::zero(),
+            40 => Amount::from_bytes(
+                bytes[32..40]
+                    .try_into()
+                    .expect("lockbox amount should be parsable"),
+            )
+            .map_err(Lockbox)?,
+            _ => return Err(Unparsable),
+        };
+
         let deferred = match bytes_length {
             32 => Amount::zero(),
             40 => Amount::from_bytes(
@@ -392,6 +417,7 @@ impl ValueBalance<NonNegative> {
             sprout,
             sapling,
             orchard,
+            lockbox,
             deferred,
         })
     }
@@ -412,6 +438,9 @@ pub enum ValueBalanceError {
     /// orchard amount error {0}
     Orchard(amount::Error),
 
+    /// Lockbox amount error {0}
+    Lockbox(amount::Error),
+
     /// deferred amount error {0}
     Deferred(amount::Error),
 
@@ -426,6 +455,7 @@ impl fmt::Display for ValueBalanceError {
             Sprout(e) => format!("sprout amount err: {e}"),
             Sapling(e) => format!("sapling amount err: {e}"),
             Orchard(e) => format!("orchard amount err: {e}"),
+            Lockbox(e) => format!("lockbox amount err: {e}"),
             Deferred(e) => format!("deferred amount err: {e}"),
             Unparsable => "value balance is unparsable".to_string(),
         })
@@ -443,6 +473,7 @@ where
             sprout: (self.sprout + rhs.sprout).map_err(Sprout)?,
             sapling: (self.sapling + rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard + rhs.orchard).map_err(Orchard)?,
+            lockbox: (self.lockbox + rhs.lockbox).map_err(Lockbox)?,
             deferred: (self.deferred + rhs.deferred).map_err(Deferred)?,
         })
     }
@@ -492,6 +523,7 @@ where
             sprout: (self.sprout - rhs.sprout).map_err(Sprout)?,
             sapling: (self.sapling - rhs.sapling).map_err(Sapling)?,
             orchard: (self.orchard - rhs.orchard).map_err(Orchard)?,
+            lockbox: (self.lockbox - rhs.lockbox).map_err(Lockbox)?,
             deferred: (self.deferred - rhs.deferred).map_err(Deferred)?,
         })
     }
@@ -561,6 +593,7 @@ where
             sprout: self.sprout.neg(),
             sapling: self.sapling.neg(),
             orchard: self.orchard.neg(),
+            lockbox: self.lockbox.neg(),
             deferred: self.deferred.neg(),
         }
     }
