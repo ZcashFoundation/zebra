@@ -77,14 +77,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get a read-only state and the database.
     let (read_state, _latest_chain_tip, chain_tip_change, sync_task) =
         if let Some(indexer_rpc_addr) = args.zebra_indexer_rpc_listen_addr {
-            zebra_rpc::sync::init_read_state_with_syncer(
-                state_config,
-                &network,
-                args.zebra_rpc_listen_addr,
-                indexer_rpc_addr,
-            )
-            .await?
-            .map_err(|err| eyre!(err))?
+            zebra_rpc::sync::init_read_state_with_syncer(state_config, &network, indexer_rpc_addr)
+                .await?
+                .map_err(|err| eyre!(err))?
         } else {
             if state_config.ephemeral {
                 return Err(

@@ -45,6 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
+    response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -2126,6 +2127,28 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .wait_for_panics()
+            }
+
+            ReadRequest::NonFinalizedBlocksListener => {
+                // The non-finalized blocks listener is used to notify the state service
+                // about new blocks that have been added to the non-finalized state.
+                let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
+                    self.network.clone(),
+                    self.non_finalized_state_receiver.clone(),
+                );
+
+                async move {
+                    timer.finish(
+                        module_path!(),
+                        line!(),
+                        "ReadRequest::NonFinalizedBlocksListener",
+                    );
+
+                    Ok(ReadResponse::NonFinalizedBlocksListener(
+                        non_finalized_blocks_listener,
+                    ))
+                }
+                .boxed()
             }
         }
     }

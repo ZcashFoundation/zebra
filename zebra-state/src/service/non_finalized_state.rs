@@ -569,6 +569,12 @@ impl NonFinalizedState {
         Some(self.best_chain()?.blocks.len() as u32)
     }
 
+    /// Returns the root height of the non-finalized state, if the non-finalized state is not empty.
+    pub fn root_height(&self) -> Option<block::Height> {
+        self.best_chain()
+            .map(|chain| chain.non_finalized_root_height())
+    }
+
     /// Returns `true` if `hash` is contained in the non-finalized portion of any
     /// known chain.
     #[allow(dead_code)]

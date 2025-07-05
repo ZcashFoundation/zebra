@@ -13,6 +13,15 @@ message BlockHashAndHeight {
   uint32 height = 2;
 };
 
+// An encoded block and its hash.
+message BlockAndHash {
+  // The hash of the block in display order.
+  bytes hash = 1;
+  
+  // The encoded block data.
+  bytes data = 2;
+};
+
 // Represents a change in the mempool.
 message MempoolChangeMessage {
   // The type of change that occurred.
@@ -39,6 +48,9 @@ message MempoolChangeMessage {
 service Indexer {
   // Notifies listeners of chain tip changes
   rpc ChainTipChange(Empty) returns (stream BlockHashAndHeight);
+
+  // Notifies listeners of new blocks in the non-finalized state.
+  rpc NonFinalizedStateChange(Empty) returns (stream BlockAndHash);
 
   // Notifies listeners of mempool changes
   rpc MempoolChange(Empty) returns (stream MempoolChangeMessage);
