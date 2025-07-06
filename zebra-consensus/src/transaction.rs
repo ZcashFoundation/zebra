@@ -427,7 +427,6 @@ where
                     sapling_shielded_data,
                     orchard_shielded_data,
                 )?,
-
             };
 
             if let Some(unmined_tx) = req.mempool_transaction() {
