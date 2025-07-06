@@ -109,7 +109,7 @@ where
                     .try_into()
                     .unwrap(),
                 binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
-                #[cfg(feature = "tx-v6")]
+                #[cfg(feature = "tx_v6")]
                 burn: bundle.burn().as_slice().into(),
             }
         })
@@ -196,7 +196,7 @@ async fn verify_generated_halo2_proofs_vanilla() {
         .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_zsa() {
     verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA)
@@ -287,7 +287,7 @@ async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
     .await
 }
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_zsa() {
     correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(

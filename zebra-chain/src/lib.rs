@@ -41,7 +41,7 @@ pub mod transparent;
 pub mod value_balance;
 pub mod work;
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 pub mod orchard_zsa;
 
 #[cfg(any(test, feature = "proptest-impl"))]

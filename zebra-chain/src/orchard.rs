@@ -28,5 +28,5 @@ pub use shielded_data_flavor::{OrchardVanilla, ShieldedDataFlavor};
 
 pub(crate) use shielded_data::ActionCommon;
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 pub use shielded_data_flavor::OrchardZSA;

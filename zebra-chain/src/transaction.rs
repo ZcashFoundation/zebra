@@ -53,7 +53,7 @@ use crate::{
     value_balance::{ValueBalance, ValueBalanceError},
 };
 
-#[cfg(feature = "tx-v6")]
+#[cfg(feature = "tx_v6")]
 use crate::orchard_zsa;
 
 /// A Zcash transaction.
@@ -146,7 +146,7 @@ pub enum Transaction {
         orchard_shielded_data: Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
     },
     /// A `version = 6` transaction , OrchardZSA, Orchard, Sapling and transparent, but not Sprout.
-    #[cfg(feature = "tx-v6")]
+    #[cfg(feature = "tx_v6")]
     V6 {
         /// The Network Upgrade for this transaction.
         ///
@@ -202,8 +202,8 @@ impl fmt::Display for Transaction {
 }
 
 // Define the macro to include the V6 variant.
-// Needed only with the `tx-v6` feature to avoid duplicating code.
-#[cfg(feature = "tx-v6")]
+// Needed only with the `tx_v6` feature to avoid duplicating code.
+#[cfg(feature = "tx_v6")]
 macro_rules! tx_v5_and_v6 {
     { $($fields:tt)* } => {
         Transaction::V5 { $($fields)* } | Transaction::V6 { $($fields)* }
@@ -211,7 +211,7 @@ macro_rules! tx_v5_and_v6 {
 }
 
 /// Same as above, without the V6 arm.
-#[cfg(not(feature = "tx-v6"))]
+#[cfg(not(feature = "tx_v6"))]
 macro_rules! tx_v5_and_v6 {
     { $($fields:tt)* } => {
         Transaction::V5 { $($fields)* }
@@ -237,7 +237,7 @@ macro_rules! orchard_shielded_data_field {
                 ..
             } => orchard_shielded_data.as_ref().map(|data| data.$field),
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
@@ -403,7 +403,7 @@ impl Transaction {
             Transaction::V3 { .. } => 3,
             Transaction::V4 { .. } => 4,
             Transaction::V5 { .. } => 5,
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 { .. } => 6,
         }
     }
@@ -1015,7 +1015,7 @@ impl Transaction {
                     .flat_map(orchard::ShieldedData::action_commons),
             ),
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
@@ -1044,7 +1044,7 @@ impl Transaction {
                     .flat_map(orchard::ShieldedData::nullifiers),
             ),
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
@@ -1073,7 +1073,7 @@ impl Transaction {
                     .flat_map(orchard::ShieldedData::note_commitments)
                     .cloned(),
             ),
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 orchard_zsa_issue_data,
@@ -1499,7 +1499,7 @@ impl Transaction {
                 ..
             } => Some(&mut orchard_shielded_data.value_balance),
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 {
                 orchard_shielded_data: Some(orchard_shielded_data),
                 ..
@@ -1514,7 +1514,7 @@ impl Transaction {
                 ..
             } => None,
 
-            #[cfg(feature = "tx-v6")]
+            #[cfg(feature = "tx_v6")]
             Transaction::V6 {
                 orchard_shielded_data: None,
                 ..

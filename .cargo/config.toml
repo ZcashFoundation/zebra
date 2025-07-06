@@ -3,8 +3,8 @@
 # Flags that apply to all Zebra crates and configurations
 [target.'cfg(all())']
 rustflags = [
-    # Enable tx-v6 everywhere by default
-    "--cfg", 'feature="tx-v6"',
+    # Enable tx_v6 everywhere by default
+    "--cfg", 'feature="tx_v6"',
 
     # TODO: Consider removing this line later (it's needed for the ZSA version of librustzcash crates)
     "--cfg", "zcash_unstable=\"nu6\"",
@@ -88,8 +88,8 @@ rustflags = [
 
 [build]
 rustdocflags = [
-    # Enable tx-v6 everywhere by default
-    "--cfg", 'feature="tx-v6"',
+    # Enable tx_v6 everywhere by default
+    "--cfg", 'feature="tx_v6"',
 
     # TODO: Consider removing this line later (it's needed for the ZSA version of librustzcash crates)
     "--cfg", "zcash_unstable=\"nu6\"",
