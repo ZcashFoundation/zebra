@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    amount::MAX_MONEY,
+    amount::{DeferredPoolBalanceChange, MAX_MONEY},
     block::{
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,
@@ -520,7 +520,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
                     Some(activation_height) if height >= activation_height => {
                         subsidy_is_valid(&block, &network, expected_block_subsidy)?
                     }
-                    _other => Amount::zero(),
+                    _other => DeferredPoolBalanceChange::zero(),
                 };
 
             assert!(check::miner_fees_are_valid(
@@ -552,7 +552,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
         Some(activation_height) if height >= activation_height => {
             subsidy_is_valid(&block, &network, expected_block_subsidy)?
         }
-        _other => Amount::zero(),
+        _other => DeferredPoolBalanceChange::zero(),
     };
 
     assert_eq!(

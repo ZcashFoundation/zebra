@@ -7,7 +7,7 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::{Amount, NegativeAllowed},
+    amount::{DeferredPoolBalanceChange, NegativeAllowed},
     block::{self, Block, HeightDiff},
     history_tree::HistoryTree,
     orchard,
@@ -252,7 +252,7 @@ pub struct SemanticallyVerifiedBlock {
     /// in the same order as `block.transactions`.
     pub transaction_hashes: Arc<[transaction::Hash]>,
     /// This block's deferred pool value balance change.
-    pub deferred_pool_balance_change: Option<Amount>,
+    pub deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
 }
 
 /// A block ready to be committed directly to the finalized state with
@@ -382,7 +382,7 @@ pub struct FinalizedBlock {
     /// The tresstate associated with the block.
     pub(super) treestate: Treestate,
     /// This block's deferred pool value balance change.
-    pub(super) deferred_pool_balance_change: Option<Amount>,
+    pub(super) deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
 }
 
 impl FinalizedBlock {
@@ -511,7 +511,7 @@ impl CheckpointVerifiedBlock {
     pub fn new(
         block: Arc<Block>,
         hash: Option<block::Hash>,
-        deferred_pool_balance_change: Option<Amount>,
+        deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
     ) -> Self {
         let mut block = Self::with_hash(block.clone(), hash.unwrap_or(block.hash()));
         block.deferred_pool_balance_change = deferred_pool_balance_change;
@@ -549,7 +549,7 @@ impl SemanticallyVerifiedBlock {
     /// Sets the deferred balance in the block.
     pub fn with_deferred_pool_balance_change(
         mut self,
-        deferred_pool_balance_change: Option<Amount>,
+        deferred_pool_balance_change: Option<DeferredPoolBalanceChange>,
     ) -> Self {
         self.deferred_pool_balance_change = deferred_pool_balance_change;
         self
@@ -590,7 +590,9 @@ impl From<ContextuallyVerifiedBlock> for SemanticallyVerifiedBlock {
             height: valid.height,
             new_outputs: valid.new_outputs,
             transaction_hashes: valid.transaction_hashes,
-            deferred_pool_balance_change: Some(valid.chain_value_pool_change.deferred_amount()),
+            deferred_pool_balance_change: Some(DeferredPoolBalanceChange::new(
+                valid.chain_value_pool_change.deferred_amount(),
+            )),
         }
     }
 }

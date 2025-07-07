@@ -28,7 +28,7 @@ use tower::{Service, ServiceExt};
 use tracing::instrument;
 
 use zebra_chain::{
-    amount,
+    amount::{self, DeferredPoolBalanceChange},
     block::{self, Block},
     parameters::{
         subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver, SubsidyError},
@@ -622,7 +622,8 @@ where
 
         let deferred_pool_balance_change = expected_deferred_amount
             .unwrap_or_default()
-            .checked_sub(self.network.lockbox_disbursement_total_amount(height));
+            .checked_sub(self.network.lockbox_disbursement_total_amount(height))
+            .map(DeferredPoolBalanceChange::new);
 
         // don't do precalculation until the block passes basic difficulty checks
         let block = CheckpointVerifiedBlock::new(block, Some(hash), deferred_pool_balance_change);

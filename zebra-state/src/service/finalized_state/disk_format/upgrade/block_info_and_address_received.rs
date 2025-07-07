@@ -7,7 +7,7 @@ use crossbeam_channel::TryRecvError;
 use itertools::Itertools;
 use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use zebra_chain::{
-    amount::NonNegative,
+    amount::{DeferredPoolBalanceChange, NonNegative},
     block::{Block, Height},
     block_info::BlockInfo,
     parameters::subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver},
@@ -193,7 +193,10 @@ impl DiskFormatUpgrade for Upgrade {
             value_pool = value_pool
                 .add_chain_value_pool_change(
                     block
-                        .chain_value_pool_change(&utxos, deferred_pool_balance_change)
+                        .chain_value_pool_change(
+                            &utxos,
+                            deferred_pool_balance_change.map(DeferredPoolBalanceChange::new),
+                        )
                         .unwrap_or_default(),
                 )
                 .expect("value pool change should not overflow");

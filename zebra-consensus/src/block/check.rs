@@ -6,7 +6,9 @@ use chrono::{DateTime, Utc};
 
 use mset::MultiSet;
 use zebra_chain::{
-    amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
+    amount::{
+        Amount, DeferredPoolBalanceChange, Error as AmountError, NegativeAllowed, NonNegative,
+    },
     block::{Block, Hash, Header, Height},
     parameters::{
         subsidy::{FundingStreamReceiver, SubsidyError},
@@ -154,7 +156,7 @@ pub fn subsidy_is_valid(
     block: &Block,
     network: &Network,
     expected_block_subsidy: Amount<NonNegative>,
-) -> Result<Amount, BlockError> {
+) -> Result<DeferredPoolBalanceChange, BlockError> {
     let height = block.coinbase_height().ok_or(SubsidyError::NoCoinbase)?;
     let coinbase = block.transactions.first().ok_or(SubsidyError::NoCoinbase)?;
 
@@ -162,7 +164,7 @@ pub fn subsidy_is_valid(
     let Some(halving_div) = zebra_chain::parameters::subsidy::halving_divisor(height, network)
     else {
         // Far future halving, with no founders reward or funding streams
-        return Ok(Amount::zero());
+        return Ok(DeferredPoolBalanceChange::zero());
     };
 
     let canopy_activation_height = NetworkUpgrade::Canopy
@@ -248,10 +250,10 @@ pub fn subsidy_is_valid(
             }
         }
 
-        Ok(deferred_pool_balance_change)
+        Ok(DeferredPoolBalanceChange::new(deferred_pool_balance_change))
     } else {
         // Future halving, with no founders reward or funding streams
-        Ok(Amount::zero())
+        Ok(DeferredPoolBalanceChange::zero())
     }
 }
 
@@ -263,7 +265,7 @@ pub fn miner_fees_are_valid(
     height: Height,
     block_miner_fees: Amount<NonNegative>,
     expected_block_subsidy: Amount<NonNegative>,
-    expected_deferred_pool_balance_change: Amount,
+    expected_deferred_pool_balance_change: DeferredPoolBalanceChange,
     network: &Network,
 ) -> Result<(), BlockError> {
     let transparent_value_balance = zebra_chain::parameters::subsidy::output_amounts(coinbase_tx)
@@ -288,8 +290,8 @@ pub fn miner_fees_are_valid(
     // from the block subsidy value plus the transaction fees paid by transactions in this block.
     let total_output_value =
         (transparent_value_balance - sapling_value_balance - orchard_value_balance
-            + expected_deferred_pool_balance_change)
-            .map_err(|_| SubsidyError::SumOverflow)?;
+            + expected_deferred_pool_balance_change.value())
+        .map_err(|_| SubsidyError::SumOverflow)?;
     let total_input_value =
         (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 

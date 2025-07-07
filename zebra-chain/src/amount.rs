@@ -644,3 +644,24 @@ impl ZcashDeserialize for Amount<NonNegative> {
         Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
     }
 }
+
+/// Represents a change to the deferred pool balance from a coinbase transaction.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct DeferredPoolBalanceChange(Amount);
+
+impl DeferredPoolBalanceChange {
+    /// Creates a new [`DeferredPoolBalanceChange`]
+    pub fn new(amount: Amount) -> Self {
+        Self(amount)
+    }
+
+    /// Creates a new [`DeferredPoolBalanceChange`] with a zero value.
+    pub fn zero() -> Self {
+        Self(Amount::zero())
+    }
+
+    /// Consumes `self` and returns the inner [`Amount`] value.
+    pub fn value(self) -> Amount {
+        self.0
+    }
+}
