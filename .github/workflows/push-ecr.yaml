@@ -1,0 +1,110 @@
+# This GitHub Actions workflow automates pushing the Zebra Server Docker image to Amazon ECR.
+# It triggers on any new tag or manual dispatch, builds a Docker image, and pushes it to Amazon Elastic Container Registry (ECR).
+name: Push to Amazon ECR
+
+on:
+  push:
+    tags:
+      - '*' # Triggers the workflow on any new tag
+  workflow_dispatch:
+    inputs:
+      image_tag_version:
+        description: 'Version to tag the Docker image'
+        required: false
+        type: string
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
+
+jobs:
+  push-to-ecr:
+    name: Push to ECR
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Get Git tags and set image tags
+        id: vars
+        run: |
+          git fetch --tags
+          
+          # Get exact match tag if it exists (will be empty if the current commit doesn't have a tag)
+          GIT_TAG=$(git describe --exact-match --tags 2>/dev/null || echo "")
+          if [ -n "$GIT_TAG" ]; then
+            echo "GIT_TAG=$GIT_TAG" >> $GITHUB_ENV
+          fi
+          
+          # Set the input IMAGE_TAG_VERSION
+          echo "IMAGE_TAG_VERSION=${{ github.event.inputs.image_tag_version }}" >> $GITHUB_ENV
+          
+          # Echo what we found
+          echo "Git Tag Discovery:"
+          if [ -n "$GIT_TAG" ]; then
+            echo "  Found exact match Git tag: $GIT_TAG"
+          else
+            echo "  No exact match Git tag found for current commit"
+          fi
+          echo "  User-provided IMAGE_TAG_VERSION: ${{ github.event.inputs.image_tag_version }}"
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG_LATEST: latest
+        run: |
+          # Build docker container with multiple tags
+          DOCKER_BUILD_ARGS=()
+          DOCKER_BUILD_ARGS+=("-t" "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST")
+          DOCKER_BUILD_ARGS+=("-t" "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION")
+          
+          # Add exact tag if it exists
+          if [ -n "$GIT_TAG" ]; then
+            DOCKER_BUILD_ARGS+=("-t" "$ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG")
+          fi
+          
+          # Echo final tags that will be pushed
+          echo "Docker Image Tags to be pushed:"
+          echo "  $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST"
+          echo "  $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION"
+          if [ -n "$GIT_TAG" ]; then
+            echo "  $ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG"
+          fi
+          echo ""
+          
+          # Build with all tags
+          echo "Building Docker image..."
+          docker build "${DOCKER_BUILD_ARGS[@]}" -f testnet-single-node-deploy/dockerfile .
+          
+          # Push all tags
+          echo "Pushing images to ECR..."
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION
+          
+          if [ -n "$GIT_TAG" ]; then
+            docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG
+          fi
+          
+          echo "All images pushed successfully"
+          
+          # Output the image URIs
+          echo "image_latest=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" >> $GITHUB_OUTPUT
+          echo "image_version=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION" >> $GITHUB_OUTPUT
+          
+          if [ -n "$GIT_TAG" ]; then
+            echo "image_exact_tag=$ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG" >> $GITHUB_OUTPUT
+          fi
