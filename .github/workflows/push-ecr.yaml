@@ -21,7 +21,6 @@ jobs:
   push-to-ecr:
     name: Push to ECR
     runs-on: ubuntu-latest
-    environment: production
 
     steps:
       - name: Checkout
