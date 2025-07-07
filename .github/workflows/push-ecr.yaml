@@ -44,20 +44,19 @@ jobs:
           
           # Get exact match tag if it exists (will be empty if the current commit doesn't have a tag)
           GIT_TAG=$(git describe --exact-match --tags 2>/dev/null || echo "")
+          
+          # Set environment variables and echo results
           if [ -n "$GIT_TAG" ]; then
             echo "GIT_TAG=$GIT_TAG" >> $GITHUB_ENV
+            echo "Git Tag Discovery:"
+            echo "  Found exact match Git tag: $GIT_TAG"
+          else
+            echo "Git Tag Discovery:"
+            echo "  No exact match Git tag found for current commit"
           fi
           
           # Set the input IMAGE_TAG_VERSION
           echo "IMAGE_TAG_VERSION=${{ github.event.inputs.image_tag_version }}" >> $GITHUB_ENV
-          
-          # Echo what we found
-          echo "Git Tag Discovery:"
-          if [ -n "$GIT_TAG" ]; then
-            echo "  Found exact match Git tag: $GIT_TAG"
-          else
-            echo "  No exact match Git tag found for current commit"
-          fi
           echo "  User-provided IMAGE_TAG_VERSION: ${{ github.event.inputs.image_tag_version }}"
 
       - name: Build, tag, and push image to Amazon ECR
@@ -78,24 +77,34 @@ jobs:
           
           # Echo final tags that will be pushed
           echo "Docker Image Tags to be pushed:"
-          echo "  $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST"
-          echo "  $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION"
-          if [ -n "$GIT_TAG" ]; then
-            echo "  $ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG"
-          fi
+          for arg in "${DOCKER_BUILD_ARGS[@]}"; do
+            if [[ "$arg" != "-t" ]]; then
+              echo "  $arg"
+            fi
+          done
           echo ""
           
           # Build with all tags
           echo "Building Docker image..."
           docker build "${DOCKER_BUILD_ARGS[@]}" -f testnet-single-node-deploy/dockerfile .
           
-          # Push all tags
+          # Push all tags with error handling
           echo "Pushing images to ECR..."
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST
-          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION
-          
+          if ! docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST; then
+            echo "Failed to push latest tag"
+            exit 1
+          fi
+
+          if ! docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION; then
+            echo "Failed to push version tag"
+            exit 1
+          fi
+
           if [ -n "$GIT_TAG" ]; then
-            docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG
+            if ! docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG; then
+              echo "Failed to push git tag"
+              exit 1
+            fi
           fi
           
           echo "All images pushed successfully"
@@ -107,3 +116,10 @@ jobs:
           if [ -n "$GIT_TAG" ]; then
             echo "image_exact_tag=$ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG" >> $GITHUB_OUTPUT
           fi
+
+          # Print the public repository URL
+          echo ""
+          echo "====================================="
+          echo "Public ECR Repository URL:"
+          echo "https://gallery.ecr.aws/$ECR_REPOSITORY"
+          echo "====================================="
