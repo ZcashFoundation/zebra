@@ -5,13 +5,16 @@ use std::pin::Pin;
 use futures::Stream;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Response, Status};
-use tower::BoxError;
+use tower::{util::ServiceExt, BoxError};
 
+use tracing::Span;
 use zebra_chain::chain_tip::ChainTip;
 use zebra_node_services::mempool::MempoolChangeKind;
+use zebra_state::{ReadRequest, ReadResponse};
 
 use super::{
-    indexer_server::Indexer, server::IndexerRPC, BlockHashAndHeight, Empty, MempoolChangeMessage,
+    indexer_server::Indexer, server::IndexerRPC, BlockAndHash, BlockHashAndHeight, Empty,
+    MempoolChangeMessage,
 };
 
 /// The maximum number of messages that can be queued to be streamed to a client
@@ -33,6 +36,8 @@ where
 {
     type ChainTipChangeStream =
         Pin<Box<dyn Stream<Item = Result<BlockHashAndHeight, Status>> + Send>>;
+    type NonFinalizedStateChangeStream =
+        Pin<Box<dyn Stream<Item = Result<BlockAndHash, Status>> + Send>>;
     type MempoolChangeStream =
         Pin<Box<dyn Stream<Item = Result<MempoolChangeMessage, Status>> + Send>>;
 
@@ -40,6 +45,7 @@ where
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::ChainTipChangeStream>, Status> {
+        let span = Span::current();
         let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
         let mut chain_tip_change = self.chain_tip_change.clone();
@@ -56,15 +62,83 @@ where
                     .send(Ok(BlockHashAndHeight::new(tip_hash, tip_height)))
                     .await
                 {
-                    tracing::info!(?error, "failed to send chain tip change, dropping task");
+                    span.in_scope(|| {
+                        tracing::info!(?error, "failed to send chain tip change, dropping task");
+                    });
                     return;
                 }
             }
 
-            tracing::warn!("chain_tip_change channel has closed");
+            span.in_scope(|| {
+                tracing::warn!("chain_tip_change channel has closed");
+            });
+
             let _ = response_sender
                 .send(Err(Status::unavailable(
                     "chain_tip_change channel has closed",
+                )))
+                .await;
+        });
+
+        Ok(Response::new(Box::pin(response_stream)))
+    }
+
+    async fn non_finalized_state_change(
+        &self,
+        _: tonic::Request<Empty>,
+    ) -> Result<Response<Self::NonFinalizedStateChangeStream>, Status> {
+        let span = Span::current();
+        let read_state = self.read_state.clone();
+        let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
+        let response_stream = ReceiverStream::new(response_receiver);
+
+        tokio::spawn(async move {
+            let mut non_finalized_state_change = match read_state
+                .oneshot(ReadRequest::NonFinalizedBlocksListener)
+                .await
+            {
+                Ok(ReadResponse::NonFinalizedBlocksListener(listener)) => listener.unwrap(),
+                Ok(_) => unreachable!("unexpected response type from ReadStateService"),
+                Err(error) => {
+                    span.in_scope(|| {
+                        tracing::error!(
+                            ?error,
+                            "failed to subscribe to non-finalized state changes"
+                        );
+                    });
+
+                    let _ = response_sender
+                        .send(Err(Status::unavailable(
+                            "failed to subscribe to non-finalized state changes",
+                        )))
+                        .await;
+                    return;
+                }
+            };
+
+            // Notify the client of chain tip changes until the channel is closed
+            while let Some((hash, block)) = non_finalized_state_change.recv().await {
+                if let Err(error) = response_sender
+                    .send(Ok(BlockAndHash::new(hash, block)))
+                    .await
+                {
+                    span.in_scope(|| {
+                        tracing::info!(
+                            ?error,
+                            "failed to send non-finalized state change, dropping task"
+                        );
+                    });
+                    return;
+                }
+            }
+
+            span.in_scope(|| {
+                tracing::warn!("non-finalized state change channel has closed");
+            });
+
+            let _ = response_sender
+                .send(Err(Status::unavailable(
+                    "non-finalized state change channel has closed",
                 )))
                 .await;
         });
@@ -76,6 +150,7 @@ where
         &self,
         _: tonic::Request<Empty>,
     ) -> Result<Response<Self::MempoolChangeStream>, Status> {
+        let span = Span::current();
         let (response_sender, response_receiver) = tokio::sync::mpsc::channel(RESPONSE_BUFFER_SIZE);
         let response_stream = ReceiverStream::new(response_receiver);
         let mut mempool_change = self.mempool_change.subscribe();
@@ -84,7 +159,9 @@ where
             // Notify the client of chain tip changes until the channel is closed
             while let Ok(change) = mempool_change.recv().await {
                 for tx_id in change.tx_ids() {
-                    tracing::debug!("mempool change: {:?}", change);
+                    span.in_scope(|| {
+                        tracing::debug!("mempool change: {:?}", change);
+                    });
 
                     if let Err(error) = response_sender
                         .send(Ok(MempoolChangeMessage {
@@ -101,13 +178,18 @@ where
                         }))
                         .await
                     {
-                        tracing::info!(?error, "failed to send mempool change, dropping task");
+                        span.in_scope(|| {
+                            tracing::info!(?error, "failed to send mempool change, dropping task");
+                        });
                         return;
                     }
                 }
             }
 
-            tracing::warn!("mempool_change channel has closed");
+            span.in_scope(|| {
+                tracing::warn!("mempool_change channel has closed");
+            });
+
             let _ = response_sender
                 .send(Err(Status::unavailable(
                     "mempool_change channel has closed",

@@ -14,7 +14,7 @@ use std::{path::Path, sync::Arc};
 use crossbeam_channel::bounded;
 use semver::Version;
 
-use zebra_chain::parameters::Network;
+use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
     config::database_format_version_on_disk,
@@ -242,6 +242,20 @@ impl ZebraDb {
     /// When called with a secondary DB instance, tries to catch up with the primary DB instance
     pub fn try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
         self.db.try_catch_up_with_primary()
+    }
+
+    /// Spawns a blocking task to try catching up with the primary DB instance.
+    pub async fn spawn_try_catch_up_with_primary(&self) -> Result<(), rocksdb::Error> {
+        let db = self.clone();
+        tokio::task::spawn_blocking(move || {
+            let result = db.try_catch_up_with_primary();
+            if let Err(catch_up_error) = &result {
+                tracing::warn!(?catch_up_error, "failed to catch up to primary");
+            }
+            result
+        })
+        .wait_for_panics()
+        .await
     }
 
     /// Shut down the database, cleaning up background tasks and ephemeral data.
