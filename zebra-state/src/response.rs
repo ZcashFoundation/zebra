@@ -8,7 +8,9 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
     block_info::BlockInfo,
-    orchard, sapling,
+    orchard,
+    parameters::Network,
+    sapling,
     serialization::DateTime32,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
@@ -23,7 +25,7 @@ use zebra_chain::work::difficulty::CompactDifficulty;
 #[allow(unused_imports)]
 use crate::{ReadRequest, Request};
 
-use crate::{service::read::AddressUtxos, TransactionLocation};
+use crate::{service::read::AddressUtxos, NonFinalizedState, TransactionLocation, WatchReceiver};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a [`StateService`](crate::service::StateService) [`Request`].
@@ -152,6 +154,109 @@ impl MinedTx {
         }
     }
 }
+
+/// How many non-finalized block references to buffer in [`NonFinalizedBlocksListener`] before blocking sends.
+///
+/// # Correctness
+///
+/// This should be large enough to typically avoid blocking the sender when the non-finalized state is full so
+/// that the [`NonFinalizedBlocksListener`] reliably receives updates whenever the non-finalized state changes.
+///
+/// It's okay to occasionally miss updates when the buffer is full, as the new blocks in the missed change will be
+/// sent to the listener on the next change to the non-finalized state.
+const NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE: usize = 1_000;
+
+/// A listener for changes in the non-finalized state.
+#[derive(Clone, Debug)]
+pub struct NonFinalizedBlocksListener(
+    pub Arc<tokio::sync::mpsc::Receiver<(zebra_chain::block::Hash, Arc<zebra_chain::block::Block>)>>,
+);
+
+impl NonFinalizedBlocksListener {
+    /// Spawns a task to listen for changes in the non-finalized state and sends any blocks in the non-finalized state
+    /// to the caller that have not already been sent.
+    ///
+    /// Returns a new instance of [`NonFinalizedBlocksListener`] for the caller to listen for new blocks in the non-finalized state.
+    pub fn spawn(
+        network: Network,
+        mut non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+    ) -> Self {
+        let (sender, receiver) = tokio::sync::mpsc::channel(NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE);
+
+        tokio::spawn(async move {
+            // Start with an empty non-finalized state with the expectation that the caller doesn't yet have
+            // any blocks from the non-finalized state.
+            let mut prev_non_finalized_state = NonFinalizedState::new(&network);
+
+            loop {
+                // # Correctness
+                //
+                // This loop should check that the non-finalized state receiver has changed sooner
+                // than the non-finalized state could possibly have changed to avoid missing updates, so
+                // the logic here should be quicker than the contextual verification logic that precedes
+                // commits to the non-finalized state.
+                //
+                // See the `NON_FINALIZED_STATE_CHANGE_BUFFER_SIZE` documentation for more details.
+                let latest_non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
+
+                let new_blocks = latest_non_finalized_state
+                    .chain_iter()
+                    .flat_map(|chain| {
+                        // Take blocks from the chain in reverse height order until we reach a block that was
+                        // present in the last seen copy of the non-finalized state.
+                        let mut new_blocks: Vec<_> = chain
+                            .blocks
+                            .values()
+                            .rev()
+                            .take_while(|cv_block| {
+                                !prev_non_finalized_state.any_chain_contains(&cv_block.hash)
+                            })
+                            .collect();
+                        new_blocks.reverse();
+                        new_blocks
+                    })
+                    .map(|cv_block| (cv_block.hash, cv_block.block.clone()));
+
+                for new_block_with_hash in new_blocks {
+                    if sender.send(new_block_with_hash).await.is_err() {
+                        tracing::debug!("non-finalized state change receiver closed, ending task");
+                        return;
+                    }
+                }
+
+                prev_non_finalized_state = latest_non_finalized_state;
+
+                // Wait for the next update to the non-finalized state
+                if let Err(error) = non_finalized_state_receiver.changed().await {
+                    warn!(?error, "non-finalized state receiver closed, ending task");
+                    break;
+                }
+            }
+        });
+
+        Self(Arc::new(receiver))
+    }
+
+    /// Consumes `self`, unwrapping the inner [`Arc`] and returning the non-finalized state change channel receiver.
+    ///
+    /// # Panics
+    ///
+    /// If the `Arc` has more than one strong reference, this will panic.
+    pub fn unwrap(
+        self,
+    ) -> tokio::sync::mpsc::Receiver<(zebra_chain::block::Hash, Arc<zebra_chain::block::Block>)>
+    {
+        Arc::try_unwrap(self.0).unwrap()
+    }
+}
+
+impl PartialEq for NonFinalizedBlocksListener {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for NonFinalizedBlocksListener {}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// A response to a read-only
@@ -292,6 +397,9 @@ pub enum ReadResponse {
 
     /// Response to [`ReadRequest::TipBlockSize`]
     TipBlockSize(Option<usize>),
+
+    /// Response to [`ReadRequest::NonFinalizedBlocksListener`]
+    NonFinalizedBlocksListener(NonFinalizedBlocksListener),
 }
 
 /// A structure with the information needed from the state to build a `getblocktemplate` RPC response.
@@ -383,7 +491,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
-            | ReadResponse::ChainInfo(_) => {
+            | ReadResponse::ChainInfo(_)
+            | ReadResponse::NonFinalizedBlocksListener(_) => {
                 Err("there is no corresponding Response for this ReadResponse")
             }
 
