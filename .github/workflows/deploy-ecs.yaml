@@ -1,0 +1,80 @@
+# This GitHub Actions workflow automates deploying the Zebra Server to Amazon ECS.
+# It allows manual triggering with the ability to choose which image tag to deploy.
+name: Deploy to Amazon ECS
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag to deploy (e.g., latest, v1.0.0, commit-hash)'
+        required: true
+        type: string
+        default: 'latest'
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
+  ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
+  ECS_SERVICE: ${{ vars.ECS_SERVICE || 'dev-zebra' }}
+  ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'dev-zebra-cluster' }}
+
+jobs:
+  deploy-to-ecs:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Deploy to Amazon ECS
+        id: deploy-ecs
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          # Construct the full image URI
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+          
+          echo "Deploying image: $IMAGE_URI"
+          echo "ECS Service: $ECS_SERVICE"
+          echo "ECS Cluster: $ECS_CLUSTER"
+          
+          # Update the ECS service with the new image
+          aws ecs update-service \
+            --cluster $ECS_CLUSTER \
+            --service $ECS_SERVICE \
+            --force-new-deployment
+          
+          # Wait for the service to be stable
+          echo "Waiting for ECS service to be stable..."
+          aws ecs wait services-stable \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE
+          
+          echo "Deployment completed successfully!"
+          
+          # Output the deployment information
+          echo "deployed_image=$IMAGE_URI" >> $GITHUB_OUTPUT
+          echo "ecs_service=$ECS_SERVICE" >> $GITHUB_OUTPUT
+          echo "ecs_cluster=$ECS_CLUSTER" >> $GITHUB_OUTPUT
+
+      - name: Get deployment status
+        run: |
+          echo "Deployment Status:"
+          aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE \
+            --query 'services[0].{ServiceName:serviceName,Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount}' \
+            --output table
