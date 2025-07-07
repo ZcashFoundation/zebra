@@ -1,5 +1,6 @@
 # This GitHub Actions workflow automates deploying the Zebra Server to Amazon ECS.
 # It allows manual triggering with the ability to choose which image tag to deploy.
+# Because of the "force-new-deployment" flag, the ECS service will update to a new 'latest' image, if one was pushed.
 name: Deploy to Amazon ECS
 
 on:
