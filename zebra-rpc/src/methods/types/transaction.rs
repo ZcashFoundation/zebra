@@ -685,14 +685,9 @@ impl TransactionObject {
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
             joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.
-                raw_key
-                    .as_ref()
-                    .iter()
-                    .rev()
-                    .copied()
-                    .collect::<Vec<_>>()
-                    .try_into()
-                    .unwrap()
+                let mut key: [u8; 32] = raw_key.into();
+                key.reverse();
+                key
             }),
             joinsplit_sig: tx.joinsplit_sig().map(|raw_sig| raw_sig.into()),
             size: tx.as_bytes().len().try_into().ok(),
