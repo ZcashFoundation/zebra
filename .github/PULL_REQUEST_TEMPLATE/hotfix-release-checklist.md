@@ -29,9 +29,8 @@ The release level for a hotfix should always follow semantic versioning as a `pa
 
 ```sh
 # Update everything except for alpha crates and zebrad:
-cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-grpc beta
+cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad beta
 # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.2
 # Update zebrad:
 cargo release version --verbose --execute --allow-branch '*' --package zebrad patch
 # Continue with the release process:
