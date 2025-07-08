@@ -2997,7 +2997,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         zebra_rpc::sync::init_read_state_with_syncer(
             config.state,
             &config.network.network,
-            rpc_address,
             indexer_listen_addr,
         )
         .await?
@@ -3200,10 +3199,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         [127, 0, 0, 1],
         random_known_port(),
     )));
-
-    let rpc_address = config.rpc.listen_addr.unwrap();
     let indexer_listen_addr = config.rpc.indexer_listen_addr.unwrap();
-
     let test_dir = testdir()?.with_config(&mut config)?;
 
     let _child = test_dir.spawn_child(args!["start"])?;
@@ -3218,7 +3214,6 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         zebra_rpc::sync::init_read_state_with_syncer(
             config.state,
             &config.network.network,
-            rpc_address,
             indexer_listen_addr,
         )
         .await?
