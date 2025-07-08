@@ -16,6 +16,7 @@ on:
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
+  DOCKERFILE_PATH: testnet-single-node-deploy/dockerfile
 
 jobs:
   push-to-ecr:
@@ -86,28 +87,20 @@ jobs:
           
           # Build with all tags
           echo "Building Docker image..."
-          docker build "${DOCKER_BUILD_ARGS[@]}" -f testnet-single-node-deploy/dockerfile .
+          docker build "${DOCKER_BUILD_ARGS[@]}" -f $DOCKERFILE_PATH .
           
           # Push all tags with error handling
-          echo "Pushing images to ECR..."
-          if ! docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST; then
-            echo "Failed to push latest tag"
-            exit 1
-          fi
+          for tag in "$IMAGE_TAG_LATEST" "$IMAGE_TAG_VERSION" "$GIT_TAG"; do
+                # Skip empty tags (e.g., if GIT_TAG is unset)
+                [ -z "$tag" ] && continue
 
-          if ! docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION; then
-            echo "Failed to push version tag"
-            exit 1
-          fi
-
-          if [ -n "$GIT_TAG" ]; then
-            if ! docker push $ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG; then
-              echo "Failed to push git tag"
-              exit 1
-            fi
-          fi
-          
-          echo "All images pushed successfully"
+                image="$ECR_REGISTRY/$ECR_REPOSITORY:$tag"
+                echo "Pushing $image…"
+                if ! docker push "$image"; then
+                  echo "Failed to push $image"
+                  exit 1
+                fi
+              done
           
           # Output the image URIs
           echo "image_latest=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" >> $GITHUB_OUTPUT

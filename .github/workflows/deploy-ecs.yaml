@@ -63,7 +63,23 @@ jobs:
             --cluster $ECS_CLUSTER \
             --services $ECS_SERVICE
           
-          echo "Deployment completed successfully!"
+          # Check the actual service status after waiting
+          echo "Checking service status..."
+          SERVICE_STATUS=$(aws ecs describe-services \
+            --cluster $ECS_CLUSTER \
+            --services $ECS_SERVICE \
+            --query 'services[0].status' \
+            --output text)
+          
+          echo "Service Status: $SERVICE_STATUS"
+          
+          # Check if deployment was successful
+          if [ "$SERVICE_STATUS" = "ACTIVE" ]; then
+            echo "Deployment completed successfully!"
+          else
+            echo "Deployment may have issues. Service status: $SERVICE_STATUS"
+            exit 1
+          fi
           
           # Output the deployment information
           echo "deployed_image=$IMAGE_URI" >> $GITHUB_OUTPUT
