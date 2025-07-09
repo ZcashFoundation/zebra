@@ -230,9 +230,6 @@ use common::{
 /// This limit only applies to some tests.
 pub const MAX_ASYNC_BLOCKING_TIME: Duration = zebra_test::mock_service::DEFAULT_MAX_REQUEST_DELAY;
 
-/// The test config file prefix for `--feature shielded-scan` configs.
-pub const SHIELDED_SCAN_CONFIG_PREFIX: &str = "shieldedscan-";
-
 #[test]
 fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -954,13 +951,6 @@ fn stored_configs_parsed_correctly() -> Result<()> {
                 ?config_file_path,
                 "skipping hidden/temporary config file path"
             );
-            continue;
-        }
-
-        // ignore files starting with shieldedscan prefix
-        // if we were not built with the shielded-scan feature.
-        if config_file_name.starts_with(SHIELDED_SCAN_CONFIG_PREFIX) {
-            tracing::info!(?config_file_path, "skipping shielded-scan config file path");
             continue;
         }
 

@@ -6372,7 +6372,6 @@ dependencies = [
  "uint 0.10.0",
  "x25519-dalek",
  "zcash_address",
- "zcash_client_backend",
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
@@ -6424,28 +6423,6 @@ dependencies = [
  "zebra-chain",
  "zebra-node-services",
  "zebra-script",
- "zebra-state",
- "zebra-test",
-]
-
-[[package]]
-name = "zebra-grpc"
-version = "0.1.0-alpha.13"
-dependencies = [
- "color-eyre",
- "futures-util",
- "insta",
- "prost",
- "serde",
- "tokio",
- "tokio-stream",
- "tonic",
- "tonic-build",
- "tonic-reflection",
- "tower 0.4.13",
- "zcash_primitives",
- "zebra-chain",
- "zebra-node-services",
  "zebra-state",
  "zebra-test",
 ]
@@ -6550,54 +6527,6 @@ dependencies = [
  "zebra-script",
  "zebra-state",
  "zebra-test",
-]
-
-[[package]]
-name = "zebra-scan"
-version = "0.1.0-alpha.15"
-dependencies = [
- "bls12_381",
- "chrono",
- "color-eyre",
- "ff",
- "futures",
- "group",
- "hex",
- "indexmap 2.9.0",
- "insta",
- "itertools 0.14.0",
- "jsonrpc",
- "jubjub",
- "lazy_static",
- "proptest",
- "proptest-derive",
- "rand 0.8.5",
- "sapling-crypto",
- "semver",
- "serde",
- "serde_json",
- "structopt",
- "tempfile",
- "tokio",
- "toml 0.8.22",
- "tonic",
- "tower 0.4.13",
- "tracing",
- "tracing-subscriber",
- "zcash_address",
- "zcash_client_backend",
- "zcash_keys",
- "zcash_note_encryption",
- "zcash_primitives",
- "zcash_protocol",
- "zebra-chain",
- "zebra-grpc",
- "zebra-node-services",
- "zebra-rpc",
- "zebra-state",
- "zebra-test",
- "zebrad",
- "zip32",
 ]
 
 [[package]]
@@ -6781,7 +6710,6 @@ dependencies = [
  "zcash_keys",
  "zebra-chain",
  "zebra-consensus",
- "zebra-grpc",
  "zebra-network",
  "zebra-node-services",
  "zebra-rpc",
