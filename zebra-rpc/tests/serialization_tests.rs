@@ -208,6 +208,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = block.block_commitments();
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
+    let chain_history_root = block.chain_history_root();
     let tx = block
         .tx()
         .iter()
@@ -255,6 +256,7 @@ fn test_get_block_1() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
+        chain_history_root.clone(),
         tx.iter()
             .map(|h| GetBlockTransaction::Hash(zebra_chain::transaction::Hash(*h)))
             .collect(),
@@ -297,6 +299,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = block.block_commitments();
     let final_sapling_root = block.final_sapling_root();
     let final_orchard_root = block.final_orchard_root();
+    let chain_history_root = block.chain_history_root();
     // We don't unpack the transaction object because we test that in the
     // get_raw_transaction test.
     let tx = block
@@ -331,6 +334,7 @@ fn test_get_block_2() -> Result<(), Box<dyn std::error::Error>> {
         block_commitments,
         final_sapling_root,
         final_orchard_root,
+        chain_history_root.clone(),
         tx.iter()
             .cloned()
             .map(GetBlockTransaction::Object)
@@ -363,6 +367,7 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
   "merkleroot": "4097b67ba0aa552538ed3fce670c756f22452f0273095f10cd693912551ebe3a",
   "blockcommitments": "cdf618b251ca2353360d06dc3efd9f16fb45d95d2692e69b2adffa26bf2db884",
   "finalsaplingroot": "35a0acf56d25f4e282d345e5a546331487b13a663f0b1f745088d57f878e9d6d",
+  "chainhistoryroot": "2647bead1cb9790d2004162d3aeb0bc3fc5b494aaff81cf80e96e111602684c5",
   "time": 1747751624,
   "nonce": "7ddc00a80000000000000000000a00000000000000000000000000003e1e6cd7",
   "solution": "0038e90b8de2fd3fc1b62218e6caeb60f20d38c0ad38d6dd05176996455c5a54fef2f99eee4fe5b887e808da827951cc9e5adb73542891d451e147f4746eb70bd34a4a2ec5ecfa8fce87ae10e8c55b8b3ffe76e40b56057d714637ac33e6434e849f3bf21aeb14bf3e1b4336eb39493110c5f0ac63d272733fa94f9e7da529fe0c8c436f9c0feb49031a20c8310a419ab670d732cce9fceda95911f8e646ef64fe6462bb449fe2fc053ca4358d8495ee254644a530b1e59dd025d9a2ce131ec187805c1cbbef9362bda8dcaed1ec8697ab570806e1e0ff0b3f1cf891a086664d0efca6127244db1b564dfa960a8527e08029cef05aa71ac10e9923620d6719702685d27938c2910f385d18368f54b588f3129c55e9f9d27e46d563a190deb39dbc877d771ad213559232280a55d4a0f9513e38ba4f6973096bd3811cd70ee63613bdb4dec033a1aeb9b5b6c1f3b96d080082c9c6e683e7f72be7c834fef1dec64c4b75b30730ff374b00968c51d7e093d3867c503e2dce7faf220249d037e49202b5a7de013474e956c61b5e7526ff35637cbfd86abef37406f3a50ec1168ddb8b5ad96c08503de5d75cae433ae4b504f6e995858640151454460e9b2ee669a44969779592682ca56e4e10d60aae11818b708b19db8593e59389d1ff50359d13f67a311d2565749d20724f239407beabf6790e54479cd5d2015e0903f94f0043ac7484c61936832d7fdf7b13de0579969a795149f77eb1a6961461b6c33b9bbcdfd203c706bf634dc1f7bb6841aebaae01e492ef69fca14996eacc9ef54947dfc268b25a74f52e46f2f504d9105d51e6619d224b0e7b47ca0dbeeece2e04552b123056be9d383cb9a1f5cc75ab8c5aa76dc2709cec58108e4df4e74a5ee2dc299192ddc4ecb4e19a7df843138157422d610c690c34a33ae6ccf16d493711827900d82c1366cdb1e147b5d4fc2b4d5fd32ef95eaa4406bd7d52dec5ee30e258311336c27b4e7069faedd608f86cc239cd62006c03923df66d362ca5203026e4780d277f13e73b2163a04858c3c413de5e9c5470c90e59e6d7b391cd85a59cc47a68f5e95ada981eba3d35878435e39c23599efb53a411b6397d062b4e4f9b0f423d2b8ad7a0e2fdbe8489374f23193882bd473a53ac542d81e81dc9eb2b661ca9d6816e242bffb83a00dc6f70a511b469a75271458ef43a66b1ab7b43163fd3ddc0c1d24239d176db980fe5e316fc127adbd005253897ea0867306dc0811a3ea87cd049236e3b5f4ee58bb310ecf7039f33eabaf6e091ff682c9bb6740e0c3171bf7025cba3587827cc5008fb2d6a5cb83c1ba48d58718c4f42f506b4794ffe0721411738bd671d12d20c3a08c9e06c27258f0bd7d295b46fbfc53f48bdcdd7be62cb87a437b9865be5ca6fb6155e7e6801a73a8b335432d303fc22c5a7a27484f46936fe7124a1a363f90fd924a08e540968ecdc71c6f11ddc8a2aa9161c8b532984c911f4e780474785d296b02e4d2d12f9c4c46b735f79c3c9351ef5bebea2a65b48eb0747384a31d7e6c9d3a0c2507cef7df8971fd541570a3174b74ec91401acb5b45f105e8b25dd407c745d08da0cc4d5c88dd33bd3c2876c2af6a4f110c8867638e6dc6e72b3b0ddb37ef6aa4dedbb7dca039a0e08049502e526c8f72121a68ae5385bad3b5bd59efadc0b8882cccad2634937da612098e760c4f9510fcf311517d4ae2c4e0e8f081354194329b42d3a2c0c93924aa985a9b99598377a98489881e83b5eb3f155ca120a28d4bfd2d43d01a6dd368d52626905f26cb3ff9c0d5b98a9796172e54fd1f2b7dc7851fd3c9e191abd14e96c8781c6453f33a198797ee50f02682a7c2a7829420e0b40fe787dfc7f32ce05df3a3a86fc59700e",
@@ -388,6 +393,7 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
     let block_commitments = header.block_commitments();
     let final_sapling_root = header.final_sapling_root();
     let sapling_tree_size = header.sapling_tree_size();
+    let chain_history_root = header.chain_history_root();
     let time = header.time();
     let nonce = header.nonce();
     let solution = header.solution();
@@ -404,6 +410,7 @@ fn test_get_block_header() -> Result<(), Box<dyn std::error::Error>> {
         merkle_root,
         block_commitments,
         final_sapling_root,
+        chain_history_root,
         sapling_tree_size,
         time,
         nonce,

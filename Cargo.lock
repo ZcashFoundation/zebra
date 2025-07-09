@@ -574,6 +574,20 @@ name = "bytemuck"
 version = "1.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9134a6ef01ce4b366b50689c94f82c14bc72bc5d0386829828a2e2752ef7958c"
+dependencies = [
+ "bytemuck_derive",
+]
+
+[[package]]
+name = "bytemuck_derive"
+version = "1.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ecc273b49b3205b83d648f0690daa588925572cc5063745bfe547fe7ec8e1a1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.103",
+]
 
 [[package]]
 name = "byteorder"
@@ -6509,6 +6523,7 @@ name = "zebra-rpc"
 version = "1.0.0-beta.46"
 dependencies = [
  "base64 0.22.1",
+ "bytemuck",
  "chrono",
  "color-eyre",
  "derive-getters",
@@ -6539,6 +6554,7 @@ dependencies = [
  "tower 0.4.13",
  "tracing",
  "zcash_address",
+ "zcash_history",
  "zcash_keys",
  "zcash_primitives",
  "zcash_protocol",

@@ -82,6 +82,10 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_protocol = { workspace = true }
 zcash_transparent = { workspace = true }
 
+# For the `gethistorynode` RPC method
+zcash_history.workspace = true
+bytemuck = {version = "1.22", features = ["derive"] }
+
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
