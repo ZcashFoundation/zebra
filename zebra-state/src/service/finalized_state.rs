@@ -55,12 +55,6 @@ pub use disk_format::{
 };
 pub use zebra_db::ZebraDb;
 
-#[cfg(feature = "shielded-scan")]
-pub use disk_format::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
-    SaplingScanningKey,
-};
-
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use disk_format::KV;
 

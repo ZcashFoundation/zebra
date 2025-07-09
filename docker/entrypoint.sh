@@ -189,11 +189,6 @@ run_tests() {
       --package zebra-state \
       -- --nocapture --include-ignored with_fake_activation_heights
 
-  elif [[ "${TEST_SCANNER}" -eq "1" ]]; then
-    # Test the scanner.
-    exec_as_user cargo test --locked --release --package zebra-scan \
-      -- --nocapture --include-ignored scan_task_commands scan_start_where_left
-
   elif [[ "${SYNC_LARGE_CHECKPOINTS_EMPTY}" -eq "1" ]]; then
     # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
     # state.
