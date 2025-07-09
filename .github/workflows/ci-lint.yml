@@ -93,7 +93,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
 
-      - uses: Swatinem/rust-cache@v2.7.8
+      - uses: Swatinem/rust-cache@v2.8.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -138,7 +138,7 @@ jobs:
 
       # We don't cache `fmt` outputs because the job is quick,
       # and we want to use the limited GitHub actions cache space for slower jobs.
-      #- uses: Swatinem/rust-cache@v2.7.8
+      #- uses: Swatinem/rust-cache@v2.8.0
 
       - run: |
           cargo fmt --all -- --check
