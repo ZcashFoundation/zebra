@@ -220,11 +220,7 @@ impl Input {
     /// # Panics
     ///
     /// If the coinbase data is greater than [`MAX_COINBASE_DATA_LEN`].
-    pub fn new_coinbase(
-        height: block::Height,
-        data: Option<Vec<u8>>,
-        sequence: Option<u32>,
-    ) -> Input {
+    pub fn new_coinbase(height: block::Height, data: Vec<u8>, sequence: Option<u32>) -> Input {
         // `zcashd` includes an extra byte after the coinbase height in the coinbase data. We do
         // that only if the data is empty to stay compliant with the following consensus rule:
         //
@@ -235,15 +231,13 @@ impl Input {
         // Coinbase heights < 17 are serialized as a single byte, and if there is no coinbase data,
         // the script of a coinbase tx with such a height would consist only of this single byte,
         // violating the consensus rule.
-        let data = data.map_or(vec![0], |d| if d.is_empty() { vec![0] } else { d });
-        let height_size = height.coinbase_zcash_serialized_size();
+        let data = if data.is_empty() { vec![0] } else { data };
+        let data_limit = MAX_COINBASE_DATA_LEN - height.coinbase_zcash_serialized_size();
 
         assert!(
-            data.len() + height_size <= MAX_COINBASE_DATA_LEN,
-            "invalid coinbase data: extra data {} bytes + height {height_size} bytes \
-             must be {} or less",
+            data.len() <= data_limit,
+            "miner data has {} bytes, which exceeds the limit of {data_limit} bytes",
             data.len(),
-            MAX_COINBASE_DATA_LEN,
         );
 
         Input::Coinbase {
