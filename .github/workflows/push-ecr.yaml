@@ -16,7 +16,7 @@ on:
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
-  DOCKERFILE_PATH: testnet-single-node-deploy/dockerfile
+  DOCKERFILE_PATH: ${{ vars.DOCKERFILE_PATH }}
 
 jobs:
   push-to-ecr:
