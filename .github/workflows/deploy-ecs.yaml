@@ -22,6 +22,7 @@ jobs:
   deploy-to-ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - name: Checkout
