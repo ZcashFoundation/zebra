@@ -12,6 +12,7 @@ use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::Network,
+    primitives::ed25519,
     sapling::NotSmallOrderValueCommitment,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
@@ -184,6 +185,36 @@ pub struct TransactionObject {
     /// Sapling outputs of the transaction.
     #[serde(rename = "vShieldedOutput")]
     pub(crate) shielded_outputs: Vec<ShieldedOutput>,
+
+    /// Sapling binding signature of the transaction.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "opthex",
+        default,
+        rename = "bindingSig"
+    )]
+    #[getter(copy)]
+    pub(crate) binding_sig: Option<[u8; 64]>,
+
+    /// JoinSplit public key of the transaction.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "opthex",
+        default,
+        rename = "joinSplitPubKey"
+    )]
+    #[getter(copy)]
+    pub(crate) joinsplit_pub_key: Option<[u8; 32]>,
+
+    /// JoinSplit signature of the transaction.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        with = "opthex",
+        default,
+        rename = "joinSplitSig"
+    )]
+    #[getter(copy)]
+    pub(crate) joinsplit_sig: Option<[u8; ed25519::Signature::BYTE_SIZE]>,
 
     /// Orchard actions of the transaction.
     #[serde(rename = "orchard", skip_serializing_if = "Option::is_none")]
@@ -460,6 +491,9 @@ impl Default for TransactionObject {
             shielded_spends: Vec::new(),
             shielded_outputs: Vec::new(),
             orchard: None,
+            binding_sig: None,
+            joinsplit_pub_key: None,
+            joinsplit_sig: None,
             value_balance: None,
             value_balance_zat: None,
             size: None,
@@ -580,6 +614,8 @@ impl TransactionObject {
             shielded_outputs: tx
                 .sapling_outputs()
                 .map(|output| {
+                    let mut cm_u: [u8; 32] = output.cm_u.to_bytes();
+                    cm_u.reverse();
                     let mut ephemeral_key: [u8; 32] = output.ephemeral_key.into();
                     ephemeral_key.reverse();
                     let enc_ciphertext: [u8; 580] = output.enc_ciphertext.into();
@@ -587,7 +623,7 @@ impl TransactionObject {
 
                     ShieldedOutput {
                         cv: output.cv,
-                        cm_u: output.cm_u.to_bytes(),
+                        cm_u,
                         ephemeral_key,
                         enc_ciphertext,
                         out_ciphertext,
@@ -597,7 +633,6 @@ impl TransactionObject {
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-
             orchard: if !tx.has_orchard_shielded_data() {
                 None
             } else {
@@ -647,6 +682,14 @@ impl TransactionObject {
                     value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
                 })
             },
+            binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
+            joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
+                // Display order is reversed in the RPC output.
+                let mut key: [u8; 32] = raw_key.into();
+                key.reverse();
+                key
+            }),
+            joinsplit_sig: tx.joinsplit_sig().map(|raw_sig| raw_sig.into()),
             size: tx.as_bytes().len().try_into().ok(),
             time: block_time,
             txid,

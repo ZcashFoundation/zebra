@@ -53,7 +53,7 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar"]
+default = ["release_max_level_info", "progress-bar", "prometheus"]
 
 # Default features for official ZF binary release builds
 default-release-binaries = ["default", "sentry"]
@@ -262,6 +262,9 @@ jsonrpsee-types = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 insta = { workspace = true, features = ["json"] }
+bytes = { workspace = true }
+http-body-util = { workspace = true }
+hyper-util = { workspace = true }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
 serde_json = { workspace = true, features = ["preserve_order"] }
@@ -291,7 +294,6 @@ zebra-network = { path = "../zebra-network", version = "1.0.0", features = ["pro
 zebra-state = { path = "../zebra-state", version = "1.0.0", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "1.0.0" }
-zebra-grpc = { path = "../zebra-grpc", version = "0.1.0" }
 
 # Used by the checkpoint generation tests via the zebra-checkpoints feature
 # (the binaries in this crate won't be built unless their features are enabled).

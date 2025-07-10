@@ -58,6 +58,13 @@ $( [[ -n ${ZEBRA_COOKIE_DIR} ]] && echo "cookie_dir = \"${ZEBRA_COOKIE_DIR}\"" )
 SUB_EOF
 )
 
+$( ( ! [[ " ${FEATURES} " =~ " prometheus " ]] ) && cat <<-SUB_EOF
+
+[metrics]
+# endpoint_addr = "${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
+SUB_EOF
+)
+
 $( [[ " ${FEATURES} " =~ " prometheus " ]] && cat <<-SUB_EOF
 
 [metrics]
@@ -181,11 +188,6 @@ run_tests() {
     exec_as_user cargo test --locked --release --lib --features "zebra-test" \
       --package zebra-state \
       -- --nocapture --include-ignored with_fake_activation_heights
-
-  elif [[ "${TEST_SCANNER}" -eq "1" ]]; then
-    # Test the scanner.
-    exec_as_user cargo test --locked --release --package zebra-scan \
-      -- --nocapture --include-ignored scan_task_commands scan_start_where_left
 
   elif [[ "${SYNC_LARGE_CHECKPOINTS_EMPTY}" -eq "1" ]]; then
     # Test that Zebra syncs and checkpoints a few thousand blocks from an empty

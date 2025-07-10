@@ -29,11 +29,6 @@ async-error = [
     "tokio",
 ]
 
-# Experimental shielded scanning support
-shielded-scan = [
-    "zcash_client_backend"
-]
-
 # Experimental internal miner support
 internal-miner = ["equihash/solver"]
 
@@ -128,9 +123,6 @@ serde_json = { workspace = true, optional = true }
 
 # Production feature async-error and testing feature proptest-impl
 tokio = { workspace = true, optional = true }
-
-# Experimental feature shielded-scan
-zcash_client_backend = { workspace = true, optional = true }
 
 # Optional testing dependencies
 proptest = { workspace = true, optional = true }
