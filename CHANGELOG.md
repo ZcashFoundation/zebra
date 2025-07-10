@@ -10,8 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ### Breaking Changes
 
 This release has the following breaking changes:
-- *TODO*: Check the `Removed` and `Deprecated` sections for any breaking changes
-- *TODO*: Add a short description of the user impact of each breaking change, and any actions users need to take
 
 - This release contains a major database upgrade. It will upgrade an existing
   database, automatically moving it from the `v26/` folder to a new `v27/`
@@ -25,6 +23,11 @@ This release has the following breaking changes:
 - The `debug_like_zcashd` config option for mining is no longer available. It
   was not enabled by default; if it is now present in the config file, Zebra
   will panic. Simply delete the config option to fix.
+- The `cm_u` field byte order was fixed in `getrawtransaction`/`getblock`
+  response, so if you relied on the wrong order, you will need to fix your
+  application.
+- The `zebra-scan` and `zebra-grpc` crates are no longer supported and were
+  removed from the codebase.
 
 
 ### Security
@@ -44,6 +47,9 @@ This release has the following breaking changes:
 - Added missing fields to getrawtransaction ([#9636](https://github.com/ZcashFoundation/zebra/pull/9636))
 - Added value pool balances to `getblock` RPC output ([#9432](https://github.com/ZcashFoundation/zebra/pull/9432), [#9539](https://github.com/ZcashFoundation/zebra/pull/9539))
 - Added support for configuring shielded addresses for mining ([#9574](https://github.com/ZcashFoundation/zebra/pull/9574))
+- Added binding_sig, joinsplit_pub_key and joinsplit_sig fields to `getrawtransaction`/`getblock` response ([#9652](https://github.com/ZcashFoundation/zebra/pull/9652))
+- Added a method in `zebra-rpc` to allow validating addresses ([#9658](https://github.com/ZcashFoundation/zebra/pull/9658))
+- Added support for generating V4 coinbase transactions ([#9647](https://github.com/ZcashFoundation/zebra/pull/9647))
 
 ### Changed
 
@@ -55,6 +61,8 @@ This release has the following breaking changes:
 - Added a `Nu6_1` variant to `NetworkUpgrade` ([#9526](https://github.com/ZcashFoundation/zebra/pull/9526))
 - Use zcash\_script’s new `Script` trait ([#8751](https://github.com/ZcashFoundation/zebra/pull/8751))
 - Removed `debug_like_zcashd` config option ([#9627](https://github.com/ZcashFoundation/zebra/pull/9627))
+- Sync all chains in TrustedChainSync::sync, add `NonFinalizedStateChange` gRPC method ([#9654](https://github.com/ZcashFoundation/zebra/pull/9654))
+- Added `prometheus` as a default feature in zebrad ([#9677](https://github.com/ZcashFoundation/zebra/pull/9677))
 
 ### Fixed
 
@@ -66,6 +74,9 @@ This release has the following breaking changes:
 - Allow for parsing `z_gettreestate` output type where optional fields are omitted ([#9451](https://github.com/ZcashFoundation/zebra/pull/9451))
 - Pad script in V5 coinbase ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
 
+### Removed
+
+- Removed `zebra-scan` and `zebra-grpc` ([#9683](https://github.com/ZcashFoundation/zebra/pull/9683))
 
 ### Contributors
 
