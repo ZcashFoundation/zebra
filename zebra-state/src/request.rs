@@ -8,10 +8,12 @@ use std::{
 
 use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
-    block::{self, Block, HeightDiff},
+    block::{self, Block, Height, HeightDiff},
     history_tree::HistoryTree,
     orchard,
     parallel::tree::NoteCommitmentTrees,
+    parameters::NetworkUpgrade,
+    primitives::zcash_history::Entry,
     sapling,
     serialization::SerializationError,
     sprout,
@@ -324,6 +326,8 @@ pub struct Treestate {
     pub note_commitment_trees: NoteCommitmentTrees,
     /// History tree.
     pub history_tree: Arc<HistoryTree>,
+    /// New history nodes added by this block.
+    pub new_history_nodes: Option<Vec<Entry>>,
 }
 
 impl Treestate {
@@ -334,6 +338,7 @@ impl Treestate {
         sapling_subtree: Option<NoteCommitmentSubtree<sapling::tree::Node>>,
         orchard_subtree: Option<NoteCommitmentSubtree<orchard::tree::Node>>,
         history_tree: Arc<HistoryTree>,
+        new_history_nodes: Option<Vec<Entry>>,
     ) -> Self {
         Self {
             note_commitment_trees: NoteCommitmentTrees {
@@ -344,6 +349,7 @@ impl Treestate {
                 orchard_subtree,
             },
             history_tree,
+            new_history_nodes,
         }
     }
 }
@@ -1111,6 +1117,24 @@ pub enum ReadRequest {
         limit: Option<NoteCommitmentSubtreeIndex>,
     },
 
+    /// Looks up a history tree either by height.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::HistoryTree(Some(Arc<HistoryTree>))`](crate::ReadResponse::HistoryTree)
+    ///   if the corresponding block contains a history tree.
+    /// * [`ReadResponse::HistoryTree(None)`](crate::ReadResponse::HistoryTree) otherwise.
+    HistoryTree(Height),
+
+    /// Looks up a history node by index for the given network upgrade.
+    ///
+    /// Returns
+    ///
+    /// /// * [`ReadResponse::HistoryNode(Some(Entry))`](crate::ReadResponse::HistoryTree)
+    ///  if a history node of the specified index exists for the specified network upgrade.
+    /// * [`ReadResponse::HistoryTree(None)`](crate::ReadResponse::HistoryTree) otherwise.
+    HistoryNode(NetworkUpgrade, u32),
+
     /// Looks up the balance of a set of transparent addresses.
     ///
     /// Returns an [`Amount`] with the total
@@ -1224,6 +1248,8 @@ impl ReadRequest {
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",
             ReadRequest::OrchardSubtrees { .. } => "orchard_subtrees",
+            ReadRequest::HistoryTree(_) => "history_tree",
+            ReadRequest::HistoryNode(_, _) => "history_node",
             ReadRequest::AddressBalance { .. } => "address_balance",
             ReadRequest::TransactionIdsByAddresses { .. } => "transaction_ids_by_addresses",
             ReadRequest::UtxosByAddresses(_) => "utxos_by_addresses",

@@ -16,11 +16,11 @@ use zebra_chain::{
     amount::{Amount, NegativeAllowed, NonNegative},
     block::{self, Height},
     block_info::BlockInfo,
-    history_tree::HistoryTree,
+    history_tree::{HistoryTree, NonEmptyHistoryTree},
     orchard,
     parallel::tree::NoteCommitmentTrees,
-    parameters::Network,
-    primitives::Groth16Proof,
+    parameters::{Network, NetworkUpgrade},
+    primitives::{zcash_history::Entry, Groth16Proof},
     sapling,
     serialization::ZcashSerialize as _,
     sprout,
@@ -152,6 +152,8 @@ pub struct ChainInner {
     /// This extra tree is removed when the first non-finalized block is committed.
     pub(crate) history_trees_by_height: BTreeMap<block::Height, Arc<HistoryTree>>,
 
+    pub(crate) history_nodes_by_height: BTreeMap<block::Height, Vec<Entry>>,
+
     // Anchors
     //
     /// The Sprout anchors created by `blocks`.
@@ -267,6 +269,7 @@ impl Chain {
             partial_transparent_transfers: Default::default(),
             partial_cumulative_work: Default::default(),
             history_trees_by_height: Default::default(),
+            history_nodes_by_height: Default::default(),
             chain_value_pools: finalized_tip_chain_value_pools,
             block_info_by_height: Default::default(),
         };
@@ -1178,6 +1181,85 @@ impl Chain {
         }
     }
 
+    /// Returns the history tree node at the given index.
+    ///
+    /// Returns `None` if the chain network upgrade does not match the given one, if there is no history tree associated with the chain, or if the requested index does not exist.
+    pub fn history_node(&self, upgrade: NetworkUpgrade, index: u32) -> Option<Entry> {
+        if upgrade != NetworkUpgrade::current(&self.network(), self.non_finalized_tip_height()) {
+            return None;
+        }
+
+        let history_tree = self.history_block_commitment_tree();
+        if let Some(inner_tree) = Option::<NonEmptyHistoryTree>::clone(&history_tree) {
+            let height = inner_tree.current_height();
+            let entries = self.history_nodes_at_chain_tip()?;
+            let node_count = history_tree.node_count_at(height)?;
+            let start_index = node_count - entries.len() as u32;
+
+            if index >= start_index && index < node_count {
+                let entry = entries.get((index - start_index) as usize)?;
+                Some(entry.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    /// Returns the history nodes added by the block at the given hash or height, or `None` if they are not found (because either the block does not exist, or history nodes are not available for this chain)
+    fn history_nodes_at_block(&self, hash_or_height: HashOrHeight) -> Option<Vec<Entry>> {
+        let height = hash_or_height.height()?;
+
+        self.history_nodes_by_height.get(&height).cloned()
+    }
+
+    /// Returns all the history nodes added by this chain, up to the tip block.
+    ///
+    /// Returns `None` if the chain has no history nodes.
+    fn history_nodes_at_chain_tip(&self) -> Option<Vec<Entry>> {
+        let mut result = Vec::<Entry>::new();
+
+        if self.history_nodes_by_height.is_empty() {
+            return None;
+        }
+
+        for (_key, mut entries) in self.history_nodes_by_height.clone() {
+            result.append(&mut entries);
+        }
+
+        Some(result)
+    }
+
+    /// Add history nodes for the given block height to this chain.
+    fn add_history_nodes(&mut self, height: Height, nodes: Vec<Entry>) {
+        trace!(?height, "adding history nodes");
+
+        assert_eq!(
+            self.history_nodes_by_height.insert(height, nodes),
+            None,
+            "incorrect overwrite of history nodes: nodes should never be overwritten",
+        );
+    }
+
+    /// Remove the history nodes at `height`.
+    ///
+    /// `height` can be at two different [`RevertPosition`]s in the chain:
+    /// - a tip block above a chain fork: only that height is removed, or
+    /// - a root block: all nodes below that height are removed.
+    fn remove_history_nodes(&mut self, position: RevertPosition, height: Height) {
+        trace!(?height, ?position, "removing history nodes");
+
+        if position == RevertPosition::Root {
+            self.history_nodes_by_height
+                .retain(|index_height, _| *index_height > height);
+        } else {
+            self.history_nodes_by_height
+                .remove(&height)
+                .expect("History nodes must be present if block was added to chain");
+        }
+    }
+
     fn treestate(&self, hash_or_height: HashOrHeight) -> Option<Treestate> {
         let sprout_tree = self.sprout_tree(hash_or_height)?;
         let sapling_tree = self.sapling_tree(hash_or_height)?;
@@ -1185,6 +1267,7 @@ impl Chain {
         let history_tree = self.history_tree(hash_or_height)?;
         let sapling_subtree = self.sapling_subtree(hash_or_height);
         let orchard_subtree = self.orchard_subtree(hash_or_height);
+        let new_history_nodes = self.history_nodes_at_block(hash_or_height);
 
         Some(Treestate::new(
             sprout_tree,
@@ -1193,6 +1276,7 @@ impl Chain {
             sapling_subtree,
             orchard_subtree,
             history_tree,
+            new_history_nodes,
         ))
     }
 
@@ -1491,7 +1575,7 @@ impl Chain {
         // TODO: update the history trees in a rayon thread, if they show up in CPU profiles
         let mut history_tree = self.history_block_commitment_tree();
         let history_tree_mut = Arc::make_mut(&mut history_tree);
-        history_tree_mut
+        let new_entries = history_tree_mut
             .push(
                 &self.network,
                 contextually_valid.block.clone(),
@@ -1499,6 +1583,12 @@ impl Chain {
                 &orchard_root,
             )
             .map_err(Arc::new)?;
+
+        // Add new entries to non finalized state
+        // `new_entries` should never be `None` unless history trees are not available yet
+        if let Some(new_nodes) = new_entries {
+            self.add_history_nodes(height, new_nodes.clone());
+        };
 
         self.add_history_tree(height, history_tree);
 
@@ -1826,6 +1916,8 @@ impl UpdateWith<ContextuallyVerifiedBlock> for Chain {
 
         // TODO: move this to the history tree UpdateWith.revert...()?
         self.remove_history_tree(position, height);
+
+        self.remove_history_nodes(position, height);
 
         // revert the chain value pool balances, if needed
         // note that size is 0 because it isn't need for reverting

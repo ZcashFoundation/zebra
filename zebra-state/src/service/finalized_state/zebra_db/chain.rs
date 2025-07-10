@@ -17,8 +17,15 @@ use std::{
 };
 
 use zebra_chain::{
-    amount::NonNegative, block::Height, block_info::BlockInfo, history_tree::HistoryTree,
-    serialization::ZcashSerialize as _, transparent, value_balance::ValueBalance,
+    amount::NonNegative,
+    block::Height,
+    block_info::BlockInfo,
+    history_tree::{HistoryTree, NonEmptyHistoryTree},
+    parameters::NetworkUpgrade,
+    primitives::zcash_history::{Entry, HistoryNodeIndex},
+    serialization::ZcashSerialize as _,
+    transparent,
+    value_balance::ValueBalance,
 };
 
 use crate::{
@@ -50,6 +57,17 @@ pub type LegacyHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, Height, HistoryT
 /// A generic raw key type for reading history trees from the database, regardless of the database version.
 /// This type should not be used in new code.
 pub type RawHistoryTreePartsCf<'cf> = TypedColumnFamily<'cf, RawBytes, HistoryTreeParts>;
+
+/// The name of the history node column family.
+///
+/// This constant should be used so the compiler can detect typos.
+pub const HISTORY_NODE: &str = "history_node";
+
+/// The type for reading history nodes from the database.
+///
+/// This constant should be used so the compiler can detect incorrectly typed accesses to the
+/// column family.
+pub type HistoryNodeCf<'cf> = TypedColumnFamily<'cf, HistoryNodeIndex, Entry>;
 
 /// The name of the tip-only chain value pools column family.
 ///
@@ -93,6 +111,11 @@ impl ZebraDb {
     /// This should not be used in new code.
     pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf {
         RawHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
+            .expect("column family was created when database was created")
+    }
+
+    pub(crate) fn history_node_cf(&self) -> HistoryNodeCf {
+        HistoryNodeCf::new(&self.db, HISTORY_NODE)
             .expect("column family was created when database was created")
     }
 
@@ -152,6 +175,54 @@ impl ZebraDb {
         Arc::new(HistoryTree::from(history_tree))
     }
 
+    /// Returns the ZIP-221 history tree at the given height.
+    ///
+    /// If history trees had not been activated at that height (pre-Heartwood),
+    /// or the state is empty, returns an empty history tree.
+    pub fn history_tree_by_height(&self, height: Height) -> Option<Arc<HistoryTree>> {
+        // Get network and upgrade from height
+        let network = self.db.network();
+        let upgrade = NetworkUpgrade::current(&network, height);
+
+        // Create temporary tree from block at height
+        let block = self.block(HashOrHeight::Height(
+            Height::try_from(height.as_usize() as u32).ok()?,
+        ))?;
+        let sapling_root = self
+            .sapling_tree_by_height(&Height::try_from(height.as_usize() as u32).ok()?)?
+            .root();
+        let orchard_root = self
+            .orchard_tree_by_height(&Height::try_from(height.as_usize() as u32).ok()?)?
+            .root();
+        let temp_tree =
+            HistoryTree::from_block(&network, block, &sapling_root, &orchard_root).ok()?;
+
+        // Get the peaks at the last block height covered by the tree,
+        // which is that of the previous block. If this is the activation
+        // block, the history tree is empty and this will return None.
+        let peak_ids = temp_tree.peaks_at((height - 1)?)?;
+
+        // Read the peaks and build the inner tree
+        let mut peaks = BTreeMap::<u32, Entry>::new();
+        for i in peak_ids {
+            let index = HistoryNodeIndex { upgrade, index: i };
+            peaks.insert(i, self.history_node(index)?);
+        }
+
+        let inner_tree = NonEmptyHistoryTree::from_cache(
+            &network,
+            temp_tree.node_count_at(height)?,
+            peaks,
+            height,
+        );
+
+        // Return the outer tree
+        match inner_tree {
+            Ok(tree) => Some(Arc::new(HistoryTree::from(tree))),
+            Err(_) => None,
+        }
+    }
+
     /// Returns all the history tip trees.
     /// We only store the history tree for the tip, so this method is only used in tests and
     /// upgrades.
@@ -167,6 +238,25 @@ impl ZebraDb {
                 (raw_key, Arc::new(HistoryTree::from(history_tree)))
             })
             .collect()
+    }
+
+    /// Returns the history node at the given index.
+    pub fn history_node(&self, index: HistoryNodeIndex) -> Option<Entry> {
+        self.history_node_cf().zs_get(&index)
+    }
+
+    /// Returns the last history node index.                                                                                            
+    pub fn last_history_node_index(&self) -> Option<HistoryNodeIndex> {
+        self.history_node_cf()
+            .zs_last_key_value()
+            .map(|(index, _)| index)
+    }
+
+    /// Returns the last history node.
+    pub fn last_history_node(&self) -> Option<Entry> {
+        self.history_node_cf()
+            .zs_last_key_value()
+            .map(|(_, entry)| entry)
     }
 
     // Value pool methods
@@ -203,6 +293,32 @@ impl DiskWriteBatch {
             // The batch is modified by this method and written by the caller.
             let _ = history_tree_cf.zs_insert(&(), &HistoryTreeParts::from(tree));
         }
+    }
+
+    /// Writes a history tree node to the database.
+    ///
+    /// The batch must be written to the database by the caller.
+    pub fn write_history_node(&mut self, db: &ZebraDb, index: HistoryNodeIndex, node: Entry) {
+        let history_node_cf = db.history_node_cf().with_batch_for_writing(self);
+
+        let _ = history_node_cf.zs_insert(&index, &node);
+    }
+
+    /// Removes all history nodes from the database.
+    ///
+    /// Should only be used for debug and database upgrade.
+    pub fn clear_history_nodes(&mut self, db: &ZebraDb) {
+        let history_node_cf = db.history_node_cf().with_batch_for_writing(self);
+
+        let from = HistoryNodeIndex {
+            upgrade: zebra_chain::parameters::NetworkUpgrade::Heartwood,
+            index: 0,
+        };
+        let until_strictly_before = HistoryNodeIndex {
+            upgrade: zebra_chain::parameters::NetworkUpgrade::Nu6,
+            index: u32::MAX,
+        };
+        let _ = history_node_cf.zs_delete_range(&from, &until_strictly_before);
     }
 
     /// Legacy method: Deletes the range of history trees at the given [`Height`]s.

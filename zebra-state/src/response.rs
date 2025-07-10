@@ -8,6 +8,7 @@ use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, ChainHistoryMmrRootHash},
     block_info::BlockInfo,
+    history_tree::HistoryTree,
     orchard,
     parameters::Network,
     sapling,
@@ -357,6 +358,12 @@ pub enum ReadResponse {
         BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<orchard::tree::Node>>,
     ),
 
+    /// Response to [`ReadRequest::HistoryTree`] with the specified history tree.
+    HistoryTree(Option<Arc<HistoryTree>>),
+
+    /// Response to [`ReadRequest::HistoryNode`] with the specified history tree.
+    HistoryNode(Option<zebra_chain::primitives::zcash_history::Entry>),
+
     /// Response to [`ReadRequest::AddressBalance`] with the total balance of the addresses,
     /// and the total received funds, including change.
     AddressBalance {
@@ -488,6 +495,8 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)
             | ReadResponse::OrchardSubtrees(_)
+            | ReadResponse::HistoryTree(_)
+            | ReadResponse::HistoryNode(_)
             | ReadResponse::AddressBalance { .. }
             | ReadResponse::AddressesTransactionIds(_)
             | ReadResponse::AddressUtxos(_)
