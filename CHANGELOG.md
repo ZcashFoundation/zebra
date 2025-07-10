@@ -32,7 +32,7 @@ This release has the following breaking changes:
 
 ### Security
 
-- fix: Pad script in V5 coinbase ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
+- Fix a consensus rule violation in V5 coinbase transactions at low heights. This issue could only occur on Regtest or custom testnets and is now resolved  ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
 
 ### Added
 
@@ -49,7 +49,6 @@ This release has the following breaking changes:
 - Added support for configuring shielded addresses for mining ([#9574](https://github.com/ZcashFoundation/zebra/pull/9574))
 - Added binding_sig, joinsplit_pub_key and joinsplit_sig fields to `getrawtransaction`/`getblock` response ([#9652](https://github.com/ZcashFoundation/zebra/pull/9652))
 - Added a method in `zebra-rpc` to allow validating addresses ([#9658](https://github.com/ZcashFoundation/zebra/pull/9658))
-- Added support for generating V4 coinbase transactions ([#9647](https://github.com/ZcashFoundation/zebra/pull/9647))
 
 ### Changed
 
@@ -61,7 +60,7 @@ This release has the following breaking changes:
 - Added a `Nu6_1` variant to `NetworkUpgrade` ([#9526](https://github.com/ZcashFoundation/zebra/pull/9526))
 - Use zcash\_script’s new `Script` trait ([#8751](https://github.com/ZcashFoundation/zebra/pull/8751))
 - Removed `debug_like_zcashd` config option ([#9627](https://github.com/ZcashFoundation/zebra/pull/9627))
-- Sync all chains in TrustedChainSync::sync, add `NonFinalizedStateChange` gRPC method ([#9654](https://github.com/ZcashFoundation/zebra/pull/9654))
+- Sync all chains in `TrustedChainSync::sync`, add `NonFinalizedStateChange` gRPC method ([#9654](https://github.com/ZcashFoundation/zebra/pull/9654))
 - Added `prometheus` as a default feature in zebrad ([#9677](https://github.com/ZcashFoundation/zebra/pull/9677))
 
 ### Fixed
@@ -72,7 +71,6 @@ This release has the following breaking changes:
 - Correctly set optional `scriptPubKey` fields of transactions in `getblock` and `getrawtransaction` RPC outputs ([#9536](https://github.com/ZcashFoundation/zebra/pull/9536))
 - Allow local outbound connections on Regtest ([#9580](https://github.com/ZcashFoundation/zebra/pull/9580))
 - Allow for parsing `z_gettreestate` output type where optional fields are omitted ([#9451](https://github.com/ZcashFoundation/zebra/pull/9451))
-- Pad script in V5 coinbase ([#9620](https://github.com/ZcashFoundation/zebra/pull/9620))
 
 ### Removed
 
