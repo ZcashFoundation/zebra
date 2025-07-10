@@ -905,6 +905,11 @@ where
 
         (rpc_impl, rpc_tx_queue_task_handle)
     }
+
+    /// Returns a reference to the configured network.
+    pub fn network(&self) -> &Network {
+        &self.network
+    }
 }
 
 #[async_trait]
@@ -2839,17 +2844,20 @@ where
                 ));
             };
 
-            let proposal_block =
-                proposal_block_from_template(&block_template, BlockTemplateTimeSource::CurTime)
-                    .map_error(server::error::LegacyCode::default())?;
+            let proposal_block = proposal_block_from_template(
+                &block_template,
+                BlockTemplateTimeSource::CurTime,
+                &network,
+            )
+            .map_error(server::error::LegacyCode::default())?;
+
             let hex_proposal_block = HexData(
                 proposal_block
                     .zcash_serialize_to_vec()
                     .map_error(server::error::LegacyCode::default())?,
             );
 
-            let _submit = rpc
-                .submit_block(hex_proposal_block, None)
+            rpc.submit_block(hex_proposal_block, None)
                 .await
                 .map_error(server::error::LegacyCode::default())?;
 
@@ -4220,7 +4228,7 @@ where
     let response = match (should_use_default, response) {
         (_, Ok(res)) => res,
         (true, Err(_)) => {
-            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64)
+            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64);
         }
         (false, Err(error)) => return Err(ErrorObject::owned(0, error.to_string(), None::<()>)),
     };
