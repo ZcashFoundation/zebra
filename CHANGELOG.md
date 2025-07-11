@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ## Unreleased
 
 ### Added
-- RPCs which return value pools now return the pool with id "lockbox" to eventually
+- RPCs which return value pools now return the pool with id "lockbox" using the "deferred"
+  value pool as source. The source of truth continue to be the "deferred" pool until it is decided 
+  to fully rename it and remove "deferred" as a value pool id in the GetBlock and GetBlockchainInfo
+  RPCs.
 
 ### Changed
 - Slice `[GetBlockchainInfoBalance; 6]` type is aliased as `BlockchainValuePoolBalances`
