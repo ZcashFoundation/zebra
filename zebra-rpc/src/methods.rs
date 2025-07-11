@@ -3594,7 +3594,7 @@ pub struct BlockObject {
     /// Value pool balances
     #[serde(rename = "valuePools")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    value_pools: Option<BlockchainValuePoolBalances>, // TODO: This should be a type alias
+    value_pools: Option<BlockchainValuePoolBalances>,
 
     /// Information about the note commitment trees.
     #[getter(copy)]
