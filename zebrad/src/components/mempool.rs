@@ -769,11 +769,7 @@ impl Service<Request> for Mempool {
 
                     let res: HashSet<_> = storage.tx_ids().collect();
 
-                    // This log line is checked by tests,
-                    // because lightwalletd doesn't return mempool transactions at the moment.
-                    //
-                    // TODO: downgrade to trace level when we can check transactions via gRPC
-                    info!(?req, res_count = ?res.len(), "answered mempool request");
+                    trace!(?req, res_count = ?res.len(), "answered mempool request");
 
                     async move { Ok(Response::TransactionIds(res)) }.boxed()
                 }
