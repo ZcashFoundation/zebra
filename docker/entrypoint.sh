@@ -38,8 +38,16 @@ exec_as_user() {
 # figment-compatible format. It exports the new variables so `zebrad` can
 # detect them, and unsets the old ZEBRA_ prefixed variables to avoid conflicts.
 prepare_conf_file() {
-  # Don't set network environment variable override - let config files control network setting
-  # This prevents network mismatches where tests expect one network but environment forces another
+  # Handle NETWORK variable for test orchestration and configuration override
+  # NETWORK is used in two ways:
+  # 1. For building test feature names (e.g., sync_to_mandatory_checkpoint_testnet)
+  # 2. For overriding the network configuration in CI tests
+  #
+  # We only set ZEBRA_NETWORK__NETWORK when NETWORK is explicitly provided,
+  # allowing CI to override config files while preventing unintended overrides in other contexts
+  if [[ -n "${NETWORK}" ]]; then
+    export ZEBRA_NETWORK__NETWORK="${NETWORK}"
+  fi
 
   # Map legacy ZEBRA_CACHE_DIR to ZEBRA_STATE__CACHE_DIR and unset it.
   # Only export if it was explicitly set by the user.
@@ -212,6 +220,11 @@ run_tests() {
 
   elif [[ "${SYNC_TO_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
+    # Ensure NETWORK is set for building the test feature name
+    if [[ -z "${NETWORK}" ]]; then
+      echo "ERROR: NETWORK environment variable must be set for SYNC_TO_MANDATORY_CHECKPOINT test"
+      exit 1
+    fi
     run_cargo_test "${FEATURES} sync_to_mandatory_checkpoint_${NETWORK,,}" \
       "sync_to_mandatory_checkpoint_${NETWORK,,}"
     echo "ran test_disk_rebuild"
@@ -224,6 +237,11 @@ run_tests() {
   elif [[ "${SYNC_PAST_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
     # past it.
+    # Ensure NETWORK is set for building the test feature name
+    if [[ -z "${NETWORK}" ]]; then
+      echo "ERROR: NETWORK environment variable must be set for SYNC_PAST_MANDATORY_CHECKPOINT test"
+      exit 1
+    fi
     run_cargo_test "${FEATURES} sync_past_mandatory_checkpoint_${NETWORK,,}" \
       "sync_past_mandatory_checkpoint_${NETWORK,,}"
 
