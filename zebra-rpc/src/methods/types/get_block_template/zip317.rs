@@ -60,9 +60,9 @@ pub fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
     miner_addr: &Address,
+    miner_data: Vec<u8>,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
-    extra_coinbase_data: Vec<u8>,
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
         Amount<NonNegative>,
     >,
