@@ -1835,7 +1835,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
     })?;
 
     // Only runs when a cached Zebra state is configured.
-    lightwalletd_integration_test(UpdateZebraCachedStateNoRpc)?;
+    lwd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
     // These tests need the compile-time gRPC feature
     #[cfg(feature = "lightwalletd-grpc-tests")]
@@ -1843,7 +1843,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
         // Do the quick tests first
 
         // Only runs when LWD_CACHE_DIR is set and a cached Zebra state is configured.
-        lightwalletd_integration_test(UpdateCachedState)?;
+        lwd_integration_test(UpdateCachedState)?;
 
         // Only runs when LWD_CACHE_DIR is set and a cached Zebra state is configured.
         common::lightwalletd::wallet_grpc_test::run().await?;
