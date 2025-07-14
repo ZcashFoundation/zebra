@@ -9,7 +9,7 @@ V5(
   inputs: [
     Coinbase(
       height: Height(1842421),
-      data: CoinbaseData([
+      data: MinerData([
         122,
         240,
         159,
