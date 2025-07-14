@@ -31,6 +31,7 @@ fn excludes_tx_with_unselected_dependencies() {
             Height(1_000_000),
             &Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])),
             vec![],
+            None,
             vec![unmined_tx],
             mempool_tx_deps,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
@@ -74,6 +75,7 @@ fn includes_tx_with_selected_dependencies() {
         Height(1_000_000),
         &Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])),
         vec![],
+        None,
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]

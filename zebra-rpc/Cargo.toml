@@ -93,8 +93,6 @@ zcash_protocol = { workspace = true }
 zcash_script = { workspace = true }
 zcash_transparent = { workspace = true }
 
-sapling-crypto = { workspace = true }
-
 # Test-only feature proptest-impl
 proptest = { workspace = true, optional = true }
 
