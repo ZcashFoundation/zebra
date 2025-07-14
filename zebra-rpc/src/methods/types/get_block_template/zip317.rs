@@ -53,9 +53,9 @@ pub fn select_mempool_transactions(
     network: &Network,
     next_block_height: Height,
     miner_addr: &Address,
+    miner_data: Vec<u8>,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
-    miner_data: Vec<u8>,
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
