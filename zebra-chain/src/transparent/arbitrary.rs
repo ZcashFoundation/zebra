@@ -8,7 +8,7 @@ use crate::{
     LedgerState,
 };
 
-use super::{Address, CoinbaseData, Input, OutPoint, Script, GENESIS_COINBASE_DATA};
+use super::{Address, Input, MinerData, OutPoint, Script, GENESIS_COINBASE_DATA};
 
 impl Input {
     /// Construct a strategy for creating valid-ish vecs of Inputs.
@@ -32,9 +32,9 @@ impl Arbitrary for Input {
                 .prop_map(move |(data, sequence)| Input::Coinbase {
                     height,
                     data: if height == block::Height(0) {
-                        CoinbaseData(GENESIS_COINBASE_DATA.to_vec())
+                        MinerData(GENESIS_COINBASE_DATA.to_vec())
                     } else {
-                        CoinbaseData(data)
+                        MinerData(data)
                     },
                     sequence,
                 })
