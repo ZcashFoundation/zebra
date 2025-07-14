@@ -3530,6 +3530,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height()),
         &miner_addr,
         vec![],
+        None,
         &[],
         chain_history_root,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
@@ -3591,6 +3592,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height()),
         &miner_addr,
         vec![],
+        None,
         &[],
         chain_history_root,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
