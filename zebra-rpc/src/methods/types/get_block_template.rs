@@ -17,7 +17,7 @@ use jsonrpsee_types::{ErrorCode, ErrorObject};
 use tokio::sync::watch::{self, error::SendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
-use zcash_protocol::PoolType;
+use zcash_protocol::memo::MemoBytes;
 
 use zebra_chain::{
     amount::{self, NegativeOrZero},
@@ -40,10 +40,10 @@ use zebra_state::GetBlockTemplateChainInfo;
 use crate::{
     config,
     methods::types::{
-        default_roots::DefaultRoots, long_poll::LongPollId, submit_block,
-        transaction::TransactionTemplate,
+        default_roots::DefaultRoots, long_poll::LongPollId, transaction::TransactionTemplate,
     },
     server::error::OkOrError,
+    SubmitBlockChannel,
 };
 
 use constants::{
@@ -263,6 +263,7 @@ impl BlockTemplateResponse {
         network: &Network,
         miner_address: &Address,
         miner_data: Vec<u8>,
+        miner_memo: Option<MemoBytes>,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
@@ -317,6 +318,7 @@ impl BlockTemplateResponse {
             next_block_height,
             miner_address,
             miner_data,
+            miner_memo,
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
         )
@@ -430,6 +432,11 @@ where
     /// Limited to 94 bytes.
     miner_data: Vec<u8>,
 
+    /// Optional shielded memo for the miner's coinbase transaction.
+    ///
+    /// Applies only if [`Self::miner_address`] contains a shielded component.
+    miner_memo: Option<MemoBytes>,
+
     /// The chain verifier, used for submitting blocks.
     block_verifier_router: BlockVerifierRouter,
 
@@ -457,6 +464,7 @@ where
     ///
     /// - If the `miner_address` in `conf` is not valid.
     /// - If the `miner_data` in `conf` is not valid.
+    /// - If the `miner_memo` in `conf` is not valid.
     pub fn new(
         net: &Network,
         conf: config::mining::Config,
@@ -482,6 +490,10 @@ where
         // This is different from the consensus rule, which limits the total height + data.
         const MINER_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
 
+        let miner_memo = conf.miner_memo.map(|memo| {
+            MemoBytes::from_bytes(memo.as_bytes())
+                .expect("mining.miner_memo must be a valid shielded memo")
+        });
 
         assert!(
             miner_data.len() <= MINER_DATA_LIMIT,
@@ -496,6 +508,7 @@ where
         Self {
             miner_address,
             miner_data,
+            miner_memo,
             block_verifier_router,
             sync_status,
             mined_block_sender,
@@ -510,6 +523,11 @@ where
     /// Returns the optional miner data.
     pub fn miner_data(&self) -> Vec<u8> {
         self.miner_data.clone()
+    }
+
+    /// Returns the miner memo, if any.
+    pub fn miner_memo(&self) -> Option<MemoBytes> {
+        self.miner_memo.clone()
     }
 
     /// Returns the sync status.
@@ -783,10 +801,19 @@ pub fn new_coinbase_with_roots(
     height: Height,
     miner_addr: &Address,
     miner_data: Vec<u8>,
+    miner_memo: Option<MemoBytes>,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
 ) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), Box<dyn std::error::Error>> {
-    let tx = TransactionTemplate::new_coinbase(net, height, miner_addr, miner_data, mempool_txs)?;
+    let tx = TransactionTemplate::new_coinbase(
+        net,
+        height,
+        miner_addr,
+        miner_data,
+        miner_memo,
+        mempool_txs,
+    )?;
+
     let roots = DefaultRoots::from_coinbase(net, height, &tx, chain_history_root, mempool_txs)?;
 
     Ok((tx, roots))
