@@ -13,7 +13,7 @@ use crate::{
     transaction,
 };
 
-use super::{CoinbaseData, Input, OutPoint, Output, Script};
+use super::{Input, MinerData, OutPoint, Output, Script};
 
 /// The maximum length of the coinbase data.
 ///
@@ -109,19 +109,18 @@ impl ZcashDeserialize for OutPoint {
 /// <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
 pub(crate) fn parse_coinbase_height(
     mut data: Vec<u8>,
-) -> Result<(block::Height, CoinbaseData), SerializationError> {
+) -> Result<(block::Height, MinerData), SerializationError> {
     match (data.first(), data.len()) {
         // Blocks 1 through 16 inclusive encode block height with OP_N opcodes.
-        (Some(op_n @ 0x51..=0x60), len) if len >= 1 => Ok((
-            Height((op_n - 0x50) as u32),
-            CoinbaseData(data.split_off(1)),
-        )),
+        (Some(op_n @ 0x51..=0x60), len) if len >= 1 => {
+            Ok((Height((op_n - 0x50) as u32), MinerData(data.split_off(1))))
+        }
         // Blocks 17 through 128 exclusive encode block height with the `0x01` opcode.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
         (Some(0x01), len) if len >= 2 && data[1] < 0x80 => {
             let h = data[1] as u32;
             if (17..128).contains(&h) {
-                Ok((Height(h), CoinbaseData(data.split_off(2))))
+                Ok((Height(h), MinerData(data.split_off(2))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -131,7 +130,7 @@ pub(crate) fn parse_coinbase_height(
         (Some(0x02), len) if len >= 3 && data[2] < 0x80 => {
             let h = data[1] as u32 + ((data[2] as u32) << 8);
             if (128..32_768).contains(&h) {
-                Ok((Height(h), CoinbaseData(data.split_off(3))))
+                Ok((Height(h), MinerData(data.split_off(3))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -141,7 +140,7 @@ pub(crate) fn parse_coinbase_height(
         (Some(0x03), len) if len >= 4 && data[3] < 0x80 => {
             let h = data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16);
             if (32_768..8_388_608).contains(&h) {
-                Ok((Height(h), CoinbaseData(data.split_off(4))))
+                Ok((Height(h), MinerData(data.split_off(4))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -157,7 +156,7 @@ pub(crate) fn parse_coinbase_height(
         // TODO: update this check based on the consensus rule changes in
         //       https://github.com/zcash/zips/issues/540
         (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => {
-            Ok((Height(0), CoinbaseData(data)))
+            Ok((Height(0), MinerData(data)))
         }
         // As noted above, this is included for completeness.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
@@ -167,7 +166,7 @@ pub(crate) fn parse_coinbase_height(
                 + ((data[3] as u32) << 16)
                 + ((data[4] as u32) << 24);
             if (8_388_608..=Height::MAX.0).contains(&h) {
-                Ok((Height(h), CoinbaseData(data.split_off(5))))
+                Ok((Height(h), MinerData(data.split_off(5))))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -193,7 +192,7 @@ pub(crate) fn parse_coinbase_height(
 /// coinbase height,
 pub(crate) fn write_coinbase_height<W: io::Write>(
     height: block::Height,
-    coinbase_data: &CoinbaseData,
+    coinbase_data: &MinerData,
     mut w: W,
 ) -> Result<(), io::Error> {
     // We can't write this as a match statement on stable until exclusive range
@@ -236,7 +235,7 @@ impl Height {
     /// Get the size of `Height` when serialized into a coinbase input script.
     pub fn coinbase_zcash_serialized_size(&self) -> usize {
         let mut writer = FakeWriter(0);
-        let empty_data = CoinbaseData(Vec::new());
+        let empty_data = MinerData(Vec::new());
 
         write_coinbase_height(*self, &empty_data, &mut writer).expect("writer should never fail");
         writer.0
