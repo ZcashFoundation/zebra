@@ -970,6 +970,7 @@ pub async fn test_mining_rpcs<State, ReadState>(
             [0x7e; 20],
         )),
         miner_data: None,
+        miner_memo: None,
         // TODO: Use default field values when optional features are enabled in tests #8183
         internal_miner: true,
     };

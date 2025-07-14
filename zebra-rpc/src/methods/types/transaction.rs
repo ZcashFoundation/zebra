@@ -10,9 +10,12 @@ use hex::ToHex;
 
 use rand::rngs::OsRng;
 use zcash_keys::address::Address;
-use zcash_primitives::transaction::{
-    builder::{BuildConfig, Builder},
-    fees::fixed::FeeRule,
+use zcash_primitives::{
+    memo::MemoBytes,
+    transaction::{
+        builder::{BuildConfig, Builder},
+        fees::fixed::FeeRule,
+    },
 };
 use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
 use zebra_chain::{
@@ -127,6 +130,7 @@ impl TransactionTemplate<NegativeOrZero> {
         height: Height,
         miner_addr: &Address,
         miner_data: Vec<u8>,
+        miner_memo: Option<MemoBytes>,
         mempool_txs: &[VerifiedUnminedTx],
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let block_subsidy = block_subsidy(height, net)?;
@@ -139,7 +143,7 @@ impl TransactionTemplate<NegativeOrZero> {
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fee;
         let miner_reward = Zatoshis::try_from(u64::from(miner_reward?))?;
 
-        let memo = zcash_primitives::memo::MemoBytes::empty();
+        let memo = miner_memo.unwrap_or(MemoBytes::empty());
 
         let mut builder = Builder::new(
             net,

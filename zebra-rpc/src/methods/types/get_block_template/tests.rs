@@ -111,11 +111,18 @@ fn coinbase() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(height) = nu.activation_height(&net) {
                 for data in &miner_datas {
                     // It should be possible to generate a coinbase tx from these params.
-                    TransactionTemplate::new_coinbase(&net, height, &addr, data.clone(), &[])?
-                        .data()
-                        .as_ref()
-                        // Deserialization contains checks for elementary consensus rules, which must pass.
-                        .zcash_deserialize_into::<Transaction>()?;
+                    TransactionTemplate::new_coinbase(
+                        &net,
+                        height,
+                        &addr,
+                        data.clone(),
+                        None,
+                        &[],
+                    )?
+                    .data()
+                    .as_ref()
+                    // Deserialization contains checks for elementary consensus rules, which must pass.
+                    .zcash_deserialize_into::<Transaction>()?;
                 }
             }
         }
