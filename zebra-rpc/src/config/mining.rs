@@ -16,12 +16,12 @@ pub struct Config {
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub miner_address: Option<ZcashAddress>,
 
-    /// Extra data to include in coinbase transaction inputs.
-    /// Limited to around 95 bytes by the consensus rules.
+    /// Optional data that Zebra will include in the transparent input of a coinbase transaction.
+    /// Limited to 94 bytes.
     ///
-    /// If this string is hex-encoded, it will be hex-decoded into bytes.
-    /// Otherwise, it will be UTF-8 encoded into bytes.
-    pub extra_coinbase_data: Option<String>,
+    /// If this string is hex-encoded, it will be hex-decoded into bytes. Otherwise, it will be
+    /// UTF-8 encoded into bytes.
+    pub miner_data: Option<String>,
 
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
     ///
