@@ -2155,7 +2155,7 @@ where
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
 
-        let miner_address = self
+        let miner_addr = self
             .gbt
             .miner_address()
             .ok_or_misc_error("miner_address not configured")?;
@@ -2412,7 +2412,7 @@ where
         let mempool_txs = select_mempool_transactions(
             &network,
             next_block_height,
-            &miner_address,
+            &miner_addr,
             miner_data.clone(),
             miner_memo.clone(),
             mempool_txs,
@@ -2431,7 +2431,7 @@ where
 
         let response = BlockTemplateResponse::new_internal(
             &network,
-            &miner_address,
+            &miner_addr,
             miner_data,
             miner_memo,
             &chain_tip_and_local_time,
