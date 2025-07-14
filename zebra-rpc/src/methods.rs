@@ -2124,7 +2124,7 @@ where
 
         // Clone Configs
         let network = self.network.clone();
-        let extra_coinbase_data = self.gbt.extra_coinbase_data();
+        let miner_data = self.gbt.miner_data();
 
         // Clone Services
         let mempool = self.mempool.clone();
@@ -2409,9 +2409,9 @@ where
             &network,
             next_block_height,
             &miner_address,
+            miner_data.clone(),
             mempool_txs,
             mempool_tx_deps,
-            extra_coinbase_data.clone(),
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
@@ -2429,11 +2429,11 @@ where
         let response = BlockTemplateResponse::new_internal(
             &network,
             &miner_address,
+            miner_data,
             &chain_tip_and_local_time,
             server_long_poll_id,
             mempool_txs,
             submit_old,
-            extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         );
