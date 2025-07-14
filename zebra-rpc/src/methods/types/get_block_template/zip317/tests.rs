@@ -13,10 +13,7 @@ use super::select_mempool_transactions;
 #[test]
 fn excludes_tx_with_unselected_dependencies() {
     let network = Network::Mainnet;
-    let next_block_height = Height(1_000_000);
-    let extra_coinbase_data = Vec::new();
     let mut mempool_tx_deps = TransactionDependencies::default();
-    let miner_address = Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]));
 
     let unmined_tx = network
         .unmined_transactions_in_blocks(..)
@@ -31,11 +28,11 @@ fn excludes_tx_with_unselected_dependencies() {
     assert_eq!(
         select_mempool_transactions(
             &network,
-            next_block_height,
-            &miner_address,
+            Height(1_000_000),
+            &Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])),
+            vec![],
             vec![unmined_tx],
             mempool_tx_deps,
-            extra_coinbase_data,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
             None,
         ),
@@ -47,7 +44,6 @@ fn excludes_tx_with_unselected_dependencies() {
 #[test]
 fn includes_tx_with_selected_dependencies() {
     let network = Network::Mainnet;
-    let next_block_height = Height(1_000_000);
     let unmined_txs: Vec<_> = network.unmined_transactions_in_blocks(..).take(3).collect();
     let miner_addr = Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]));
 
@@ -73,15 +69,13 @@ fn includes_tx_with_selected_dependencies() {
         ],
     );
 
-    let extra_coinbase_data = Vec::new();
-
     let selected_txs = select_mempool_transactions(
         &network,
-        next_block_height,
-        &miner_addr,
+        Height(1_000_000),
+        &Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])),
+        vec![],
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
-        extra_coinbase_data,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         None,
     );
