@@ -23,6 +23,12 @@ pub struct Config {
     /// UTF-8 encoded into bytes.
     pub miner_data: Option<String>,
 
+    /// Optional shielded memo that Zebra will include in the output of a shielded coinbase
+    /// transaction. Limited to 512 bytes.
+    ///
+    /// Applies only if [`Self::miner_address`] contains a shielded component.
+    pub miner_memo: Option<String>,
+
     /// Mine blocks using Zebra's internal miner, without an external mining pool or equihash solver.
     ///
     /// This experimental feature is only supported on regtest as it uses null solutions and skips checking
