@@ -61,7 +61,7 @@ pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
 // - https://github.com/rust-lang/rust-analyzer/issues/9121
 // - https://github.com/emacs-lsp/lsp-mode/issues/2080
 // - https://github.com/rust-lang/rust-analyzer/issues/13709
-pub const EXTRA_ZEBRA_COINBASE_DATA: &str = "z\u{1F993}";
+pub const ZEBRA_MINER_DATA: &str = "z\u{1F993}";
 
 /// Arbitrary data inserted by miners into a coinbase transaction.
 //
