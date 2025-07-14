@@ -33,7 +33,7 @@ use zebra_chain::{
         },
         zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
-    transparent::{self, CoinbaseData, CoinbaseSpendRestriction},
+    transparent::{self, CoinbaseSpendRestriction, MinerData},
 };
 
 use zebra_node_services::mempool;
@@ -3113,7 +3113,7 @@ fn mock_coinbase_transparent_output(
 
     let input = transparent::Input::Coinbase {
         height: coinbase_height,
-        data: CoinbaseData::new(Vec::new()),
+        data: MinerData::new(Vec::new()),
         sequence: u32::MAX,
     };
 
