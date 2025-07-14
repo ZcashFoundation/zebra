@@ -37,7 +37,7 @@ impl Transaction {
         //
         // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
         //
-        // Zebra adds extra coinbase data if configured to do so.
+        // Zebra adds optional miner data if configured to do so.
         //
         // Since we're not using a lock time, any sequence number is valid here.
         // See `Transaction::lock_time()` for the relevant consensus rules.

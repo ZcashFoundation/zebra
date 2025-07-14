@@ -11,7 +11,7 @@ use tokio::sync::{
 use tracing::Span;
 use zebra_chain::{
     block::{self, Height},
-    transparent::EXTRA_ZEBRA_COINBASE_DATA,
+    transparent::ZEBRA_MINER_DATA,
 };
 
 use crate::{
@@ -485,20 +485,20 @@ fn log_if_mined_by_zebra(
 
     // This code is rate-limited, so we can do expensive transformations here.
     let coinbase_data = tip_block.transactions[0].inputs()[0]
-        .extra_coinbase_data()
+        .miner_data()
         .expect("valid blocks must start with a coinbase input")
         .clone();
 
     if coinbase_data
         .as_ref()
-        .starts_with(EXTRA_ZEBRA_COINBASE_DATA.as_bytes())
+        .starts_with(ZEBRA_MINER_DATA.as_bytes())
     {
         let text = String::from_utf8_lossy(coinbase_data.as_ref());
 
         *last_zebra_mined_log_height = Some(Height(height));
 
         // No need for hex-encoded data if it's exactly what we expected.
-        if coinbase_data.as_ref() == EXTRA_ZEBRA_COINBASE_DATA.as_bytes() {
+        if coinbase_data.as_ref() == ZEBRA_MINER_DATA.as_bytes() {
             info!(
                 %text,
                 %height,
@@ -513,7 +513,7 @@ fn log_if_mined_by_zebra(
             // to the terminal.
             let text = text.replace(
                 |c: char| {
-                    !EXTRA_ZEBRA_COINBASE_DATA
+                    !ZEBRA_MINER_DATA
                         .to_ascii_lowercase()
                         .contains(c.to_ascii_lowercase())
                 },
