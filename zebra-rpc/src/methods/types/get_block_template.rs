@@ -31,7 +31,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
-    transparent::{EXTRA_ZEBRA_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN},
+    transparent::{MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN, ZEBRA_MINER_DATA},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 // Required for trait method `.bytes_in_display_order()` used indirectly in Debug impl
@@ -267,12 +267,12 @@ impl BlockTemplateResponse {
     pub(crate) fn new_internal(
         network: &Network,
         miner_address: &Address,
+        miner_data: Vec<u8>,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
-        extra_coinbase_data: Vec<u8>,
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
             Amount<NonNegative>,
         >,
@@ -324,7 +324,7 @@ impl BlockTemplateResponse {
             network,
             next_block_height,
             miner_address,
-            extra_coinbase_data,
+            miner_data,
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
             extra_coinbase_data,
@@ -433,8 +433,8 @@ where
     miner_address: Option<Address>,
 
     /// Optional data to include in the coinbase input script.
-    /// Limited to around 95 bytes by the consensus rules.
-    extra_coinbase_data: Vec<u8>,
+    /// Limited to 94 bytes.
+    miner_data: Vec<u8>,
 
     /// The chain verifier, used for submitting blocks.
     block_verifier_router: BlockVerifierRouter,
@@ -461,6 +461,7 @@ where
     /// # Panics
     ///
     /// - If the `miner_address` in `conf` is not valid.
+    /// - If the `miner_data` in `conf` is not valid.
     pub fn new(
         net: &Network,
         conf: config::mining::Config,
@@ -475,27 +476,33 @@ where
         });
 
         // Hex-decode to bytes if possible, otherwise UTF-8 encode to bytes.
-        let extra_coinbase_data = conf
-            .extra_coinbase_data
-            .unwrap_or_else(|| EXTRA_ZEBRA_COINBASE_DATA.to_string());
-        let extra_coinbase_data = hex::decode(&extra_coinbase_data)
-            .unwrap_or_else(|_error| extra_coinbase_data.as_bytes().to_vec());
+        let miner_data = conf
+            .miner_data
+            .unwrap_or_else(|| ZEBRA_MINER_DATA.to_string());
+
+        let miner_data =
+            hex::decode(&miner_data).unwrap_or_else(|_error| miner_data.as_bytes().to_vec());
+
+        // A limit on the configured miner data, regardless of the current block height.
+        // This is different from the consensus rule, which limits the total height + data.
+        const MINER_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
 
         assert!(
-            extra_coinbase_data.len() <= EXTRA_COINBASE_DATA_LIMIT,
-            "extra coinbase data is {} bytes, but Zebra's limit is {}.\n\
-             Configure mining.extra_coinbase_data with a shorter string",
-            extra_coinbase_data.len(),
-            EXTRA_COINBASE_DATA_LIMIT,
+            miner_data.len() <= MINER_DATA_LIMIT,
+            "miner data is {} bytes, but Zebra's limit is {MINER_DATA_LIMIT}.\n\
+             Configure mining.miner_data with a shorter string",
+            miner_data.len(),
         );
+
+        let mined_block_sender =
+            mined_block_sender.unwrap_or(SubmitBlockChannel::default().sender());
 
         Self {
             miner_address,
-            extra_coinbase_data,
+            miner_data,
             block_verifier_router,
             sync_status,
-            mined_block_sender: mined_block_sender
-                .unwrap_or(submit_block::SubmitBlockChannel::default().sender()),
+            mined_block_sender,
         }
     }
 
@@ -504,9 +511,9 @@ where
         self.miner_address.clone()
     }
 
-    /// Returns the extra coinbase data.
-    pub fn extra_coinbase_data(&self) -> Vec<u8> {
-        self.extra_coinbase_data.clone()
+    /// Returns the optional miner data.
+    pub fn miner_data(&self) -> Vec<u8> {
+        self.miner_data.clone()
     }
 
     /// Changes the extra coinbase data.
@@ -554,7 +561,7 @@ where
         // Skip fields without debug impls
         f.debug_struct("GetBlockTemplateRpcImpl")
             .field("miner_address", &self.miner_address)
-            .field("extra_coinbase_data", &self.extra_coinbase_data)
+            .field("miner_data", &self.miner_data)
             .finish()
     }
 }
