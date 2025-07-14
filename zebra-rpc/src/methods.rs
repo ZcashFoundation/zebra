@@ -2137,6 +2137,7 @@ where
         // Clone Configs
         let network = self.network.clone();
         let miner_data = self.gbt.miner_data();
+        let miner_memo = self.gbt.miner_memo();
 
         // Clone Services
         let mempool = self.mempool.clone();
@@ -2422,6 +2423,7 @@ where
             next_block_height,
             &miner_address,
             miner_data.clone(),
+            miner_memo.clone(),
             mempool_txs,
             mempool_tx_deps,
         );
@@ -2440,6 +2442,7 @@ where
             &network,
             &miner_address,
             miner_data,
+            miner_memo,
             &chain_tip_and_local_time,
             server_long_poll_id,
             mempool_txs,

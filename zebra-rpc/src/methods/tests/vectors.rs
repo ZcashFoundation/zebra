@@ -1954,6 +1954,7 @@ async fn gbt_with(net: Network, addr: ZcashAddress) {
     let mining_conf = crate::config::mining::Config {
         miner_address: Some(addr.clone()),
         miner_data: None,
+        miner_memo: None,
         internal_miner: true,
     };
 
@@ -2569,6 +2570,7 @@ async fn rpc_getdifficulty() {
     let mining_conf = mining::Config {
         miner_address: None,
         miner_data: None,
+        miner_memo: None,
         internal_miner: true,
     };
 

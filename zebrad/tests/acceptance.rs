@@ -3500,6 +3500,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height()),
         &miner_address,
         vec![],
+        None,
         &[],
         chain_history_root,
     )
@@ -3558,6 +3559,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         Height(block_template.height()),
         &miner_address,
         vec![],
+        None,
         &[],
         chain_history_root,
     )
