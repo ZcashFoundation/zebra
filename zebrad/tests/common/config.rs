@@ -61,18 +61,18 @@ pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
     // These are the ZF funding stream addresses for mainnet and testnet.
     #[allow(unused_mut)]
     let mut mining = zebra_rpc::config::mining::Config::default();
-// TODO: Fix figment configuration loading to prevent external config files from overriding
-//       the intended test network. This is a workaround for the network mismatch issue where:
-//       - The test intends to use a specific network (parameter `net`)
-//       - But figment may load external config files that override `network.network`
-//       - This causes validation errors like "IncorrectNetwork { expected: Main, actual: Test }"
-//       - We use `net` (intended network) instead of `network.network` (configured network)
-//         to ensure the miner address matches the intended test network
-//
-//       Proper fix should either:
-//       1. Prevent figment from loading external configs in tests, or
-//       2. Ensure test configurations are isolated from external config files, or
-//       3. Make the figment configuration loading more predictable for tests
+    // TODO: Fix figment configuration loading to prevent external config files from overriding
+    //       the intended test network. This is a workaround for the network mismatch issue where:
+    //       - The test intends to use a specific network (parameter `net`)
+    //       - But figment may load external config files that override `network.network`
+    //       - This causes validation errors like "IncorrectNetwork { expected: Main, actual: Test }"
+    //       - We use `net` (intended network) instead of `network.network` (configured network)
+    //         to ensure the miner address matches the intended test network
+    //
+    //       Proper fix should either:
+    //       1. Prevent figment from loading external configs in tests, or
+    //       2. Ensure test configurations are isolated from external config files, or
+    //       3. Make the figment configuration loading more predictable for tests
 
     let miner_address = if net.is_mainnet() {
         // Mainnet UA
