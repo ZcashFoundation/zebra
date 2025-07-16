@@ -164,12 +164,8 @@ impl Network {
     }
 
     /// Creates a new [`Network::Testnet`] with `Regtest` parameters and the provided network upgrade activation heights.
-    pub fn new_regtest(
-        configured_activation_heights: testnet::ConfiguredActivationHeights,
-    ) -> Self {
-        Self::new_configured_testnet(testnet::Parameters::new_regtest(
-            configured_activation_heights,
-        ))
+    pub fn new_regtest(params: testnet::RegtestParameters) -> Self {
+        Self::new_configured_testnet(testnet::Parameters::new_regtest(params))
     }
 
     /// Returns true if the network is the default Testnet, or false otherwise.
