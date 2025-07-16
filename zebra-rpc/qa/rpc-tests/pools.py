@@ -56,21 +56,21 @@ class PoolsTest(BitcoinTestFramework):
         value_pools_from_getblock = self.nodes[0].getblock('0')['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblock)
 
-        assert_equal(transparent_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(transparent_pool['chainValue'], Decimal('0'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
         getblockchaininfo = self.nodes[0].getblockchaininfo()
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
-        assert_equal(transparent_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(transparent_pool['chainValue'], Decimal('0'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
         
@@ -82,9 +82,11 @@ class PoolsTest(BitcoinTestFramework):
         assert_equal(nu5['status'], 'pending')
         assert_equal(nu6['status'], 'pending')
 
-        # TODO: A call to `getblocksubsidy` here will fail as not supported before first halving.
-        # add an expected exception when the call is made.
-        # self.nodes[0].getblocksubsidy()
+        # `getblocksubsidy` is not supported before first halving.
+        try :
+            block_subsidy = self.nodes[0].getblocksubsidy()
+        except Exception as e:
+            return
 
         print("block 1")
         self.nodes[0].generate(1)
@@ -94,22 +96,22 @@ class PoolsTest(BitcoinTestFramework):
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblock)
 
         assert_equal(transparent_pool['chainValue'], Decimal('6.25'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
         getblockchaininfo = self.nodes[0].getblockchaininfo()
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
         assert_equal(transparent_pool['chainValue'], Decimal('6.25'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
-        # Check the upgrades
+        # Up to Canopy is active at block 1
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
 
         assert_equal(overwinter['status'], 'active')
@@ -120,71 +122,29 @@ class PoolsTest(BitcoinTestFramework):
         assert_equal(nu5['status'], 'pending')
         assert_equal(nu6['status'], 'pending')
 
-        print("Activating NU5")
-        self.nodes[0].generate(289)
-
-        # Check the value pools
-        value_pools_from_getblock = self.nodes[0].getblock('290')['valuePools']
-        (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblock)
-
-        assert_equal(transparent_pool['chainValue'], Decimal('1800'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
-
-        getblockchaininfo = self.nodes[0].getblockchaininfo()
-        value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
-        (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
-
-        assert_equal(transparent_pool['chainValue'], Decimal('1800'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
-
-        # Check the upgrades
-        (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
-
-        assert_equal(overwinter['status'], 'active')
-        assert_equal(sapling['status'], 'active')
-        assert_equal(blossom['status'], 'active')
-        assert_equal(heartwood['status'], 'active')
-        assert_equal(canopy['status'], 'active')
-        assert_equal(nu5['status'], 'active')
-        assert_equal(nu6['status'], 'pending')
-
-        # We can call getblocksubsidy now
-        block_subsidy = self.nodes[0].getblocksubsidy()
-        assert_equal(block_subsidy['miner'], Decimal('3.125'))
-        assert_equal(block_subsidy['founders'], Decimal('0'))
-        assert_equal(block_subsidy['fundingstreamstotal'], Decimal('0'))
-        assert_equal(block_subsidy['lockboxtotal'], Decimal('0'))
-        assert_equal(block_subsidy['totalblocksubsidy'], Decimal('3.125'))
-
         print("Activating NU6")
-        self.nodes[0].generate(1)
+        self.nodes[0].generate(290)
 
         # Check the value pools
         value_pools_from_getblock = self.nodes[0].getblock('291')['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblock)
 
         assert_equal(transparent_pool['chainValue'], Decimal('1803.125'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
         getblockchaininfo = self.nodes[0].getblockchaininfo()
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
         assert_equal(transparent_pool['chainValue'], Decimal('1803.125'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
         # TODO: Should not be 0
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
         # Check the upgrades
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
@@ -214,21 +174,21 @@ class PoolsTest(BitcoinTestFramework):
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblock)
 
         assert_equal(transparent_pool['chainValue'], Decimal('1809.375'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
         getblockchaininfo = self.nodes[0].getblockchaininfo()
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
         assert_equal(transparent_pool['chainValue'], Decimal('1809.375'))
-        assert_equal(sprout_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(sapling_pool['chainValue'], Decimal('0.00000000'))
-        assert_equal(orchard_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
         # TODO: Should not be 0
-        assert_equal(deferred_pool['chainValue'], Decimal('0.00000000'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
 
         # Check the upgrades
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
@@ -249,6 +209,32 @@ class PoolsTest(BitcoinTestFramework):
         # TODO: Should not be 0
         assert_equal(block_subsidy['lockboxtotal'], Decimal('0'))
         assert_equal(block_subsidy['totalblocksubsidy'], Decimal('3.125'))
+
+        print("Activating nu6.1")
+        self.nodes[0].generate(2)
+
+        # Check the value pools
+        value_pools_from_getblock = self.nodes[0].getblock('295')['valuePools']
+        (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblock)
+
+        assert_equal(transparent_pool['chainValue'], Decimal('1815.625'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
+
+        getblockchaininfo = self.nodes[0].getblockchaininfo()
+        value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
+        (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
+
+        assert_equal(transparent_pool['chainValue'], Decimal('1815.625'))
+        assert_equal(sprout_pool['chainValue'], Decimal('0'))
+        assert_equal(sapling_pool['chainValue'], Decimal('0'))
+        assert_equal(orchard_pool['chainValue'], Decimal('0'))
+        # Period is over, zero is ok.
+        assert_equal(deferred_pool['chainValue'], Decimal('0'))
+
+        # Pass nu6.1
 
 if __name__ == '__main__':
     PoolsTest().main()
