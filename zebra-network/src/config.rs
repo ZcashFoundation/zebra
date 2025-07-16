@@ -16,7 +16,7 @@ use tracing::Span;
 use zebra_chain::{
     common::atomic_write,
     parameters::{
-        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams, RegtestParameters},
         Magic, Network, NetworkKind,
     },
     work::difficulty::U256,
@@ -729,11 +729,22 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let configured_activation_heights = testnet_parameters
-                    .and_then(|params| params.activation_heights)
+                let params = testnet_parameters
+                    .map(
+                        |DTestnetParameters {
+                             activation_heights,
+                             pre_nu6_funding_streams,
+                             post_nu6_funding_streams,
+                             ..
+                         }| RegtestParameters {
+                            activation_heights: activation_heights.unwrap_or_default(),
+                            pre_nu6_funding_streams,
+                            post_nu6_funding_streams,
+                        },
+                    )
                     .unwrap_or_default();
 
-                Network::new_regtest(configured_activation_heights)
+                Network::new_regtest(params)
             }
             (
                 NetworkKind::Testnet,

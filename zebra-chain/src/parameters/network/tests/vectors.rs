@@ -12,7 +12,8 @@ use crate::{
         },
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
-            ConfiguredFundingStreams, MAX_NETWORK_NAME_LENGTH, RESERVED_NETWORK_NAMES,
+            ConfiguredFundingStreams, RegtestParameters, MAX_NETWORK_NAME_LENGTH,
+            RESERVED_NETWORK_NAMES,
         },
         Network, NetworkUpgrade, MAINNET_ACTIVATION_HEIGHTS, TESTNET_ACTIVATION_HEIGHTS,
     },
@@ -447,4 +448,24 @@ fn check_configured_funding_stream_constraints() {
     );
     expected_panic_wrong_addr_network
         .expect_err("should panic when recipient addresses are for Mainnet");
+}
+
+/// Check that `new_regtest()` constructs a network with the provided funding streams.
+#[test]
+fn check_configured_funding_stream_regtest() {
+    let default_testnet = Network::new_default_testnet();
+    let regtest = Network::new_regtest(RegtestParameters {
+        activation_heights: (&default_testnet.activation_list()).into(),
+        pre_nu6_funding_streams: Some(default_testnet.pre_nu6_funding_streams().into()),
+        post_nu6_funding_streams: Some(default_testnet.post_nu6_funding_streams().into()),
+    });
+
+    assert_eq!(
+        default_testnet.pre_nu6_funding_streams(),
+        regtest.pre_nu6_funding_streams()
+    );
+    assert_eq!(
+        default_testnet.post_nu6_funding_streams(),
+        regtest.post_nu6_funding_streams()
+    );
 }

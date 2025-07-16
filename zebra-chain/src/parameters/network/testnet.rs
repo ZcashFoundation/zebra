@@ -611,6 +611,26 @@ impl ParametersBuilder {
     }
 }
 
+/// A struct of parameters for configuring Regtest in Zebra.
+#[derive(Default, Clone)]
+pub struct RegtestParameters {
+    /// The configured network upgrade activation heights to use on Regtest
+    pub activation_heights: ConfiguredActivationHeights,
+    /// Configured pre-NU6 funding streams
+    pub pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    /// Configured post-NU6 funding streams
+    pub post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+}
+
+impl From<ConfiguredActivationHeights> for RegtestParameters {
+    fn from(value: ConfiguredActivationHeights) -> Self {
+        Self {
+            activation_heights: value,
+            ..Default::default()
+        }
+    }
+}
+
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parameters {
@@ -667,10 +687,20 @@ impl Parameters {
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     pub fn new_regtest(
-        ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
+        RegtestParameters {
+            activation_heights: ConfiguredActivationHeights { nu5, nu6, nu7, .. },
+            pre_nu6_funding_streams,
+            post_nu6_funding_streams,
+        }: RegtestParameters,
     ) -> Self {
         #[cfg(any(test, feature = "proptest-impl"))]
         let nu5 = nu5.or(Some(100));
+
+        // Configure no funding streams by default if none are provided rather than the default testnet funding streams.
+        let pre_nu6_funding_streams =
+            pre_nu6_funding_streams.unwrap_or(ConfiguredFundingStreams::empty());
+        let post_nu6_funding_streams =
+            post_nu6_funding_streams.unwrap_or(ConfiguredFundingStreams::empty());
 
         let parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
@@ -688,13 +718,9 @@ impl Parameters {
                 nu7,
                 ..Default::default()
             })
-            .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL);
-
-        // TODO: Always clear funding streams on Regtest once the testnet parameters are being serialized (#8920).
-        // #[cfg(not(any(test, feature = "proptest-impl")))]
-        let parameters = parameters
-            .with_pre_nu6_funding_streams(ConfiguredFundingStreams::empty())
-            .with_post_nu6_funding_streams(ConfiguredFundingStreams::empty());
+            .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
+            .with_pre_nu6_funding_streams(pre_nu6_funding_streams)
+            .with_post_nu6_funding_streams(post_nu6_funding_streams);
 
         Self {
             network_name: "Regtest".to_string(),
