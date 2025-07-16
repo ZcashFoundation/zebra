@@ -17,3 +17,4 @@ cache_dir = ""
 [network.testnet_parameters.activation_heights]
 NU5 = 290
 NU6 = 291
+"NU6.1" = 295
