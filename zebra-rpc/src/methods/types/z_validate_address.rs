@@ -2,7 +2,8 @@
 
 use derive_getters::Getters;
 use derive_new::new;
-use zebra_chain::primitives::Address;
+use jsonrpsee::core::RpcResult;
+use zebra_chain::{parameters::Network, primitives::Address};
 
 /// `z_validateaddress` response
 #[derive(
@@ -68,5 +69,77 @@ impl From<&Address> for ZValidateAddressType {
             Address::Sapling { .. } => Self::Sapling,
             Address::Unified { .. } => Self::Unified,
         }
+    }
+}
+
+/// Validates a Zcash address against a network and returns a structured response.
+///
+/// # Parameters
+///
+/// - `network: Network`
+///   - The network (Mainnet or Testnet) against which the address validation is performed.
+///
+/// - `raw_address: String`
+///   - The raw input address as a string that needs to be validated.
+///
+/// # Returns
+///
+/// - `RpcResult<ZValidateAddressResponse>`
+///   - A result containing a `ZValidateAddressResponse` object if the address validation succeeds,
+///     or an error if the validation process encounters an issue.
+///
+/// # Process
+///
+/// 1. **Parse the Raw Address**:
+///    Attempts to parse the raw address into a `zcash_address::ZcashAddress`. If parsing fails,
+///    returns an invalid address response.
+///
+/// 2. **Convert Address**:
+///    If parsing is successful, attempts to convert the address to the `Address` type.
+///    If conversion fails, logs the conversion error and returns an invalid response.
+///
+/// 3. **Network Validation**:
+///    Checks if the parsed address belongs to the given network. If not, logs an info message
+///    about the network mismatch and returns an invalid response.
+///
+/// 4. **Generate Response**:
+///    If all validations pass, constructs and returns a `ZValidateAddressResponse` with:
+///      - `is_valid` set to `true`,
+///      - the given `raw_address`,
+///      - inferred `address_type`,
+///      - `is_mine` set to `false` (as wallet functionality is not implemented).
+pub fn z_validateaddress(
+    network: Network,
+    raw_address: String,
+) -> RpcResult<ZValidateAddressResponse> {
+    let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
+        return Ok(ZValidateAddressResponse::invalid());
+    };
+
+    let address = match address.convert::<Address>() {
+        Ok(address) => address,
+        Err(err) => {
+            tracing::debug!(?err, "conversion error");
+            return Ok(ZValidateAddressResponse::invalid());
+        }
+    };
+
+    if address.network() == network.kind() {
+        Ok(ZValidateAddressResponse {
+            is_valid: true,
+            address: Some(raw_address),
+            address_type: Some(ZValidateAddressType::from(&address)),
+            is_mine: Some(false),
+        })
+    } else {
+        tracing::info!(
+            ?network,
+            address_network = ?address.network(),
+            "invalid address network in z_validateaddress RPC: address is for {:?} but Zebra is on {:?}",
+            address.network(),
+            network
+        );
+
+        Ok(ZValidateAddressResponse::invalid())
     }
 }
