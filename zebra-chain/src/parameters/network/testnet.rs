@@ -688,14 +688,11 @@ impl Parameters {
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     pub fn new_regtest(
         RegtestParameters {
-            activation_heights: ConfiguredActivationHeights { nu5, nu6, nu7, .. },
+            activation_heights,
             pre_nu6_funding_streams,
             post_nu6_funding_streams,
         }: RegtestParameters,
     ) -> Self {
-        #[cfg(any(test, feature = "proptest-impl"))]
-        let nu5 = nu5.or(Some(100));
-
         // Configure no funding streams by default if none are provided rather than the default testnet funding streams.
         let pre_nu6_funding_streams =
             pre_nu6_funding_streams.unwrap_or(ConfiguredFundingStreams::empty());
@@ -711,13 +708,7 @@ impl Parameters {
             .with_slow_start_interval(Height::MIN)
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
-            .with_activation_heights(ConfiguredActivationHeights {
-                canopy: Some(1),
-                nu5,
-                nu6,
-                nu7,
-                ..Default::default()
-            })
+            .with_activation_heights(activation_heights)
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
             .with_pre_nu6_funding_streams(pre_nu6_funding_streams)
             .with_post_nu6_funding_streams(post_nu6_funding_streams);
