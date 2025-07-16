@@ -27,6 +27,7 @@ pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
+use redjubjub::{Binding, Signature};
 pub use sapling::FieldNotPresent;
 pub use serialize::{
     SerializedTransaction, MIN_TRANSPARENT_TX_SIZE, MIN_TRANSPARENT_TX_V4_SIZE,
@@ -1316,6 +1317,79 @@ impl Transaction {
         };
 
         ValueBalance::from_sapling_amount(sapling_value_balance)
+    }
+
+    /// Returns the Sapling binding signature for this transaction.
+    ///
+    /// Returns `Some(binding_sig)` for transactions that contain Sapling shielded
+    /// data (V4+), or `None` for transactions without Sapling components.
+    pub fn sapling_binding_sig(&self) -> Option<Signature<Binding>> {
+        match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(sapling_shielded_data.binding_sig),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(sapling_shielded_data.binding_sig),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(sapling_shielded_data.binding_sig),
+            _ => None,
+        }
+    }
+
+    /// Returns the JoinSplit public key for this transaction.
+    ///
+    /// Returns `Some(pub_key)` for transactions that contain JoinSplit data (V2-V4),
+    /// or `None` for transactions without JoinSplit components or unsupported versions.
+    ///
+    /// ## Note
+    /// JoinSplits are deprecated in favor of Sapling and Orchard
+    pub fn joinsplit_pub_key(&self) -> Option<ed25519::VerificationKeyBytes> {
+        match self {
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            _ => None,
+        }
+    }
+
+    /// Returns the JoinSplit signature this for transaction.
+    ///
+    /// Returns `Some(signature)` for transactions that contain JoinSplit data (V2-V4),
+    /// or `None` for transactions without JoinSplit components or unsupported versions.
+    ///
+    /// ## Note
+    /// JoinSplits are deprecated in favor of Sapling and Orchard
+    pub fn joinsplit_sig(&self) -> Option<ed25519::Signature> {
+        match self {
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.sig),
+            Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.sig),
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.sig),
+            _ => None,
+        }
     }
 
     /// Return the orchard value balance, the change in the transaction value

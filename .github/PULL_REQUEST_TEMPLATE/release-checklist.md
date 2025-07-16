@@ -78,8 +78,6 @@ Choose a release level for `zebrad`. Release levels are based on user-visible ch
 - significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
 - otherwise, it is a `patch` release
 
-Zebra's Rust API doesn't have any support or stability guarantees, so we keep all the `zebra-*` and `tower-*` crates on a beta `pre-release` version.
-
 ### Update Crate Versions
 
 If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
@@ -90,10 +88,8 @@ Check that the release will work:
 
 ```sh
 # Update everything except for alpha crates and zebrad:
-cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
+cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad beta
 # Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.4
-cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.2
 # Update zebrad:
 cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
 # Continue with the release process:

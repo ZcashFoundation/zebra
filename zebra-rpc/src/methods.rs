@@ -89,6 +89,7 @@ use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, Trans
 
 use crate::{
     config,
+    methods::types::validate_address::validate_address,
     queue::Queue,
     server::{
         self,
@@ -903,6 +904,11 @@ where
         );
 
         (rpc_impl, rpc_tx_queue_task_handle)
+    }
+
+    /// Returns a reference to the configured network.
+    pub fn network(&self) -> &Network {
+        &self.network
     }
 }
 
@@ -2620,38 +2626,7 @@ where
     async fn validate_address(&self, raw_address: String) -> Result<ValidateAddressResponse> {
         let network = self.network.clone();
 
-        let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
-            return Ok(ValidateAddressResponse::invalid());
-        };
-
-        let address = match address.convert::<primitives::Address>() {
-            Ok(address) => address,
-            Err(err) => {
-                tracing::debug!(?err, "conversion error");
-                return Ok(ValidateAddressResponse::invalid());
-            }
-        };
-
-        // we want to match zcashd's behaviour
-        if !address.is_transparent() {
-            return Ok(ValidateAddressResponse::invalid());
-        }
-
-        if address.network() == network.kind() {
-            Ok(ValidateAddressResponse {
-                address: Some(raw_address),
-                is_valid: true,
-                is_script: Some(address.is_script_hash()),
-            })
-        } else {
-            tracing::info!(
-                ?network,
-                address_network = ?address.network(),
-                "invalid address in validateaddress RPC: Zebra's configured network must match address network"
-            );
-
-            Ok(ValidateAddressResponse::invalid())
-        }
+        validate_address(network, raw_address)
     }
 
     async fn z_validate_address(&self, raw_address: String) -> Result<ZValidateAddressResponse> {
@@ -2869,17 +2844,20 @@ where
                 ));
             };
 
-            let proposal_block =
-                proposal_block_from_template(&block_template, BlockTemplateTimeSource::CurTime)
-                    .map_error(server::error::LegacyCode::default())?;
+            let proposal_block = proposal_block_from_template(
+                &block_template,
+                BlockTemplateTimeSource::CurTime,
+                &network,
+            )
+            .map_error(server::error::LegacyCode::default())?;
+
             let hex_proposal_block = HexData(
                 proposal_block
                     .zcash_serialize_to_vec()
                     .map_error(server::error::LegacyCode::default())?,
             );
 
-            let _submit = rpc
-                .submit_block(hex_proposal_block, None)
+            rpc.submit_block(hex_proposal_block, None)
                 .await
                 .map_error(server::error::LegacyCode::default())?;
 
@@ -4250,7 +4228,7 @@ where
     let response = match (should_use_default, response) {
         (_, Ok(res)) => res,
         (true, Err(_)) => {
-            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64)
+            return Ok((U256::from(network.target_difficulty_limit()) >> 128).as_u128() as f64);
         }
         (false, Err(error)) => return Err(ErrorObject::owned(0, error.to_string(), None::<()>)),
     };

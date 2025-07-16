@@ -1,6 +1,11 @@
 //! A tonic RPC server for Zebra's indexer API.
 
-use zebra_chain::block;
+use std::sync::Arc;
+
+use zebra_chain::{
+    block,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
+};
 
 #[cfg(test)]
 mod tests;
@@ -34,5 +39,42 @@ impl BlockHashAndHeight {
             })
             .ok()
             .and_then(|hash| self.height.try_into().ok().map(|height| (hash, height)))
+    }
+}
+
+impl BlockAndHash {
+    /// Creates a new [`BlockAndHash`] from a [`block::Hash`] and [`block::Height`].
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the block serialization fails (if the header version is invalid).
+    pub fn new(hash: block::Hash, block: Arc<block::Block>) -> Self {
+        BlockAndHash {
+            hash: hash.bytes_in_display_order().to_vec(),
+            data: block
+                .zcash_serialize_to_vec()
+                .expect("block serialization should not fail"),
+        }
+    }
+
+    /// Try to convert a [`BlockAndHash`] into a tuple of a decoded block and hash.
+    pub fn decode(self) -> Option<(block::Block, block::Hash)> {
+        self.hash
+            .try_into()
+            .map(|bytes| block::Hash::from_bytes_in_display_order(&bytes))
+            .map_err(|bytes: Vec<_>| {
+                tracing::warn!(
+                    "failed to convert BlockHash to Hash, unexpected len: {}",
+                    bytes.len()
+                )
+            })
+            .ok()
+            .and_then(|hash| {
+                self.data
+                    .zcash_deserialize_into()
+                    .map_err(|err| tracing::warn!(?err, "failed to deserialize block",))
+                    .ok()
+                    .map(|block| (block, hash))
+            })
     }
 }

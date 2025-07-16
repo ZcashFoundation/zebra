@@ -174,6 +174,15 @@ impl ChainTipSender {
         (sender, current, change)
     }
 
+    /// Returns a clone of itself for sending finalized tip changes,
+    /// used by `TrustedChainSync` in `zebra-rpc`.
+    pub fn finalized_sender(&self) -> Self {
+        Self {
+            use_non_finalized_tip: false,
+            sender: self.sender.clone(),
+        }
+    }
+
     /// Update the latest finalized tip.
     ///
     /// May trigger an update to the best tip.

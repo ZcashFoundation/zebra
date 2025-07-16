@@ -26,7 +26,7 @@ where
     <ReadStateService as tower::Service<zebra_state::ReadRequest>>::Future: Send,
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
-    _read_state: ReadStateService,
+    pub(super) read_state: ReadStateService,
     pub(super) chain_tip_change: Tip,
     pub(super) mempool_change: MempoolTxSubscriber,
 }
@@ -35,7 +35,7 @@ where
 #[tracing::instrument(skip_all)]
 pub async fn init<ReadStateService, Tip>(
     listen_addr: SocketAddr,
-    _read_state: ReadStateService,
+    read_state: ReadStateService,
     chain_tip_change: Tip,
     mempool_change: MempoolTxSubscriber,
 ) -> Result<(ServerTask, SocketAddr), BoxError>
@@ -52,7 +52,7 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
 {
     let indexer_service = IndexerRPC {
-        _read_state,
+        read_state,
         chain_tip_change,
         mempool_change,
     };

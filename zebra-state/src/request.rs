@@ -1195,6 +1195,10 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
+
+    /// Returns [`ReadResponse::NonFinalizedBlocksListener`] with a channel receiver
+    /// allowing the caller to listen for new blocks in the non-finalized state.
+    NonFinalizedBlocksListener,
 }
 
 impl ReadRequest {
@@ -1233,6 +1237,7 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
+            ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
         }
     }
 
