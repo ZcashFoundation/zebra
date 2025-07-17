@@ -49,18 +49,15 @@ jobs:
           echo "Task Definition: $TASK_DEFINITION"
           echo "Container Name: $CONTAINER_NAME"
           
-          # Get the current task definition
-          TASK_DEFINITION_ARN=$(aws ecs describe-task-definition \
-            --task-definition $TASK_DEFINITION \
-            --query 'taskDefinition.taskDefinitionArn' \
-            --output text)
-          
-          echo "Current task definition ARN: $TASK_DEFINITION_ARN"
-          
           # Download the current task definition
           aws ecs describe-task-definition \
             --task-definition $TASK_DEFINITION \
             --query 'taskDefinition' > task-definition.json
+          
+          # Get the current task definition ARN from the downloaded file
+          TASK_DEFINITION_ARN=$(jq -r '.taskDefinitionArn' task-definition.json)
+          
+          echo "Current task definition ARN: $TASK_DEFINITION_ARN"
           
           # Update the image in the task definition
           jq --arg IMAGE_URI "$IMAGE_URI" --arg CONTAINER_NAME "$CONTAINER_NAME" \
