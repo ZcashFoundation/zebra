@@ -221,7 +221,15 @@ impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLoc
         Ok(AddressBalanceLocationInner {
             balance: (self.balance + rhs.balance)?,
             received: self.received.saturating_add(rhs.received),
-            location: self.location.min(rhs.location),
+            // Keep in mind that `AddressBalanceLocationChange` reuses this type
+            // (AddressBalanceLocationInner) and this addition method. The
+            // `block_info_and_address_received` database upgrade uses the
+            // empty/zero location as a dummy value for
+            // `AddressBalanceLocationChange`. Therefore, when adding, we should
+            // ignore these dummy values (which are 0). Using `max` achieves
+            // this. It is also possible that two zero-location balance changes
+            // are added, and `max` will correctly keep the zero value.
+            location: self.location.max(rhs.location),
         })
     }
 }

@@ -118,6 +118,13 @@ impl DiskFormatUpgrade for Upgrade {
 
                         for output in tx.outputs() {
                             if let Some(address) = output.address(&network) {
+                                // Note: using `empty()` will set the location
+                                // to a dummy zero value. This only works
+                                // because the addition operator for
+                                // `AddressBalanceLocationChange` (which reuses
+                                // the `AddressBalanceLocationInner` addition
+                                // operator) will ignore these dummy values when
+                                // adding balances during the merge operator.
                                 *address_balance_changes
                                     .entry(address)
                                     .or_insert_with(AddressBalanceLocationChange::empty)
@@ -202,6 +209,8 @@ impl DiskFormatUpgrade for Upgrade {
 
             // Update transparent addresses that received funds in this block.
             for (address, change) in address_balance_changes {
+                // Note that the logic of the merge operator is set up by
+                // calling `set_merge_operator_associative()` in `DiskDb`.
                 batch.zs_merge(balance_by_transparent_addr, address, change);
             }
 
