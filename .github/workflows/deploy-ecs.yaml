@@ -1,8 +1,7 @@
 # This GitHub Actions workflow automates deploying the Zebra Server to Amazon ECS.
 # It allows manual triggering with the ability to choose which image tag to deploy.
-# Because of the "force-new-deployment" flag, the ECS service will update to a new 'latest' image, if one was pushed.
+# This version properly updates the task definition with the new image.
 name: Deploy to Amazon ECS
-
 on:
   workflow_dispatch:
     inputs:
@@ -11,34 +10,30 @@ on:
         required: true
         type: string
         default: 'latest'
-
 env:
   AWS_REGION: ${{ vars.AWS_REGION || 'eu-central-1' }}
   ECR_REPOSITORY: ${{ vars.ECR_REPOSITORY || 'dev-zebra-server' }}
   ECS_SERVICE: ${{ vars.ECS_SERVICE || 'dev-zebra' }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'dev-zebra-cluster' }}
-
+  TASK_DEFINITION: ${{ vars.TASK_DEFINITION || 'dev-zebra-task' }}
+  CONTAINER_NAME: ${{ vars.CONTAINER_NAME || 'zebra-server' }}
 jobs:
   deploy-to-ecs:
     name: Deploy to ECS
     runs-on: ubuntu-latest
     environment: production
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
       - name: Login to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-
       - name: Deploy to Amazon ECS
         id: deploy-ecs
         env:
@@ -51,11 +46,40 @@ jobs:
           echo "Deploying image: $IMAGE_URI"
           echo "ECS Service: $ECS_SERVICE"
           echo "ECS Cluster: $ECS_CLUSTER"
+          echo "Task Definition: $TASK_DEFINITION"
+          echo "Container Name: $CONTAINER_NAME"
           
-          # Update the ECS service with the new image
+          # Get the current task definition
+          TASK_DEFINITION_ARN=$(aws ecs describe-task-definition \
+            --task-definition $TASK_DEFINITION \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          
+          echo "Current task definition ARN: $TASK_DEFINITION_ARN"
+          
+          # Download the current task definition
+          aws ecs describe-task-definition \
+            --task-definition $TASK_DEFINITION \
+            --query 'taskDefinition' > task-definition.json
+          
+          # Update the image in the task definition
+          jq --arg IMAGE_URI "$IMAGE_URI" --arg CONTAINER_NAME "$CONTAINER_NAME" \
+            '.containerDefinitions |= map(if .name == $CONTAINER_NAME then .image = $IMAGE_URI else . end) | del(.taskDefinitionArn, .revision, .status, .requiresAttributes, .placementConstraints, .compatibilities, .registeredAt, .registeredBy)' \
+            task-definition.json > updated-task-definition.json
+          
+          # Register the new task definition
+          NEW_TASK_DEFINITION_ARN=$(aws ecs register-task-definition \
+            --cli-input-json file://updated-task-definition.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+          
+          echo "New task definition ARN: $NEW_TASK_DEFINITION_ARN"
+          
+          # Update the ECS service with the new task definition
           aws ecs update-service \
             --cluster $ECS_CLUSTER \
             --service $ECS_SERVICE \
+            --task-definition $NEW_TASK_DEFINITION_ARN \
             --force-new-deployment
           
           # Wait for the service to be stable
@@ -86,12 +110,20 @@ jobs:
           echo "deployed_image=$IMAGE_URI" >> $GITHUB_OUTPUT
           echo "ecs_service=$ECS_SERVICE" >> $GITHUB_OUTPUT
           echo "ecs_cluster=$ECS_CLUSTER" >> $GITHUB_OUTPUT
-
+          echo "task_definition_arn=$NEW_TASK_DEFINITION_ARN" >> $GITHUB_OUTPUT
       - name: Get deployment status
         run: |
           echo "Deployment Status:"
           aws ecs describe-services \
             --cluster $ECS_CLUSTER \
             --services $ECS_SERVICE \
-            --query 'services[0].{ServiceName:serviceName,Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount}' \
+            --query 'services[0].{ServiceName:serviceName,Status:status,DesiredCount:desiredCount,RunningCount:runningCount,PendingCount:pendingCount,TaskDefinition:taskDefinition}' \
+            --output table
+          
+          echo ""
+          echo "Current running tasks:"
+          aws ecs list-tasks \
+            --cluster $ECS_CLUSTER \
+            --service-name $ECS_SERVICE \
+            --query 'taskArns' \
             --output table
