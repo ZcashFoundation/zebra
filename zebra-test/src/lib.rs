@@ -72,6 +72,9 @@ static INIT: Once = Once::new();
 /// gets dropped when the test finishes.
 #[must_use]
 pub fn init() -> impl Drop {
+    // Set test mode environment variable
+    std::env::set_var("ZEBRA_TEST_MODE", "1");
+
     // Per-test
 
     // Settings for threads that snapshots data using `insta`

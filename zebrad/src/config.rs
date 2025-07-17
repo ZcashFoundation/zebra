@@ -95,28 +95,57 @@ pub struct ZebradConfig {
 }
 
 impl ZebradConfig {
-    /// Loads configuration using Figment: Defaults → TOML → Environment Variables.
+    /// Load a configuration from an optional path and environment variables.
     ///
-    /// The TOML file path can be specified via config_file_path parameter.
-    /// If None, uses default path based on platform.
+    /// If no path is provided, uses the default configuration location.
     ///
-    /// Environment variables are prefixed with "ZEBRA_" and use double underscores
-    /// for nested fields (e.g., ZEBRA_RPC__LISTEN_ADDR).
+    /// ## Configuration Priority
+    ///
+    /// In normal mode:
+    /// 1. Defaults (lowest priority)
+    /// 2. TOML config file
+    /// 3. Environment variables (highest priority)
+    ///
+    /// In test mode (when `ZEBRA_TEST_MODE=1`):
+    /// 1. Defaults (lowest priority)
+    /// 2. Environment variables
+    /// 3. TOML config file (highest priority)
+    ///
+    /// This ensures that test configurations are not accidentally overridden
+    /// by environment variables set in Docker or CI environments.
     pub fn load(config_file_path: Option<PathBuf>) -> Result<Self, Error> {
         let default_config_file = Self::default_config_path();
 
         let config_file_path = config_file_path.unwrap_or(default_config_file);
 
+        // Check if we're in test mode
+        let is_test_mode = std::env::var("ZEBRA_TEST_MODE").unwrap_or_default() == "1";
+
         // Create base figment with layered configuration
         let mut figment = Figment::new().merge(Serialized::defaults(Self::default()));
 
-        // Only add TOML file if it exists - without .nested() to allow proper overriding
-        if config_file_path.exists() {
-            figment = figment.merge(Toml::file(&config_file_path));
-        }
+        if is_test_mode {
+            // In test mode: prioritize config file over environment variables
+            // This ensures test configurations aren't overridden by Docker/CI environment
 
-        // Add standard environment variables (without custom mappings first)
-        figment = figment.merge(Env::prefixed("ZEBRA_").split("__"));
+            // Add environment variables first (lower priority)
+            figment = figment.merge(Env::prefixed("ZEBRA_").split("__"));
+
+            // Then add TOML file if it exists (higher priority - will override env vars)
+            if config_file_path.exists() {
+                figment = figment.merge(Toml::file(&config_file_path));
+            }
+        } else {
+            // Normal mode: environment variables have higher priority
+
+            // Only add TOML file if it exists - without .nested() to allow proper overriding
+            if config_file_path.exists() {
+                figment = figment.merge(Toml::file(&config_file_path));
+            }
+
+            // Add standard environment variables (without custom mappings first)
+            figment = figment.merge(Env::prefixed("ZEBRA_").split("__"));
+        }
 
         let config: Self = figment.extract().map_err(Error::from)?;
 
