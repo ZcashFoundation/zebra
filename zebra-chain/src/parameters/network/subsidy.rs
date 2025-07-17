@@ -142,6 +142,11 @@ impl FundingStreams {
         }
     }
 
+    /// Creates a new empty [`FundingStreams`] representing no funding streams.
+    pub fn empty() -> Self {
+        Self::new(Height::MAX..Height::MAX, HashMap::new())
+    }
+
     /// Returns height range where these [`FundingStreams`] should apply.
     pub fn height_range(&self) -> &std::ops::Range<Height> {
         &self.height_range

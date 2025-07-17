@@ -171,6 +171,7 @@ use zcash_keys::address::Address;
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     parameters::{
+        testnet::ConfiguredActivationHeights,
         Network::{self, *},
         NetworkUpgrade,
     },
@@ -2973,7 +2974,13 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Default::default());
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu7: Some(1),
+            ..Default::default()
+        }
+        .into(),
+    );
     let mut config = os_assigned_rpc_port_config(false, &network)?;
 
     config.state.ephemeral = false;
@@ -3745,7 +3752,13 @@ async fn invalidate_and_reconsider_block() -> Result<()> {
     use common::regtest::MiningRpcMethods;
 
     let _init_guard = zebra_test::init();
-    let net = Network::new_regtest(Default::default());
+    let net = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu7: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
     let mut config = os_assigned_rpc_port_config(false, &net)?;
     config.state.ephemeral = false;
 
