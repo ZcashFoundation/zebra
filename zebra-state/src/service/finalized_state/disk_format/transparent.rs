@@ -224,12 +224,16 @@ impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLoc
             // Keep in mind that `AddressBalanceLocationChange` reuses this type
             // (AddressBalanceLocationInner) and this addition method. The
             // `block_info_and_address_received` database upgrade uses the
-            // empty/zero location as a dummy value for
-            // `AddressBalanceLocationChange`. Therefore, when adding, we should
-            // ignore these dummy values (which are 0). Using `max` achieves
-            // this. It is also possible that two zero-location balance changes
-            // are added, and `max` will correctly keep the zero value.
-            location: self.location.max(rhs.location),
+            // usize::MAX dummy location value returned from
+            // `AddressBalanceLocationChange::empty()`. Therefore, when adding,
+            // we should ignore these dummy values. Using `min` achieves this.
+            // It is also possible that two dummy-location balance changes are
+            // added, and `min` will correctly keep the same dummy value. The
+            // reason we haven't used zero as a dummy value and `max()` here is
+            // because we use the minimum UTXO location as the canonical
+            // location for an address; and using `min()` will work if a
+            // non-canonical location is added.
+            location: self.location.min(rhs.location),
         })
     }
 }

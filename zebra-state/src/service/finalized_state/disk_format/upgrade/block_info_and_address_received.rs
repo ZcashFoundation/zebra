@@ -119,8 +119,8 @@ impl DiskFormatUpgrade for Upgrade {
                         for output in tx.outputs() {
                             if let Some(address) = output.address(&network) {
                                 // Note: using `empty()` will set the location
-                                // to a dummy zero value. This only works
-                                // because the addition operator for
+                                // to a dummy value. This only works because the
+                                // addition operator for
                                 // `AddressBalanceLocationChange` (which reuses
                                 // the `AddressBalanceLocationInner` addition
                                 // operator) will ignore these dummy values when
@@ -302,8 +302,14 @@ impl DiskFormatUpgrade for Upgrade {
 }
 
 impl AddressBalanceLocationChange {
-    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and a dummy location.
+    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and
+    /// a dummy (all one bits) location. See `AddressBalanceLocationInner::add()`
+    /// for the rationale for using this dummy value.
     fn empty() -> Self {
-        Self::new(AddressLocation::from_usize(Height(0), 0, 0))
+        Self::new(AddressLocation::from_usize(
+            crate::MAX_ON_DISK_HEIGHT,
+            usize::MAX,
+            usize::MAX,
+        ))
     }
 }

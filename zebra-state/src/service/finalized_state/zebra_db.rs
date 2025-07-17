@@ -26,7 +26,7 @@ use crate::{
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
-    write_database_format_version_to_disk, BoxError, Config, OutputLocation,
+    write_database_format_version_to_disk, BoxError, Config,
 };
 
 use super::disk_format::upgrade::restorable_db_versions;
