@@ -32,6 +32,8 @@ resource "aws_iam_policy" "ecr_ecs_policy" {
           "ecs:ListServices",
           "ecs:ListTasks",
           "ecs:DescribeTasks",
+          "ecs:DescribeTaskDefinition",
+          "ecs:RegisterTaskDefinition",
           "ecs:RunTask",
           "ecs:StopTask",
           "ecs:StartTask"
@@ -45,6 +47,18 @@ resource "aws_iam_policy" "ecr_ecs_policy" {
           "lambda:*"
         ]
         Resource = "arn:aws:lambda:${var.aws_region}:${var.aws_account_id}:function:watch-zebra-logs"
+      },
+      {
+        # The CICD user needs the iam:PassRole permission to pass the ECS execution role when registering task definitions.
+        Sid    = "AllowPassRole"
+        Effect = "Allow"
+        Action = [
+          "iam:PassRole"
+        ]
+        Resource = [
+          "arn:aws:iam::${var.aws_account_id}:role/${var.env}-zebra-ecs_execution_role",
+          "arn:aws:iam::${var.aws_account_id}:role/${var.env}-zebra-ecs_task_role"
+        ]
       }
     ]
   })
