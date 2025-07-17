@@ -286,14 +286,16 @@ fn check_network_name() {
 fn check_full_activation_list() {
     let network = testnet::Parameters::build()
         .with_activation_heights(ConfiguredActivationHeights {
-            nu6_1: Some(1),
+            // Update this to be the latest network upgrade in Zebra, and update
+            // the code below to expect the latest number of network upgrades.
+            nu7: Some(1),
             ..Default::default()
         })
         .clear_funding_streams()
         .to_network();
 
-    // We expect the first 10 network upgrades to be included, up to and including NU6.1
-    let expected_network_upgrades = NetworkUpgrade::iter().take(10);
+    // We expect the first 11 network upgrades to be included, up to and including NU7
+    let expected_network_upgrades = NetworkUpgrade::iter().take(11);
     let full_activation_list_network_upgrades: Vec<_> = network
         .full_activation_list()
         .into_iter()
