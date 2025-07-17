@@ -796,8 +796,8 @@ impl Parameters {
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
-            pre_nu6_funding_streams,
-            post_nu6_funding_streams,
+            pre_nu6_funding_streams: _,
+            post_nu6_funding_streams: _,
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
@@ -809,8 +809,6 @@ impl Parameters {
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
-            && self.pre_nu6_funding_streams == pre_nu6_funding_streams
-            && self.post_nu6_funding_streams == post_nu6_funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends
