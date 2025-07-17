@@ -1,6 +1,6 @@
 # This GitHub Actions workflow automates deploying the Zebra Server to Amazon ECS.
 # It allows manual triggering with the ability to choose which image tag to deploy.
-# This version properly updates the task definition with the new image.
+# Because of the "force-new-deployment" flag, the ECS service will update to a new 'latest' image, if one was pushed.
 name: Deploy to Amazon ECS
 on:
   workflow_dispatch:
@@ -16,7 +16,7 @@ env:
   ECS_SERVICE: ${{ vars.ECS_SERVICE || 'dev-zebra' }}
   ECS_CLUSTER: ${{ vars.ECS_CLUSTER || 'dev-zebra-cluster' }}
   TASK_DEFINITION: ${{ vars.TASK_DEFINITION || 'dev-zebra-task' }}
-  CONTAINER_NAME: ${{ vars.CONTAINER_NAME || 'zebra-server' }}
+  CONTAINER_NAME: ${{ vars.CONTAINER_NAME || 'zebra-container' }}
 jobs:
   deploy-to-ecs:
     name: Deploy to ECS
