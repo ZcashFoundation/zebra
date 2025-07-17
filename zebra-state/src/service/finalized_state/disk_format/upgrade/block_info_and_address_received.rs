@@ -16,8 +16,9 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::finalized_state::disk_format::transparent::{
-        AddressBalanceLocationChange, AddressLocation,
+    service::finalized_state::{
+        disk_format::transparent::{AddressBalanceLocationChange, AddressLocation},
+        MAX_ON_DISK_HEIGHT,
     },
     DiskWriteBatch, HashOrHeight, TransactionLocation, WriteDisk,
 };
@@ -307,7 +308,7 @@ impl AddressBalanceLocationChange {
     /// for the rationale for using this dummy value.
     fn empty() -> Self {
         Self::new(AddressLocation::from_usize(
-            crate::MAX_ON_DISK_HEIGHT,
+            MAX_ON_DISK_HEIGHT,
             usize::MAX,
             usize::MAX,
         ))
