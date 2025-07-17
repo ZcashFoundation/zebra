@@ -2976,7 +2976,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let network = Network::new_regtest(
         ConfiguredActivationHeights {
-            nu7: Some(1),
+            nu5: Some(100),
             ..Default::default()
         }
         .into(),
