@@ -17,3 +17,35 @@ cache_dir = ""
 [network.testnet_parameters.activation_heights]
 NU5 = 290
 NU6 = 291
+
+[[network.testnet_parameters.pre_nu6_funding_streams.recipients]]
+receiver = "ECC"
+numerator = 7
+addresses = ["t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz"]
+
+[[network.testnet_parameters.pre_nu6_funding_streams.recipients]]
+receiver = "ZcashFoundation"
+numerator = 5
+addresses = ["t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"]
+
+[[network.testnet_parameters.pre_nu6_funding_streams.recipients]]
+receiver = "MajorGrants"
+numerator = 8
+addresses = ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"]
+
+[network.testnet_parameters.pre_nu6_funding_streams.height_range]
+start = 290
+end = 291
+
+[[network.testnet_parameters.post_nu6_funding_streams.recipients]]
+receiver = "MajorGrants"
+numerator = 8
+addresses = ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"]
+
+[[network.testnet_parameters.post_nu6_funding_streams.recipients]]
+receiver = "Deferred"
+numerator = 12
+
+[network.testnet_parameters.post_nu6_funding_streams.height_range]
+start = 291
+end = 293
