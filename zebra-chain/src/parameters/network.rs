@@ -143,6 +143,11 @@ impl std::fmt::Debug for Network {
             Self::Testnet(params) if params.is_regtest() => f
                 .debug_struct("Regtest")
                 .field("activation_heights", params.activation_heights())
+                .field("pre_nu6_funding_streams", params.pre_nu6_funding_streams())
+                .field(
+                    "post_nu6_funding_streams",
+                    params.post_nu6_funding_streams(),
+                )
                 .finish(),
             Self::Testnet(params) if params.is_default_testnet() => {
                 write!(f, "{self}")
