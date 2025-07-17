@@ -35,7 +35,7 @@ pub(crate) async fn submit_blocks_test() -> Result<()> {
 
     let network = Network::new_regtest(
         ConfiguredActivationHeights {
-            nu7: Some(1),
+            nu5: Some(100),
             ..Default::default()
         }
         .into(),
