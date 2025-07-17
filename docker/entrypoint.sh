@@ -45,7 +45,7 @@ prepare_conf_file() {
   #
   # We only set ZEBRA_NETWORK__NETWORK when NETWORK is explicitly provided,
   # allowing CI to override config files while preventing unintended overrides in other contexts
-  # Note: In test mode, ZebradConfig::load() prioritizes config files over environment variables
+  # Note: In test mode (TEST_MODE=1), ZebradConfig::load() prioritizes config files over environment variables
   if [[ -n "${NETWORK}" ]]; then
     export ZEBRA_NETWORK__NETWORK="${NETWORK}"
   fi

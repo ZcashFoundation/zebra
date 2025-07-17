@@ -106,7 +106,7 @@ impl ZebradConfig {
     /// 2. TOML config file
     /// 3. Environment variables (highest priority)
     ///
-    /// In test mode (when `ZEBRA_TEST_MODE=1`):
+    /// In test mode (when `TEST_MODE=1`):
     /// 1. Defaults (lowest priority)
     /// 2. Environment variables
     /// 3. TOML config file (highest priority)
@@ -119,7 +119,7 @@ impl ZebradConfig {
         let config_file_path = config_file_path.unwrap_or(default_config_file);
 
         // Check if we're in test mode
-        let is_test_mode = std::env::var("ZEBRA_TEST_MODE").unwrap_or_default() == "1";
+        let is_test_mode = std::env::var("TEST_MODE").unwrap_or_default() == "1";
 
         // Create base figment with layered configuration
         let mut figment = Figment::new().merge(Serialized::defaults(Self::default()));

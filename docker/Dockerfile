@@ -59,7 +59,7 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 FROM deps AS tests
 
 # Set test mode for configuration priority handling
-ENV ZEBRA_TEST_MODE=1
+ENV TEST_MODE=1
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG TESTS_ZEBRA_SKIP_IPV6

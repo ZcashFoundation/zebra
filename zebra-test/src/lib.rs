@@ -73,7 +73,7 @@ static INIT: Once = Once::new();
 #[must_use]
 pub fn init() -> impl Drop {
     // Set test mode environment variable
-    std::env::set_var("ZEBRA_TEST_MODE", "1");
+    std::env::set_var("TEST_MODE", "1");
 
     // Per-test
 
