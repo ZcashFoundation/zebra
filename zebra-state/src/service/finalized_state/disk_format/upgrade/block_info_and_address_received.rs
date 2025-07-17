@@ -293,8 +293,12 @@ impl DiskFormatUpgrade for Upgrade {
 }
 
 impl AddressBalanceLocationChange {
-    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and a dummy location.
+    /// Creates a new [`AddressBalanceLocationChange`] with all zero values and a dummy (all one bits) location.
     fn empty() -> Self {
-        Self::new(AddressLocation::from_usize(Height(0), 0, 0))
+        Self::new(AddressLocation::from_usize(
+            crate::MAX_ON_DISK_HEIGHT,
+            usize::MAX,
+            usize::MAX,
+        ))
     }
 }
