@@ -307,10 +307,9 @@ impl AddressBalanceLocationChange {
     /// a dummy (all one bits) location. See `AddressBalanceLocationInner::add()`
     /// for the rationale for using this dummy value.
     fn empty() -> Self {
-        Self::new(AddressLocation::from_usize(
-            MAX_ON_DISK_HEIGHT,
-            usize::MAX,
-            usize::MAX,
+        Self::new(AddressLocation::from_output_index(
+            TransactionLocation::from_index(MAX_ON_DISK_HEIGHT, u16::MAX),
+            u32::MAX,
         ))
     }
 }
