@@ -1,6 +1,8 @@
 //! Compile proto files
 use std::{env, fs, path::PathBuf, process::Command};
 
+const ZALLET_COMMIT: Option<&str> = None;
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let out_dir = env::var("OUT_DIR").map(PathBuf::from);
     tonic_build::configure()
@@ -15,7 +17,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Code below is fragile and will just build the main branch of the wallet repository
         // so we can have it available for `qa` regtests.
 
-        let build_dir = env::var("OUT_DIR").map(PathBuf::from).unwrap_or_default();
+        let build_dir = env::var("OUT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+            .join("zallet_build");
 
         let profile = "debug".to_string();
 
@@ -33,6 +38,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ])
             .status()
             .expect("failed to clone external binary");
+
+        if ZALLET_COMMIT.is_some() {
+            let _ = Command::new("git")
+                .args(["checkout", ZALLET_COMMIT.unwrap()])
+                .current_dir(&build_dir)
+                .status()
+                .expect("failed to build external binary");
+        }
 
         let _ = Command::new("cargo")
             .args(["build"])

@@ -28,14 +28,14 @@ class PoolsTest(BitcoinTestFramework):
 
     def setup_network(self):
         # Add pre and post NU6 funding streams to the node.
-        args = [[True] * self.num_nodes]
+        args = [True]
 
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, extra_args=args)
 
     def run_test(self):
 
         def get_value_pools(value_pools):
-            pools_by_id = { pool['id']: pool for pool in value_pools_from_getblock }
+            pools_by_id = { pool['id']: pool for pool in value_pools }
             return (pools_by_id['transparent'],
                     pools_by_id['sprout'],
                     pools_by_id['sapling'],
@@ -57,6 +57,16 @@ class PoolsTest(BitcoinTestFramework):
                     upgrades_by_name['NU5'],
                     upgrades_by_name['NU6'])
 
+        def assert_value_pools_equals(pool1,  pool2):
+            (transparent_pool1, sapling_pool1, sprout_pool1, orchard_pool1, deferred_pool1) = get_value_pools(pool1)
+            (transparent_pool2, sapling_pool2, sprout_pool2, orchard_pool2, deferred_pool2) = get_value_pools(pool1)
+
+            assert_equal(transparent_pool1['chainValue'], transparent_pool2['chainValue'])
+            assert_equal(sapling_pool1['chainValue'], sapling_pool2['chainValue'])
+            assert_equal(sprout_pool1['chainValue'], sprout_pool2['chainValue'])
+            assert_equal(orchard_pool1['chainValue'], orchard_pool2['chainValue'])
+            assert_equal(deferred_pool1['chainValue'], deferred_pool2['chainValue'])
+
         print("Initial Conditions at Block 0")
 
         # Check all value pools are empty
@@ -73,7 +83,7 @@ class PoolsTest(BitcoinTestFramework):
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
-        assert_equal(get_value_pools(value_pools_from_getblock), get_value_pools(value_pools_from_getblockchaininfo))
+        assert_value_pools_equals(value_pools_from_getblock, value_pools_from_getblockchaininfo)
 
         # Check the network upgrades are all pending
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
@@ -103,7 +113,7 @@ class PoolsTest(BitcoinTestFramework):
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
-        assert_equal(get_value_pools(value_pools_from_getblock), get_value_pools(value_pools_from_getblockchaininfo))
+        assert_value_pools_equals(value_pools_from_getblock, value_pools_from_getblockchaininfo)
 
         # Check the network upgrades up to Canopy are active
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
@@ -119,7 +129,7 @@ class PoolsTest(BitcoinTestFramework):
         print("Activating NU5 at Block 290")
         self.nodes[0].generate(289)
 
-        # chjeck that the only value pool with value is still the transparent and nothing else
+        # Check that the only value pool with value is still the transparent and nothing else
         value_pools_from_getblock = self.nodes[0].getblock('290')['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblock)
 
@@ -133,7 +143,7 @@ class PoolsTest(BitcoinTestFramework):
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
-        assert_equal(get_value_pools(value_pools_from_getblock), get_value_pools(value_pools_from_getblockchaininfo))
+        assert_value_pools_equals(value_pools_from_getblock, value_pools_from_getblockchaininfo)
 
         # Check that NU5 is now active
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
@@ -152,6 +162,7 @@ class PoolsTest(BitcoinTestFramework):
         assert_equal(block_subsidy['founders'], Decimal('0'))
         assert_equal(block_subsidy['fundingstreamstotal'], Decimal('0.625'))
         assert_equal(block_subsidy['lockboxtotal'], Decimal('0'))
+        print(block_subsidy)
         assert_equal(block_subsidy['totalblocksubsidy'], Decimal('3.125'))
 
         print("Activating NU6")
@@ -171,7 +182,7 @@ class PoolsTest(BitcoinTestFramework):
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
-        assert_equal(get_value_pools(value_pools_from_getblock), get_value_pools(value_pools_from_getblockchaininfo))
+        assert_value_pools_equals(value_pools_from_getblock, value_pools_from_getblockchaininfo)
 
         # Check all upgrades up to NU6 are active
         (overwinter, sapling, blossom, heartwood, canopy, nu5, nu6) = get_network_upgrades(getblockchaininfo)
@@ -209,7 +220,7 @@ class PoolsTest(BitcoinTestFramework):
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
-        assert_equal(get_value_pools(value_pools_from_getblock), get_value_pools(value_pools_from_getblockchaininfo))
+        assert_value_pools_equals(value_pools_from_getblock, value_pools_from_getblockchaininfo)
 
         print("Pass the range of the lockbox, tip now at Block 294")
         self.nodes[0].generate(2)
@@ -228,7 +239,7 @@ class PoolsTest(BitcoinTestFramework):
         value_pools_from_getblockchaininfo = getblockchaininfo['valuePools']
         (transparent_pool, sapling_pool, sprout_pool, orchard_pool, deferred_pool) = get_value_pools(value_pools_from_getblockchaininfo)
 
-        assert_equal(get_value_pools(value_pools_from_getblock), get_value_pools(value_pools_from_getblockchaininfo))
+        assert_value_pools_equals(value_pools_from_getblock, value_pools_from_getblockchaininfo)
 
         # Check there are no fundingstreams or lockbox rewards after the range
         block_subsidy = self.nodes[0].getblocksubsidy()
