@@ -111,8 +111,13 @@ impl ZebradConfig {
     /// 2. Environment variables
     /// 3. TOML config file (highest priority)
     ///
+    /// Test mode is enabled for:
+    /// - Unit/integration tests via `zebra_test::init()`
+    /// - Cargo test runs in Docker via entrypoint script
+    ///
     /// This ensures that test configurations are not accidentally overridden
-    /// by environment variables set in Docker or CI environments.
+    /// by environment variables, while allowing CI tests that run zebrd directly
+    /// to use normal environment variable override behavior.
     pub fn load(config_file_path: Option<PathBuf>) -> Result<Self, Error> {
         let default_config_file = Self::default_config_path();
 

@@ -155,30 +155,27 @@ create_owned_directory() {
 
 # Runs cargo test with an arbitrary number of arguments.
 #
-# Positional Parameters
+# ## Positional Parameters
 #
-# - '$1' must contain cargo FEATURES as described here:
-#   https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options
-# - The remaining params will be appended to a command starting with
+# - $1: `features` cargo test features to use
+# - $2..$n: Arguments to pass to the cargo test command.
+#
+# ## Example
+#
+#   `run_cargo_test "${FEATURES}" "sync_large_checkpoints_"`
+#
+# Will run:
 #   `exec_as_user cargo test ... -- ...`
 run_cargo_test() {
-  # Shift the first argument, as it's already included in the cmd
-  local features="$1"
-  shift
+  # Set test mode for cargo test runs
+  export TEST_MODE=1
 
-  # Start constructing the command array
+  local features="$1"; shift
   local cmd=(cargo test --locked --release --features "${features}" --package zebrad --test acceptance -- --nocapture --include-ignored)
 
-  # Loop through the remaining arguments
-  for arg in "$@"; do
-    if [[ -n ${arg} ]]; then
-      # If the argument is non-empty, add it to the command
-      cmd+=("${arg}")
-    fi
-  done
+  # Add the passed arguments to the command
+  cmd+=("$@")
 
-  echo "Running: ${cmd[*]}"
-  # Execute directly to become PID 1
   exec_as_user "${cmd[@]}"
 }
 
@@ -188,6 +185,9 @@ run_cargo_test() {
 #
 # - $@: Arbitrary command that will be executed if no test env var is set.
 run_tests() {
+  # Set test mode only for actual test runs
+  export TEST_MODE=1
+
   if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
