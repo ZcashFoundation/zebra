@@ -23,7 +23,9 @@ class ReindexTest(BitcoinTestFramework):
     def setup_network(self):
         self.nodes = []
         self.is_network_split = False
-        self.nodes.append(start_node(0, self.options.tmpdir))
+        args = [False]
+
+        self.nodes.append(start_node(0, self.options.tmpdir, args))
 
     def reindex(self, justchainstate=False):
         # When zebra reindexes, it will only do it up to the finalized chain height. 

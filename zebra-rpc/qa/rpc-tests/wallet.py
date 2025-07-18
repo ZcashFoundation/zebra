@@ -18,7 +18,8 @@ class WalletTest (BitcoinTestFramework):
         self.num_nodes = 4
 
     def setup_network(self, split=False):
-        self.nodes = start_nodes(3, self.options.tmpdir)
+        args = [[False] * self.num_nodes]
+        self.nodes = start_nodes(3, self.options.tmpdir, args)
 
         connect_nodes_bi(self.nodes,0,1)
         connect_nodes_bi(self.nodes,1,2)
