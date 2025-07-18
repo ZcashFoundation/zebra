@@ -431,7 +431,7 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
-        mut address_balances: HashMap<transparent::Address, AddressBalanceLocationChange>,
+        mut address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let db = &zebra_db.db;
         let FinalizedBlock { block, height, .. } = finalized;
@@ -489,7 +489,7 @@ impl DiskWriteBatch {
         db: &DiskDb,
         network: &Network,
         new_outputs_by_out_loc: &BTreeMap<OutputLocation, transparent::Utxo>,
-        address_balances: &mut HashMap<transparent::Address, AddressBalanceLocationChange>,
+        address_balances: &mut HashMap<transparent::Address, AddressBalanceLocation>,
     ) -> Result<(), BoxError> {
         let utxo_by_out_loc = db.cf_handle("utxo_by_out_loc").unwrap();
         let utxo_loc_by_transparent_addr_loc =
@@ -513,7 +513,7 @@ impl DiskWriteBatch {
                 //   (the first location of the address in the chain).
                 let address_balance_location = address_balances
                     .entry(receiving_address)
-                    .or_insert_with(|| AddressBalanceLocationChange::new(*new_output_location));
+                    .or_insert_with(|| AddressBalanceLocation::new(*new_output_location));
                 let receiving_address_location = address_balance_location.address_location();
 
                 // Update the balance for the address in memory.

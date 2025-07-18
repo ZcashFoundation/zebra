@@ -37,7 +37,7 @@ use crate::{
         disk_db::{DiskDb, DiskWriteBatch, ReadDisk, WriteDisk},
         disk_format::{
             block::TransactionLocation,
-            transparent::{AddressBalanceLocationChange, OutputLocation},
+            transparent::{AddressBalanceLocation, AddressBalanceLocationChange, OutputLocation},
         },
         zebra_db::{metrics::block_precommit_metrics, ZebraDb},
         FromDisk, RawBytes,
@@ -517,7 +517,7 @@ impl ZebraDb {
             .collect();
 
         // Get the current address balances, before the transactions in this block
-        let address_balances: HashMap<transparent::Address, AddressBalanceLocationChange> =
+        let address_balances: HashMap<transparent::Address, AddressBalanceLocation> =
             changed_addresses
                 .into_iter()
                 .filter_map(|address| {
@@ -525,7 +525,7 @@ impl ZebraDb {
                     //
                     // Address balances are updated with the `fetch_add_balance_and_received` merge operator, so
                     // the values must represent the changes to the balance, not the final balance.
-                    let addr_loc = self.address_balance_location(&address)?.into_new_change();
+                    let addr_loc = self.address_balance_location(&address)?;
                     Some((address.clone(), addr_loc))
                 })
                 .collect();
@@ -602,7 +602,7 @@ impl DiskWriteBatch {
             transparent::OutPoint,
             OutputLocation,
         >,
-        address_balances: HashMap<transparent::Address, AddressBalanceLocationChange>,
+        address_balances: HashMap<transparent::Address, AddressBalanceLocation>,
         value_pool: ValueBalance<NonNegative>,
         prev_note_commitment_trees: Option<NoteCommitmentTrees>,
     ) -> Result<(), BoxError> {

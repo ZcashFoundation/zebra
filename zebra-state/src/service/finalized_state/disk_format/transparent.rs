@@ -240,14 +240,23 @@ impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLoc
 
 /// Represents a change in the [`AddressBalanceLocation`] of a transparent address
 /// in the finalized state.
-pub struct AddressBalanceLocationChange(AddressBalanceLocationInner<NegativeAllowed>);
+pub struct AddressBalanceLocationChange {
+    /// The total balance of all UTXOs sent to an address.
+    balance: Amount<NegativeAllowed>,
+
+    /// The total balance of all spent and unspent outputs sent to an address.
+    received: u64,
+}
 
 impl AddressBalanceLocationChange {
     /// Creates a new [`AddressBalanceLocationChange`].
     ///
     /// See [`AddressBalanceLocationInner::new`] for more details.
-    pub fn new(location: AddressLocation) -> Self {
-        Self(AddressBalanceLocationInner::new(location))
+    pub fn new() -> Self {
+        Self {
+            balance: Amount::zero(),
+            received: 0,
+        }
     }
 
     /// Updates the current balance by adding the supplied output's value.
@@ -281,19 +290,25 @@ impl AddressBalanceLocationChange {
 
         Ok(())
     }
-}
 
-impl std::ops::Deref for AddressBalanceLocationChange {
-    type Target = AddressBalanceLocationInner<NegativeAllowed>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    /// Returns the current balance for the address.
+    pub fn balance(&self) -> Amount<NegativeAllowed> {
+        self.balance
     }
-}
 
-impl std::ops::DerefMut for AddressBalanceLocationChange {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+    /// Returns the current received balance for the address.
+    pub fn received(&self) -> u64 {
+        self.received
+    }
+
+    /// Returns a mutable reference to the current balance for the address.
+    pub fn balance_mut(&mut self) -> &mut Amount<NegativeAllowed> {
+        &mut self.balance
+    }
+
+    /// Returns a mutable reference to the current received balance for the address.
+    pub fn received_mut(&mut self) -> &mut u64 {
+        &mut self.received
     }
 }
 
@@ -301,7 +316,10 @@ impl std::ops::Add for AddressBalanceLocationChange {
     type Output = Result<Self, amount::Error>;
 
     fn add(self, rhs: Self) -> Self::Output {
-        (self.0 + rhs.0).map(Self)
+        (self.balance + rhs.balance).map(|balance| Self {
+            balance,
+            received: self.received + rhs.received,
+        })
     }
 }
 
@@ -327,12 +345,6 @@ impl AddressBalanceLocation {
     /// See [`AddressBalanceLocationInner::new`] for more details.
     pub fn new(first_output: OutputLocation) -> Self {
         Self(AddressBalanceLocationInner::new(first_output))
-    }
-
-    /// Consumes self and returns a new [`AddressBalanceLocationChange`] with
-    /// a zero balance, zero received balance, and the `location` of `self`.
-    pub fn into_new_change(self) -> AddressBalanceLocationChange {
-        AddressBalanceLocationChange::new(self.location)
     }
 }
 
@@ -745,10 +757,13 @@ impl IntoDisk for AddressBalanceLocation {
 }
 
 impl IntoDisk for AddressBalanceLocationChange {
-    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
+    type Bytes = [u8; BALANCE_DISK_BYTES + size_of::<u64>()];
 
     fn as_bytes(&self) -> Self::Bytes {
-        self.0.as_bytes()
+        let balance_bytes = self.balance().as_bytes().to_vec();
+        let received_bytes = self.received().to_le_bytes().to_vec();
+
+        [balance_bytes, received_bytes].concat().try_into().unwrap()
     }
 }
 
@@ -781,7 +796,17 @@ impl FromDisk for AddressBalanceLocation {
 
 impl FromDisk for AddressBalanceLocationChange {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        Self(AddressBalanceLocationInner::from_bytes(disk_bytes))
+        let (balance_bytes, rest) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+        let (received_bytes, _) = rest.split_at_checked(size_of::<u64>()).unwrap_or_default();
+
+        let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
+        let received = u64::from_le_bytes(received_bytes.try_into().unwrap_or_default());
+
+        let mut address_balance_change = Self::new();
+        *address_balance_change.balance_mut() = balance;
+        *address_balance_change.received_mut() = received;
+
+        address_balance_change
     }
 }
 
