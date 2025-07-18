@@ -883,7 +883,7 @@ mod submitblock_test {
             .in_current_span(),
         );
 
-        // Send a block top the channel
+        // Send a block to the channel
         submitblock_channel
             .sender()
             .send((block::Hash([1; 32]), block::Height(1)))
