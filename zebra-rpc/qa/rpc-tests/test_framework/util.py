@@ -213,7 +213,7 @@ def initialize_datadir(dirname, n, clock_offset=0):
 
     return datadir
 
-def update_zebrad_conf(datadir, rpc_port, p2p_port):
+def update_zebrad_conf(datadir, rpc_port, p2p_port, funding_streams=False):
     import toml
 
     config_path = zebrad_config(datadir)
@@ -224,6 +224,54 @@ def update_zebrad_conf(datadir, rpc_port, p2p_port):
     config_file['rpc']['listen_addr'] = '127.0.0.1:'+str(rpc_port)
     config_file['network']['listen_addr'] = '127.0.0.1:'+str(p2p_port)
     config_file['state']['cache_dir'] = datadir
+
+    # TODO: Add More config options. zcashd uses extra arguments to pass options
+    # to the binary, but zebrad uses a config file.
+    # We want to make the config accept different options.
+    # For now, we hardcode the funding streams to be enabled.
+    if funding_streams == True:
+        config_file['network']['testnet_parameters']['pre_nu6_funding_streams'] = {
+            'recipients': [
+                {
+                    'receiver': 'ECC',
+                    'numerator': 7,
+                    'addresses': ['t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz']
+                },
+                {
+                    'receiver': 'ZcashFoundation',
+                    'numerator': 5,
+                    'addresses': ['t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v']
+                },
+                {
+                    'receiver': 'MajorGrants',
+                    'numerator': 8,
+                    'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
+                },
+            ],
+            'height_range': {
+                'start': 290,
+                'end': 291
+            }
+        }
+
+        config_file['network']['testnet_parameters']['post_nu6_funding_streams'] = {
+            'recipients': [
+                {
+                    'receiver': 'MajorGrants',
+                    'numerator': 8,
+                    'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
+                },
+                {
+                    'receiver': 'Deferred',
+                    'numerator': 12
+                    # No addresses field is valid for Deferred
+                }
+            ],
+            'height_range': {
+                'start': 291,
+                'end': 293
+            }
+        }
 
     with open(config_path, 'w') as f:
         toml.dump(config_file, f)
@@ -529,10 +577,10 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
     if binary is None:
         binary = zcashd_binary()
 
-    config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
+    config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), funding_streams = extra_args[i])
     args = [ binary, "-c="+config, "start" ]
 
-    if extra_args is not None: args.extend(extra_args)
+    #if extra_args is not None: args.extend(extra_args)
     bitcoind_processes[i] = subprocess.Popen(args, stderr=stderr)
     if os.getenv("PYTHON_DEBUG", ""):
         print("start_node: bitcoind started, waiting for RPC to come up")

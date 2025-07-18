@@ -27,7 +27,10 @@ class PoolsTest(BitcoinTestFramework):
         self.cache_behavior = 'clean'
 
     def setup_network(self):
-        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir)
+        # Add pre and post NU6 funding streams to the node.
+        args = [[True] * self.num_nodes]
+
+        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, extra_args=args)
 
     def run_test(self):
 
