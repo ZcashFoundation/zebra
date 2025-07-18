@@ -577,7 +577,10 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
     if binary is None:
         binary = zcashd_binary()
 
-    config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), funding_streams = extra_args[i])
+    if extra_args is not None:
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), funding_streams = extra_args[i])
+    else:
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
     args = [ binary, "-c="+config, "start" ]
 
     #if extra_args is not None: args.extend(extra_args)
@@ -623,7 +626,7 @@ def start_nodes(num_nodes, dirname, extra_args=None, rpchost=None, binary=None):
     rpcs = []
     try:
         for i in range(num_nodes):
-            rpcs.append(start_node(i, dirname, extra_args[i], rpchost, binary=binary[i]))
+            rpcs.append(start_node(i, dirname, extra_args, rpchost, binary=binary[i]))
     except: # If one node failed to start, stop the others
         stop_nodes(rpcs)
         raise
@@ -922,7 +925,7 @@ def update_zallet_conf(datadir, validator_port, zallet_port):
     config_file['rpc']['bind'][0] = '127.0.0.1:'+str(zallet_port)
     config_file['indexer']['validator_address'] = '127.0.0.1:'+str(validator_port)
 
-    config_file['wallet_db'] = os.path.join(datadir, 'datadir/data.sqlite')
+    config_file['database']['wallet'] = os.path.join(datadir, 'datadir/data.sqlite')
     config_file['indexer']['db_path'] = os.path.join(datadir, 'datadir/zaino')
     config_file['keystore']['identity'] = os.path.join(datadir, 'datadir/identity.txt')
 
