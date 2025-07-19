@@ -5,11 +5,11 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, path::PathBuf, time::Duration};
+use std::time::Duration;
 
 use tempfile::TempDir;
 
-use zebra_chain::{block::Height, parameters::Network};
+use zebra_chain::{block::Height, common::default_cache_dir, parameters::Network};
 use zebrad::{components::sync, config::ZebradConfig};
 
 use zebra_test::{args, prelude::*};
@@ -172,7 +172,7 @@ impl MempoolBehavior {
 /// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
 /// If your test environment does not have network access, skip
-/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// this test by setting the `TESTS_ZEBRA_SKIP_NETWORK` env var.
 ///
 /// # Test Status
 ///
@@ -326,20 +326,15 @@ pub fn check_sync_logs_until(
     Ok(zebrad)
 }
 
-/// Returns the cache directory for Zebra's state.
-///
-/// It checks the `ZEBRA_CACHE_DIR` environment variable and returns its value if set.
-/// Otherwise, it defaults to `"/zebrad-cache"`.
-fn get_zebra_cached_state_dir() -> PathBuf {
-    env::var("ZEBRA_CACHE_DIR")
-        .unwrap_or_else(|_| "/zebrad-cache".to_string())
-        .into()
-}
-
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.
 pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<ZebradConfig> {
     let mut config = persistent_test_config(network)?;
-    config.state.cache_dir = get_zebra_cached_state_dir();
+
+    // If the cache dir is the default, and we're in a test that needs a
+    // cached state, override it with the specific test cache dir.
+    if config.state.cache_dir == default_cache_dir() {
+        config.state.cache_dir = "/zebrad-cache".into();
+    }
 
     // To get to the mandatory checkpoint, we need to sync lots of blocks.
     // (Most tests use a smaller limit to minimise redundant block downloads.)
@@ -365,7 +360,7 @@ pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<Zebr
 /// Typically this is `STOP_AT_HEIGHT_REGEX`,
 /// with an extra check for checkpoint or full validation.
 ///
-/// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// This test ignores the `TESTS_ZEBRA_SKIP_NETWORK` env var.
 ///
 /// # Test Status
 ///
@@ -387,7 +382,7 @@ pub fn create_cached_database_height(
     config.state.debug_stop_at_height = Some(height.0);
     config.consensus.checkpoint_sync = checkpoint_sync;
 
-    let dir = get_zebra_cached_state_dir();
+    let dir = config.state.cache_dir.clone();
     let mut child = dir
         .with_exact_config(&config)?
         .spawn_child(args!["start"])?

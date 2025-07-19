@@ -41,7 +41,7 @@ pub mod wallet_grpc_test;
 ///
 /// This environmental variable is used to enable the lightwalletd tests.
 /// But the network tests are *disabled* by their environmental variables.
-pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
+pub const TESTS_ZEBRA_LIGHTWALLETD: &str = "TESTS_ZEBRA_LIGHTWALLETD";
 
 /// Optional environment variable with the cached state for lightwalletd.
 ///
@@ -60,12 +60,12 @@ pub fn zebra_skip_lightwalletd_tests() -> bool {
     //
     // See is_command_available() in zebra-test/src/tests/command.rs for one way to do this.
 
-    if env::var_os(ZEBRA_TEST_LIGHTWALLETD).is_none() {
+    if env::var_os(TESTS_ZEBRA_LIGHTWALLETD).is_none() {
         // This message is captured by the test runner, use
         // `cargo test -- --nocapture` to see it.
         eprintln!(
             "Skipped lightwalletd integration test, \
-             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
+             set the 'TESTS_ZEBRA_LIGHTWALLETD' environmental variable to run the test",
         );
         return true;
     }
