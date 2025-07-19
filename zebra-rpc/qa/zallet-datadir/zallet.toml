@@ -32,7 +32,7 @@ validator_password = ".."
 db_path = "zaino"
 
 [keystore]
-identity = "identity.txt"
+encryption_identity = "identity.txt"
 
 [note_management]
 
