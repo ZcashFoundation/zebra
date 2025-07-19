@@ -14,7 +14,7 @@ use std::{path::Path, sync::Arc};
 use crossbeam_channel::bounded;
 use semver::Version;
 
-use zebra_chain::{diagnostic::task::WaitForPanics, parameters::Network};
+use zebra_chain::{block::Height, diagnostic::task::WaitForPanics, parameters::Network};
 
 use crate::{
     config::database_format_version_on_disk,
@@ -22,6 +22,7 @@ use crate::{
         disk_db::DiskDb,
         disk_format::{
             block::MAX_ON_DISK_HEIGHT,
+            transparent::AddressLocation,
             upgrade::{DbFormatChange, DbFormatChangeThreadHandle},
         },
     },
@@ -138,6 +139,17 @@ impl ZebraDb {
                 read_only,
             ),
         };
+
+        let zero_location_utxos =
+            db.address_utxo_locations(AddressLocation::from_usize(Height(0), 0, 0));
+        if !zero_location_utxos.is_empty() {
+            warn!(
+                "You have been impacted by the Zebra 2.4.0 address indexer corruption bug. \
+                If you rely on the data from the RPC interface, you will need to recover your database. \
+                Follow the instructions in the 2.4.1 release notes: https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.1 \
+                If you just run the node for consensus and don't use data from the RPC interface, you can ignore this warning."
+            )
+        }
 
         db.spawn_format_change(format_change);
 
