@@ -927,7 +927,7 @@ def update_zallet_conf(datadir, validator_port, zallet_port):
 
     config_file['database']['wallet'] = os.path.join(datadir, 'datadir/data.sqlite')
     config_file['indexer']['db_path'] = os.path.join(datadir, 'datadir/zaino')
-    config_file['keystore']['identity'] = os.path.join(datadir, 'datadir/identity.txt')
+    config_file['keystore']['encryption_identity'] = os.path.join(datadir, 'datadir/identity.txt')
 
     with open(config_path, 'w') as f:
         toml.dump(config_file, f)
