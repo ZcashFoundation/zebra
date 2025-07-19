@@ -147,7 +147,7 @@ jobs:
   get-disk-name:
     name: Get disk name
     uses: ./.github/workflows/sub-find-cached-disks.yml
-    if: ${{ (github.event_name != 'release' && !(github.event.pull_request.head.repo.fork)) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
+    if: ${{ !(github.event.pull_request.head.repo.fork) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       disk_prefix: zebrad-cache
