@@ -358,13 +358,13 @@ pub enum BlockError {
     WrongTransactionConsensusBranchId,
 
     #[error(
-        "block {height:?} {hash:?} has {legacy_sigop_count} legacy transparent signature operations, \
+        "block {height:?} {hash:?} has {sigops} legacy transparent signature operations, \
          but the limit is {MAX_BLOCK_SIGOPS}"
     )]
     TooManyTransparentSignatureOperations {
         height: zebra_chain::block::Height,
         hash: zebra_chain::block::Hash,
-        legacy_sigop_count: u64,
+        sigops: u32,
     },
 
     #[error("summing miner fees for block {height:?} {hash:?} failed: {source:?}")]

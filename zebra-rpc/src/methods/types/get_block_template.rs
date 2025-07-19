@@ -159,7 +159,7 @@ pub struct BlockTemplateResponse {
 
     /// Max legacy signature operations in the block.
     #[serde(rename = "sigoplimit")]
-    pub(crate) sigop_limit: u64,
+    pub(crate) sigop_limit: u32,
 
     /// Max block size in bytes
     #[serde(rename = "sizelimit")]

@@ -18,6 +18,7 @@ use zebra_chain::{
     transparent::Script,
 };
 use zebra_consensus::groth16::Description;
+use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
 use super::super::opthex;
@@ -62,7 +63,7 @@ where
     pub(crate) fee: Amount<FeeConstraint>,
 
     /// The number of transparent signature operations in this transaction.
-    pub(crate) sigops: u64,
+    pub(crate) sigops: u32,
 
     /// Is this transaction required in the block?
     ///
@@ -92,7 +93,7 @@ impl From<&VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 
             fee: tx.miner_fee,
 
-            sigops: tx.legacy_sigop_count,
+            sigops: tx.sigops,
 
             // Zebra does not require any transactions except the coinbase transaction.
             required: false,
@@ -123,11 +124,6 @@ impl TransactionTemplate<NegativeOrZero> {
             .constrain()
             .expect("negating a NonNegative amount always results in a valid NegativeOrZero");
 
-        let legacy_sigop_count = zebra_script::legacy_sigop_count(&tx.transaction).expect(
-            "invalid generated coinbase transaction: \
-                 failure in zcash_script sigop count",
-        );
-
         Self {
             data: tx.transaction.as_ref().into(),
             hash: tx.id.mined_id(),
@@ -138,7 +134,7 @@ impl TransactionTemplate<NegativeOrZero> {
 
             fee: miner_fee,
 
-            sigops: legacy_sigop_count,
+            sigops: tx.sigops().expect("sigops count should be valid"),
 
             // Zcash requires a coinbase transaction.
             required: true,
