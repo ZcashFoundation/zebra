@@ -198,13 +198,6 @@ pub trait With<T> {
     fn with(self, _: T) -> Self;
 }
 
-impl<S> With<Cookie> for HttpRequestMiddleware<S> {
-    fn with(mut self, cookie: Cookie) -> Self {
-        self.cookie = Some(cookie);
-        self
-    }
-}
-
 impl<S> Service<HttpRequest<HttpBody>> for HttpRequestMiddleware<S>
 where
     S: Service<HttpRequest, Response = HttpResponse> + std::clone::Clone + Send + 'static,
