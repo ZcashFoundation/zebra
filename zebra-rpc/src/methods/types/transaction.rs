@@ -132,7 +132,7 @@ impl TransactionTemplate<NegativeOrZero> {
         miner_params: &MinerParams,
         mempool_txs: &[VerifiedUnminedTx],
         #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    ) -> Result<Self, TransactionError> {
         let block_subsidy = block_subsidy(height, net)?;
 
         let miner_fee = mempool_txs
@@ -210,9 +210,13 @@ impl TransactionTemplate<NegativeOrZero> {
 
             Address::Transparent(addr) => add_transparent_reward(&mut builder, addr),
 
-            _ => Err("Address type not supported for miner reward output")?,
+            _ => Err(TransactionError::CoinbaseConstruction(
+                "Address not supported for miner rewards".to_string(),
+            ))?,
         }
-        .ok_or("Could not add output with miner reward")?;
+        .ok_or(TransactionError::CoinbaseConstruction(
+            "Could not construct output with miner reward".to_string(),
+        ))?;
 
         let mut funding_streams = funding_stream_values(height, net, block_subsidy)?
             .into_iter()
