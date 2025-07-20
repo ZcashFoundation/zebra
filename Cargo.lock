@@ -7509,6 +7509,7 @@ dependencies = [
 name = "zebra-rpc"
 version = "6.0.1"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "chrono",
  "color-eyre",
@@ -7523,6 +7524,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-proc-macros",
  "jsonrpsee-types",
+ "lazy_static",
  "metrics",
  "nix",
  "openrpsee",
@@ -7537,6 +7539,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "strum",
+ "strum_macros",
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
@@ -7680,6 +7684,7 @@ name = "zebrad"
 version = "4.3.0"
 dependencies = [
  "abscissa_core",
+ "anyhow",
  "atty",
  "bytes",
  "chrono",
@@ -7722,6 +7727,8 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "tempfile",
  "thiserror 2.0.18",
  "thread-priority",
