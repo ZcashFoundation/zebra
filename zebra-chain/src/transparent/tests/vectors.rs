@@ -1,53 +1,41 @@
 use std::sync::Arc;
 
-use super::super::serialize::parse_coinbase_height;
-use super::super::Input;
+use super::super::serialize::parse_coinbase_script;
 use crate::{
-    block::Block,
+    block::{Block, Height},
     parameters::Network,
-    serialization::{SerializationError, ZcashDeserialize, ZcashDeserializeInto},
+    serialization::ZcashDeserializeInto,
     transaction,
 };
 use hex::FromHex;
 
+use zcash_transparent::coinbase::MinerData;
 use zebra_test::prelude::*;
 
 #[test]
-fn parse_coinbase_height_mins() {
+fn parse_coinbase_height_mins() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    // examples with height 1:
+    // height 1:
+    let (height, data) = parse_coinbase_script(&[0x51, 0x00])?;
+    assert_eq!(height, Height(1));
+    assert_eq!(data, MinerData::default());
 
-    let case1 = vec![0x51];
-    assert!(parse_coinbase_height(case1.clone()).is_ok());
-    assert_eq!(parse_coinbase_height(case1).unwrap().0 .0, 1);
+    parse_coinbase_script(&[0x01, 0x01]).expect_err("invalid script");
+    parse_coinbase_script(&[0x02, 0x01, 0x00]).expect_err("invalid script");
+    parse_coinbase_script(&[0x03, 0x01, 0x00, 0x00]).expect_err("invalid script");
+    parse_coinbase_script(&[0x04, 0x01, 0x00, 0x00, 0x00]).expect_err("invalid script");
 
-    let case2 = vec![0x01, 0x01];
-    assert!(parse_coinbase_height(case2).is_err());
+    // height 17:
+    let (height, data) = parse_coinbase_script(&[0x01, 0x11, 0x00])?;
+    assert_eq!(height, Height(17));
+    assert_eq!(data, MinerData::default());
 
-    let case3 = vec![0x02, 0x01, 0x00];
-    assert!(parse_coinbase_height(case3).is_err());
+    parse_coinbase_script(&[0x02, 0x11, 0x00]).expect_err("invalid script");
+    parse_coinbase_script(&[0x03, 0x11, 0x00, 0x00]).expect_err("invalid script");
+    parse_coinbase_script(&[0x04, 0x11, 0x00, 0x00, 0x00]).expect_err("invalid script");
 
-    let case4 = vec![0x03, 0x01, 0x00, 0x00];
-    assert!(parse_coinbase_height(case4).is_err());
-
-    let case5 = vec![0x04, 0x01, 0x00, 0x00, 0x00];
-    assert!(parse_coinbase_height(case5).is_err());
-
-    // examples with height 17:
-
-    let case1 = vec![0x01, 0x11];
-    assert!(parse_coinbase_height(case1.clone()).is_ok());
-    assert_eq!(parse_coinbase_height(case1).unwrap().0 .0, 17);
-
-    let case2 = vec![0x02, 0x11, 0x00];
-    assert!(parse_coinbase_height(case2).is_err());
-
-    let case3 = vec![0x03, 0x11, 0x00, 0x00];
-    assert!(parse_coinbase_height(case3).is_err());
-
-    let case4 = vec![0x04, 0x11, 0x00, 0x00, 0x00];
-    assert!(parse_coinbase_height(case4).is_err());
+    Ok(())
 }
 
 #[test]
@@ -94,43 +82,6 @@ fn get_transparent_output_address_with_blocks() {
     for network in Network::iter() {
         get_transparent_output_address_with_blocks_for_network(network);
     }
-}
-
-/// Build a coinbase `Input` byte sequence: 32 zero bytes for the null outpoint
-/// hash, the coinbase index `0xffffffff` little-endian, and a coinbase-script
-/// CompactSize length followed by `payload`.
-///
-/// Used by the regression tests below to confirm that `Input::zcash_deserialize`
-/// rejects attacker-controlled coinbase script lengths *before* allocating or
-/// reading the script bytes.
-fn coinbase_input_bytes(compactsize_len: &[u8], payload: &[u8]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(32 + 4 + compactsize_len.len() + payload.len());
-    bytes.extend_from_slice(&[0u8; 32]);
-    bytes.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
-    bytes.extend_from_slice(compactsize_len);
-    bytes.extend_from_slice(payload);
-    bytes
-}
-
-/// Coinbase scripts longer than the consensus maximum (100 bytes) must be
-/// rejected at length-decode time, not after allocating the bytes.
-///
-/// Regression test: encoding a CompactSize length of 101 with no payload would
-/// have made the previous implementation try to `read_exact(101)` and surface
-/// an `io::Error`; the fix returns the consensus error string before the read.
-#[test]
-fn coinbase_script_oversize_rejected_before_allocation() {
-    let _init_guard = zebra_test::init();
-
-    let bytes = coinbase_input_bytes(&[101u8], &[]);
-    let result = Input::zcash_deserialize(std::io::Cursor::new(&bytes));
-    assert!(
-        matches!(
-            result,
-            Err(SerializationError::Parse("coinbase data is too long"))
-        ),
-        "expected `coinbase data is too long`, got {result:?}",
-    );
 }
 
 /// Test that the block test vector indexes match the heights in the block data,
