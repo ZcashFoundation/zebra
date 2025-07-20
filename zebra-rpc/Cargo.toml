@@ -51,6 +51,10 @@ serde_with = { workspace = true, features = ["hex"] }
 indexmap = { workspace = true, features = ["serde"] }
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 derive-new = { workspace = true }
+thiserror = { workspace = true }
+lazy_static = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # RPC endpoint basic auth
 base64 = { workspace = true }
@@ -106,10 +110,9 @@ tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
-
+anyhow = { workspace = true }
 proptest = { workspace = true }
 
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = [
