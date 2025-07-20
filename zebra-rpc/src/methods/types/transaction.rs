@@ -38,8 +38,8 @@ use zebra_chain::{
 use zebra_script::Sigops;
 use zebra_state::IntoDisk;
 
-use super::super::opthex;
 use super::zec::Zec;
+use super::{super::opthex, get_block_template::MinerParams};
 
 /// Transaction data and fields needed to generate blocks using the `getblocktemplate` RPC.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
@@ -129,9 +129,7 @@ impl TransactionTemplate<NegativeOrZero> {
     pub fn new_coinbase(
         net: &Network,
         height: Height,
-        miner_addr: &Address,
-        miner_data: Vec<u8>,
-        miner_memo: Option<MemoBytes>,
+        miner_params: &MinerParams,
         mempool_txs: &[VerifiedUnminedTx],
         #[cfg(feature = "tx_v6")] zip233_amount: Option<Amount<NonNegative>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -145,16 +143,17 @@ impl TransactionTemplate<NegativeOrZero> {
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fee;
         let miner_reward = Zatoshis::try_from(u64::from(miner_reward?))?;
 
-        let memo = miner_memo.unwrap_or(MemoBytes::empty());
-
         let mut builder = Builder::new(
             net,
             BlockHeight::from(height),
             BuildConfig::Coinbase {
-                miner_data,
+                miner_data: miner_params.data().cloned().unwrap_or_default(),
                 sequence: 0,
             },
         );
+
+        let empty_memo = MemoBytes::empty();
+        let memo = miner_params.memo().unwrap_or(&empty_memo);
 
         macro_rules! trace_err {
             ($res:expr, $type:expr) => {
@@ -194,7 +193,7 @@ impl TransactionTemplate<NegativeOrZero> {
             )
         };
 
-        match miner_addr {
+        match miner_params.addr() {
             Address::Unified(addr) => addr
                 .orchard()
                 .and_then(|addr| add_orchard_reward(&mut builder, addr))
