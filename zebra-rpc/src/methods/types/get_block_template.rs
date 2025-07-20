@@ -413,7 +413,90 @@ impl GetBlockTemplateResponse {
     }
 }
 
-///  Handler for the `getblocktemplate` RPC.
+/// Miner parameters.
+#[derive(Clone, Debug)]
+pub struct MinerParams {
+    /// Address for receiving miner subsidy and tx fees.
+    addr: Address,
+
+    /// Optional data to include in the coinbase input script.
+    data: Option<MinerData>,
+
+    /// Optional shielded memo for the miner's coinbase transaction.
+    ///
+    /// Applies only if [`Self::addr`] contains a shielded component.
+    memo: Option<MemoBytes>,
+}
+
+impl MinerParams {
+    /// Creates a new instance of [`MinerParams`].
+    pub fn new(net: &Network, conf: config::mining::Config) -> Result<Self, MinerParamsError> {
+        let addr = conf
+            .miner_address
+            .map(|addr| Address::try_from_zcash_address(net, addr))
+            .ok_or(MinerParamsError::MissingAddr)??;
+
+        let data = conf
+            .miner_data
+            .or_else(|| Some(ZEBRA_MINER_DATA.to_string()))
+            .map(|str| hex::decode(&str).unwrap_or_else(|_| str.as_bytes().to_vec()))
+            .map(|bytes| MinerData::try_from(bytes.as_ref()))
+            .transpose()?;
+
+        let memo = conf
+            .miner_memo
+            .map(|memo| MemoBytes::from_bytes(memo.as_bytes()))
+            .transpose()?;
+
+        Ok(Self { addr, data, memo })
+    }
+
+    /// Returns the miner address.
+    pub fn addr(&self) -> &Address {
+        &self.addr
+    }
+
+    /// Returns the miner data.
+    pub fn data(&self) -> Option<&MinerData> {
+        self.data.as_ref()
+    }
+
+    /// Returns the miner memo.
+    pub fn memo(&self) -> Option<&MemoBytes> {
+        self.memo.as_ref()
+    }
+}
+
+impl From<Address> for MinerParams {
+    fn from(addr: Address) -> Self {
+        Self {
+            addr,
+            data: None,
+            memo: None,
+        }
+    }
+}
+
+/// Errors that can occur when creating [`MinerParams`].
+#[derive(Debug, thiserror::Error)]
+pub enum MinerParamsError {
+    #[error("Missing miner address")]
+    MissingAddr,
+    #[error("Invalid miner address: {0}")]
+    InvalidAddr(zcash_address::ConversionError<&'static str>),
+    #[error(transparent)]
+    InvalidData(#[from] zcash_transparent::coinbase::Error),
+    #[error(transparent)]
+    InvalidMemo(#[from] zcash_protocol::memo::Error),
+}
+
+impl From<zcash_address::ConversionError<&'static str>> for MinerParamsError {
+    fn from(err: zcash_address::ConversionError<&'static str>) -> Self {
+        Self::InvalidAddr(err)
+    }
+}
+
+/// Handler for the `getblocktemplate` RPC.
 #[derive(Clone)]
 pub struct GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
