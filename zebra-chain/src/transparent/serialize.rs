@@ -3,6 +3,7 @@
 use std::io;
 
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use zcash_transparent::coinbase::{MAX_COINBASE_SCRIPT_LEN, MIN_COINBASE_SCRIPT_LEN};
 
 use crate::{
     block::{self, Height},
@@ -15,43 +16,11 @@ use crate::{
 
 use super::{Input, MinerData, OutPoint, Output, Script};
 
-/// The maximum length of the coinbase data.
-///
-/// Includes the encoded coinbase height, if any.
-///
-/// # Consensus
-///
-/// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-pub const MAX_COINBASE_DATA_LEN: usize = 100;
-
-/// The maximum length of the encoded coinbase height.
-///
-/// # Consensus
-///
-/// > The length of heightBytes MUST be in the range {1 .. 5}. Then the encoding is the length
-/// > of heightBytes encoded as one byte, followed by heightBytes itself.
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-pub const MAX_COINBASE_HEIGHT_DATA_LEN: usize = 6;
-
-/// The minimum length of the coinbase data.
-///
-/// Includes the encoded coinbase height, if any.
-///
-/// # Consensus
-///
-/// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-pub const MIN_COINBASE_DATA_LEN: usize = 2;
-
 /// The coinbase data for a genesis block.
 ///
 /// Zcash uses the same coinbase data for the Mainnet, Testnet, and Regtest
 /// genesis blocks.
-pub const GENESIS_COINBASE_DATA: [u8; 77] = [
+pub const GENESIS_COINBASE_SCRIPT_SIG: [u8; 77] = [
     4, 255, 255, 7, 31, 1, 4, 69, 90, 99, 97, 115, 104, 48, 98, 57, 99, 52, 101, 101, 102, 56, 98,
     55, 99, 99, 52, 49, 55, 101, 101, 53, 48, 48, 49, 101, 51, 53, 48, 48, 57, 56, 52, 98, 54, 102,
     101, 97, 51, 53, 54, 56, 51, 97, 55, 99, 97, 99, 49, 52, 49, 97, 48, 52, 51, 99, 52, 50, 48,
@@ -107,40 +76,47 @@ impl ZcashDeserialize for OutPoint {
 ///
 /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
 /// <https://github.com/bitcoin/bips/blob/master/bip-0034.mediawiki>
-pub(crate) fn parse_coinbase_height(
-    mut data: Vec<u8>,
+pub(crate) fn parse_coinbase_script(
+    script: &[u8],
 ) -> Result<(block::Height, MinerData), SerializationError> {
-    match (data.first(), data.len()) {
-        // Blocks 1 through 16 inclusive encode block height with OP_N opcodes.
-        (Some(op_n @ 0x51..=0x60), len) if len >= 1 => {
-            Ok((Height((op_n - 0x50) as u32), MinerData(data.split_off(1))))
+    match (script.first(), script.len()) {
+        (_, len) if len < MIN_COINBASE_SCRIPT_LEN => {
+            Err(SerializationError::Parse("coinbase script is too short"))
         }
+        (_, len) if len > MAX_COINBASE_SCRIPT_LEN => {
+            Err(SerializationError::Parse("coinbase script is too long"))
+        }
+        // Blocks 1 through 16 inclusive encode block height with OP_N opcodes.
+        (Some(op_n @ 0x51..=0x60), len) if len > 1 => Ok((
+            Height((op_n - 0x50) as u32),
+            MinerData::try_from(&script[1..])?,
+        )),
         // Blocks 17 through 128 exclusive encode block height with the `0x01` opcode.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
-        (Some(0x01), len) if len >= 2 && data[1] < 0x80 => {
-            let h = data[1] as u32;
+        (Some(0x01), len) if len > 2 && script[1] < 0x80 => {
+            let h = script[1] as u32;
             if (17..128).contains(&h) {
-                Ok((Height(h), MinerData(data.split_off(2))))
+                Ok((Height(h), MinerData::try_from(&script[2..])?))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
         }
         // Blocks 128 through 32768 exclusive encode block height with the `0x02` opcode.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
-        (Some(0x02), len) if len >= 3 && data[2] < 0x80 => {
-            let h = data[1] as u32 + ((data[2] as u32) << 8);
+        (Some(0x02), len) if len > 3 && script[2] < 0x80 => {
+            let h = script[1] as u32 + ((script[2] as u32) << 8);
             if (128..32_768).contains(&h) {
-                Ok((Height(h), MinerData(data.split_off(3))))
+                Ok((Height(h), MinerData::try_from(&script[3..])?))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
         }
         // Blocks 32768 through 2**23 exclusive encode block height with the `0x03` opcode.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
-        (Some(0x03), len) if len >= 4 && data[3] < 0x80 => {
-            let h = data[1] as u32 + ((data[2] as u32) << 8) + ((data[3] as u32) << 16);
+        (Some(0x03), len) if len > 4 && script[3] < 0x80 => {
+            let h = script[1] as u32 + ((script[2] as u32) << 8) + ((script[3] as u32) << 16);
             if (32_768..8_388_608).contains(&h) {
-                Ok((Height(h), MinerData(data.split_off(4))))
+                Ok((Height(h), MinerData::try_from(&script[4..])?))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -155,18 +131,18 @@ pub(crate) fn parse_coinbase_height(
         //
         // TODO: update this check based on the consensus rule changes in
         //       https://github.com/zcash/zips/issues/540
-        (Some(0x04), _) if data[..] == GENESIS_COINBASE_DATA[..] => {
-            Ok((Height(0), MinerData(data)))
+        (Some(0x04), _) if script[..] == GENESIS_COINBASE_SCRIPT_SIG[..] => {
+            Ok((Height(0), MinerData::try_from(script)?))
         }
         // As noted above, this is included for completeness.
         // The Bitcoin encoding requires that the most significant byte is below 0x80.
-        (Some(0x04), len) if len >= 5 && data[4] < 0x80 => {
-            let h = data[1] as u32
-                + ((data[2] as u32) << 8)
-                + ((data[3] as u32) << 16)
-                + ((data[4] as u32) << 24);
+        (Some(0x04), len) if len > 5 && script[4] < 0x80 => {
+            let h = script[1] as u32
+                + ((script[2] as u32) << 8)
+                + ((script[3] as u32) << 16)
+                + ((script[4] as u32) << 24);
             if (8_388_608..=Height::MAX.0).contains(&h) {
-                Ok((Height(h), MinerData(data.split_off(5))))
+                Ok((Height(h), MinerData::try_from(&script[5..])?))
             } else {
                 Err(SerializationError::Parse("Invalid block height"))
             }
@@ -192,7 +168,7 @@ pub(crate) fn parse_coinbase_height(
 /// coinbase height,
 pub(crate) fn write_coinbase_height<W: io::Write>(
     height: block::Height,
-    coinbase_data: &MinerData,
+    data: &MinerData,
     mut w: W,
 ) -> Result<(), io::Error> {
     // We can't write this as a match statement on stable until exclusive range
@@ -206,7 +182,7 @@ pub(crate) fn write_coinbase_height<W: io::Write>(
         //
         // TODO: update this check based on the consensus rule changes in
         //       https://github.com/zcash/zips/issues/540
-        if coinbase_data.0 != GENESIS_COINBASE_DATA {
+        if data.as_ref() != GENESIS_COINBASE_SCRIPT_SIG {
             return Err(io::Error::other("invalid genesis coinbase data"));
         }
     } else if let h @ 1..=16 = height.0 {
@@ -235,9 +211,9 @@ impl Height {
     /// Get the size of `Height` when serialized into a coinbase input script.
     pub fn coinbase_zcash_serialized_size(&self) -> usize {
         let mut writer = FakeWriter(0);
-        let empty_data = MinerData(Vec::new());
+        let data = MinerData::default();
 
-        write_coinbase_height(*self, &empty_data, &mut writer).expect("writer should never fail");
+        write_coinbase_height(*self, &data, &mut writer).expect("writer should never fail");
         writer.0
     }
 }
@@ -274,7 +250,7 @@ impl ZcashSerialize for Input {
 
                 let mut height_and_data = Vec::new();
                 write_coinbase_height(*height, data, &mut height_and_data)?;
-                height_and_data.extend(&data.0);
+                height_and_data.extend(data.as_ref());
                 zcash_serialize_bytes(&height_and_data, &mut writer)?;
 
                 writer.write_u32::<LittleEndian>(*sequence)?;
@@ -294,17 +270,7 @@ impl ZcashDeserialize for Input {
                 return Err(SerializationError::Parse("wrong index in coinbase"));
             }
 
-            let data: Vec<u8> = (&mut reader).zcash_deserialize_into()?;
-
-            // Check the coinbase data length.
-            if data.len() > MAX_COINBASE_DATA_LEN {
-                return Err(SerializationError::Parse("coinbase data is too long"));
-            } else if data.len() < MIN_COINBASE_DATA_LEN {
-                return Err(SerializationError::Parse("coinbase data is too short"));
-            }
-
-            let (height, data) = parse_coinbase_height(data)?;
-
+            let (height, data) = parse_coinbase_script(&Vec::zcash_deserialize(&mut reader)?)?;
             let sequence = reader.read_u32::<LittleEndian>()?;
 
             Ok(Input::Coinbase {
