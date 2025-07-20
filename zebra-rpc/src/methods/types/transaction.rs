@@ -159,7 +159,7 @@ impl TransactionTemplate<NegativeOrZero> {
 
         macro_rules! trace_err {
             ($res:expr, $type:expr) => {
-                $res.map_err(|e| tracing::error!("Failed to add {} output: {}", $type, e))
+                $res.map_err(|err| tracing::error!("Failed to add {} output: {err}", $type))
                     .ok()
             };
         }
