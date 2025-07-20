@@ -4,6 +4,7 @@ use std::{array::TryFromSliceError, io, num::TryFromIntError, str::Utf8Error, sy
 
 use hex::FromHexError;
 use thiserror::Error;
+use zcash_transparent::coinbase;
 
 /// A serialization error.
 // TODO: refine error types -- better to use boxed errors?
@@ -50,6 +51,10 @@ pub enum SerializationError {
     /// rule](https://zips.z.cash/protocol/protocol.pdf#txnencodingandconsensus).
     #[error("transaction balance is non-zero but doesn't have Sapling shielded spends or outputs")]
     BadTransactionBalance,
+
+    /// Invalid coinbase transaction.
+    #[error("coinbase error: {0}")]
+    Coinbase(coinbase::Error),
 }
 
 impl From<crate::Error> for SerializationError {
@@ -71,5 +76,11 @@ impl From<crate::Error> for SerializationError {
 impl From<io::Error> for SerializationError {
     fn from(value: io::Error) -> Self {
         Arc::new(value).into()
+    }
+}
+
+impl From<coinbase::Error> for SerializationError {
+    fn from(e: zcash_transparent::coinbase::Error) -> Self {
+        Self::Coinbase(e)
     }
 }
