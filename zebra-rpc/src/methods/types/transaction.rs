@@ -124,7 +124,7 @@ impl From<VerifiedUnminedTx> for TransactionTemplate<NonNegative> {
 }
 
 impl TransactionTemplate<NegativeOrZero> {
-    /// Constructs a transaction template containing a coinbase transaction.
+    /// Constructs a transaction template for a coinbase transaction.
     pub fn new_coinbase(
         net: &Network,
         height: Height,
