@@ -1,9 +1,10 @@
 //! Tests for types and functions for the `getblocktemplate` RPC.
 
+use anyhow::anyhow;
 use std::iter;
 
+use strum::IntoEnumIterator;
 use zcash_keys::address::Address;
-use zcash_transparent::address::TransparentAddress;
 
 use zebra_chain::parameters::subsidy::{
     FUNDING_STREAM_ECC_ADDRESSES_TESTNET, FUNDING_STREAM_MG_ADDRESSES_TESTNET,
@@ -22,12 +23,17 @@ use zebra_chain::{
 };
 
 use crate::client::TransactionTemplate;
+use crate::config::mining::{MinerAddressType, MINER_ADDRESS};
+
+use super::MinerParams;
 
 /// Tests that coinbase transactions can be generated.
+///
+/// This test needs to be run with the `--release` flag so that it runs for ~ 30 seconds instead of
+/// ~ 90.
 #[test]
-fn coinbase() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = Address::from(TransparentAddress::PublicKeyHash([0x42; 20]));
-
+#[ignore]
+fn coinbase() -> anyhow::Result<()> {
     let regtest = testnet::Parameters::build()
         .with_slow_start_interval(Height::MIN)
         .with_activation_heights(ConfiguredActivationHeights {
@@ -97,31 +103,23 @@ fn coinbase() -> Result<(), Box<dyn std::error::Error>> {
         ])
         .to_network();
 
-    // The maximum length of miner data is 96 bytes.
-    let miner_datas = [
-        vec![],
-        vec![0x00; 1],
-        vec![0x00; 96],
-        vec![0xff; 1],
-        vec![0xff; 96],
-    ];
-
     for net in Network::iter().chain(iter::once(regtest)) {
-        for nu in NetworkUpgrade::iter().filter(|nu| nu >= &NetworkUpgrade::Overwinter) {
+        for nu in NetworkUpgrade::iter().filter(|nu| nu >= &NetworkUpgrade::Sapling) {
             if let Some(height) = nu.activation_height(&net) {
-                for data in &miner_datas {
-                    // It should be possible to generate a coinbase tx from these params.
+                for addr_type in MinerAddressType::iter() {
                     TransactionTemplate::new_coinbase(
                         &net,
                         height,
-                        &addr,
-                        data.clone(),
-                        None,
+                        &MinerParams::from(
+                            Address::decode(&net, MINER_ADDRESS[&net.kind()][&addr_type])
+                                .ok_or(anyhow!("hard-coded addr must be valid"))?,
+                        ),
                         &[],
                     )?
                     .data()
                     .as_ref()
-                    // Deserialization contains checks for elementary consensus rules, which must pass.
+                    // Deserialization contains checks for elementary consensus rules, which must
+                    // pass.
                     .zcash_deserialize_into::<Transaction>()?;
                 }
             }
