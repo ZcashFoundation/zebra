@@ -225,7 +225,7 @@ impl TestType {
             // This is what we recommend our users configure.
             random_known_rpc_port_config(true, network)
         } else {
-            default_test_config(network)
+            Ok(default_test_config(network))
         };
 
         let mut config = match config {
