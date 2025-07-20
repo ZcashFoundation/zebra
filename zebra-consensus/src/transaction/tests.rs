@@ -13,6 +13,7 @@ use futures::{FutureExt, TryFutureExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use tower::{buffer::Buffer, service_fn, ServiceExt};
 
+use zcash_transparent::coinbase::MinerData;
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
@@ -29,7 +30,7 @@ use zebra_chain::{
         },
         zip317, Hash, HashType, JoinSplitData, LockTime, Transaction,
     },
-    transparent::{self, CoinbaseSpendRestriction, MinerData},
+    transparent::{self, CoinbaseSpendRestriction},
 };
 
 use zebra_node_services::mempool;
@@ -3085,7 +3086,7 @@ fn mock_coinbase_transparent_output(
 
     let input = transparent::Input::Coinbase {
         height: coinbase_height,
-        data: MinerData::new(Vec::new()),
+        data: MinerData::default(),
         sequence: u32::MAX,
     };
 
