@@ -2132,11 +2132,6 @@ where
             zip317::select_mempool_transactions,
         };
 
-        // Clone Configs
-        let network = self.network.clone();
-        let miner_data = self.gbt.miner_data();
-        let miner_memo = self.gbt.miner_memo();
-
         // Clone Services
         let mempool = self.mempool.clone();
         let mut latest_chain_tip = self.latest_chain_tip.clone();
@@ -2150,7 +2145,7 @@ where
             return validate_block_proposal(
                 self.gbt.block_verifier_router(),
                 block_proposal_bytes,
-                network,
+                &self.network,
                 latest_chain_tip,
                 sync_status,
             )
@@ -2161,11 +2156,6 @@ where
         check_parameters(&parameters)?;
 
         let client_long_poll_id = parameters.as_ref().and_then(|params| params.long_poll_id);
-
-        let miner_addr = self
-            .gbt
-            .miner_address()
-            .ok_or_misc_error("miner_address not configured")?;
 
         // - Checks and fetches that can change during long polling
         //
@@ -2186,7 +2176,7 @@ where
             //
             // Optional TODO:
             // - add `async changed()` method to ChainSyncStatus (like `ChainTip`)
-            check_synced_to_tip(&network, latest_chain_tip.clone(), sync_status.clone())?;
+            check_synced_to_tip(&self.network, latest_chain_tip.clone(), sync_status.clone())?;
             // TODO: return an error if we have no peers, like `zcashd` does,
             //       and add a developer config that mines regardless of how many peers we have.
             // https://github.com/zcash/zcash/blob/6fdd9f1b81d3b228326c9826fa10696fc516444b/src/miner.cpp#L865-L880
@@ -2403,10 +2393,6 @@ where
         // the template only depends on the previously fetched data.
         // This processing never fails.
 
-        // Calculate the next block height.
-        let next_block_height =
-            (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
-
         tracing::debug!(
             mempool_tx_hashes = ?mempool_txs
                 .iter()
@@ -2415,13 +2401,22 @@ where
             "selecting transactions for the template from the mempool"
         );
 
+        let miner_params = self.gbt.miner_params().ok_or_error(
+            0,
+            "miner parameters must be present to generate a coinbase transaction",
+        )?;
+
+        // Determine the next block height.
+        let height = chain_tip_and_local_time
+            .tip_height
+            .next()
+            .expect("chain tip must be below Height::MAX");
+
         // Randomly select some mempool transactions.
         let mempool_txs = select_mempool_transactions(
-            &network,
-            next_block_height,
-            &miner_addr,
-            miner_data.clone(),
-            miner_memo.clone(),
+            &self.network,
+            height,
+            miner_params,
             mempool_txs,
             mempool_tx_deps,
             #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
@@ -2439,10 +2434,8 @@ where
         // - After this point, the template only depends on the previously fetched data.
 
         let response = BlockTemplateResponse::new_internal(
-            &network,
-            &miner_addr,
-            miner_data,
-            miner_memo,
+            &self.network,
+            miner_params,
             &chain_tip_and_local_time,
             server_long_poll_id,
             mempool_txs,

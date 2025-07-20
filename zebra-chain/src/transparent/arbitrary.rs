@@ -1,4 +1,5 @@
 use proptest::{collection::vec, prelude::*};
+use zcash_transparent::coinbase::MinerData;
 
 use crate::{
     block,
@@ -8,7 +9,7 @@ use crate::{
     LedgerState,
 };
 
-use super::{Address, Input, MinerData, OutPoint, Script, GENESIS_COINBASE_DATA};
+use super::{serialize::GENESIS_COINBASE_SCRIPT_SIG, Address, Input, OutPoint, Script};
 
 impl Input {
     /// Construct a strategy for creating valid-ish vecs of Inputs.
@@ -28,13 +29,14 @@ impl Arbitrary for Input {
 
     fn arbitrary_with(height: Self::Parameters) -> Self::Strategy {
         if let Some(height) = height {
-            (vec(any::<u8>(), 0..95), any::<u32>())
+            (vec(any::<u8>(), 1..95), any::<u32>())
                 .prop_map(move |(data, sequence)| Input::Coinbase {
                     height,
                     data: if height == block::Height(0) {
-                        MinerData(GENESIS_COINBASE_DATA.to_vec())
+                        MinerData::try_from(GENESIS_COINBASE_SCRIPT_SIG.as_ref())
+                            .expect("genesis coinbase data is valid")
                     } else {
-                        MinerData(data)
+                        MinerData::try_from(data.as_ref()).expect("coinbase data is valid")
                     },
                     sequence,
                 })
