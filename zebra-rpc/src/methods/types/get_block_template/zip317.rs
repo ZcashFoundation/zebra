@@ -13,9 +13,6 @@ use rand::{
     prelude::thread_rng,
 };
 
-use zcash_keys::address::Address;
-
-use zcash_protocol::memo::MemoBytes;
 use zebra_chain::{
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
@@ -38,6 +35,8 @@ mod tests;
 #[cfg(test)]
 use crate::methods::types::get_block_template::InBlockTxDependenciesDepth;
 
+use super::MinerParams;
+
 /// Used in the return type of [`select_mempool_transactions()`] for test compilations.
 #[cfg(test)]
 type SelectedMempoolTx = (InBlockTxDependenciesDepth, VerifiedUnminedTx);
@@ -58,11 +57,9 @@ type SelectedMempoolTx = VerifiedUnminedTx;
 /// [ZIP-317]: https://zips.z.cash/zip-0317#block-production
 #[allow(clippy::too_many_arguments)]
 pub fn select_mempool_transactions(
-    network: &Network,
-    next_block_height: Height,
-    miner_addr: &Address,
-    miner_data: Vec<u8>,
-    miner_memo: Option<MemoBytes>,
+    net: &Network,
+    height: Height,
+    miner_params: &MinerParams,
     mempool_txs: Vec<VerifiedUnminedTx>,
     mempool_tx_deps: TransactionDependencies,
     #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))] zip233_amount: Option<
@@ -72,11 +69,9 @@ pub fn select_mempool_transactions(
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
     let fake_coinbase_tx = TransactionTemplate::new_coinbase(
-        network,
-        next_block_height,
-        miner_addr,
-        miner_data,
-        miner_memo,
+        net,
+        height,
+        miner_params,
         &[],
         #[cfg(all(zcash_unstable = "nu7", feature = "tx_v6"))]
         zip233_amount,
