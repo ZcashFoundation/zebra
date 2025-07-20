@@ -154,8 +154,6 @@ use semver::Version;
 use serde_json::Value;
 use tower::ServiceExt;
 
-use zcash_keys::address::Address;
-
 use zebra_chain::{
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     parameters::{
@@ -227,7 +225,7 @@ fn generate_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let child = testdir()?
-        .with_config(&mut default_test_config(&Mainnet)?)?
+        .with_config(&mut default_test_config(&Mainnet))?
         .spawn_child(args!["generate"])?;
 
     let output = child.wait_with_output()?;
@@ -289,7 +287,7 @@ fn generate_args() -> Result<()> {
 fn help_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
 
     let child = testdir.spawn_child(args!["help"])?;
     let output = child.wait_with_output()?;
@@ -361,7 +359,7 @@ fn start_no_args() -> Result<()> {
 fn start_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let testdir = &testdir;
 
     let mut child = testdir.spawn_child(args!["start"])?;
@@ -386,7 +384,7 @@ fn start_args() -> Result<()> {
 #[tokio::test]
 async fn db_init_outside_future_executor() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let config = default_test_config(&Mainnet)?;
+    let config = default_test_config(&Mainnet);
 
     let start = Instant::now();
 
@@ -487,7 +485,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 
     let _init_guard = zebra_test::init();
 
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     let run_dir = testdir()?;
 
     let ignored_cache_dir = run_dir.path().join("state");
@@ -590,7 +588,7 @@ fn ephemeral(cache_dir_config: EphemeralConfig, cache_dir_check: EphemeralCheck)
 fn version_no_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
 
     let child = testdir.spawn_child(args!["--version"])?;
     let output = child.wait_with_output()?;
@@ -611,7 +609,7 @@ fn version_no_args() -> Result<()> {
 fn version_args() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let testdir = &testdir;
 
     // unrecognized option `-f`
@@ -1413,7 +1411,7 @@ async fn metrics_endpoint() -> Result<()> {
     let url = format!("http://{endpoint}");
 
     // Write a configuration that has metrics endpoint_addr set
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.metrics.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -1482,7 +1480,7 @@ async fn tracing_endpoint() -> Result<()> {
     let url_filter = format!("{url_default}/filter");
 
     // Write a configuration that has tracing endpoint_addr option set
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.tracing.endpoint_addr = Some(endpoint.parse().unwrap());
 
     let dir = testdir()?.with_config(&mut config)?;
@@ -2204,7 +2202,7 @@ fn zebra_zcash_listener_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created network listen_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.network.listen_addr = listen_addr.parse().unwrap();
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!("Opened Zcash protocol endpoint at {listen_addr}"));
@@ -2233,7 +2231,7 @@ fn zebra_metrics_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created metrics endpoint_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.metrics.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened metrics endpoint at {listen_addr}"));
@@ -2262,7 +2260,7 @@ fn zebra_tracing_conflict() -> Result<()> {
     let listen_addr = format!("127.0.0.1:{port}");
 
     // Write a configuration that has our created tracing endpoint_addr
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     config.tracing.endpoint_addr = Some(listen_addr.parse().unwrap());
     let dir1 = testdir()?.with_config(&mut config)?;
     let regex1 = regex::escape(&format!(r"Opened tracing endpoint at {listen_addr}"));
@@ -2489,7 +2487,7 @@ fn delete_old_databases() -> Result<()> {
         return Ok(());
     }
 
-    let mut config = default_test_config(&Mainnet)?;
+    let mut config = default_test_config(&Mainnet);
     let run_dir = testdir()?;
     let cache_dir = run_dir.path().join("state");
 
@@ -2602,7 +2600,7 @@ async fn rpc_submit_block() -> Result<()> {
 #[test]
 fn end_of_support_is_checked_at_start() -> Result<()> {
     let _init_guard = zebra_test::init();
-    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet)?)?;
+    let testdir = testdir()?.with_config(&mut default_test_config(&Mainnet))?;
     let mut child = testdir.spawn_child(args!["start"])?;
 
     // Give enough time to start up the eos task.
@@ -3002,7 +3000,6 @@ fn external_address() -> Result<()> {
 /// Test successful `getblocktemplate` and `submitblock` RPC calls on Regtest on Canopy.
 ///
 /// See [`common::regtest::submit_blocks`] for more information.
-// TODO: Test this with an NU5 activation height too once config can be serialized.
 #[tokio::test]
 async fn regtest_block_templates_are_valid_block_submissions() -> Result<()> {
     common::regtest::submit_blocks_test().await?;
@@ -3354,9 +3351,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
-    let default_test_config = default_test_config(&network)?;
-    let mining_config = default_test_config.mining;
-    let miner_addr = Address::try_from_zcash_address(
+    let miner_address = Address::try_from_zcash_address(
         &network,
         mining_config
             .miner_address
@@ -3364,6 +3359,8 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
             .expect("mining address should be configured"),
     )
     .expect("configured mining address should be valid");
+    let default_test_config = default_test_config(&network);
+    let mining_conf = default_test_config.mining;
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network).await;
@@ -3400,7 +3397,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let (rpc, _) = RpcImpl::new(
         network.clone(),
-        mining_config,
+        mining_conf,
         false,
         "0.0.1",
         "Zebra tests",
