@@ -251,7 +251,6 @@ impl TransactionTemplate<NegativeOrZero> {
             data: data.into(),
             hash: tx.txid().as_ref().into(),
             auth_digest: tx.auth_commitment().as_ref().try_into()?,
-            // Always empty, coinbase transactions do not have inputs.
             depends: Vec::new(),
             fee: (-miner_fee).constrain()?,
             sigops: tx.sigops()?,
