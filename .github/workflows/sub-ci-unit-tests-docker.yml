@@ -8,7 +8,8 @@
 # 3. 'state-fake-activation-heights': Runs state tests with fake activation heights, isolating its build products.
 # 4. 'sync-large-checkpoints-empty': Tests Zebra's ability to sync and checkpoint from an empty state.
 # 5. 'test-lightwalletd-integration': Validates integration with 'lightwalletd' starting from an empty state.
-# 6. 'test-docker-configurations': Runs a matrix of configuration tests to validate various Docker configurations.
+# 6. 'coinbase': Tests that Zebra can generate valid coinbase txs.
+# 7. 'test-docker-configurations': Runs a matrix of configuration tests to validate various Docker configurations.
 name: Docker Unit Tests
 
 on:
@@ -147,6 +148,31 @@ jobs:
           docker run --tty \
           -e ZEBRA_TEST_LIGHTWALLETD=1 \
           -e LIGHTWALLETD_INTEGRATION=1 \
+          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e RUST_LOG=${{ env.RUST_LOG }} \
+          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+
+  # Tests that Zebra can generate valid coinbase txs.
+  coinbase:
+    name: Coinbase
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - uses: r7kamura/rust-problem-matchers@v1.5.0
+
+      - name: Inject slug/short variables
+        uses: rlespinasse/github-slug-action@v5
+        with:
+          short-length: 7
+
+      - name: Run tests for constructing and checking coinbase txs
+        env:
+          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
+        run: |
+          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
+          docker run --tty \
+          -e COINBASE=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
