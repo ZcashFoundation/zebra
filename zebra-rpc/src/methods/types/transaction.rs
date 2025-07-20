@@ -233,8 +233,8 @@ impl TransactionTemplate<NegativeOrZero> {
 
         let build_result = builder.build(
             &Default::default(),
-            &[],
-            &[],
+            Default::default(),
+            Default::default(),
             OsRng,
             &*PROVER_PARAMS,
             &*PROVER_PARAMS,
