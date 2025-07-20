@@ -7,6 +7,9 @@
 use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
+use zebra_rpc::config::mining::{MinerAddressType, MINER_ADDRESS};
+
+use crate::components::With;
 
 /// Centralized, case-insensitive suffix-based deny-list to ban setting config fields with
 /// environment variables if those config field names end with any of these suffixes.
@@ -172,5 +175,17 @@ impl ZebradConfig {
         let config = builder.build()?;
         // Deserialize into our struct, which will use defaults for any missing fields
         config.try_deserialize()
+    }
+}
+
+impl With<MinerAddressType> for ZebradConfig {
+    fn with(mut self, miner_address_type: MinerAddressType) -> Self {
+        self.mining.miner_address = Some(
+            MINER_ADDRESS[&self.network.network.kind()][&miner_address_type]
+                .parse()
+                .expect("valid hard-coded address"),
+        );
+
+        self
     }
 }
