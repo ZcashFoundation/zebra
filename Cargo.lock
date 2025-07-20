@@ -1395,7 +1395,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.2"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "blake2b_simd",
  "core2",
@@ -1430,7 +1430,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "blake2b_simd",
 ]
@@ -4061,15 +4061,15 @@ dependencies = [
 
 [[package]]
 name = "rustix"
-version = "1.0.7"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c71e83d6afe7ff64890ec6b71d6a69bb8a610ab78ce364b3352876bb4c801266"
+checksum = "11181fbabf243db407ef8df94a6ce0b2f9a733bd8be4ad02b4eda9602296cac8"
 dependencies = [
  "bitflags 2.9.1",
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4686,6 +4686,25 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "strum"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f64def088c51c9510a8579e3c5d67c65349dcf755e5479ad3d010aa6454e2c32"
+
+[[package]]
+name = "strum_macros"
+version = "0.27.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c77a8c5abcaf0f9ce05d62342b7d298c346515365c36b673df4ebe3ced01fde8"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -6185,7 +6204,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.8.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "bech32",
  "bs58",
@@ -6198,7 +6217,7 @@ dependencies = [
 [[package]]
 name = "zcash_client_backend"
 version = "0.19.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -6238,7 +6257,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "core2",
  "nonempty",
@@ -6247,7 +6266,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6257,7 +6276,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.9.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -6296,8 +6315,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.23.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+version = "0.23.1"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6338,7 +6357,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.23.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6360,8 +6379,8 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.5.3"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+version = "0.5.4"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "core2",
  "document-features",
@@ -6399,7 +6418,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.3.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6410,6 +6429,7 @@ dependencies = [
  "hex",
  "ripemd 0.1.3",
  "secp256k1",
+ "serde",
  "sha2 0.10.9",
  "subtle",
  "zcash_address",
@@ -6522,7 +6542,11 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber",
+ "zcash_primitives",
  "zcash_proofs",
+ "zcash_protocol",
+ "zcash_script",
+ "zcash_transparent",
  "zebra-chain",
  "zebra-node-services",
  "zebra-script",
@@ -6588,6 +6612,7 @@ dependencies = [
 name = "zebra-rpc"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "chrono",
  "color-eyre",
@@ -6602,6 +6627,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-proc-macros",
  "jsonrpsee-types",
+ "lazy_static",
  "nix",
  "orchard",
  "proptest",
@@ -6612,6 +6638,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "strum",
+ "strum_macros",
  "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
@@ -6758,6 +6786,7 @@ name = "zebrad"
 version = "2.4.0"
 dependencies = [
  "abscissa_core",
+ "anyhow",
  "atty",
  "bytes",
  "chrono",
@@ -6795,6 +6824,8 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "tempfile",
  "thiserror 2.0.12",
  "thread-priority",
@@ -6935,7 +6966,7 @@ dependencies = [
 [[package]]
 name = "zip321"
 version = "0.4.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#8e5543b1f61ff5e63f725d619418851534a8e3f8"
 dependencies = [
  "base64 0.22.1",
  "nom",
