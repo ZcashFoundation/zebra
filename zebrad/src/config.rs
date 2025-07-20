@@ -5,6 +5,9 @@
 //! for specifying it.
 
 use serde::{Deserialize, Serialize};
+use zebra_rpc::config::mining::{MinerAddressType, MINER_ADDRESS};
+
+use crate::components::With;
 
 /// Configuration for `zebrad`.
 ///
@@ -53,4 +56,16 @@ pub struct ZebradConfig {
 
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,
+}
+
+impl With<MinerAddressType> for ZebradConfig {
+    fn with(mut self, miner_address_type: MinerAddressType) -> Self {
+        self.mining.miner_address = Some(
+            MINER_ADDRESS[&self.network.network.kind()][&miner_address_type]
+                .parse()
+                .expect("valid hard-coded address"),
+        );
+
+        self
+    }
 }
