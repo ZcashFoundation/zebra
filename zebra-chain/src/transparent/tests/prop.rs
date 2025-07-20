@@ -5,11 +5,9 @@ use zebra_test::prelude::*;
 use crate::{block, fmt::SummaryDebug, transaction::arbitrary::MAX_ARBITRARY_ITEMS, LedgerState};
 
 use super::super::{
-    serialize::{parse_coinbase_height, write_coinbase_height},
+    serialize::{parse_coinbase_script, write_coinbase_height},
     Input,
 };
-
-use proptest::collection::vec;
 
 #[test]
 fn coinbase_has_height() -> Result<()> {
@@ -50,51 +48,25 @@ fn input_coinbase_vecs_only_have_coinbase_input() -> Result<()> {
 }
 
 #[test]
-fn coinbase_height_round_trip_from_random_input() -> Result<()> {
+fn coinbase_script_round_trip() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let strategy =
-        any::<block::Height>().prop_flat_map(|height| Input::arbitrary_with(Some(height)));
-
-    proptest!(|(input in strategy)| {
-        let (height, data) = match input {
+    proptest!(|(input in any::<block::Height>().prop_flat_map(|h| Input::arbitrary_with(Some(h))))| {
+        let (expected_height, expected_data) = match input {
             Input::Coinbase { height, data, .. } => (height, data),
-            _ => unreachable!("all inputs will have coinbase height and data"),
+            _ => unreachable!("proptest strategy must generate a coinbase input"),
         };
-        let mut encoded = Vec::new();
-        write_coinbase_height(height, &data, &mut encoded)?;
-        let decoded = parse_coinbase_height(encoded)?;
 
-        prop_assert_eq!(height, decoded.0);
+        let mut script = Vec::new();
+
+        write_coinbase_height(expected_height, &expected_data, &mut script)?;
+        script.extend(expected_data.as_ref());
+
+        let (parsed_height, parsed_data) = parse_coinbase_script(&script)?;
+
+        prop_assert_eq!(expected_height, parsed_height);
+        prop_assert_eq!(expected_data, parsed_data);
     });
 
     Ok(())
-}
-
-proptest! {
-    #[test]
-    fn coinbase_height_round_trip_from_random_bytes(mut height_bytes in vec(any::<u8>(), 1..5)) {
-        let mut encoded1 = vec![height_bytes.len() as u8];
-        encoded1.append(&mut height_bytes);
-
-        let decoded = parse_coinbase_height(encoded1.clone()).ok();
-
-        if decoded.is_some() {
-            let mut encoded2 = Vec::new();
-            write_coinbase_height(decoded.as_ref().unwrap().0, &decoded.unwrap().1, &mut encoded2)?;
-            prop_assert_eq!(encoded2, encoded1);
-        }
-    }
-
-    #[test]
-    fn coinbase_height_round_trip_from_random_byte(height_byte in vec(any::<u8>(), 1..2)) {
-        let encoded1 = height_byte;
-        let decoded = parse_coinbase_height(encoded1.clone()).ok();
-
-        if decoded.is_some() {
-            let mut encoded2 = Vec::new();
-            write_coinbase_height(decoded.as_ref().unwrap().0, &decoded.unwrap().1, &mut encoded2)?;
-            prop_assert_eq!(encoded2, encoded1);
-        }
-    }
 }
