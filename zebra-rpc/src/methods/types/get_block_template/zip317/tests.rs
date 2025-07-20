@@ -6,6 +6,8 @@ use zcash_transparent::address::TransparentAddress;
 use zebra_chain::{block::Height, parameters::Network, transaction, transparent::OutPoint};
 use zebra_node_services::mempool::TransactionDependencies;
 
+use crate::methods::types::get_block_template::MinerParams;
+
 use super::select_mempool_transactions;
 
 #[test]
@@ -27,9 +29,7 @@ fn excludes_tx_with_unselected_dependencies() {
         select_mempool_transactions(
             &network,
             Height(1_000_000),
-            &Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])),
-            vec![],
-            None,
+            &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
             vec![unmined_tx],
             mempool_tx_deps,
         ),
@@ -68,9 +68,7 @@ fn includes_tx_with_selected_dependencies() {
     let selected_txs = select_mempool_transactions(
         &network,
         Height(1_000_000),
-        &Address::from(TransparentAddress::PublicKeyHash([0x7e; 20])),
-        vec![],
-        None,
+        &MinerParams::from(Address::from(TransparentAddress::PublicKeyHash([0x7e; 20]))),
         unmined_txs.clone(),
         mempool_tx_deps.clone(),
     );
