@@ -57,6 +57,9 @@ sapling-crypto = { workspace = true, features = ["multicore"]}
 orchard.workspace = true
 
 zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
+zcash_transparent = { workspace = true }
+zcash_script = { workspace = true }
+zcash_primitives = { workspace = true }
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-batch-control = { path = "../tower-batch-control/", version = "1.0.1" }
