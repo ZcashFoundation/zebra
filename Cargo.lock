@@ -4787,6 +4787,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6687,6 +6705,7 @@ dependencies = [
 name = "zebra-rpc"
 version = "2.0.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "chrono",
  "color-eyre",
@@ -6701,6 +6720,7 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-proc-macros",
  "jsonrpsee-types",
+ "lazy_static",
  "nix",
  "orchard",
  "proptest",
@@ -6711,6 +6731,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_with",
+ "strum",
+ "strum_macros",
  "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
@@ -6857,6 +6879,7 @@ name = "zebrad"
 version = "2.5.0"
 dependencies = [
  "abscissa_core",
+ "anyhow",
  "atty",
  "bytes",
  "chrono",
@@ -6894,6 +6917,8 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "tempfile",
  "thiserror 2.0.12",
  "thread-priority",
