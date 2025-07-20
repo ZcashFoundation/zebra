@@ -169,7 +169,7 @@ use zebra_rpc::{
     methods::{RpcImpl, RpcServer},
     new_coinbase_with_roots, proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
-    SubmitBlockChannel,
+    MinerParams, SubmitBlockChannel,
 };
 use zebra_state::{constants::LOCK_FILE_ERROR, state_database_format_version_in_code};
 use zebra_test::{
@@ -3315,16 +3315,9 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
 
-    let miner_address = Address::try_from_zcash_address(
-        &network,
-        mining_config
-            .miner_address
-            .clone()
-            .expect("mining address should be configured"),
-    )
-    .expect("configured mining address should be valid");
     let default_test_config = default_test_config(&network);
     let mining_conf = default_test_config.mining;
+    let miner_params = MinerParams::new(&network, mining_conf.clone())?;
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
         zebra_state::init_test_services(&network);
@@ -3495,9 +3488,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let (coinbase_txn, default_roots) = new_coinbase_with_roots(
         &network,
         Height(block_template.height()),
-        &miner_address,
-        vec![],
-        None,
+        &miner_params,
         &[],
         chain_history_root,
     )
@@ -3554,9 +3545,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let (coinbase_txn, default_roots) = new_coinbase_with_roots(
         &network,
         Height(block_template.height()),
-        &miner_address,
-        vec![],
-        None,
+        &miner_params,
         &[],
         chain_history_root,
     )

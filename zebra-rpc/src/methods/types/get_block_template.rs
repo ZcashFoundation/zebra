@@ -8,7 +8,10 @@ pub mod zip317;
 #[cfg(test)]
 mod tests;
 
-use std::{fmt, sync::Arc};
+use std::{
+    fmt::{self},
+    sync::Arc,
+};
 
 use derive_getters::Getters;
 use derive_new::new;
@@ -19,6 +22,7 @@ use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
 use zcash_protocol::memo::MemoBytes;
 
+use zcash_transparent::coinbase::MinerData;
 use zebra_chain::{
     amount::{self, NegativeOrZero},
     block::{
@@ -30,7 +34,7 @@ use zebra_chain::{
     parameters::Network,
     serialization::{DateTime32, ZcashDeserializeInto},
     transaction::VerifiedUnminedTx,
-    transparent::{MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN, ZEBRA_MINER_DATA},
+    transparent::ZEBRA_MINER_DATA,
     work::difficulty::{CompactDifficulty, ExpandedDifficulty},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
@@ -261,20 +265,20 @@ impl BlockTemplateResponse {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new_internal(
         network: &Network,
-        miner_address: &Address,
-        miner_data: Vec<u8>,
-        miner_memo: Option<MemoBytes>,
+        miner_params: &MinerParams,
         chain_tip_and_local_time: &GetBlockTemplateChainInfo,
         long_poll_id: LongPollId,
         #[cfg(not(test))] mempool_txs: Vec<VerifiedUnminedTx>,
         #[cfg(test)] mempool_txs: Vec<(InBlockTxDependenciesDepth, VerifiedUnminedTx)>,
         submit_old: Option<bool>,
     ) -> Self {
-        // Calculate the next block height.
-        let next_block_height =
-            (chain_tip_and_local_time.tip_height + 1).expect("tip is far below Height::MAX");
+        // Determine the next block height.
+        let height = chain_tip_and_local_time
+            .tip_height
+            .next()
+            .expect("chain tip must be below Height::MAX");
 
-        // Convert transactions into TransactionTemplates
+        // Convert transactions into TransactionTemplates.
         #[cfg(not(test))]
         let (mempool_tx_templates, mempool_txs): (Vec<_>, Vec<_>) =
             mempool_txs.into_iter().map(|tx| ((&tx).into(), tx)).unzip();
@@ -315,10 +319,8 @@ impl BlockTemplateResponse {
         // TODO: move expensive root, hash, and tree cryptography to a rayon thread?
         let (coinbase_txn, default_roots) = new_coinbase_with_roots(
             network,
-            next_block_height,
-            miner_address,
-            miner_data,
-            miner_memo,
+            height,
+            miner_params,
             &mempool_txs,
             chain_tip_and_local_time.chain_history_root,
         )
@@ -375,7 +377,7 @@ impl BlockTemplateResponse {
 
             bits: chain_tip_and_local_time.expected_difficulty,
 
-            height: next_block_height.0,
+            height: height.0,
 
             max_time: chain_tip_and_local_time.max_time,
 
@@ -508,17 +510,8 @@ where
     <BlockVerifierRouter as Service<zebra_consensus::Request>>::Future: Send,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    /// Address for receiving miner subsidy and tx fees.
-    miner_address: Option<Address>,
-
-    /// Optional data to include in the coinbase input script.
-    /// Limited to 94 bytes.
-    miner_data: Vec<u8>,
-
-    /// Optional shielded memo for the miner's coinbase transaction.
-    ///
-    /// Applies only if [`Self::miner_address`] contains a shielded component.
-    miner_memo: Option<MemoBytes>,
+    /// Miner parameters, including the miner address, data, and memo.
+    miner_params: Option<MinerParams>,
 
     /// The chain verifier, used for submitting blocks.
     block_verifier_router: BlockVerifierRouter,
@@ -542,12 +535,6 @@ where
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
     /// Creates a new [`GetBlockTemplateHandler`].
-    ///
-    /// # Panics
-    ///
-    /// - If the `miner_address` in `conf` is not valid.
-    /// - If the `miner_data` in `conf` is not valid.
-    /// - If the `miner_memo` in `conf` is not valid.
     pub fn new(
         net: &Network,
         conf: config::mining::Config,
@@ -555,62 +542,18 @@ where
         sync_status: SyncStatus,
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
-        // Check that the configured miner address is valid.
-        let miner_address = conf.miner_address.map(|addr| {
-            Address::try_from_zcash_address(net, addr)
-                .expect("miner_address must be a valid Zcash address")
-        });
-
-        // Hex-decode to bytes if possible, otherwise UTF-8 encode to bytes.
-        let miner_data = conf
-            .miner_data
-            .unwrap_or_else(|| ZEBRA_MINER_DATA.to_string());
-
-        let miner_data =
-            hex::decode(&miner_data).unwrap_or_else(|_error| miner_data.as_bytes().to_vec());
-
-        // A limit on the configured miner data, regardless of the current block height.
-        // This is different from the consensus rule, which limits the total height + data.
-        const MINER_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
-
-        let miner_memo = conf.miner_memo.map(|memo| {
-            MemoBytes::from_bytes(memo.as_bytes())
-                .expect("mining.miner_memo must be a valid shielded memo")
-        });
-
-        assert!(
-            miner_data.len() <= MINER_DATA_LIMIT,
-            "miner data is {} bytes, but Zebra's limit is {MINER_DATA_LIMIT}.\n\
-             Configure mining.miner_data with a shorter string",
-            miner_data.len(),
-        );
-
-        let mined_block_sender =
-            mined_block_sender.unwrap_or(SubmitBlockChannel::default().sender());
-
         Self {
-            miner_address,
-            miner_data,
-            miner_memo,
+            miner_params: MinerParams::new(net, conf).ok(),
             block_verifier_router,
             sync_status,
-            mined_block_sender,
+            mined_block_sender: mined_block_sender
+                .unwrap_or(SubmitBlockChannel::default().sender()),
         }
     }
 
-    /// Returns a valid miner address, if any.
-    pub fn miner_address(&self) -> Option<Address> {
-        self.miner_address.clone()
-    }
-
-    /// Returns the optional miner data.
-    pub fn miner_data(&self) -> Vec<u8> {
-        self.miner_data.clone()
-    }
-
-    /// Returns the miner memo, if any.
-    pub fn miner_memo(&self) -> Option<MemoBytes> {
-        self.miner_memo.clone()
+    /// Returns the miner parameters, including the address, data, and memo.
+    pub fn miner_params(&self) -> Option<&MinerParams> {
+        self.miner_params.as_ref()
     }
 
     /// Returns the sync status.
@@ -646,9 +589,8 @@ where
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Skip fields without debug impls
-        f.debug_struct("GetBlockTemplateRpcImpl")
-            .field("miner_address", &self.miner_address)
-            .field("miner_data", &self.miner_data)
+        f.debug_struct("GetBlockTemplateHandler")
+            .field("miner_params", &self.miner_params)
             .finish()
     }
 }
@@ -706,7 +648,7 @@ pub fn check_parameters(parameters: &Option<GetBlockTemplateParameters>) -> RpcR
 pub async fn validate_block_proposal<BlockVerifierRouter, Tip, SyncStatus>(
     mut block_verifier_router: BlockVerifierRouter,
     block_proposal_bytes: Vec<u8>,
-    network: Network,
+    net: &Network,
     latest_chain_tip: Tip,
     sync_status: SyncStatus,
 ) -> RpcResult<GetBlockTemplateResponse>
@@ -719,7 +661,7 @@ where
     Tip: ChainTip + Clone + Send + Sync + 'static,
     SyncStatus: ChainSyncStatus + Clone + Send + Sync + 'static,
 {
-    check_synced_to_tip(&network, latest_chain_tip, sync_status)?;
+    check_synced_to_tip(net, latest_chain_tip, sync_status)?;
 
     let block: Block = match block_proposal_bytes.zcash_deserialize_into() {
         Ok(block) => block,
@@ -882,21 +824,11 @@ where
 pub fn new_coinbase_with_roots(
     net: &Network,
     height: Height,
-    miner_addr: &Address,
-    miner_data: Vec<u8>,
-    miner_memo: Option<MemoBytes>,
+    miner_params: &MinerParams,
     mempool_txs: &[VerifiedUnminedTx],
     chain_history_root: Option<ChainHistoryMmrRootHash>,
 ) -> Result<(TransactionTemplate<NegativeOrZero>, DefaultRoots), Box<dyn std::error::Error>> {
-    let tx = TransactionTemplate::new_coinbase(
-        net,
-        height,
-        miner_addr,
-        miner_data,
-        miner_memo,
-        mempool_txs,
-    )?;
-
+    let tx = TransactionTemplate::new_coinbase(net, height, miner_params, mempool_txs)?;
     let roots = DefaultRoots::from_coinbase(net, height, &tx, chain_history_root, mempool_txs)?;
 
     Ok((tx, roots))

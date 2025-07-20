@@ -9,7 +9,7 @@ mod utxo;
 
 use std::{collections::HashMap, fmt, iter, ops::AddAssign};
 
-use zcash_transparent::{address::TransparentAddress, bundle::TxOut};
+use zcash_transparent::{address::TransparentAddress, bundle::TxOut, coinbase::MinerData};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -20,7 +20,6 @@ use crate::{
 
 pub use address::Address;
 pub use script::Script;
-pub use serialize::{GENESIS_COINBASE_DATA, MAX_COINBASE_DATA_LEN, MAX_COINBASE_HEIGHT_DATA_LEN};
 pub use utxo::{
     new_ordered_outputs, new_outputs, outputs_from_utxos, utxos_from_ordered_utxos,
     CoinbaseSpendRestriction, OrderedUtxo, Utxo,
@@ -62,51 +61,6 @@ pub const MIN_TRANSPARENT_COINBASE_MATURITY: u32 = 100;
 // - https://github.com/emacs-lsp/lsp-mode/issues/2080
 // - https://github.com/rust-lang/rust-analyzer/issues/13709
 pub const ZEBRA_MINER_DATA: &str = "z\u{1F993}";
-
-/// Arbitrary data inserted by miners into a coinbase transaction.
-#[derive(Clone, Eq, PartialEq)]
-#[cfg_attr(
-    any(test, feature = "proptest-impl", feature = "elasticsearch"),
-    derive(Serialize)
-)]
-pub struct MinerData(
-    /// Invariant: this vec, together with the coinbase height, must be less than
-    /// 100 bytes. We enforce this by only constructing CoinbaseData fields by
-    /// parsing blocks with 100-byte data fields, and checking newly created
-    /// CoinbaseData lengths in the transaction builder.
-    pub(super) Vec<u8>,
-);
-
-#[cfg(any(test, feature = "proptest-impl"))]
-impl MinerData {
-    /// Create a new `CoinbaseData` containing `data`.
-    ///
-    /// Only for use in tests.
-    pub fn new(data: Vec<u8>) -> MinerData {
-        MinerData(data)
-    }
-}
-
-impl AsRef<[u8]> for MinerData {
-    fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
-    }
-}
-
-impl std::fmt::Debug for MinerData {
-    #[allow(clippy::unwrap_in_result)]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let escaped = String::from_utf8(
-            self.0
-                .iter()
-                .cloned()
-                .flat_map(std::ascii::escape_default)
-                .collect(),
-        )
-        .expect("ascii::escape_default produces utf8");
-        f.debug_tuple("MinerData").field(&escaped).finish()
-    }
-}
 
 /// OutPoint
 ///
@@ -196,7 +150,7 @@ impl fmt::Display for Input {
                 let mut fmter = f.debug_struct("transparent::Input::Coinbase");
 
                 fmter.field("height", height);
-                fmter.field("data_len", &data.0.len());
+                fmter.field("data_len", &data.as_ref().len());
 
                 fmter.finish()
             }
@@ -222,7 +176,7 @@ impl Input {
             Input::Coinbase { height, data, .. } => {
                 let mut height_and_data = Vec::new();
                 serialize::write_coinbase_height(*height, data, &mut height_and_data).ok()?;
-                height_and_data.extend(&data.0);
+                height_and_data.extend(data.as_ref());
                 Some(height_and_data)
             }
         }
