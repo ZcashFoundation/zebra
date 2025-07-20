@@ -192,12 +192,6 @@ impl<S> tower::Layer<S> for HttpRequestMiddlewareLayer {
     }
 }
 
-/// A trait for updating an object, consuming it and returning the updated version.
-pub trait With<T> {
-    /// Updates `self` with an instance of type `T` and returns the updated version of `self`.
-    fn with(self, _: T) -> Self;
-}
-
 impl<S> Service<HttpRequest<HttpBody>> for HttpRequestMiddleware<S>
 where
     S: Service<HttpRequest, Response = HttpResponse> + std::clone::Clone + Send + 'static,
