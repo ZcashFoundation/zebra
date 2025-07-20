@@ -235,8 +235,8 @@ impl TransactionTemplate<NegativeOrZero> {
 
         let build_result = builder.build(
             &Default::default(),
-            &[],
-            &[],
+            Default::default(),
+            Default::default(),
             OsRng,
             &*groth16::SAPLING,
             &*groth16::SAPLING,
