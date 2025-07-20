@@ -213,7 +213,7 @@ def initialize_datadir(dirname, n, clock_offset=0):
 
     return datadir
 
-def update_zebrad_conf(datadir, rpc_port, p2p_port, funding_streams=False):
+def update_zebrad_conf(datadir, rpc_port, p2p_port, funding_streams=False, miner_address = "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"):
     import toml
 
     config_path = zebrad_config(datadir)
@@ -224,6 +224,8 @@ def update_zebrad_conf(datadir, rpc_port, p2p_port, funding_streams=False):
     config_file['rpc']['listen_addr'] = '127.0.0.1:'+str(rpc_port)
     config_file['network']['listen_addr'] = '127.0.0.1:'+str(p2p_port)
     config_file['state']['cache_dir'] = datadir
+
+    config_file['mining']['miner_address'] = miner_address
 
     # TODO: Add More config options. zcashd uses extra arguments to pass options
     # to the binary, but zebrad uses a config file.
@@ -578,7 +580,7 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
         binary = zcashd_binary()
 
     if extra_args is not None:
-        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), funding_streams = extra_args[i])
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), funding_streams = extra_args[i][0], miner_address = extra_args[i][1])
     else:
         config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
     args = [ binary, "-c="+config, "start" ]
@@ -891,6 +893,12 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     """
 
     datadir = os.path.join(dirname, "wallet"+str(i))
+    wallet_datadir = os.path.join(dirname, "wallet_data"+str(i))
+    prepare = False
+    if not os.path.exists(wallet_datadir):
+        prepare = True
+        os.mkdir(wallet_datadir)
+
     if binary is None:
         binary = zallet_binary()
 
@@ -898,7 +906,19 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     zallet_port = wallet_rpc_port(i)
 
     config = update_zallet_conf(datadir, validator_port, zallet_port)
-    args = [ binary, "-c="+config, "start" ]
+
+    # We prepare the wallet if it is new
+    if prepare:
+        args = [ binary, "-c="+config, "-d="+wallet_datadir, "init-wallet-encryption" ]
+        process = subprocess.Popen(args, stderr=stderr)
+        process.wait()
+
+        args = [ binary, "-c="+config, "-d="+wallet_datadir, "generate-mnemonic" ]
+        process = subprocess.Popen(args, stderr=stderr)
+        process.wait()
+
+    # Start the wallet
+    args = [ binary, "-c="+config, "-d="+wallet_datadir, "start" ]
 
     if extra_args is not None: args.extend(extra_args)
     zallet_processes[i] = subprocess.Popen(args, stderr=stderr)
@@ -946,7 +966,8 @@ def stop_wallets(wallets):
 def zallet_config(datadir):
     base_location = os.path.join('qa', 'zallet-datadir')
     new_location = os.path.join(datadir, "datadir")
-    shutil.copytree(base_location, new_location)
+    if not os.path.exists(new_location):
+        shutil.copytree(base_location, new_location)
     config = new_location + "/zallet.toml"
     return config
 
