@@ -16,7 +16,11 @@ class AddNodeTest (BitcoinTestFramework):
         self.num_nodes = 3
 
     def setup_network(self, split=False):
-        args = [False, False, False]
+        args = [
+            [False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"],
+            [False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"],
+            [False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]
+        ]
         self.nodes = start_nodes(self.num_nodes , self.options.tmpdir, extra_args=args)
 
         # connect all the nodes to each other

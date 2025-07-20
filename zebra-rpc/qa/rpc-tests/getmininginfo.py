@@ -18,7 +18,7 @@ class GetMiningInfoTest(BitcoinTestFramework):
         self.cache_behavior = 'clean'
 
     def setup_network(self, split=False):
-        args = [False * self.num_nodes]
+        args = [[False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
         self.is_network_split = False
         self.sync_all()

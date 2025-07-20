@@ -28,7 +28,7 @@ class PoolsTest(BitcoinTestFramework):
 
     def setup_network(self):
         # Add pre and post NU6 funding streams to the node.
-        args = [True]
+        args = [[True, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
 
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, extra_args=args)
 
