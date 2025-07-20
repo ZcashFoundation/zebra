@@ -205,48 +205,6 @@ impl fmt::Display for Input {
 }
 
 impl Input {
-    /// Returns a new coinbase input for `height` with optional `data` and `sequence`.
-    ///
-    /// # Consensus
-    ///
-    /// The combined serialized size of `height` and `data` can be at most 100 bytes.
-    ///
-    /// > A coinbase transaction script MUST have length in {2 .. 100} bytes.
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#txnconsensus>
-    ///
-    /// # Panics
-    ///
-    /// If the coinbase data is greater than [`MAX_COINBASE_DATA_LEN`].
-    pub fn new_coinbase(height: block::Height, data: Vec<u8>, sequence: Option<u32>) -> Input {
-        // `zcashd` includes an extra byte after the coinbase height in the coinbase data. We do
-        // that only if the data is empty to stay compliant with the following consensus rule:
-        //
-        // > A coinbase transaction script MUST have length in {2 .. 100} bytes.
-        //
-        // ## Rationale
-        //
-        // Coinbase heights < 17 are serialized as a single byte, and if there is no coinbase data,
-        // the script of a coinbase tx with such a height would consist only of this single byte,
-        // violating the consensus rule.
-        let data = if data.is_empty() { vec![0] } else { data };
-        let data_limit = MAX_COINBASE_DATA_LEN - height.coinbase_zcash_serialized_size();
-
-        assert!(
-            data.len() <= data_limit,
-            "miner data has {} bytes, which exceeds the limit of {data_limit} bytes",
-            data.len(),
-        );
-
-        Input::Coinbase {
-            height,
-            data: MinerData(data),
-            // If the caller does not specify the sequence number, use a sequence number that
-            // activates the LockTime.
-            sequence: sequence.unwrap_or(0),
-        }
-    }
-
     /// Returns the miner data in this input, if it is an [`Input::Coinbase`].
     pub fn miner_data(&self) -> Option<&MinerData> {
         match self {
