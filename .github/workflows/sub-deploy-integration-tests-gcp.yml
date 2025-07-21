@@ -210,7 +210,7 @@ jobs:
             gcloud compute disks create "${NAME}" \
               --size=400GB \
               --type=pd-balanced \
-              --source-image="${{ env.CACHED_DISK_NAME }}" \
+              --image="${{ env.CACHED_DISK_NAME }}" \
               --zone=${{ vars.GCP_ZONE }}
           else
             echo "Creating empty disk ${NAME}"
