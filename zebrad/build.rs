@@ -67,8 +67,8 @@ fn main() {
         .expect("Failed to generate lightwalletd gRPC files");
 
     // Add custom git tag and commit information
-    let git_tag = run_git_command(&["describe", "--exact-match", "--tags"], "none");     // Will be set to 'none' if .git is missing or git fails.
-    let git_commit = run_git_command(&["rev-parse", "HEAD"], "none");                    // Will be set to 'none' if .git is missing or git fails.
+    let git_tag = run_git_command(&["describe", "--exact-match", "--tags"], "none"); // Will be set to 'none' if .git is missing or git fails.
+    let git_commit = run_git_command(&["rev-parse", "HEAD"], "none"); // Will be set to 'none' if .git is missing or git fails.
 
     println!("cargo:rustc-env=GIT_TAG={}", git_tag);
     println!("cargo:rustc-env=GIT_COMMIT_FULL={}", git_commit);
