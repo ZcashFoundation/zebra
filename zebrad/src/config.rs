@@ -5,6 +5,8 @@
 //! for specifying it.
 
 use serde::{Deserialize, Serialize};
+use zebra_chain::parameters::testnet::ConfiguredActivationHeights;
+use zebra_network::config::{DConfig, DTestnetParameters};
 
 /// Configuration for `zebrad`.
 ///
@@ -53,4 +55,30 @@ pub struct ZebradConfig {
 
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,
+}
+
+#[test]
+fn serialising_config() {
+    let d_config = DConfig {
+        listen_addr: "127.0.0.1:3000".to_string(),
+        testnet_parameters: Some(DTestnetParameters {
+            network_name: Some("name".to_owned()),
+            disable_pow: Some(true),
+            activation_heights: Some(ConfiguredActivationHeights {
+                overwinter: Some(1),
+                before_overwinter: Some(2),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+
+    let config: ZebradConfig = ZebradConfig {
+        network: zebra_network::Config::try_from(d_config).unwrap(),
+        ..Default::default()
+    };
+
+    let serialised = toml::to_string_pretty(&config).unwrap();
+    println!("{}", serialised)
 }

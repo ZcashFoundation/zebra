@@ -585,35 +585,35 @@ impl Default for Config {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-struct DTestnetParameters {
-    network_name: Option<String>,
-    network_magic: Option<[u8; 4]>,
-    slow_start_interval: Option<u32>,
-    target_difficulty_limit: Option<String>,
-    disable_pow: Option<bool>,
-    genesis_hash: Option<String>,
-    activation_heights: Option<ConfiguredActivationHeights>,
-    pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
-    post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
-    pre_blossom_halving_interval: Option<u32>,
+pub struct DTestnetParameters {
+    pub network_name: Option<String>,
+    pub network_magic: Option<[u8; 4]>,
+    pub slow_start_interval: Option<u32>,
+    pub target_difficulty_limit: Option<String>,
+    pub disable_pow: Option<bool>,
+    pub genesis_hash: Option<String>,
+    pub activation_heights: Option<ConfiguredActivationHeights>,
+    pub pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    pub post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    pub pre_blossom_halving_interval: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
-struct DConfig {
-    listen_addr: String,
-    external_addr: Option<String>,
-    network: NetworkKind,
-    testnet_parameters: Option<DTestnetParameters>,
-    initial_mainnet_peers: IndexSet<String>,
-    initial_testnet_peers: IndexSet<String>,
-    cache_dir: CacheDir,
-    peerset_initial_target_size: usize,
+pub struct DConfig {
+    pub listen_addr: String,
+    pub external_addr: Option<String>,
+    pub network: NetworkKind,
+    pub testnet_parameters: Option<DTestnetParameters>,
+    pub initial_mainnet_peers: IndexSet<String>,
+    pub initial_testnet_peers: IndexSet<String>,
+    pub cache_dir: CacheDir,
+    pub peerset_initial_target_size: usize,
     #[serde(alias = "new_peer_interval", with = "humantime_serde")]
-    crawl_new_peer_interval: Duration,
-    max_connections_per_ip: Option<usize>,
+    pub crawl_new_peer_interval: Duration,
+    pub max_connections_per_ip: Option<usize>,
 }
 
 impl Default for DConfig {
@@ -690,187 +690,221 @@ impl From<Config> for DConfig {
     }
 }
 
+use thiserror::Error;
+
+#[non_exhaustive]
+#[derive(Debug, Error)]
+pub enum ConfigConvertError {
+    #[error("{0}")]
+    Message(String),
+
+    #[error("invalid listen_addr: {0}")]
+    InvalidListenAddr(String),
+
+    #[error("invalid external_addr: {0}")]
+    InvalidExternalAddr(String),
+
+    #[error("cannot use default initial peers with incompatible testnet")]
+    IncompatibleTestnetWithDefaultPeers,
+
+    #[error("u256 parse error in target_difficulty_limit: {0}")]
+    TargetDiffParse(String),
+
+    #[error("slow_start_interval out of range: {0}")]
+    SlowStartInterval(String),
+}
+
+impl ConfigConvertError {
+    fn msg<S: Into<String>>(s: S) -> Self {
+        ConfigConvertError::Message(s.into())
+    }
+}
+
+fn contains_default_initial_peers(initial_peers: &IndexSet<String>) -> bool {
+    let Config {
+        initial_mainnet_peers: mut default_initial_peers,
+        initial_testnet_peers: default_initial_testnet_peers,
+        ..
+    } = Config::default();
+
+    default_initial_peers.extend(default_initial_testnet_peers);
+
+    initial_peers
+        .intersection(&default_initial_peers)
+        .next()
+        .is_some()
+}
+
+fn parse_addr_with_default(s: &str, default_port: u16) -> Result<SocketAddr, ConfigConvertError> {
+    // direct parse with optional explicit port
+    if let Ok(sock) = s.parse::<SocketAddr>() {
+        return Ok(sock);
+    }
+
+    // try "host:default_port"
+    let s_with_port = format!("{s}:{default_port}");
+    if let Ok(sock) = s_with_port.parse::<SocketAddr>() {
+        return Ok(sock);
+    }
+
+    // try raw IP only
+    if let Ok(ip) = s.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, default_port));
+    }
+
+    Err(ConfigConvertError::msg(format!(
+        "{s}; Hint: addresses can be IPv4, IPv6 (with brackets), or DNS; port optional"
+    )))
+}
+
+fn build_network(
+    network_kind: NetworkKind,
+    testnet_parameters: Option<DTestnetParameters>,
+    initial_testnet_peers: &IndexSet<String>,
+) -> Result<Network, ConfigConvertError> {
+    Ok(match (network_kind, testnet_parameters) {
+        (NetworkKind::Mainnet, _) => Network::Mainnet,
+
+        (NetworkKind::Testnet, None) => Network::new_default_testnet(),
+
+        (NetworkKind::Regtest, testnet_parameters) => {
+            let configured_activation_heights = testnet_parameters
+                .and_then(|p| p.activation_heights)
+                .unwrap_or_default();
+            Network::new_regtest(configured_activation_heights)
+        }
+
+        (
+            NetworkKind::Testnet,
+            Some(DTestnetParameters {
+                network_name,
+                network_magic,
+                slow_start_interval,
+                target_difficulty_limit,
+                disable_pow,
+                genesis_hash,
+                activation_heights,
+                pre_nu6_funding_streams,
+                post_nu6_funding_streams,
+                pre_blossom_halving_interval,
+            }),
+        ) => {
+            let mut params_builder = testnet::Parameters::build();
+
+            if let Some(network_name) = network_name.clone() {
+                params_builder = params_builder.with_network_name(network_name);
+            }
+            if let Some(network_magic) = network_magic {
+                params_builder = params_builder.with_network_magic(Magic(network_magic));
+            }
+            if let Some(genesis_hash) = genesis_hash {
+                params_builder = params_builder.with_genesis_hash(genesis_hash);
+            }
+            if let Some(slow_start_interval) = slow_start_interval {
+                params_builder = params_builder.with_slow_start_interval(
+                    slow_start_interval
+                        .try_into()
+                        .map_err(|e| ConfigConvertError::SlowStartInterval(format!("{e}")))?,
+                );
+            }
+            if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
+                params_builder = params_builder.with_target_difficulty_limit(
+                    target_difficulty_limit
+                        .parse::<U256>()
+                        .map_err(|e| ConfigConvertError::TargetDiffParse(format!("{e}")))?,
+                );
+            }
+            if let Some(disable_pow) = disable_pow {
+                params_builder = params_builder.with_disable_pow(disable_pow);
+            }
+            if let Some(activation_heights) = activation_heights.clone() {
+                params_builder = params_builder.with_activation_heights(activation_heights);
+            }
+            if let Some(halving) = pre_blossom_halving_interval {
+                params_builder = params_builder.with_halving_interval(halving.into());
+            }
+            if let Some(streams) = pre_nu6_funding_streams {
+                params_builder = params_builder.with_pre_nu6_funding_streams(streams);
+            }
+            if let Some(streams) = post_nu6_funding_streams {
+                params_builder = params_builder.with_post_nu6_funding_streams(streams);
+            }
+
+            if !params_builder.is_compatible_with_default_parameters()
+                && contains_default_initial_peers(initial_testnet_peers)
+            {
+                return Err(ConfigConvertError::IncompatibleTestnetWithDefaultPeers);
+            }
+
+            // default testnet fast-path
+            if network_name.is_none() && params_builder == testnet::Parameters::build() {
+                Network::new_default_testnet()
+            } else {
+                params_builder.to_network()
+            }
+        }
+    })
+}
+
+impl TryFrom<DConfig> for Config {
+    type Error = ConfigConvertError;
+
+    fn try_from(dc: DConfig) -> Result<Self, Self::Error> {
+        // Build network first (needed for default port)
+        let network = build_network(dc.network, dc.testnet_parameters, &dc.initial_testnet_peers)?;
+
+        // Listen addr w/ default port
+        let listen_addr = parse_addr_with_default(&dc.listen_addr, network.default_port())?;
+        // External addr optional
+        let external_addr = match dc.external_addr {
+            Some(ref s) => Some(parse_addr_with_default(s, network.default_port())?),
+            None => None,
+        };
+
+        // Normalize size fields
+        let [max_connections_per_ip, peerset_initial_target_size] = [
+            (
+                "max_connections_per_ip",
+                dc.max_connections_per_ip,
+                DEFAULT_MAX_CONNS_PER_IP,
+            ),
+            (
+                "peerset_initial_target_size",
+                Some(dc.peerset_initial_target_size),
+                DEFAULT_PEERSET_INITIAL_TARGET_SIZE,
+            ),
+        ]
+        .map(|(field_name, non_zero, default)| {
+            if non_zero == Some(0) {
+                warn!(
+                    ?field_name,
+                    ?non_zero,
+                    "{field_name} should be > 0; using default {default}"
+                );
+            }
+            non_zero.filter(|v| *v > 0).unwrap_or(default)
+        });
+
+        Ok(Config {
+            listen_addr: canonical_socket_addr(listen_addr),
+            external_addr,
+            network,
+            initial_mainnet_peers: dc.initial_mainnet_peers,
+            initial_testnet_peers: dc.initial_testnet_peers,
+            cache_dir: dc.cache_dir,
+            peerset_initial_target_size,
+            crawl_new_peer_interval: dc.crawl_new_peer_interval,
+            max_connections_per_ip,
+        })
+    }
+}
+
 impl<'de> Deserialize<'de> for Config {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        let DConfig {
-            listen_addr,
-            external_addr,
-            network: network_kind,
-            testnet_parameters,
-            initial_mainnet_peers,
-            initial_testnet_peers,
-            cache_dir,
-            peerset_initial_target_size,
-            crawl_new_peer_interval,
-            max_connections_per_ip,
-        } = DConfig::deserialize(deserializer)?;
-
-        /// Accepts an [`IndexSet`] of initial peers,
-        ///
-        /// Returns true if any of them are the default Testnet or Mainnet initial peers.
-        fn contains_default_initial_peers(initial_peers: &IndexSet<String>) -> bool {
-            let Config {
-                initial_mainnet_peers: mut default_initial_peers,
-                initial_testnet_peers: default_initial_testnet_peers,
-                ..
-            } = Config::default();
-            default_initial_peers.extend(default_initial_testnet_peers);
-
-            initial_peers
-                .intersection(&default_initial_peers)
-                .next()
-                .is_some()
-        }
-
-        let network = match (network_kind, testnet_parameters) {
-            (NetworkKind::Mainnet, _) => Network::Mainnet,
-            (NetworkKind::Testnet, None) => Network::new_default_testnet(),
-            (NetworkKind::Regtest, testnet_parameters) => {
-                let configured_activation_heights = testnet_parameters
-                    .and_then(|params| params.activation_heights)
-                    .unwrap_or_default();
-
-                Network::new_regtest(configured_activation_heights)
-            }
-            (
-                NetworkKind::Testnet,
-                Some(DTestnetParameters {
-                    network_name,
-                    network_magic,
-                    slow_start_interval,
-                    target_difficulty_limit,
-                    disable_pow,
-                    genesis_hash,
-                    activation_heights,
-                    pre_nu6_funding_streams,
-                    post_nu6_funding_streams,
-                    pre_blossom_halving_interval,
-                }),
-            ) => {
-                let mut params_builder = testnet::Parameters::build();
-
-                if let Some(network_name) = network_name.clone() {
-                    params_builder = params_builder.with_network_name(network_name)
-                }
-
-                if let Some(network_magic) = network_magic {
-                    params_builder = params_builder.with_network_magic(Magic(network_magic));
-                }
-
-                if let Some(genesis_hash) = genesis_hash {
-                    params_builder = params_builder.with_genesis_hash(genesis_hash);
-                }
-
-                if let Some(slow_start_interval) = slow_start_interval {
-                    params_builder = params_builder.with_slow_start_interval(
-                        slow_start_interval.try_into().map_err(de::Error::custom)?,
-                    );
-                }
-
-                if let Some(target_difficulty_limit) = target_difficulty_limit.clone() {
-                    params_builder = params_builder.with_target_difficulty_limit(
-                        target_difficulty_limit
-                            .parse::<U256>()
-                            .map_err(de::Error::custom)?,
-                    );
-                }
-
-                if let Some(disable_pow) = disable_pow {
-                    params_builder = params_builder.with_disable_pow(disable_pow);
-                }
-
-                // Retain default Testnet activation heights unless there's an empty [testnet_parameters.activation_heights] section.
-                if let Some(activation_heights) = activation_heights.clone() {
-                    params_builder = params_builder.with_activation_heights(activation_heights)
-                }
-
-                if let Some(halving_interval) = pre_blossom_halving_interval {
-                    params_builder = params_builder.with_halving_interval(halving_interval.into())
-                }
-
-                // Set configured funding streams after setting any parameters that affect the funding stream address period.
-
-                if let Some(funding_streams) = pre_nu6_funding_streams {
-                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
-                }
-
-                if let Some(funding_streams) = post_nu6_funding_streams {
-                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
-                }
-
-                // Return an error if the initial testnet peers includes any of the default initial Mainnet or Testnet
-                // peers and the configured network parameters are incompatible with the default public Testnet.
-                if !params_builder.is_compatible_with_default_parameters()
-                    && contains_default_initial_peers(&initial_testnet_peers)
-                {
-                    return Err(de::Error::custom(
-                        "cannot use default initials peers with incompatible testnet",
-                    ));
-                };
-
-                // Return the default Testnet if no network name was configured and all parameters match the default Testnet
-                if network_name.is_none() && params_builder == testnet::Parameters::build() {
-                    Network::new_default_testnet()
-                } else {
-                    params_builder.to_network()
-                }
-            }
-        };
-
-        let listen_addr = match listen_addr.parse::<SocketAddr>().or_else(|_| format!("{listen_addr}:{}", network.default_port()).parse()) {
-            Ok(socket) => Ok(socket),
-            Err(_) => match listen_addr.parse::<IpAddr>() {
-                Ok(ip) => Ok(SocketAddr::new(ip, network.default_port())),
-                Err(err) => Err(de::Error::custom(format!(
-                    "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
-                ))),
-            },
-        }?;
-
-        let external_socket_addr = if let Some(address) = &external_addr {
-            match address.parse::<SocketAddr>().or_else(|_| format!("{address}:{}", network.default_port()).parse()) {
-                Ok(socket) => Ok(Some(socket)),
-                Err(_) => match address.parse::<IpAddr>() {
-                    Ok(ip) => Ok(Some(SocketAddr::new(ip, network.default_port()))),
-                    Err(err) => Err(de::Error::custom(format!(
-                        "{err}; Hint: addresses can be a IPv4, IPv6 (with brackets), or a DNS name, the port is optional"
-                    ))),
-                },
-            }?
-        } else {
-            None
-        };
-
-        let [max_connections_per_ip, peerset_initial_target_size] = [
-            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP),
-            // If we want Zebra to operate with no network,
-            // we should implement a `zebrad` command that doesn't use `zebra-network`.
-            ("peerset_initial_target_size", Some(peerset_initial_target_size), DEFAULT_PEERSET_INITIAL_TARGET_SIZE)
-        ].map(|(field_name, non_zero_config_field, default_config_value)| {
-            if non_zero_config_field == Some(0) {
-                warn!(
-                    ?field_name,
-                    ?non_zero_config_field,
-                    "{field_name} should be greater than 0, using default value of {default_config_value} instead"
-                );
-            }
-
-            non_zero_config_field.filter(|config_value| config_value > &0).unwrap_or(default_config_value)
-        });
-
-        Ok(Config {
-            listen_addr: canonical_socket_addr(listen_addr),
-            external_addr: external_socket_addr,
-            network,
-            initial_mainnet_peers,
-            initial_testnet_peers,
-            cache_dir,
-            peerset_initial_target_size,
-            crawl_new_peer_interval,
-            max_connections_per_ip,
-        })
+        let dc = DConfig::deserialize(deserializer)?;
+        dc.try_into().map_err(|e| de::Error::custom(e))
     }
 }
