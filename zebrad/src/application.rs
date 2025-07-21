@@ -295,6 +295,8 @@ impl Application for ZebradApp {
         let git_metadata: &[(_, Option<_>)] = &[
             ("branch", option_env!("VERGEN_GIT_BRANCH")),
             ("git commit", Self::git_commit()),
+            ("git tag", option_env!("GIT_TAG")),
+            ("git commit full", option_env!("GIT_COMMIT_FULL")),
             (
                 "commit timestamp",
                 option_env!("VERGEN_GIT_COMMIT_TIMESTAMP"),

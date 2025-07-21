@@ -6,6 +6,7 @@
 //! When compiling the `lightwalletd` gRPC tests, also builds a gRPC client
 //! Rust API for `lightwalletd`.
 
+use std::process::Command;
 use vergen::EmitBuilder;
 
 /// Returns a new `vergen` builder, configured for everything except for `git` env vars.
@@ -16,6 +17,18 @@ fn base_vergen_builder() -> EmitBuilder {
     vergen.all_cargo().all_rustc();
 
     vergen
+}
+
+/// Run a git command and return the output, or a fallback value if it fails
+fn run_git_command(args: &[&str], fallback: &str) -> String {
+    Command::new("git")
+        .args(args)
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| fallback.to_owned())
 }
 
 /// Process entry point for `zebrad`'s build script
@@ -52,4 +65,11 @@ fn main() {
             &["tests/common/lightwalletd/proto"],
         )
         .expect("Failed to generate lightwalletd gRPC files");
+
+    // Add custom git tag and commit information
+    let git_tag = run_git_command(&["describe", "--exact-match", "--tags"], "none"); // Will be set to 'none' if .git is missing or git fails.
+    let git_commit = run_git_command(&["rev-parse", "HEAD"], "none"); // Will be set to 'none' if .git is missing or git fails.
+
+    println!("cargo:rustc-env=GIT_TAG={}", git_tag);
+    println!("cargo:rustc-env=GIT_COMMIT_FULL={}", git_commit);
 }
