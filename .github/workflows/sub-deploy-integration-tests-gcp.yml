@@ -221,10 +221,20 @@ jobs:
           fi
 
           # Mount the disk(s) to the container
-          # Use partition=1 for cached disks (they may have partition tables) as konlet complains if there are multiple partitions
-          CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw,partition=1"
-          if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
-            CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw,partition=1"
+          # Use partition=1 only for cached disks (they have partition tables)
+          # Empty disks don't have partitions initially, so mount the raw disk
+          if [ -n "${{ env.CACHED_DISK_NAME }}" ]; then
+            # Cached disk - use partition=1 since these disks have partition tables
+            CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw,partition=1"
+            if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
+              CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw,partition=1"
+            fi
+          else
+            # Empty disk - mount raw disk (no partitions initially)
+            CONTAINER_MOUNT_DISKS="--container-mount-disk=mount-path=${{ inputs.zebra_state_dir }},name=${NAME},mode=rw"
+            if [[ "${{ inputs.needs_lwd_state }}" == "true" || "${{ inputs.test_id }}" == "lwd-sync-full" ]]; then
+              CONTAINER_MOUNT_DISKS+=" --container-mount-disk=mount-path=${{ inputs.lwd_state_dir }},name=${NAME},mode=rw"
+            fi
           fi
 
           # Environment variables for the container
