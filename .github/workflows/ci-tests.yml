@@ -146,6 +146,8 @@ jobs:
     uses: ./.github/workflows/sub-ci-unit-tests-docker.yml
     with:
       image_digest: ${{ needs.build.outputs.image_digest }}
+      network: ${{ inputs.network }}
+      no_cache: ${{ inputs.no_cache }}
     secrets: inherit
 
   # Runs Zebra integration tests
@@ -153,4 +155,11 @@ jobs:
     name: Integration tests
     needs: build
     uses: ./.github/workflows/sub-ci-integration-tests-gcp.yml
+    with:
+      network: ${{ inputs.network }}
+      regenerate-disks: ${{ inputs.regenerate-disks }}
+      run-full-sync: ${{ inputs.run-full-sync }}
+      run-lwd-sync: ${{ inputs.run-lwd-sync }}
+      force_save_to_disk: ${{ inputs.force_save_to_disk }}
+      no_cache: ${{ inputs.no_cache }}
     secrets: inherit
