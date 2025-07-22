@@ -74,11 +74,11 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 - [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
-- [ ] Add the `A-release` tag to the release pull request in order for the `check_no_git_refs_in_cargo_lock` to run.
+- [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 
 ## Zebra git sources dependencies
 
-- [ ] Ensure the `check_no_git_refs_in_cargo_lock` check passes.
+- [ ] Ensure the `check-no-git-dependencies` check passes.
 
 This check runs automatically on pull requests with the `A-release` label. It must pass for crates to be published to crates.io. If the check fails, you should either halt the release process or proceed with the understanding that the crates will not be published on crates.io.
 
@@ -175,8 +175,15 @@ The end of support height is calculated from the current blockchain height:
 ## Publish Crates
 
 - [ ] [Run `cargo login`](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio)
-- [ ] Run `cargo clean` in the zebra repo (optional)
-- [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
+- [ ] It is recommended that the following step be run from a fresh checkout of
+      the repo, to avoid accidentally publishing files like e.g. logs that might
+      be lingering around
+- [ ] Publish the crates to crates.io:
+
+```
+for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-services zebra-script zebra-state zebra-consensus zebra-network zebra-rpc zebra-utils zebrad; do cargo release publish --verbose --execute -p $c; done
+```
+
 - [ ] Check that Zebra can be installed from `crates.io`:
       `cargo install --locked --force --version 1.minor.patch zebrad && ~/.cargo/bin/zebrad`
       and put the output in a comment on the PR.
