@@ -92,9 +92,9 @@ jobs:
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # Simple approach: Manual runs get unique IDs, others share by event + job type
+    # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || format('long-running-{0}-checkpoint', github.event_name) }}
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-{1}-checkpoint', github.run_id, inputs.network || vars.ZCASH_NETWORK) || format('long-running-{0}-{1}-checkpoint', github.event_name, inputs.network || vars.ZCASH_NETWORK) }}
       cancel-in-progress: false
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
@@ -151,9 +151,9 @@ jobs:
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # Simple approach: Manual runs get unique IDs, others share by event + job type
+    # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || format('long-running-{0}-sync-full-mainnet', github.event_name) }}
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-Mainnet-sync-full', github.run_id) || format('long-running-{0}-Mainnet-sync-full', github.event_name) }}
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
@@ -250,9 +250,9 @@ jobs:
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # Simple approach: Manual runs get unique IDs, others share by event + job type
+    # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || format('long-running-{0}-sync-full-testnet', github.event_name) }}
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-Testnet-sync-full', github.run_id) || format('long-running-{0}-Testnet-sync-full', github.event_name) }}
       cancel-in-progress: false
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
@@ -320,9 +320,9 @@ jobs:
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # Simple approach: Manual runs get unique IDs, others share by event + job type
+    # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || format('long-running-{0}-lwd-sync-full', github.event_name) }}
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-{1}-lwd-sync-full', github.run_id, inputs.network || vars.ZCASH_NETWORK) || format('long-running-{0}-{1}-lwd-sync-full', github.event_name, inputs.network || vars.ZCASH_NETWORK) }}
       cancel-in-progress: false
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state

@@ -9,7 +9,7 @@ name: Run tests
 # IMPORTANT: We never cancel scheduled runs or any manual runs to protect 
 # multi-hour sync operations from being interrupted
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-manual-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.head_ref || github.run_id) }}
   cancel-in-progress: ${{ github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
 
 on:
