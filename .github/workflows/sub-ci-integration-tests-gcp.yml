@@ -92,9 +92,9 @@ jobs:
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # See the concurrency comment on the zebrad sync-full-mainnet job for details.
+    # Ultra-simple approach: Manual runs get unique IDs, everything else shares by event type only
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.regenerate-disks == 'true') }}-sync-to-mandatory-checkpoint
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || github.event_name }}
       cancel-in-progress: false
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
@@ -151,14 +151,9 @@ jobs:
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
-    # (As the general workflow concurrency group just gets matched in Pull Requests,
-    # it has no impact on this job.)
-    #
-    # TODO:
-    # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
+    # Ultra-simple approach: Manual runs get unique IDs, everything else shares by event type only
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-full-sync == 'true') }}-sync-full-mainnet
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || github.event_name }}
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
@@ -251,18 +246,13 @@ jobs:
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
-    # We want to prevent multiple full zebrad syncs running at the same time,
+    # We want to prevent multiple full zebra syncs running at the same time,
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
-    # (As the general workflow concurrency group just gets matched in Pull Requests,
-    # it has no impact on this job.)
-    #
-    # TODO:
-    # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
+    # Ultra-simple approach: Manual runs get unique IDs, everything else shares by event type only
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-full-sync == 'true') }}-sync-full-testnet
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || github.event_name }}
       cancel-in-progress: false
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
@@ -330,9 +320,9 @@ jobs:
     # but we don't want to cancel running syncs on `main` if a new PR gets merged,
     # because we might never get a finished sync.
     #
-    # See the concurrency comment on the zebrad sync-full-mainnet job for details.
+    # Ultra-simple approach: Manual runs get unique IDs, everything else shares by event type only
     concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-lwd-sync == 'true') }}-lwd-sync-full
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}', github.run_id) || github.event_name }}
       cancel-in-progress: false
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
