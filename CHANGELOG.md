@@ -5,6 +5,49 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## [Zebra 2.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.1) - 2025-07-22
+
+This release fixes a database upgrade bug that was introduce in 2.4.0 (which has
+been removed). If you have upgraded to 2.4.1, your Zebra address index has
+become corrupted. This does not affect consensus, but will make the RPC
+interface return invalid data for calls like `getaddressutxos` and other
+address-related calls.
+
+Zebra now prints a warning upon starting if you have been impacted by the bug. The
+log line will look like:
+
+```
+2025-07-17T17:12:41.636549Z  WARN zebra_state::service::finalized_state::zebra_db: You have been impacted by the Zebra 2.4.0 address indexer corruption bug. If you rely on the data from the RPC interface, you will need to recover your database. Follow the instructions in the 2.4.1 release notes: https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.1 If you just run the node for consensus and don't use data from the RPC interface, you can ignore this warning.
+```
+
+If you rely on the RPC data, you will need to restore your database. If you have
+backed up the state up before upgrading to 2.4.0, you can simply restore the backup
+and run 2.4.1 from it. If you have not, you have two options:
+
+- Stop Zebra, delete the state (e.g. `~/.cache/zebra/state/v27/mainnet` and
+  `testnet` too if applicable), upgrade to 2.4.1, and start Zebra. It will sync
+  from scratch, which will take around 48 hours to complete, depending on the
+  machine specifications.
+- Use the `copy-state` subcommand to regenerate a valid state.
+  This will require an additional ~300 GB of free disk size.
+  - Stop Zebra.
+  - Rename the old corrupted state folder, e.g. `mv ~/.cache/zebra ~/.cache/zebra.old`
+  - Copy your current `zebrad.toml` file to a `zebrad-source.toml` file and edit
+    the `cache_dir` config to the renamed folder, e.g. `cache_dir = '/home/zebrad/.cache/zebra.old'`
+  - Run the `copy-state` command: `zebrad -c zebrad-source.toml copy-state
+    --target-config-path zebrad.toml`. The command will take several hours to
+    complete.
+
+### Fixed
+
+- Fix 2.4.0 DB upgrade; add warning if impacted ([#9709](https://github.com/ZcashFoundation/zebra/pull/9709))
+- Downgrade verbose mempool message ([#9700](https://github.com/ZcashFoundation/zebra/pull/9700))
+
+### Contributors
+
+Thanks to @ebfull for reporting the bug and helping investigating its cause.
+
+
 ## [Zebra 2.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.0) - 2025-07-11
 
 ### Breaking Changes

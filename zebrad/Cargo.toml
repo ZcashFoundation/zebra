@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "2.4.0"
+version = "2.4.1"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -162,7 +162,7 @@ zebra-consensus = { path = "../zebra-consensus", version = "1.0.0" }
 zebra-network = { path = "../zebra-network", version = "1.0.0" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0", features = ["rpc-client"] }
 zebra-rpc = { path = "../zebra-rpc", version = "1.0.0" }
-zebra-state = { path = "../zebra-state", version = "1.0.0" }
+zebra-state = { path = "../zebra-state", version = "1.0.1" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
@@ -291,7 +291,7 @@ color-eyre = { workspace = true }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0", features = ["proptest-impl"] }
 zebra-consensus = { path = "../zebra-consensus", version = "1.0.0", features = ["proptest-impl"] }
 zebra-network = { path = "../zebra-network", version = "1.0.0", features = ["proptest-impl"] }
-zebra-state = { path = "../zebra-state", version = "1.0.0", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "1.0.1", features = ["proptest-impl"] }
 
 zebra-test = { path = "../zebra-test", version = "1.0.0" }
 
