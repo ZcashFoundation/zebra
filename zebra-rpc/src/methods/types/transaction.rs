@@ -140,7 +140,7 @@ impl TransactionTemplate<NegativeOrZero> {
             .sum::<amount::Result<Amount<NonNegative>>>()?;
 
         let miner_reward = miner_subsidy(height, net, block_subsidy)? + miner_fee;
-        let miner_reward = Zatoshis::try_from(u64::from(miner_reward?))?;
+        let miner_reward = Zatoshis::try_from(miner_reward?)?;
 
         let mut builder = Builder::new(
             net,
@@ -221,7 +221,7 @@ impl TransactionTemplate<NegativeOrZero> {
             .into_iter()
             .filter_map(|(receiver, amount)| {
                 Some((
-                    Zatoshis::try_from(u64::from(amount)).ok()?,
+                    Zatoshis::try_from(amount).ok()?,
                     (*funding_stream_address(height, net, receiver)?)
                         .try_into()
                         .ok()?,
