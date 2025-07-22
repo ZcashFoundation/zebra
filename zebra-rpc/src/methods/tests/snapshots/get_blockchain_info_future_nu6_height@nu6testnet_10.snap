@@ -45,6 +45,12 @@ expression: info
       "monitored": false
     },
     {
+      "id": "lockbox",
+      "chainValue": 0.0,
+      "chainValueZat": 0,
+      "monitored": false
+    },
+    {
       "id": "deferred",
       "chainValue": 0.0,
       "chainValueZat": 0,
