@@ -283,6 +283,12 @@ impl Network {
 }
 
 // This is used for parsing a command-line argument for the `TipHeight` command in zebrad.
+// TODO: This implementation is also used by serde when deserializing config files,
+//       but it can only create default network configs. For Regtest and custom Testnets,
+//       it creates networks with default parameters, ignoring any configured parameters.
+//       This is a limitation of the current serialization approach where Network serializes
+//       to NetworkKind (a simple string) and loses the specific parameters.
+//       A better approach would be to implement a custom Deserialize that preserves all parameters.
 impl FromStr for Network {
     type Err = InvalidNetworkError;
 
@@ -290,6 +296,7 @@ impl FromStr for Network {
         match string.to_lowercase().as_str() {
             "mainnet" => Ok(Network::Mainnet),
             "testnet" => Ok(Network::new_default_testnet()),
+            "regtest" => Ok(Network::new_regtest(Default::default())),
             _ => Err(InvalidNetworkError(string.to_owned())),
         }
     }

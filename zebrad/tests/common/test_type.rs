@@ -6,6 +6,7 @@ use std::{
     time::Duration,
 };
 
+use color_eyre::eyre::Result;
 use indexmap::IndexSet;
 
 use zebra_chain::parameters::Network;
@@ -14,7 +15,6 @@ use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
-    cached_state::ZEBRA_CACHE_DIR,
     config::{default_test_config, random_known_rpc_port_config},
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
@@ -149,20 +149,26 @@ impl TestType {
         }
     }
 
-    /// Returns the Zebra state path for this test, if set.
+    /// Returns the Zebra state path for this test, if configured and needed.
     #[allow(clippy::print_stderr)]
+    #[allow(dead_code)]
     pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
-        match env::var_os(ZEBRA_CACHE_DIR) {
-            Some(path) => Some(path.into()),
-            None => {
-                let test_name = test_name.as_ref();
-                eprintln!(
-                    "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {ZEBRA_CACHE_DIR:?} environment variable to run the test",
-                );
+        let test_name = test_name.as_ref();
 
-                None
-            }
+        // Only return a path if this test type needs a cached state
+        if !self.needs_zebra_cached_state() {
+            return None;
+        }
+
+        // Check environment variable directly to avoid circular dependency
+        if let Ok(cache_dir) = env::var("ZEBRA_STATE__CACHE_DIR") {
+            Some(PathBuf::from(cache_dir))
+        } else {
+            eprintln!(
+                "skipped {test_name:?} {self:?} test, \
+                 set the ZEBRA_STATE__CACHE_DIR environment variable to run the test",
+            );
+            None
         }
     }
 
@@ -174,7 +180,7 @@ impl TestType {
     /// and `Some(Err(_))` if the config could not be created.
     pub fn zebrad_config<Str: AsRef<str>>(
         &self,
-        test_name: Str,
+        _test_name: Str,
         use_internet_connection: bool,
         replace_cache_dir: Option<&Path>,
         network: &Network,
@@ -209,9 +215,20 @@ impl TestType {
 
         // If we have a cached state, or we don't want to be ephemeral, update the config to use it
         if replace_cache_dir.is_some() || self.needs_zebra_cached_state() {
-            let zebra_state_path = replace_cache_dir
-                .map(|path| path.to_owned())
-                .or_else(|| self.zebrad_state_path(test_name))?;
+            let zebra_state_path = if let Some(path) = replace_cache_dir {
+                path.to_owned()
+            } else if self.needs_zebra_cached_state() {
+                // Check environment variable directly to avoid circular dependency with zebrad_state_path
+                if let Ok(cache_dir) = env::var("ZEBRA_STATE__CACHE_DIR") {
+                    PathBuf::from(cache_dir)
+                } else {
+                    // Skip test if no cache dir is available
+                    return None;
+                }
+            } else {
+                // This branch should be unreachable given the outer if condition
+                return None;
+            };
 
             config.state.ephemeral = false;
             config.state.cache_dir = zebra_state_path;

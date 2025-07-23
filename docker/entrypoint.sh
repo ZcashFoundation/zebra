@@ -17,9 +17,10 @@ set -eo pipefail
 # They are set to `${HOME}/.cache/zebra` and `${HOME}/.cache/lwd`
 # respectively, but can be overridden by setting the
 # `ZEBRA_CACHE_DIR` and `LWD_CACHE_DIR` environment variables.
-: "${ZEBRA_CACHE_DIR:=${HOME}/.cache/zebra}"
+#
+# We don't set defaults here - let Figment handle defaults from config.
+# We only set defaults for LWD_CACHE_DIR since it's not managed by Figment.
 : "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
-: "${ZEBRA_COOKIE_DIR:=${HOME}/.cache/zebra}"
 
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
@@ -33,70 +34,85 @@ exec_as_user() {
 
 # Modifies the Zebra config file using environment variables.
 #
-# This function generates a new config file from scratch at ZEBRA_CONF_PATH
-# using the provided environment variables.
-#
-# It creates a complete configuration with network settings, state, RPC,
-# metrics, tracing, and mining sections based on environment variables.
+# This function maps the old Docker environment variables to the new
+# figment-compatible format. It exports the new variables so `zebrad` can
+# detect them, and unsets the old ZEBRA_ prefixed variables to avoid conflicts.
 prepare_conf_file() {
-  # Base configuration
-  cat >"${ZEBRA_CONF_PATH}" <<EOF
-[network]
-network = "${NETWORK:=Mainnet}"
-listen_addr = "0.0.0.0"
-cache_dir = "${ZEBRA_CACHE_DIR}"
+  # Handle NETWORK variable for test orchestration and configuration override
+  # NETWORK is used in two ways:
+  # 1. For building test feature names (e.g., sync_to_mandatory_checkpoint_testnet)
+  # 2. For overriding the network configuration in CI tests
+  #
+  # We only set ZEBRA_NETWORK__NETWORK when NETWORK is explicitly provided,
+  # allowing CI to override config files while preventing unintended overrides in other contexts
+  # Note: In test mode (TEST_MODE=1), ZebradConfig::load() prioritizes config files over environment variables
+  if [[ -n "${NETWORK}" ]]; then
+    export ZEBRA_NETWORK__NETWORK="${NETWORK}"
+  fi
 
-[state]
-cache_dir = "${ZEBRA_CACHE_DIR}"
+  # Map legacy ZEBRA_CACHE_DIR to ZEBRA_STATE__CACHE_DIR and unset it.
+  # Only export if it was explicitly set by the user.
+  if [[ -n "${ZEBRA_CACHE_DIR}" ]]; then
+    export ZEBRA_STATE__CACHE_DIR="${ZEBRA_CACHE_DIR}"
+    unset ZEBRA_CACHE_DIR
+  fi
 
-$( [[ -n ${ZEBRA_RPC_PORT} ]] && cat <<-SUB_EOF
+  # Map RPC variables
+  # ZEBRA_RPC_PORT is used to build the listen address, then unset.
+  if [[ -n ${ZEBRA_RPC_PORT} ]]; then
+    # Only set RPC_LISTEN_ADDR default if it wasn't already provided
+    export ZEBRA_RPC__LISTEN_ADDR="${RPC_LISTEN_ADDR:-0.0.0.0}:${ZEBRA_RPC_PORT}"
+    unset ZEBRA_RPC_PORT
+  fi
 
-[rpc]
-listen_addr = "${RPC_LISTEN_ADDR:=0.0.0.0}:${ZEBRA_RPC_PORT}"
-enable_cookie_auth = ${ENABLE_COOKIE_AUTH:=true}
-$( [[ -n ${ZEBRA_COOKIE_DIR} ]] && echo "cookie_dir = \"${ZEBRA_COOKIE_DIR}\"" )
-SUB_EOF
-)
+  # ZEBRA_COOKIE_DIR is mapped directly, then unset.
+  # Only export if it was explicitly set by the user.
+  if [[ -n "${ZEBRA_COOKIE_DIR}" ]]; then
+    export ZEBRA_RPC__COOKIE_DIR="${ZEBRA_COOKIE_DIR}"
+    unset ZEBRA_COOKIE_DIR
+  fi
 
-$( ( ! [[ " ${FEATURES} " =~ " prometheus " ]] ) && cat <<-SUB_EOF
+  # ENABLE_COOKIE_AUTH is not prefixed with ZEBRA_, so it's safe.
+  # It's used to set the new variable.
+  # Only export if it was explicitly set by the user.
+  if [[ -n "${ENABLE_COOKIE_AUTH}" ]]; then
+    export ZEBRA_RPC__ENABLE_COOKIE_AUTH="${ENABLE_COOKIE_AUTH}"
+  fi
 
-[metrics]
-# endpoint_addr = "${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
-SUB_EOF
-)
+  # Map metrics variables, if prometheus feature is enabled in the image
+  if [[ " ${FEATURES} " =~ " prometheus " ]]; then
+      # Only set metrics endpoint if explicitly configured by user
+      if [[ -n "${METRICS_ENDPOINT_ADDR}" ]] || [[ -n "${METRICS_ENDPOINT_PORT}" ]]; then
+          export ZEBRA_METRICS__ENDPOINT_ADDR="${METRICS_ENDPOINT_ADDR:-0.0.0.0}:${METRICS_ENDPOINT_PORT:-9999}"
+      fi
+  fi
 
-$( [[ " ${FEATURES} " =~ " prometheus " ]] && cat <<-SUB_EOF
+  # Map tracing variables
+  if [[ -n ${USE_JOURNALD} ]]; then
+    export ZEBRA_TRACING__USE_JOURNALD="${USE_JOURNALD}"
+  fi
+  if [[ " ${FEATURES} " =~ " filter-reload " ]]; then
+    # Only set tracing endpoint if explicitly configured by user
+    if [[ -n "${TRACING_ENDPOINT_ADDR}" ]] || [[ -n "${TRACING_ENDPOINT_PORT}" ]]; then
+        export ZEBRA_TRACING__ENDPOINT_ADDR="${TRACING_ENDPOINT_ADDR:-0.0.0.0}:${TRACING_ENDPOINT_PORT:-3000}"
+    fi
+  fi
+  if [[ -n ${LOG_FILE} ]]; then
+    export ZEBRA_TRACING__LOG_FILE="${LOG_FILE}"
+  fi
+  # Only export LOG_COLOR settings if explicitly set by user
+  if [[ -n "${LOG_COLOR}" ]]; then
+    if [[ ${LOG_COLOR} == "true" ]]; then
+      export ZEBRA_TRACING__FORCE_USE_COLOR="true"
+    elif [[ ${LOG_COLOR} == "false" ]]; then
+      export ZEBRA_TRACING__USE_COLOR="false"
+    fi
+  fi
 
-[metrics]
-endpoint_addr = "${METRICS_ENDPOINT_ADDR:=0.0.0.0}:${METRICS_ENDPOINT_PORT:=9999}"
-SUB_EOF
-)
-
-$( [[ -n ${LOG_FILE} || -n ${LOG_COLOR} || -n ${TRACING_ENDPOINT_ADDR} || -n ${USE_JOURNALD} ]] && cat <<-SUB_EOF
-
-[tracing]
-$( [[ -n ${USE_JOURNALD} ]] && echo "use_journald = ${USE_JOURNALD}" )
-$( [[ " ${FEATURES} " =~ " filter-reload " ]] && echo "endpoint_addr = \"${TRACING_ENDPOINT_ADDR:=0.0.0.0}:${TRACING_ENDPOINT_PORT:=3000}\"" )
-$( [[ -n ${LOG_FILE} ]] && echo "log_file = \"${LOG_FILE}\"" )
-$( [[ ${LOG_COLOR} == "true" ]] && echo "force_use_color = true" )
-$( [[ ${LOG_COLOR} == "false" ]] && echo "use_color = false" )
-SUB_EOF
-)
-
-$( [[ -n ${MINER_ADDRESS} ]] && cat <<-SUB_EOF
-
-[mining]
-miner_address = "${MINER_ADDRESS}"
-SUB_EOF
-)
-EOF
-
-# Ensure the config file itself has the correct ownership
-#
-# This is safe in this context because prepare_conf_file is called only when
-# ZEBRA_CONF_PATH is not set, and there's no file mounted at that path.
-chown "${UID}:${GID}" "${ZEBRA_CONF_PATH}" || exit_error "Failed to secure config file: ${ZEBRA_CONF_PATH}"
-
+  # Map mining variables, if MINER_ADDRESS is set
+  if [[ -n ${MINER_ADDRESS} ]]; then
+    export ZEBRA_MINING__MINER_ADDRESS="${MINER_ADDRESS}"
+  fi
 }
 
 # Helper function
@@ -131,37 +147,35 @@ create_owned_directory() {
 }
 
 # Create and own cache and config directories
-[[ -n ${ZEBRA_CACHE_DIR} ]] && create_owned_directory "${ZEBRA_CACHE_DIR}"
-[[ -n ${LWD_CACHE_DIR} ]] && create_owned_directory "${LWD_CACHE_DIR}"
-[[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
-[[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
+# Only create directories if they were explicitly set by the user
+[[ -n "${ZEBRA_CACHE_DIR}" ]] && create_owned_directory "${ZEBRA_CACHE_DIR}"
+[[ -n "${LWD_CACHE_DIR}" ]] && create_owned_directory "${LWD_CACHE_DIR}"
+[[ -n "${ZEBRA_COOKIE_DIR}" ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
+[[ -n "${LOG_FILE}" ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
 # Runs cargo test with an arbitrary number of arguments.
 #
-# Positional Parameters
+# ## Positional Parameters
 #
-# - '$1' must contain cargo FEATURES as described here:
-#   https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options
-# - The remaining params will be appended to a command starting with
+# - $1: `features` cargo test features to use
+# - $2..$n: Arguments to pass to the cargo test command.
+#
+# ## Example
+#
+#   `run_cargo_test "${FEATURES}" "sync_large_checkpoints_"`
+#
+# Will run:
 #   `exec_as_user cargo test ... -- ...`
 run_cargo_test() {
-  # Shift the first argument, as it's already included in the cmd
-  local features="$1"
-  shift
+  # Set test mode for cargo test runs
+  export TEST_MODE=1
 
-  # Start constructing the command array
+  local features="$1"; shift
   local cmd=(cargo test --locked --release --features "${features}" --package zebrad --test acceptance -- --nocapture --include-ignored)
 
-  # Loop through the remaining arguments
-  for arg in "$@"; do
-    if [[ -n ${arg} ]]; then
-      # If the argument is non-empty, add it to the command
-      cmd+=("${arg}")
-    fi
-  done
+  # Add the passed arguments to the command
+  cmd+=("$@")
 
-  echo "Running: ${cmd[*]}"
-  # Execute directly to become PID 1
   exec_as_user "${cmd[@]}"
 }
 
@@ -171,6 +185,9 @@ run_cargo_test() {
 #
 # - $@: Arbitrary command that will be executed if no test env var is set.
 run_tests() {
+  # Set test mode only for actual test runs
+  export TEST_MODE=1
+
   if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
@@ -204,6 +221,11 @@ run_tests() {
 
   elif [[ "${SYNC_TO_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
+    # Ensure NETWORK is set for building the test feature name
+    if [[ -z "${NETWORK}" ]]; then
+      echo "ERROR: NETWORK environment variable must be set for SYNC_TO_MANDATORY_CHECKPOINT test"
+      exit 1
+    fi
     run_cargo_test "${FEATURES} sync_to_mandatory_checkpoint_${NETWORK,,}" \
       "sync_to_mandatory_checkpoint_${NETWORK,,}"
     echo "ran test_disk_rebuild"
@@ -216,6 +238,11 @@ run_tests() {
   elif [[ "${SYNC_PAST_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
     # past it.
+    # Ensure NETWORK is set for building the test feature name
+    if [[ -z "${NETWORK}" ]]; then
+      echo "ERROR: NETWORK environment variable must be set for SYNC_PAST_MANDATORY_CHECKPOINT test"
+      exit 1
+    fi
     run_cargo_test "${FEATURES} sync_past_mandatory_checkpoint_${NETWORK,,}" \
       "sync_past_mandatory_checkpoint_${NETWORK,,}"
 
@@ -280,39 +307,39 @@ run_tests() {
 
 # Main Script Logic
 #
-# 1. First check if ZEBRA_CONF_PATH is explicitly set or if a file exists at that path
-# 2. If not set but default config exists, use that
-# 3. If neither exists, generate a default config at ${HOME}/.config/zebrad.toml
-# 4. Print environment variables and config for debugging
-# 5. Process command-line arguments and execute appropriate action
+# 1. Checks for a config file specified by ZEBRA_CONF_PATH, or at the default path.
+# 2. If a file is found, prepares a `--config` flag to pass to zebrad.
+# 3. If no file is found, zebrad is started without the flag, relying on
+#    figment to use environment variables and built-in defaults.
+# 4. Processes command-line arguments and executes zebrad with the correct flags.
+
+# Always prepare environment variables first, as they have the highest precedence
+# and should override any config file settings.
+prepare_conf_file
+
 if [[ -n ${ZEBRA_CONF_PATH} ]]; then
   if [[ -f ${ZEBRA_CONF_PATH} ]]; then
-    echo "ZEBRA_CONF_PATH was set to ${ZEBRA_CONF_PATH} and a file exists."
-    echo "Using user-provided config file"
+    echo "INFO: Using Zebra config file at ${ZEBRA_CONF_PATH}"
+    conf_flag="--config ${ZEBRA_CONF_PATH}"
   else
-    echo "ERROR: ZEBRA_CONF_PATH was set and no config file found at ${ZEBRA_CONF_PATH}."
-    echo "Please ensure a config file exists or set ZEBRA_CONF_PATH to point to your config file."
-    exit 1
-  fi
-else
-  if [[ -f "${HOME}/.config/zebrad.toml" ]]; then
-    echo "ZEBRA_CONF_PATH was not set."
-    echo "Using default config at ${HOME}/.config/zebrad.toml"
-    ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-  else
-    echo "ZEBRA_CONF_PATH was not set and no default config found at ${HOME}/.config/zebrad.toml"
-    echo "Preparing a default one..."
-    ZEBRA_CONF_PATH="${HOME}/.config/zebrad.toml"
-    create_owned_directory "$(dirname "${ZEBRA_CONF_PATH}")"
-    prepare_conf_file
+    echo "INFO: No config file found. Using defaults and environment variables."
+    # Unset the variable to ensure the --config flag is not used.
+    unset ZEBRA_CONF_PATH
   fi
 fi
 
 echo "INFO: Using the following environment variables:"
 printenv
 
-echo "Using Zebra config at ${ZEBRA_CONF_PATH}:"
-cat "${ZEBRA_CONF_PATH}"
+# Only try to cat the config file if the path is set and the file exists.
+if [[ -n "${ZEBRA_CONF_PATH}" ]]; then
+  echo "Using Zebra config at ${ZEBRA_CONF_PATH}:"
+  cat "${ZEBRA_CONF_PATH}"
+fi
+
+# Unset ZEBRA_CONF_PATH to prevent figment from trying to parse it as a config field
+# This variable is only used by the entrypoint script to determine the --config flag
+unset ZEBRA_CONF_PATH
 
 # - If "$1" is "--", "-", or "zebrad", run `zebrad` with the remaining params.
 # - If "$1" is "test":
@@ -323,13 +350,17 @@ cat "${ZEBRA_CONF_PATH}"
 case "$1" in
 --* | -* | zebrad)
   shift
-  exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+  # The conf_flag variable will be empty if no config file is used.
+  # shellcheck disable=SC2086
+  exec_as_user zebrad ${conf_flag} "$@"
   ;;
 test)
   shift
   if [[ "$1" == "zebrad" ]]; then
     shift
-    exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+    # The conf_flag variable will be empty if no config file is used.
+    # shellcheck disable=SC2086
+    exec_as_user zebrad ${conf_flag} "$@"
   else
     run_tests "$@"
   fi
