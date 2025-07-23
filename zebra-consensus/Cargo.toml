@@ -62,7 +62,7 @@ tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41" }
 
 zebra-script = { path = "../zebra-script", version = "1.0.0" }
-zebra-state = { path = "../zebra-state", version = "1.0.0" }
+zebra-state = { path = "../zebra-state", version = "1.0.1" }
 zebra-node-services = { path = "../zebra-node-services", version = "1.0.0" }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0" }
 
@@ -89,6 +89,6 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "1.0.0", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "1.0.1", features = ["proptest-impl"] }
 zebra-chain = { path = "../zebra-chain", version = "1.0.0", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "1.0.0" }
