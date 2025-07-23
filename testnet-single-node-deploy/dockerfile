@@ -15,7 +15,7 @@ RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemp
 EXPOSE 18232
 
 # Copy the config file to the working directory for easier access
-COPY regtest-config.toml ./regtest-config.toml
+COPY testnet-single-node-deploy/regtest-config.toml ./regtest-config.toml
 
 # Run the zebra node
 ENTRYPOINT ["target/release/zebrad", "-c", "regtest-config.toml"]
