@@ -2973,8 +2973,8 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Default::default());
-    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    let net = Network::new_regtest(Default::default());
+    let mut config = os_assigned_rpc_port_config(false, &net)?;
 
     config.state.ephemeral = false;
     config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
@@ -3013,7 +3013,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let rpc_client = RpcRequestClient::new(rpc_address);
     let mut blocks = Vec::new();
     for _ in 0..10 {
-        let (block, height) = rpc_client.block_from_template(&network).await?;
+        let (block, height) = rpc_client.block_from_template(&net).await?;
 
         rpc_client.submit_block(block.clone()).await?;
 
@@ -3063,7 +3063,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     }
 
     tracing::info!("getting next block template");
-    let (block_11, _) = rpc_client.block_from_template(&network).await?;
+    let (block_11, _) = rpc_client.block_from_template(&net).await?;
     blocks.push(block_11);
     let next_blocks: Vec<_> = blocks.split_off(5);
 
@@ -3072,7 +3072,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     let (state2, read_state2, latest_chain_tip2, _chain_tip_change2) =
         zebra_state::populated_state(
             std::iter::once(genesis_block).chain(blocks.iter().cloned().map(Arc::new)),
-            &network,
+            &net,
         )
         .await;
 
@@ -3092,7 +3092,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
         let hist_root = chain_info.chain_history_root.unwrap_or_default();
         let header = Arc::make_mut(&mut block.header);
 
-        header.commitment_bytes = match NetworkUpgrade::current(&network, height) {
+        header.commitment_bytes = match NetworkUpgrade::current(&net, height) {
             NetworkUpgrade::Canopy => hist_root.bytes_in_serialized_order(),
             NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6

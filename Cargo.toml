@@ -152,7 +152,7 @@ vergen-git2 = { version = "1.0", default-features = false }
 wagyu-zcash-parameters = "0.2"
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
-zcash_script = "0.3.1"
+zcash_script = "0.3.2"
 
 [workspace.metadata.release]
 

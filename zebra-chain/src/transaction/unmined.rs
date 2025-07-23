@@ -337,7 +337,7 @@ pub struct VerifiedUnminedTx {
 
     /// The number of legacy signature operations in this transaction's
     /// transparent inputs and outputs.
-    pub legacy_sigop_count: u64,
+    pub sigops: u32,
 
     /// The number of conventional actions for `transaction`, as defined by [ZIP-317].
     ///
@@ -395,7 +395,7 @@ impl VerifiedUnminedTx {
     pub fn new(
         transaction: UnminedTx,
         miner_fee: Amount<NonNegative>,
-        legacy_sigop_count: u64,
+        legacy_sigop_count: u32,
     ) -> Result<Self, zip317::Error> {
         let fee_weight_ratio = zip317::conventional_fee_weight_ratio(&transaction, miner_fee);
         let conventional_actions = zip317::conventional_actions(&transaction.transaction);
@@ -406,7 +406,7 @@ impl VerifiedUnminedTx {
         Ok(Self {
             transaction,
             miner_fee,
-            legacy_sigop_count,
+            sigops: legacy_sigop_count,
             fee_weight_ratio,
             conventional_actions,
             unpaid_actions,
