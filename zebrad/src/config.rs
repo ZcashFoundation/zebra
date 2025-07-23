@@ -5,9 +5,6 @@
 //! for specifying it.
 
 use serde::{Deserialize, Serialize};
-use zebra_chain::parameters::testnet::ConfiguredActivationHeights;
-use zebra_network::config::{DConfig, DTestnetParameters};
-
 /// Configuration for `zebrad`.
 ///
 /// The `zebrad` config is a TOML-encoded version of this structure. The meaning
@@ -58,27 +55,20 @@ pub struct ZebradConfig {
 }
 
 #[test]
-fn serialising_config() {
-    let d_config = DConfig {
-        listen_addr: "127.0.0.1:3000".to_string(),
-        testnet_parameters: Some(DTestnetParameters {
-            network_name: Some("name".to_owned()),
-            disable_pow: Some(true),
-            activation_heights: Some(ConfiguredActivationHeights {
-                overwinter: Some(1),
-                before_overwinter: Some(2),
-                ..Default::default()
-            }),
+/// temporary, just to show the intended effect of this changes. Delete before merging
+fn intended_usage() {
+    // Idea is to enable this sort of construction for consumers, to generate config files.
+    let config = ZebradConfig {
+        consensus: zebra_consensus::Config {
+            checkpoint_sync: false,
+        },
+        network: zebra_network::Config::try_from(zebra_network::config::DConfig {
+            listen_addr: "127.0.0.1:3000".into(),
             ..Default::default()
-        }),
+        })
+        .unwrap(),
         ..Default::default()
     };
-
-    let config: ZebradConfig = ZebradConfig {
-        network: zebra_network::Config::try_from(d_config).unwrap(),
-        ..Default::default()
-    };
-
-    let serialised = toml::to_string_pretty(&config).unwrap();
-    println!("{}", serialised)
+    let toml_string = toml::to_string(&config).unwrap();
+    println!("{}", toml_string)
 }
