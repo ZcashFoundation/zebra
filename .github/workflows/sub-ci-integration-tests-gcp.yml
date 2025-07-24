@@ -26,6 +26,11 @@ on:
       no_cache:
         default: false
         type: boolean
+      original_event_name:
+        required: false
+        type: string
+        default: "workflow_call"
+        description: "Original event name that triggered the parent workflow"
 
 #! IMPORTANT
 #!
@@ -94,7 +99,7 @@ jobs:
     #
     # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-{1}-checkpoint', github.run_id, inputs.network || vars.ZCASH_NETWORK) || format('long-running-{0}-{1}-checkpoint', github.event_name, inputs.network || vars.ZCASH_NETWORK) }}
+      group: ${{ inputs.original_event_name == 'workflow_dispatch' && format('manual-{0}-{1}-checkpoint', github.run_id, inputs.network || vars.ZCASH_NETWORK) || format('long-running-{0}-{1}-checkpoint', inputs.original_event_name, inputs.network || vars.ZCASH_NETWORK) }}
       cancel-in-progress: false
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
@@ -133,7 +138,7 @@ jobs:
     name: Zebra tip
     needs: [get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
-    if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
+    if: ${{ inputs.original_event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     with:
       app_name: zebrad
       test_id: sync-full-mainnet
@@ -153,7 +158,7 @@ jobs:
     #
     # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-Mainnet-sync-full', github.run_id) || format('long-running-{0}-Mainnet-sync-full', github.event_name) }}
+      group: ${{ inputs.original_event_name == 'workflow_dispatch' && format('manual-{0}-Mainnet-sync-full', github.run_id) || format('long-running-{0}-Mainnet-sync-full', inputs.original_event_name) }}
       cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
@@ -231,7 +236,7 @@ jobs:
     name: Zebra tip on testnet
     needs: [get-available-disks-testnet]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
-    if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    if: ${{ (inputs.original_event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     with:
       app_name: zebrad
       test_id: sync-full-testnet
@@ -252,7 +257,7 @@ jobs:
     #
     # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-Testnet-sync-full', github.run_id) || format('long-running-{0}-Testnet-sync-full', github.event_name) }}
+      group: ${{ inputs.original_event_name == 'workflow_dispatch' && format('manual-{0}-Testnet-sync-full', github.run_id) || format('long-running-{0}-Testnet-sync-full', inputs.original_event_name) }}
       cancel-in-progress: false
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
@@ -301,7 +306,7 @@ jobs:
     needs: [sync-full-mainnet, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     # Currently the lightwalletd tests only work on Mainnet
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
+    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (inputs.original_event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
     with:
       app_name: lightwalletd
       test_id: lwd-sync-full
@@ -322,7 +327,7 @@ jobs:
     #
     # Manual runs get unique per-job groups, others share by event + job type + network
     concurrency:
-      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-{1}-lwd-sync-full', github.run_id, inputs.network || vars.ZCASH_NETWORK) || format('long-running-{0}-{1}-lwd-sync-full', github.event_name, inputs.network || vars.ZCASH_NETWORK) }}
+      group: ${{ inputs.original_event_name == 'workflow_dispatch' && format('manual-{0}-{1}-lwd-sync-full', github.run_id, inputs.network || vars.ZCASH_NETWORK) || format('long-running-{0}-{1}-lwd-sync-full', inputs.original_event_name, inputs.network || vars.ZCASH_NETWORK) }}
       cancel-in-progress: false
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state

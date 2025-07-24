@@ -165,4 +165,6 @@ jobs:
       run-lwd-sync: ${{ inputs.run-lwd-sync }}
       force_save_to_disk: ${{ inputs.force_save_to_disk }}
       no_cache: ${{ inputs.no_cache }}
+      # Pass the original event name for proper concurrency handling
+      original_event_name: ${{ github.event_name }}
     secrets: inherit
