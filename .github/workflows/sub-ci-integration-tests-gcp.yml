@@ -125,7 +125,7 @@ jobs:
     name: Zebra tip
     needs: [get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
-    if: ${{ inputs.original_event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
+    if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
     with:
       app_name: zebrad
       test_id: sync-full-mainnet
@@ -215,7 +215,7 @@ jobs:
     name: Zebra tip on testnet
     needs: [get-available-disks-testnet]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
-    if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    if: ${{ !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
     with:
       app_name: zebrad
       test_id: sync-full-testnet
@@ -277,7 +277,7 @@ jobs:
     needs: [sync-full-mainnet, get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     # Currently the lightwalletd tests only work on Mainnet
-    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
+    if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (!fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
     with:
       app_name: lightwalletd
       test_id: lwd-sync-full
