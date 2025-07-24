@@ -65,7 +65,7 @@ pub use service::{
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
 pub use service::{
-    finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb},
+    finalized_state::{DiskWriteBatch, FromDisk, RawBytes, IntoDisk, WriteDisk, ZebraDb},
     ReadStateService,
 };
 
@@ -73,7 +73,7 @@ pub use service::{
 #[cfg(any(test, feature = "proptest-impl"))]
 pub use service::{
     arbitrary::{populated_state, CHAIN_TIP_UPDATE_WAIT_LIMIT},
-    finalized_state::{RawBytes, KV, MAX_ON_DISK_HEIGHT},
+    finalized_state::{KV, MAX_ON_DISK_HEIGHT},
     init_test, init_test_services,
 };
 

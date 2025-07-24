@@ -349,6 +349,17 @@ impl DbFormatChange {
         initial_tip_height: Option<Height>,
         cancel_receiver: Receiver<CancelFormatChange>,
     ) -> Result<(), CancelFormatChange> {
+        tracing::warn!("started checking AddressBalanceLocation lens");
+
+        for (_, bytes) in db.all_address_balances() {
+            let bytes = bytes.raw_bytes();
+            if bytes.len() != 24 {
+                tracing::warn!(len = ?bytes.len(), "unexpected address balance length");
+            }
+        }
+
+        tracing::warn!("done checking AddressBalanceLocation lens");
+
         self.run_format_change_or_check(&db, initial_tip_height, &cancel_receiver)?;
 
         let Some(debug_validity_check_interval) = db.config().debug_validity_check_interval else {

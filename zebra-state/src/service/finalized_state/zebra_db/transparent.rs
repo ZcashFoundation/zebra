@@ -39,7 +39,7 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError, FromDisk, IntoDisk,
+    BoxError, FromDisk, IntoDisk, RawBytes,
 };
 
 use super::super::TypedColumnFamily;
@@ -125,6 +125,16 @@ impl ZebraDb {
     ) -> Option<(Amount<NonNegative>, u64)> {
         self.address_balance_location(address)
             .map(|abl| (abl.balance(), abl.received()))
+    }
+
+    /// Returns an iterator over all address balances in the database.
+    pub fn all_address_balances(
+        &self,
+    ) -> impl Iterator<Item = (transparent::Address, RawBytes)> + '_ {
+        let balance_by_transparent_addr = self.address_balance_cf();
+
+        self.db
+            .zs_forward_range_iter(&balance_by_transparent_addr, ..)
     }
 
     /// Returns the first output that sent funds to a [`transparent::Address`],

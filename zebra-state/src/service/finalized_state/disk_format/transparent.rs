@@ -601,7 +601,6 @@ impl IntoDisk for transparent::Address {
     }
 }
 
-#[cfg(any(test, feature = "proptest-impl"))]
 impl FromDisk for transparent::Address {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
         let (address_variant, hash_bytes) = disk_bytes.as_ref().split_at(1);
@@ -755,7 +754,7 @@ impl IntoDisk for AddressBalanceLocationChange {
 impl<C: Constraint + Copy + std::fmt::Debug> FromDisk for AddressBalanceLocationInner<C> {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
         let (balance_bytes, rest) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
-        let (address_location_bytes, rest) = rest.split_at(BALANCE_DISK_BYTES);
+        let (address_location_bytes, rest) = rest.split_at(OUTPUT_LOCATION_DISK_BYTES);
         let (received_bytes, _) = rest.split_at_checked(size_of::<u64>()).unwrap_or_default();
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
