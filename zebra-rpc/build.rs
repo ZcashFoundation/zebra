@@ -39,9 +39,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .status()
             .expect("failed to clone external binary");
 
-        if ZALLET_COMMIT.is_some() {
+        if let Some(zallet_commit) = ZALLET_COMMIT {
             let _ = Command::new("git")
-                .args(["checkout", ZALLET_COMMIT.unwrap()])
+                .args(["checkout", zallet_commit])
                 .current_dir(&build_dir)
                 .status()
                 .expect("failed to build external binary");
