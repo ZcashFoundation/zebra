@@ -16,7 +16,8 @@ use tracing::Span;
 use zebra_chain::{
     common::atomic_write,
     parameters::{
-        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams},
+        subsidy::FundingStreams,
+        testnet::{self, ConfiguredActivationHeights, ConfiguredFundingStreams, RegtestParameters},
         Magic, Network, NetworkKind,
     },
     work::difficulty::U256,
@@ -636,6 +637,14 @@ impl Default for DConfig {
 
 impl From<Arc<testnet::Parameters>> for DTestnetParameters {
     fn from(params: Arc<testnet::Parameters>) -> Self {
+        fn replace_empty_with_none(fs: &FundingStreams) -> Option<ConfiguredFundingStreams> {
+            if fs.recipients().is_empty() {
+                None
+            } else {
+                Some(fs.into())
+            }
+        }
+
         Self {
             network_name: Some(params.network_name().to_string()),
             network_magic: Some(params.network_magic().0),
@@ -644,8 +653,8 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
-            pre_nu6_funding_streams: Some(params.pre_nu6_funding_streams().into()),
-            post_nu6_funding_streams: Some(params.post_nu6_funding_streams().into()),
+            pre_nu6_funding_streams: replace_empty_with_none(params.pre_nu6_funding_streams()),
+            post_nu6_funding_streams: replace_empty_with_none(params.post_nu6_funding_streams()),
             pre_blossom_halving_interval: Some(
                 params
                     .pre_blossom_halving_interval()
@@ -729,11 +738,22 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let configured_activation_heights = testnet_parameters
-                    .and_then(|params| params.activation_heights)
+                let params = testnet_parameters
+                    .map(
+                        |DTestnetParameters {
+                             activation_heights,
+                             pre_nu6_funding_streams,
+                             post_nu6_funding_streams,
+                             ..
+                         }| RegtestParameters {
+                            activation_heights: activation_heights.unwrap_or_default(),
+                            pre_nu6_funding_streams,
+                            post_nu6_funding_streams,
+                        },
+                    )
                     .unwrap_or_default();
 
-                Network::new_regtest(configured_activation_heights)
+                Network::new_regtest(params)
             }
             (
                 NetworkKind::Testnet,
