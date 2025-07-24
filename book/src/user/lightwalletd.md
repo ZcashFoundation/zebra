@@ -64,7 +64,7 @@ enable_cookie_auth = false
 ```
 
 **WARNING:** This config allows multiple Zebra instances to share the same RPC port.
-See the [RPC config documentation](https://docs.rs/zebra_rpc/latest/zebra_rpc/config/struct.Config.html) for details.
+See the [RPC config documentation](https://docs.rs/zebra-rpc/latest/zebra_rpc/config/rpc/struct.Config.html) for details.
 
 ## Sync Zebra
 
