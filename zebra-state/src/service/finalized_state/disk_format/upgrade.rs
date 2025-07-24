@@ -20,7 +20,10 @@ use zebra_chain::{
 
 use DbFormatChange::*;
 
-use crate::service::finalized_state::ZebraDb;
+use crate::{
+    service::finalized_state::{disk_format::transparent::AddressBalanceLocation, ZebraDb},
+    FromDisk,
+};
 
 pub(crate) mod add_subtrees;
 pub(crate) mod block_info_and_address_received;
@@ -351,14 +354,18 @@ impl DbFormatChange {
     ) -> Result<(), CancelFormatChange> {
         tracing::warn!("started checking AddressBalanceLocation lens");
 
+        let mut count = 0;
         for (_, bytes) in db.all_address_balances() {
             let bytes = bytes.raw_bytes();
+            count += 1;
             if bytes.len() != 24 {
                 tracing::warn!(len = ?bytes.len(), "unexpected address balance length");
+            } else {
+                AddressBalanceLocation::from_bytes(bytes);
             }
         }
 
-        tracing::warn!("done checking AddressBalanceLocation lens");
+        tracing::warn!(?count, "done checking AddressBalanceLocation lens");
 
         self.run_format_change_or_check(&db, initial_tip_height, &cancel_receiver)?;
 

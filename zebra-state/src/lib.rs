@@ -65,7 +65,7 @@ pub use service::{
 pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
 pub use service::{
-    finalized_state::{DiskWriteBatch, FromDisk, RawBytes, IntoDisk, WriteDisk, ZebraDb},
+    finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, RawBytes, WriteDisk, ZebraDb},
     ReadStateService,
 };
 
