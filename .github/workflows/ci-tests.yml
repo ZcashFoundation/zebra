@@ -149,8 +149,8 @@ jobs:
     uses: ./.github/workflows/sub-ci-unit-tests-docker.yml
     with:
       image_digest: ${{ needs.build.outputs.image_digest }}
-      network: ${{ inputs.network }}
-      no_cache: ${{ inputs.no_cache }}
+      network: ${{ inputs.network || vars.ZCASH_NETWORK || 'Mainnet' }}
+      no_cache: ${{ inputs.no_cache || false }}
     secrets: inherit
 
   # Runs Zebra integration tests
@@ -159,10 +159,10 @@ jobs:
     needs: build
     uses: ./.github/workflows/sub-ci-integration-tests-gcp.yml
     with:
-      network: ${{ inputs.network }}
-      regenerate-disks: ${{ inputs.regenerate-disks }}
-      run-full-sync: ${{ inputs.run-full-sync }}
-      run-lwd-sync: ${{ inputs.run-lwd-sync }}
-      force_save_to_disk: ${{ inputs.force_save_to_disk }}
-      no_cache: ${{ inputs.no_cache }}
+      network: ${{ inputs.network || vars.ZCASH_NETWORK || 'Mainnet' }}
+      regenerate-disks: ${{ inputs.regenerate-disks || false }}
+      run-full-sync: ${{ inputs.run-full-sync || false }}
+      run-lwd-sync: ${{ inputs.run-lwd-sync || false }}
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
+      no_cache: ${{ inputs.no_cache || false }}
     secrets: inherit
