@@ -38,8 +38,25 @@ use crate::{
         },
         zebra_db::ZebraDb,
     },
-    BoxError,
+    BoxError, FromDisk, IntoDisk,
 };
+/// A RocksDB merge operator for the [`BALANCE_BY_TRANSPARENT_ADDR`] column family.
+pub fn fetch_add_balance_and_received(
+    _: &[u8],
+    existing_val: Option<&[u8]>,
+    operands: &rocksdb::MergeOperands,
+) -> Option<Vec<u8>> {
+    // # Correctness
+    //
+    // Merge operands are ordered, but may be combined without an existing value in partial merges, so
+    // we may need to return a negative balance here.
+    existing_val
+        .into_iter()
+        .chain(operands)
+        .map(AddressBalanceLocation::from_bytes)
+        .reduce(|a, b| a)
+        .map(|address_balance_location| address_balance_location.as_bytes().to_vec())
+}
 
 use super::super::TypedColumnFamily;
 

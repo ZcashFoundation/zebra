@@ -28,7 +28,10 @@ use zebra_chain::{parameters::Network, primitives::byte_array::increment_big_end
 
 use crate::{
     constants::DATABASE_FORMAT_VERSION_FILE_NAME,
-    service::finalized_state::disk_format::{FromDisk, IntoDisk},
+    service::finalized_state::{
+        disk_format::{FromDisk, IntoDisk},
+        zebra_db::transparent::fetch_add_balance_and_received,
+    },
     Config,
 };
 
@@ -870,7 +873,18 @@ impl DiskDb {
             .into_iter()
             .chain(column_families_in_code)
             .unique()
-            .map(|cf_name| rocksdb::ColumnFamilyDescriptor::new(cf_name, db_options.clone()));
+            .map(|cf_name| {
+                let mut cf_options = db_options.clone();
+
+                if cf_name == "balance_by_transparent_addr" {
+                    cf_options.set_merge_operator_associative(
+                        "fetch_add_balance_and_received",
+                        fetch_add_balance_and_received,
+                    );
+                }
+
+                rocksdb::ColumnFamilyDescriptor::new(cf_name, cf_options)
+            });
 
         let db_result = if read_only {
             // Use a tempfile for the secondary instance cache directory
