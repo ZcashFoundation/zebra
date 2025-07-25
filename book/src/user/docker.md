@@ -29,7 +29,7 @@ docker run \
 You can also use `docker compose`, which we recommend. First get the repo:
 
 ```shell
-git clone --depth 1 --branch v2.3.0 https://github.com/ZcashFoundation/zebra.git
+git clone --depth 1 --branch v2.4.1 https://github.com/ZcashFoundation/zebra.git
 cd zebra
 ```
 

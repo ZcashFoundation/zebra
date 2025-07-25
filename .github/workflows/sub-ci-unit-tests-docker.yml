@@ -5,8 +5,8 @@
 # Jobs:
 # 1. Builds a Docker image for tests, adaptable to the specified network (Mainnet or Testnet).
 # 2. 'test-all': Executes all Zebra tests, including normally ignored ones, in a Docker environment.
-# 3. 'test-fake-activation-heights': Runs state tests with fake activation heights, isolating its build products.
-# 4. 'test-empty-sync': Tests Zebra's ability to sync and checkpoint from an empty state.
+# 3. 'state-fake-activation-heights': Runs state tests with fake activation heights, isolating its build products.
+# 4. 'sync-large-checkpoints-empty': Tests Zebra's ability to sync and checkpoint from an empty state.
 # 5. 'test-lightwalletd-integration': Validates integration with 'lightwalletd' starting from an empty state.
 # 6. 'test-docker-configurations': Runs a matrix of configuration tests to validate various Docker configurations.
 name: Docker Unit Tests
@@ -34,7 +34,7 @@ jobs:
   test-all:
     name: Test all
     timeout-minutes: 180
-    runs-on: ubuntu-latest-xl
+    runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-xl' || 'ubuntu-latest' }}
     steps:
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
@@ -71,7 +71,7 @@ jobs:
   # Also, we don't want to accidentally use the fake heights in other tests.
   #
   # (We activate the test features to avoid recompiling dependencies, but we don't actually run any gRPC tests.)
-  test-fake-activation-heights:
+  state-fake-activation-heights:
     name: Test with fake activation heights
     timeout-minutes: 60
     runs-on: ubuntu-latest
@@ -89,7 +89,7 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
-          -e TEST_FAKE_ACTIVATION_HEIGHTS=1 \
+          -e STATE_FAKE_ACTIVATION_HEIGHTS=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -99,7 +99,7 @@ jobs:
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Test that Zebra syncs and checkpoints a few thousand blocks from an empty state.
-  test-empty-sync:
+  sync-large-checkpoints-empty:
     name: Test checkpoint sync from empty state
     timeout-minutes: 60
     runs-on: ubuntu-latest
@@ -117,7 +117,7 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
-          -e TEST_ZEBRA_EMPTY_SYNC=1 \
+          -e SYNC_LARGE_CHECKPOINTS_EMPTY=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -128,7 +128,7 @@ jobs:
 
   # Test launching lightwalletd with an empty lightwalletd and Zebra state.
   test-lightwalletd-integration:
-    name: Test integration with lightwalletd
+    name: Lightwalletd integration
     timeout-minutes: 60
     runs-on: ubuntu-latest
     steps:
@@ -146,7 +146,7 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e ZEBRA_TEST_LIGHTWALLETD=1 \
-          -e TEST_LWD_INTEGRATION=1 \
+          -e LIGHTWALLETD_INTEGRATION=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -168,8 +168,8 @@ jobs:
     needs:
       [
         test-all,
-        test-fake-activation-heights,
-        test-empty-sync,
+        state-fake-activation-heights,
+        sync-large-checkpoints-empty,
         test-lightwalletd-integration,
         test-docker-configurations,
       ]
@@ -189,7 +189,7 @@ jobs:
           always-create-new-issue: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  run-check-no-git-refs:
+  check-no-git-dependencies:
     if: contains(github.event.pull_request.labels.*.name, 'A-release')
     runs-on: ubuntu-latest
     steps:
@@ -197,7 +197,7 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
-          -e RUN_CHECK_NO_GIT_REFS=1 \
+          -e CHECK_NO_GIT_DEPENDENCIES=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \

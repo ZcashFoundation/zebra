@@ -1,6 +1,6 @@
 //! Transactions and transaction-related structures.
 
-use std::{collections::HashMap, fmt, iter};
+use std::{collections::HashMap, fmt, iter, sync::Arc};
 
 use halo2::pasta::pallas;
 
@@ -27,6 +27,7 @@ pub use hash::{Hash, WtxId};
 pub use joinsplit::JoinSplitData;
 pub use lock_time::LockTime;
 pub use memo::Memo;
+use redjubjub::{Binding, Signature};
 pub use sapling::FieldNotPresent;
 pub use serialize::{
     SerializedTransaction, MIN_TRANSPARENT_TX_SIZE, MIN_TRANSPARENT_TX_V4_SIZE,
@@ -38,10 +39,15 @@ pub use unmined::{
 };
 use zcash_protocol::consensus;
 
+#[cfg(feature = "tx_v6")]
+use crate::parameters::TX_V6_VERSION_GROUP_ID;
 use crate::{
     amount::{Amount, Error as AmountError, NegativeAllowed, NonNegative},
     block, orchard,
-    parameters::{Network, NetworkUpgrade},
+    parameters::{
+        Network, NetworkUpgrade, OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID,
+        TX_V5_VERSION_GROUP_ID,
+    },
     primitives::{ed25519, Bctv14Proof, Groth16Proof},
     sapling,
     serialization::ZcashSerialize,
@@ -51,6 +57,7 @@ use crate::{
         CoinbaseSpendRestriction::{self, *},
     },
     value_balance::{ValueBalance, ValueBalanceError},
+    Error,
 };
 
 /// A Zcash transaction.
@@ -245,19 +252,19 @@ impl Transaction {
         &self,
         nu: NetworkUpgrade,
         hash_type: sighash::HashType,
-        all_previous_outputs: &[transparent::Output],
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
         input_index_script_code: Option<(usize, Vec<u8>)>,
-    ) -> SigHash {
-        sighash::SigHasher::new(self, nu, all_previous_outputs)
-            .sighash(hash_type, input_index_script_code)
+    ) -> Result<SigHash, Error> {
+        Ok(sighash::SigHasher::new(self, nu, all_previous_outputs)?
+            .sighash(hash_type, input_index_script_code))
     }
 
     /// Return a [`SigHasher`] for this transaction.
-    pub fn sighasher<'a>(
-        &'a self,
+    pub fn sighasher(
+        &self,
         nu: NetworkUpgrade,
-        all_previous_outputs: &'a [transparent::Output],
-    ) -> sighash::SigHasher<'a> {
+        all_previous_outputs: Arc<Vec<transparent::Output>>,
+    ) -> Result<sighash::SigHasher, Error> {
         sighash::SigHasher::new(self, nu, all_previous_outputs)
     }
 
@@ -1314,6 +1321,79 @@ impl Transaction {
         ValueBalance::from_sapling_amount(sapling_value_balance)
     }
 
+    /// Returns the Sapling binding signature for this transaction.
+    ///
+    /// Returns `Some(binding_sig)` for transactions that contain Sapling shielded
+    /// data (V4+), or `None` for transactions without Sapling components.
+    pub fn sapling_binding_sig(&self) -> Option<Signature<Binding>> {
+        match self {
+            Transaction::V4 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(sapling_shielded_data.binding_sig),
+            Transaction::V5 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(sapling_shielded_data.binding_sig),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 {
+                sapling_shielded_data: Some(sapling_shielded_data),
+                ..
+            } => Some(sapling_shielded_data.binding_sig),
+            _ => None,
+        }
+    }
+
+    /// Returns the JoinSplit public key for this transaction.
+    ///
+    /// Returns `Some(pub_key)` for transactions that contain JoinSplit data (V2-V4),
+    /// or `None` for transactions without JoinSplit components or unsupported versions.
+    ///
+    /// ## Note
+    /// JoinSplits are deprecated in favor of Sapling and Orchard
+    pub fn joinsplit_pub_key(&self) -> Option<ed25519::VerificationKeyBytes> {
+        match self {
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.pub_key),
+            _ => None,
+        }
+    }
+
+    /// Returns the JoinSplit signature this for transaction.
+    ///
+    /// Returns `Some(signature)` for transactions that contain JoinSplit data (V2-V4),
+    /// or `None` for transactions without JoinSplit components or unsupported versions.
+    ///
+    /// ## Note
+    /// JoinSplits are deprecated in favor of Sapling and Orchard
+    pub fn joinsplit_sig(&self) -> Option<ed25519::Signature> {
+        match self {
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.sig),
+            Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.sig),
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Some(joinsplit_data.sig),
+            _ => None,
+        }
+    }
+
     /// Return the orchard value balance, the change in the transaction value
     /// pool due to [`orchard::Action`]s.
     ///
@@ -1404,6 +1484,21 @@ impl Transaction {
     /// Does this transaction have shielded inputs or outputs?
     pub fn has_shielded_data(&self) -> bool {
         self.has_shielded_inputs() || self.has_shielded_outputs()
+    }
+
+    /// Get the version group ID for this transaction, if any.
+    pub fn version_group_id(&self) -> Option<u32> {
+        // We could store the parsed version group ID and return that,
+        // but since the consensus rules constraint it, we can just return
+        // the value that must have been parsed.
+        match self {
+            Transaction::V1 { .. } | Transaction::V2 { .. } => None,
+            Transaction::V3 { .. } => Some(OVERWINTER_VERSION_GROUP_ID),
+            Transaction::V4 { .. } => Some(SAPLING_VERSION_GROUP_ID),
+            Transaction::V5 { .. } => Some(TX_V5_VERSION_GROUP_ID),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { .. } => Some(TX_V6_VERSION_GROUP_ID),
+        }
     }
 }
 

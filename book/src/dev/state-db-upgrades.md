@@ -12,7 +12,8 @@ family doesn't exist.
 Instead:
 - define the name and type of each column family at the top of the implementation module,
 - add a method on the database that returns that type, and
-- add the column family name to the list of column families in the database:
+- add the column family name to the list of column families in the database
+  (in the `STATE_COLUMN_FAMILIES_IN_CODE` array):
 
 For example:
 ```rust
@@ -256,7 +257,7 @@ simulates typical user behaviour.
 
 And ideally:
 - An upgrade from the earliest supported Zebra version
-  (the CI sync-past-checkpoint tests do this on every PR)
+  (the CI sync-past-mandatory-checkpoint tests do this on every PR)
 
 #### Manually Triggering a Format Upgrade
 [manual-upgrade]: #manual-upgrade
@@ -304,7 +305,7 @@ We use the following rocksdb column families:
 | `hash_by_tx_loc`                   | `TransactionLocation`  | `transaction::Hash`           | Create  |
 | `tx_loc_by_hash`                   | `transaction::Hash`    | `TransactionLocation`         | Create  |
 | *Transparent*                      |                        |                               |         |
-| `balance_by_transparent_addr`      | `transparent::Address` | `Amount \|\| AddressLocation` | Update  |
+| `balance_by_transparent_addr`      | `transparent::Address` | `AddressBalanceLocation`      | Update  |
 | `tx_loc_by_transparent_addr_loc`   | `AddressTransaction`   | `()`                          | Create  |
 | `utxo_by_out_loc`                  | `OutputLocation`       | `transparent::Output`         | Delete  |
 | `utxo_loc_by_transparent_addr_loc` | `AddressUnspentOutput` | `()`                          | Delete  |
@@ -325,19 +326,20 @@ We use the following rocksdb column families:
 | *Chain*                            |                        |                               |         |
 | `history_tree`                     | `()`                   | `NonEmptyHistoryTree`         | Update  |
 | `tip_chain_value_pool`             | `()`                   | `ValueBalance`                | Update  |
+| `block_info`                       | `block::Height`        | `BlockInfo`                   | Create  |
 
 With the following additional modifications when compiled with the `indexer` feature:
 
-| Column Family                      | Keys                   | Values                        | Changes |
-| ---------------------------------- | ---------------------- | ----------------------------- | ------- |
-| *Transparent*                      |                        |                               |         |
-| `tx_loc_by_spent_out_loc`          | `OutputLocation`       | `TransactionLocation`         | Create  |
-| *Sprout*                           |                        |                               |         |
-| `sprout_nullifiers`                | `sprout::Nullifier`    | `TransactionLocation`         | Create  |
-| *Sapling*                          |                        |                               |         |
-| `sapling_nullifiers`               | `sapling::Nullifier`   | `TransactionLocation`         | Create  |
-| *Orchard*                          |                        |                               |         |
-| `orchard_nullifiers`               | `orchard::Nullifier`   | `TransactionLocation`         | Create  |
+| Column Family             | Keys                 | Values                | Changes |
+| ------------------------- | -------------------- | --------------------- | ------- |
+| *Transparent*             |                      |                       |         |
+| `tx_loc_by_spent_out_loc` | `OutputLocation`     | `TransactionLocation` | Create  |
+| *Sprout*                  |                      |                       |         |
+| `sprout_nullifiers`       | `sprout::Nullifier`  | `TransactionLocation` | Create  |
+| *Sapling*                 |                      |                       |         |
+| `sapling_nullifiers`      | `sapling::Nullifier` | `TransactionLocation` | Create  |
+| *Orchard*                 |                      |                       |         |
+| `orchard_nullifiers`      | `orchard::Nullifier` | `TransactionLocation` | Create  |
 
 ### Data Formats
 [rocksdb-data-format]: #rocksdb-data-format
@@ -352,6 +354,7 @@ Block and Transaction Data:
 - `TransactionIndex`: 16 bits, big-endian, unsigned (max ~23,000 transactions in the 2 MB block limit)
 - `TransactionCount`: same as `TransactionIndex`
 - `TransactionLocation`: `Height \|\| TransactionIndex`
+- `AddressBalanceLocation`: `Amount \|\| u64 \|\| AddressLocation`
 - `OutputIndex`: 24 bits, big-endian, unsigned (max ~223,000 transfers in the 2 MB block limit)
 - transparent and shielded input indexes, and shielded output indexes: 16 bits, big-endian, unsigned (max ~49,000 transfers in the 2 MB block limit)
 - `OutputLocation`: `TransactionLocation \|\| OutputIndex`
@@ -600,9 +603,16 @@ So they should not be used for consensus-critical checks.
   **TODO:** store the `Root` hash in `sprout_note_commitment_tree`, and use it to look up the
   note commitment tree. This de-duplicates tree state data. But we currently only store one sprout tree by height.
 
-- The value pools are only stored for the finalized tip.
+- The value pools are only stored for the finalized tip. Per-block value pools
+  are stored in `block_info`, see below.
 
 - We do not store the cumulative work for the finalized chain,
   because the finalized work is equal for all non-finalized chains.
   So the additional non-finalized work can be used to calculate the relative chain order,
   and choose the best chain.
+
+- The `block_info` contains additional per-block data. Currently it stores
+  the value pools after that block, and its size. It has been implemented
+  in a future-proof way so it is possible to add more data to it whiles
+  still allowing database downgrades (i.e. it does not require the
+  data length to match exactly what is expected and ignores the rest)

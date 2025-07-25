@@ -1,10 +1,7 @@
 //! Type-safe column family access.
 
 // When these types aren't exported, they become dead code.
-#![cfg_attr(
-    not(any(test, feature = "proptest-impl", feature = "shielded-scan")),
-    allow(dead_code)
-)]
+#![cfg_attr(not(any(test, feature = "proptest-impl")), allow(dead_code))]
 
 use std::{
     any::type_name,

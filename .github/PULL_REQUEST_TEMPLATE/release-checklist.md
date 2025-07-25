@@ -10,9 +10,24 @@ assignees: ''
 # Prepare for the Release
 
 - [ ] Make sure there has been [at least one successful full sync test in the main branch](https://github.com/ZcashFoundation/zebra/actions/workflows/ci-tests.yml?query=branch%3Amain) since the last state change, or start a manual full sync.
-- [ ] Make sure the PRs with the new checkpoint hashes and missed dependencies are already merged.
-      (See the release ticket checklist for details)
 
+# Checkpoints
+
+For performance and security, we want to update the Zebra checkpoints in every release.
+- [ ] You can copy the latest checkpoints from CI by following [the zebra-checkpoints README](https://github.com/ZcashFoundation/zebra/blob/main/zebra-utils/README.md#zebra-checkpoints).
+
+# Missed Dependency Updates
+
+Sometimes `dependabot` misses some dependency updates, or we accidentally turned them off.
+
+This step can be skipped if there is a large pending dependency upgrade. (For example, shared ECC crates.)
+
+Here's how we make sure we got everything:
+- [ ] Run `cargo update` on the latest `main` branch, and keep the output
+- [ ] If needed, [add duplicate dependency exceptions to deny.toml](https://github.com/ZcashFoundation/zebra/blob/main/book/src/dev/continuous-integration.md#fixing-duplicate-dependencies-in-check-denytoml-bans)
+- [ ] If needed, remove resolved duplicate dependencies from `deny.toml`
+- [ ] Open a separate PR with the changes
+- [ ] Add the output of `cargo update` to that PR as a comment
 
 # Summarise Release Changes
 
@@ -26,7 +41,9 @@ Once you are ready to tag a release, copy the draft changelog into `CHANGELOG.md
 We use [the Release Drafter workflow](https://github.com/marketplace/actions/release-drafter) to automatically create a [draft changelog](https://github.com/ZcashFoundation/zebra/releases). We follow the [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) format.
 
 To create the final change log:
-- [ ] Copy the **latest** draft changelog into `CHANGELOG.md` (there can be multiple draft releases)
+- [ ] Copy the [**latest** draft
+  changelog](https://github.com/ZcashFoundation/zebra/releases) into
+  `CHANGELOG.md` (there can be multiple draft releases)
 - [ ] Delete any trivial changes
     - [ ] Put the list of deleted changelog entries in a PR comment to make reviewing easier
 - [ ] Combine duplicate changes
@@ -57,11 +74,11 @@ fastmod --fixed-strings '1.58' '1.65'
 - [ ] Freeze the [`batched` queue](https://dashboard.mergify.com/github/ZcashFoundation/repo/zebra/queues) using Mergify.
 - [ ] Mark all the release PRs as `Critical` priority, so they go in the `urgent` Mergify queue.
 - [ ] Mark all non-release PRs with `do-not-merge`, because Mergify checks approved PRs against every commit, even when a queue is frozen.
-- [ ] Add the `A-release` tag to the release pull request in order for the `check_no_git_refs_in_cargo_lock` to run.
+- [ ] Add the `A-release` tag to the release pull request in order for the `check-no-git-dependencies` to run.
 
 ## Zebra git sources dependencies
 
-- [ ] Ensure the `check_no_git_refs_in_cargo_lock` check passes.
+- [ ] Ensure the `check-no-git-dependencies` check passes.
 
 This check runs automatically on pull requests with the `A-release` label. It must pass for crates to be published to crates.io. If the check fails, you should either halt the release process or proceed with the understanding that the crates will not be published on crates.io.
 
@@ -78,30 +95,34 @@ Choose a release level for `zebrad`. Release levels are based on user-visible ch
 - significant new features or behaviour changes; changes to RPCs, command-line, or configs; and deprecations or removals are `minor` releases
 - otherwise, it is a `patch` release
 
-Zebra's Rust API doesn't have any support or stability guarantees, so we keep all the `zebra-*` and `tower-*` crates on a beta `pre-release` version.
-
-### Update Crate Versions
+### Update Crate Versions and Crate Change Logs
 
 If you're publishing crates for the first time, [log in to crates.io](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio),
 and make sure you're a member of owners group.
 
 Check that the release will work:
-- [ ] Update crate versions, commit the changes to the release branch, and do a release dry-run:
+
+- [ ] Determine which crates require release. Run `git diff --stat <previous_tag>`
+      and enumerate the crates that had changes.
+- [ ] Determine which type of release to make. Run `semver-checks` to list API
+      changes: `cargo semver-checks -p <crate> --default-features`. If there are
+      breaking API changes, do a major release, or try to revert the API change
+      if it was accidental. Otherwise do a minor or patch release depending on
+      whether a new API was added. Note that `semver-checks` won't work
+      if the previous realase was yanked; you will have to determine the
+      type of release manually.
+- [ ] Update the crate `CHANGELOG.md` listing the API changes or other
+      relevant information for a crate consumer. It might make sense to copy
+      entries from the `zebrad` changelog.
+- [ ] Update crate versions:
 
 ```sh
-# Update everything except for alpha crates and zebrad:
-cargo release version --verbose --execute --allow-branch '*' --workspace --exclude zebrad --exclude zebra-scan --exclude zebra-grpc beta
-# Due to a bug in cargo-release, we need to pass exact versions for alpha crates:
-cargo release version --verbose --execute --allow-branch '*' --package zebra-scan 0.1.0-alpha.4
-cargo release version --verbose --execute --allow-branch '*' --package zebra-grpc 0.1.0-alpha.2
-# Update zebrad:
-cargo release version --verbose --execute --allow-branch '*' --package zebrad patch # [ major | minor | patch ]
-# Continue with the release process:
-cargo release replace --verbose --execute --allow-branch '*' --package zebrad
-cargo release commit --verbose --execute --allow-branch '*'
+cargo release version --verbose --execute --allow-branch '*' -p <crate> patch # [ major | minor ]
+cargo release replace --verbose --execute --allow-branch '*' -p <crate>
 ```
 
-- [ ] Push the above version changes to the release branch.
+- [ ] Update the crate `CHANGELOG.md`
+- [ ] Commit and push the above version changes to the release branch.
 
 ## Update End of Support
 
@@ -154,8 +175,15 @@ The end of support height is calculated from the current blockchain height:
 ## Publish Crates
 
 - [ ] [Run `cargo login`](https://zebra.zfnd.org/dev/crate-owners.html#logging-in-to-cratesio)
-- [ ] Run `cargo clean` in the zebra repo (optional)
-- [ ] Publish the crates to crates.io: `cargo release publish --verbose --workspace --execute`
+- [ ] It is recommended that the following step be run from a fresh checkout of
+      the repo, to avoid accidentally publishing files like e.g. logs that might
+      be lingering around
+- [ ] Publish the crates to crates.io:
+
+```
+for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-services zebra-script zebra-state zebra-consensus zebra-network zebra-rpc zebra-utils zebrad; do cargo release publish --verbose --execute -p $c; done
+```
+
 - [ ] Check that Zebra can be installed from `crates.io`:
       `cargo install --locked --force --version 1.minor.patch zebrad && ~/.cargo/bin/zebrad`
       and put the output in a comment on the PR.

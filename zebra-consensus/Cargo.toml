@@ -1,6 +1,6 @@
 [package]
 name = "zebra-consensus"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Implementation of Zcash consensus checks"
 license = "MIT OR Apache-2.0"
@@ -33,7 +33,7 @@ proptest-impl = ["proptest", "proptest-derive", "zebra-chain/proptest-impl", "ze
 blake2b_simd = { workspace = true }
 bellman = { workspace = true }
 bls12_381 = { workspace = true }
-halo2 = { package = "halo2_proofs", version = "0.3.0" }
+halo2 = { package = "halo2_proofs", version = "0.3" }
 jubjub = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
@@ -58,13 +58,13 @@ orchard.workspace = true
 zcash_proofs = { workspace = true, features = ["multicore" ] }
 wagyu-zcash-parameters = { workspace = true }
 
-tower-fallback = { path = "../tower-fallback/", version = "0.2.41-beta.22" }
-tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41-beta.22" }
+tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
+tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41" }
 
-zebra-script = { path = "../zebra-script", version = "1.0.0-beta.46" }
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46" }
+zebra-script = { path = "../zebra-script", version = "1.0.0" }
+zebra-state = { path = "../zebra-state", version = "1.0.1" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0" }
 
 # prod feature progress-bar
 howudoin = { workspace = true, optional = true }
@@ -89,6 +89,6 @@ tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-zebra-state = { path = "../zebra-state", version = "1.0.0-beta.46", features = ["proptest-impl"] }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["proptest-impl"] }
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }
+zebra-state = { path = "../zebra-state", version = "1.0.1", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0", features = ["proptest-impl"] }
+zebra-test = { path = "../zebra-test/", version = "1.0.0" }

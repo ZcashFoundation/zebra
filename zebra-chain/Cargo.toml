@@ -1,6 +1,6 @@
 [package]
 name = "zebra-chain"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Core Zcash data structures"
 license = "MIT OR Apache-2.0"
@@ -27,11 +27,6 @@ json-conversion = [
 # Async error handling convenience traits
 async-error = [
     "tokio",
-]
-
-# Experimental shielded scanning support
-shielded-scan = [
-    "zcash_client_backend"
 ]
 
 # Experimental internal miner support
@@ -83,9 +78,10 @@ secp256k1 = { workspace = true, features = ["serde"] }
 sha2 = { workspace = true, features = ["compress"] }
 uint = { workspace = true }
 x25519-dalek = { workspace = true, features = ["serde"] }
+bech32 = { workspace = true }
 
 # ECC deps
-halo2 = { package = "halo2_proofs", version = "0.3.0" }
+halo2 = { package = "halo2_proofs", version = "0.3" }
 orchard.workspace = true
 zcash_encoding.workspace = true
 zcash_history.workspace = true
@@ -95,7 +91,7 @@ sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
 zcash_transparent.workspace = true
-sinsemilla = { version = "0.1.0" }
+sinsemilla = { version = "0.1" }
 
 # Time
 chrono = { workspace = true, features = ["clock", "std", "serde"] }
@@ -128,9 +124,6 @@ serde_json = { workspace = true, optional = true }
 # Production feature async-error and testing feature proptest-impl
 tokio = { workspace = true, optional = true }
 
-# Experimental feature shielded-scan
-zcash_client_backend = { workspace = true, optional = true }
-
 # Optional testing dependencies
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
@@ -138,7 +131,7 @@ proptest-derive = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
 rand_chacha = { workspace = true, optional = true }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46", optional = true }
+zebra-test = { path = "../zebra-test/", version = "1.0.0", optional = true }
 
 [dev-dependencies]
 # Benchmarks
@@ -161,7 +154,7 @@ rand_chacha = { workspace = true }
 
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
-zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.46" }
+zebra-test = { path = "../zebra-test/", version = "1.0.0" }
 
 [[bench]]
 name = "block"

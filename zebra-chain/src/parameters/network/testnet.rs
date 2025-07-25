@@ -23,11 +23,6 @@ use super::{
     },
 };
 
-/// The Regtest NU5 activation height in tests
-// TODO: Serialize testnet parameters in Config then remove this and use a configured NU5 activation height.
-#[cfg(any(test, feature = "proptest-impl"))]
-pub const REGTEST_NU5_ACTIVATION_HEIGHT: u32 = 100;
-
 /// Reserved network names that should not be allowed for configured Testnets.
 pub const RESERVED_NETWORK_NAMES: [&str; 6] = [
     "Mainnet",
@@ -129,6 +124,7 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
                 NetworkUpgrade::Canopy => &mut configured_activation_heights.canopy,
                 NetworkUpgrade::Nu5 => &mut configured_activation_heights.nu5,
                 NetworkUpgrade::Nu6 => &mut configured_activation_heights.nu6,
+                NetworkUpgrade::Nu6_1 => &mut configured_activation_heights.nu6_1,
                 NetworkUpgrade::Nu7 => &mut configured_activation_heights.nu7,
                 NetworkUpgrade::Genesis => {
                     continue;
@@ -260,6 +256,9 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU6` network upgrade.
     #[serde(rename = "NU6")]
     pub nu6: Option<u32>,
+    /// Activation height for `NU6.1` network upgrade.
+    #[serde(rename = "NU6.1")]
+    pub nu6_1: Option<u32>,
     /// Activation height for `NU7` network upgrade.
     #[serde(rename = "NU7")]
     pub nu7: Option<u32>,
@@ -397,6 +396,7 @@ impl ParametersBuilder {
             canopy,
             nu5,
             nu6,
+            nu6_1,
             nu7,
         }: ConfiguredActivationHeights,
     ) -> Self {
@@ -420,6 +420,7 @@ impl ParametersBuilder {
             .chain(canopy.into_iter().map(|h| (h, Canopy)))
             .chain(nu5.into_iter().map(|h| (h, Nu5)))
             .chain(nu6.into_iter().map(|h| (h, Nu6)))
+            .chain(nu6_1.into_iter().map(|h| (h, Nu6_1)))
             .chain(nu7.into_iter().map(|h| (h, Nu7)))
             .map(|(h, nu)| (h.try_into().expect("activation height must be valid"), nu))
             .collect();

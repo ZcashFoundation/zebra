@@ -1,6 +1,6 @@
 [package]
 name = "zebra-utils"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "Developer tools for Zebra maintenance and testing"
 license = "MIT OR Apache-2.0"
@@ -58,13 +58,6 @@ search-issue-refs = [
     "tokio"
 ]
 
-shielded-scan = [
-    "itertools",
-    "jsonrpc",
-    "zcash_primitives",
-    "zcash_client_backend",
-]
-
 openapi-generator = [
     "syn",
     "quote",
@@ -85,18 +78,18 @@ tracing-error = { workspace = true }
 tracing-subscriber = { workspace = true }
 thiserror = { workspace = true }
 
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0-beta.46" }
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.0" }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0" }
 
 # These crates are needed for the block-template-to-proposal binary
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0-beta.46" }
+zebra-rpc = { path = "../zebra-rpc", version = "1.0.0" }
 
 # These crates are needed for the zebra-checkpoints binary
 itertools = { workspace = true, optional = true }
 
 # These crates are needed for the search-issue-refs binary
 regex = { workspace = true, optional = true }
-# Avoid default openssl dependency to reduce the dependency tree and security alerts. 
+# Avoid default openssl dependency to reduce the dependency tree and security alerts.
 reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries

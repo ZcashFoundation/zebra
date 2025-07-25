@@ -20,9 +20,6 @@ on:
       disk_suffix:
         required: false
         type: string
-      prefer_main_cached_state:
-        required: false
-        type: boolean
       test_id:
         description: 'The test ID requiring the cached state disks'
         required: false
@@ -50,11 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     outputs:
-      state_version: ${{ steps.get-available-disks.outputs.state_version }}
-      cached_disk_name: ${{ steps.get-available-disks.outputs.cached_disk_name }}
-      lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk }}
-      zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk }}
-      zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk }}
+      state_version: ${{ steps.get-available-disks.outputs.state_version || steps.set-release-defaults.outputs.state_version }}
+      cached_disk_name: ${{ steps.get-available-disks.outputs.cached_disk_name || steps.set-release-defaults.outputs.cached_disk_name }}
+      lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk || steps.set-release-defaults.outputs.lwd_tip_disk }}
+      zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk || steps.set-release-defaults.outputs.zebra_tip_disk }}
+      zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk || steps.set-release-defaults.outputs.zebra_checkpoint_disk }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -71,7 +68,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.8
+        uses: google-github-actions/auth@v2.1.10
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
@@ -99,14 +96,15 @@ jobs:
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
       # Check if there are cached state disks available for subsequent jobs to use.
+      # Skip disk lookup for releases - they should deploy from scratch or use production disks
       - name: Check if cached state disks exists
         id: get-available-disks
+        if: ${{ github.event_name != 'release' }}
         env:
           GITHUB_REF: ${{ env.SHORT_GITHUB_REF }}
           NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
           DISK_PREFIX: ${{ inputs.disk_prefix }}
           DISK_SUFFIX: ${{ inputs.disk_suffix }}
-          PREFER_MAIN_CACHED_STATE: ${{ inputs.prefer_main_cached_state }}
         run: |
           source ./.github/workflows/scripts/gcp-get-cached-disks.sh
           echo "state_version=${LOCAL_STATE_VERSION}" >> "${GITHUB_OUTPUT}"
@@ -114,3 +112,14 @@ jobs:
           echo "lwd_tip_disk=${LWD_TIP_DISK}" >> "${GITHUB_OUTPUT}"
           echo "zebra_tip_disk=${ZEBRA_TIP_DISK}" >> "${GITHUB_OUTPUT}"
           echo "zebra_checkpoint_disk=${ZEBRA_CHECKPOINT_DISK}" >> "${GITHUB_OUTPUT}"
+
+      # For releases, set default outputs indicating no cached disks are available
+      - name: Set default outputs for releases
+        id: set-release-defaults
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          echo "state_version=" >> "${GITHUB_OUTPUT}"
+          echo "cached_disk_name=" >> "${GITHUB_OUTPUT}"
+          echo "lwd_tip_disk=false" >> "${GITHUB_OUTPUT}"
+          echo "zebra_tip_disk=false" >> "${GITHUB_OUTPUT}"
+          echo "zebra_checkpoint_disk=false" >> "${GITHUB_OUTPUT}"

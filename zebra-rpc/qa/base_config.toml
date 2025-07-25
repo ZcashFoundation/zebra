@@ -1,9 +1,11 @@
 [mining]
-miner_address = "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"
+miner_address = "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"
 
 [network]
 listen_addr = "127.0.0.1:0"
 network = "Regtest"
+max_connections_per_ip = 10
+cache_dir = false
 
 [rpc]
 listen_addr = "127.0.0.1:0"

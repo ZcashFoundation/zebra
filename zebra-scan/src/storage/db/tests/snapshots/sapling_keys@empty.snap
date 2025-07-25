@@ -1,5 +1,0 @@
----
-source: zebra-scan/src/storage/db/tests/snapshot.rs
-expression: sapling_keys_and_birthday_heights
----
-{}

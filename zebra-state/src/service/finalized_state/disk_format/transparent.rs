@@ -7,14 +7,12 @@
 
 use std::{cmp::max, fmt::Debug};
 
-use serde::{Deserialize, Serialize};
-
 use zebra_chain::{
-    amount::{self, Amount, NonNegative},
+    amount::{self, Amount, Constraint, NegativeAllowed, NonNegative},
     block::Height,
     parameters::NetworkKind,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
-    transparent::{self, Address::*},
+    transparent::{self, Address::*, OutputIndex},
 };
 
 use crate::service::finalized_state::disk_format::{
@@ -24,9 +22,6 @@ use crate::service::finalized_state::disk_format::{
 
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
-
-#[cfg(any(test, feature = "proptest-impl"))]
-mod arbitrary;
 
 /// Transparent balances are stored as an 8 byte integer on disk.
 pub const BALANCE_DISK_BYTES: usize = 8;
@@ -48,7 +43,7 @@ pub const OUTPUT_INDEX_DISK_BYTES: usize = 3;
 /// Since Zebra only stores fully verified blocks on disk, blocks with larger indexes
 /// are rejected before reaching the database.
 pub const MAX_ON_DISK_OUTPUT_INDEX: OutputIndex =
-    OutputIndex((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
+    OutputIndex::from_index((1 << (OUTPUT_INDEX_DISK_BYTES * 8)) - 1);
 
 /// [`OutputLocation`]s are stored as a 3 byte height, 2 byte transaction index,
 /// and 3 byte output index on disk.
@@ -59,58 +54,6 @@ pub const OUTPUT_LOCATION_DISK_BYTES: usize =
 
 // Transparent types
 
-/// A transparent output's index in its transaction.
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Serialize, Deserialize)]
-pub struct OutputIndex(u32);
-
-impl OutputIndex {
-    /// Create a transparent output index from the Zcash consensus integer type.
-    ///
-    /// `u32` is also the inner type.
-    pub fn from_index(output_index: u32) -> OutputIndex {
-        OutputIndex(output_index)
-    }
-
-    /// Returns this index as the inner type.
-    pub fn index(&self) -> u32 {
-        self.0
-    }
-
-    /// Create a transparent output index from `usize`.
-    #[allow(dead_code)]
-    pub fn from_usize(output_index: usize) -> OutputIndex {
-        OutputIndex(
-            output_index
-                .try_into()
-                .expect("the maximum valid index fits in the inner type"),
-        )
-    }
-
-    /// Return this index as `usize`.
-    #[allow(dead_code)]
-    pub fn as_usize(&self) -> usize {
-        self.0
-            .try_into()
-            .expect("the maximum valid index fits in usize")
-    }
-
-    /// Create a transparent output index from `u64`.
-    #[allow(dead_code)]
-    pub fn from_u64(output_index: u64) -> OutputIndex {
-        OutputIndex(
-            output_index
-                .try_into()
-                .expect("the maximum u64 index fits in the inner type"),
-        )
-    }
-
-    /// Return this index as `u64`.
-    #[allow(dead_code)]
-    pub fn as_u64(&self) -> u64 {
-        self.0.into()
-    }
-}
-
 /// A transparent output's location in the chain, by block height and transaction index.
 ///
 /// [`OutputLocation`]s are sorted in increasing chain order, by height, transaction index,
@@ -118,7 +61,7 @@ impl OutputIndex {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct OutputLocation {
     /// The location of the transparent input's transaction.
@@ -207,68 +150,55 @@ impl OutputLocation {
 ///       derive IntoDisk and FromDisk?
 pub type AddressLocation = OutputLocation;
 
-/// Data which Zebra indexes for each [`transparent::Address`].
-///
-/// Currently, Zebra tracks this data 1:1 for each address:
-/// - the balance [`Amount`] for a transparent address, and
-/// - the [`AddressLocation`] for the first [`transparent::Output`] sent to that address
-///   (regardless of whether that output is spent or unspent).
-///
-/// All other address data is tracked multiple times for each address
-/// (UTXOs and transactions).
+/// The inner type of [`AddressBalanceLocation`] and [`AddressBalanceLocationChange`].
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize),
+    serde(bound = "C: Constraint + Clone")
 )]
-pub struct AddressBalanceLocation {
+pub struct AddressBalanceLocationInner<C: Constraint + Copy + std::fmt::Debug> {
     /// The total balance of all UTXOs sent to an address.
-    balance: Amount<NonNegative>,
+    balance: Amount<C>,
+
+    /// The total balance of all spent and unspent outputs sent to an address.
+    received: u64,
 
     /// The location of the first [`transparent::Output`] sent to an address.
     location: AddressLocation,
 }
 
-impl AddressBalanceLocation {
-    /// Creates a new [`AddressBalanceLocation`] from the location of
+impl<C: Constraint + Copy + std::fmt::Debug> AddressBalanceLocationInner<C> {
+    /// Creates a new [`AddressBalanceLocationInner`] from the location of
     /// the first [`transparent::Output`] sent to an address.
     ///
-    /// The returned value has a zero initial balance.
-    pub fn new(first_output: OutputLocation) -> AddressBalanceLocation {
-        AddressBalanceLocation {
+    /// The returned value has a zero initial balance and received balance.
+    fn new(first_output: OutputLocation) -> Self {
+        Self {
             balance: Amount::zero(),
+            received: 0,
             location: first_output,
         }
     }
 
     /// Returns the current balance for the address.
-    pub fn balance(&self) -> Amount<NonNegative> {
+    pub fn balance(&self) -> Amount<C> {
         self.balance
     }
 
+    /// Returns the current received balance for the address.
+    pub fn received(&self) -> u64 {
+        self.received
+    }
+
     /// Returns a mutable reference to the current balance for the address.
-    pub fn balance_mut(&mut self) -> &mut Amount<NonNegative> {
+    pub fn balance_mut(&mut self) -> &mut Amount<C> {
         &mut self.balance
     }
 
-    /// Updates the current balance by adding the supplied output's value.
-    pub fn receive_output(
-        &mut self,
-        unspent_output: &transparent::Output,
-    ) -> Result<(), amount::Error> {
-        self.balance = (self.balance + unspent_output.value())?;
-
-        Ok(())
-    }
-
-    /// Updates the current balance by subtracting the supplied output's value.
-    pub fn spend_output(
-        &mut self,
-        spent_output: &transparent::Output,
-    ) -> Result<(), amount::Error> {
-        self.balance = (self.balance - spent_output.value())?;
-
-        Ok(())
+    /// Returns a mutable reference to the current received balance for the address.
+    pub fn received_mut(&mut self) -> &mut u64 {
+        &mut self.received
     }
 
     /// Returns the location of the first [`transparent::Output`] sent to an address.
@@ -284,6 +214,150 @@ impl AddressBalanceLocation {
     }
 }
 
+impl<C: Constraint + Copy + std::fmt::Debug> std::ops::Add for AddressBalanceLocationInner<C> {
+    type Output = Result<Self, amount::Error>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Ok(AddressBalanceLocationInner {
+            balance: (self.balance + rhs.balance)?,
+            received: self.received.saturating_add(rhs.received),
+            // Keep in mind that `AddressBalanceLocationChange` reuses this type
+            // (AddressBalanceLocationInner) and this addition method. The
+            // `block_info_and_address_received` database upgrade uses the
+            // usize::MAX dummy location value returned from
+            // `AddressBalanceLocationChange::empty()`. Therefore, when adding,
+            // we should ignore these dummy values. Using `min` achieves this.
+            // It is also possible that two dummy-location balance changes are
+            // added, and `min` will correctly keep the same dummy value. The
+            // reason we haven't used zero as a dummy value and `max()` here is
+            // because we use the minimum UTXO location as the canonical
+            // location for an address; and using `min()` will work if a
+            // non-canonical location is added.
+            location: self.location.min(rhs.location),
+        })
+    }
+}
+
+/// Represents a change in the [`AddressBalanceLocation`] of a transparent address
+/// in the finalized state.
+pub struct AddressBalanceLocationChange(AddressBalanceLocationInner<NegativeAllowed>);
+
+impl AddressBalanceLocationChange {
+    /// Creates a new [`AddressBalanceLocationChange`].
+    ///
+    /// See [`AddressBalanceLocationInner::new`] for more details.
+    pub fn new(location: AddressLocation) -> Self {
+        Self(AddressBalanceLocationInner::new(location))
+    }
+
+    /// Updates the current balance by adding the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn receive_output(
+        &mut self,
+        unspent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self
+            .balance
+            .zatoshis()
+            .checked_add(unspent_output.value().zatoshis()))
+        .expect("adding two Amounts is always within an i64")
+        .try_into()?;
+        self.received = self.received.saturating_add(unspent_output.value().into());
+        Ok(())
+    }
+
+    /// Updates the current balance by subtracting the supplied output's value.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn spend_output(
+        &mut self,
+        spent_output: &transparent::Output,
+    ) -> Result<(), amount::Error> {
+        self.balance = (self
+            .balance
+            .zatoshis()
+            .checked_sub(spent_output.value().zatoshis()))
+        .expect("subtracting two Amounts is always within an i64")
+        .try_into()?;
+
+        Ok(())
+    }
+}
+
+impl std::ops::Deref for AddressBalanceLocationChange {
+    type Target = AddressBalanceLocationInner<NegativeAllowed>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for AddressBalanceLocationChange {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::ops::Add for AddressBalanceLocationChange {
+    type Output = Result<Self, amount::Error>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        (self.0 + rhs.0).map(Self)
+    }
+}
+
+/// Data which Zebra indexes for each [`transparent::Address`].
+///
+/// Currently, Zebra tracks this data 1:1 for each address:
+/// - the balance [`Amount`] for a transparent address, and
+/// - the [`AddressLocation`] for the first [`transparent::Output`] sent to that address
+///   (regardless of whether that output is spent or unspent).
+///
+/// All other address data is tracked multiple times for each address
+/// (UTXOs and transactions).
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[cfg_attr(
+    any(test, feature = "proptest-impl"),
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
+)]
+pub struct AddressBalanceLocation(AddressBalanceLocationInner<NonNegative>);
+
+impl AddressBalanceLocation {
+    /// Creates a new [`AddressBalanceLocation`].
+    ///
+    /// See [`AddressBalanceLocationInner::new`] for more details.
+    pub fn new(first_output: OutputLocation) -> Self {
+        Self(AddressBalanceLocationInner::new(first_output))
+    }
+
+    /// Consumes self and returns a new [`AddressBalanceLocationChange`] with
+    /// a zero balance, zero received balance, and the `location` of `self`.
+    pub fn into_new_change(self) -> AddressBalanceLocationChange {
+        AddressBalanceLocationChange::new(self.location)
+    }
+}
+
+impl std::ops::Deref for AddressBalanceLocation {
+    type Target = AddressBalanceLocationInner<NonNegative>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for AddressBalanceLocation {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::ops::Add for AddressBalanceLocation {
+    type Output = Result<Self, amount::Error>;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        (self.0 + rhs.0).map(Self)
+    }
+}
+
 /// A single unspent output for a [`transparent::Address`].
 ///
 /// We store both the address location key and unspend output location value
@@ -295,7 +369,7 @@ impl AddressBalanceLocation {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressUnspentOutput {
     /// The location of the first [`transparent::Output`] sent to the address in `output`.
@@ -352,7 +426,7 @@ impl AddressUnspentOutput {
         // even if it is in a later block or transaction.
         //
         // Consensus: the block size limit is 2MB, which is much lower than the index range.
-        self.unspent_output_location.output_index.0 += 1;
+        self.unspent_output_location.output_index += 1;
     }
 
     /// The location of the first [`transparent::Output`] sent to the address of this output.
@@ -393,7 +467,7 @@ impl AddressUnspentOutput {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 #[cfg_attr(
     any(test, feature = "proptest-impl"),
-    derive(Arbitrary, Serialize, Deserialize)
+    derive(Arbitrary, serde::Serialize, serde::Deserialize)
 )]
 pub struct AddressTransaction {
     /// The location of the first [`transparent::Output`] sent to the address in `output`.
@@ -510,6 +584,9 @@ fn address_variant(address: &transparent::Address) -> u8 {
         // address variant for `Regtest` transparent addresses in the db format
         (Testnet | Regtest, PayToPublicKeyHash { .. }) => 2,
         (Testnet | Regtest, PayToScriptHash { .. }) => 3,
+        // TEX address variants
+        (Mainnet, Tex { .. }) => 4,
+        (Testnet | Regtest, Tex { .. }) => 5,
     }
 }
 
@@ -546,7 +623,7 @@ impl FromDisk for transparent::Address {
     }
 }
 
-impl IntoDisk for Amount<NonNegative> {
+impl<C: Constraint> IntoDisk for Amount<C> {
     type Bytes = [u8; BALANCE_DISK_BYTES];
 
     fn as_bytes(&self) -> Self::Bytes {
@@ -585,14 +662,14 @@ impl IntoDisk for OutputIndex {
                 {
                     use zebra_chain::serialization::TrustedPreallocate;
                     assert!(
-                        u64::from(MAX_ON_DISK_OUTPUT_INDEX.0)
+                        u64::from(MAX_ON_DISK_OUTPUT_INDEX.index())
                             > zebra_chain::transparent::Output::max_allocation(),
                         "increased block size requires database output index format change",
                     );
                 }
 
                 truncate_zero_be_bytes(
-                    &MAX_ON_DISK_OUTPUT_INDEX.0.to_be_bytes(),
+                    &MAX_ON_DISK_OUTPUT_INDEX.index().to_be_bytes(),
                     OUTPUT_INDEX_DISK_BYTES,
                 )
                 .expect("max on disk output index is valid")
@@ -644,32 +721,67 @@ impl FromDisk for OutputLocation {
     }
 }
 
-impl IntoDisk for AddressBalanceLocation {
-    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES];
+impl<C: Constraint + Copy + std::fmt::Debug> IntoDisk for AddressBalanceLocationInner<C> {
+    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
 
     fn as_bytes(&self) -> Self::Bytes {
         let balance_bytes = self.balance().as_bytes().to_vec();
         let address_location_bytes = self.address_location().as_bytes().to_vec();
+        let received_bytes = self.received().to_le_bytes().to_vec();
 
-        [balance_bytes, address_location_bytes]
+        [balance_bytes, address_location_bytes, received_bytes]
             .concat()
             .try_into()
             .unwrap()
     }
 }
 
-impl FromDisk for AddressBalanceLocation {
+impl IntoDisk for AddressBalanceLocation {
+    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.0.as_bytes()
+    }
+}
+
+impl IntoDisk for AddressBalanceLocationChange {
+    type Bytes = [u8; BALANCE_DISK_BYTES + OUTPUT_LOCATION_DISK_BYTES + size_of::<u64>()];
+
+    fn as_bytes(&self) -> Self::Bytes {
+        self.0.as_bytes()
+    }
+}
+
+impl<C: Constraint + Copy + std::fmt::Debug> FromDisk for AddressBalanceLocationInner<C> {
     fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
-        let (balance_bytes, address_location_bytes) =
-            disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+        let (balance_bytes, rest) = disk_bytes.as_ref().split_at(BALANCE_DISK_BYTES);
+        let (address_location_bytes, rest) = rest.split_at(BALANCE_DISK_BYTES);
+        let (received_bytes, _) = rest.split_at_checked(size_of::<u64>()).unwrap_or_default();
 
         let balance = Amount::from_bytes(balance_bytes.try_into().unwrap()).unwrap();
         let address_location = AddressLocation::from_bytes(address_location_bytes);
+        // # Backwards Compatibility
+        //
+        // If the value is missing a `received` field, default to 0.
+        let received = u64::from_le_bytes(received_bytes.try_into().unwrap_or_default());
 
-        let mut address_balance_location = AddressBalanceLocation::new(address_location);
+        let mut address_balance_location = Self::new(address_location);
         *address_balance_location.balance_mut() = balance;
+        *address_balance_location.received_mut() = received;
 
         address_balance_location
+    }
+}
+
+impl FromDisk for AddressBalanceLocation {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        Self(AddressBalanceLocationInner::from_bytes(disk_bytes))
+    }
+}
+
+impl FromDisk for AddressBalanceLocationChange {
+    fn from_bytes(disk_bytes: impl AsRef<[u8]>) -> Self {
+        Self(AddressBalanceLocationInner::from_bytes(disk_bytes))
     }
 }
 

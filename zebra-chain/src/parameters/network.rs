@@ -34,8 +34,14 @@ pub enum NetworkKind {
 }
 
 impl From<Network> for NetworkKind {
-    fn from(network: Network) -> Self {
-        network.kind()
+    fn from(net: Network) -> Self {
+        NetworkKind::from(&net)
+    }
+}
+
+impl From<&Network> for NetworkKind {
+    fn from(net: &Network) -> Self {
+        net.kind()
     }
 }
 
@@ -82,6 +88,16 @@ impl NetworkKind {
             "main".to_string()
         } else {
             "test".to_string()
+        }
+    }
+
+    /// Returns the 2 bytes prefix for Bech32m-encoded transparent TEX
+    /// payment addresses for the network as defined in [ZIP-320](https://zips.z.cash/zip-0320.html).
+    pub fn tex_address_prefix(self) -> [u8; 2] {
+        // TODO: Add this bytes to `zcash_primitives::constants`?
+        match self {
+            Self::Mainnet => [0x1c, 0xb8],
+            Self::Testnet | Self::Regtest => [0x1d, 0x25],
         }
     }
 }

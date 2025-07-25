@@ -1,6 +1,6 @@
 [package]
 name = "zebra-network"
-version = "1.0.0-beta.46"
+version = "1.0.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>", "Tower Maintainers <team@tower-rs.com>"]
 description = "Networking code for Zebra"
 # # Legal
@@ -76,14 +76,14 @@ howudoin = { workspace = true, optional = true }
 
 # tor dependencies
 # Wait until `arti-client`'s dependency `x25519-dalek v1.2.0` is updated to a higher version. (#5492)
-# arti-client = { version = "0.0.2", optional = true }
-# tor-rtcompat  = { version = "0.0.2", optional = true }
+# arti-client = { version = "0.0", optional = true }
+# tor-rtcompat  = { version = "0.0", optional = true }
 
 # proptest dependencies
 proptest = { workspace = true, optional = true }
 proptest-derive = { workspace = true, optional = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0-beta.46", features = ["async-error"] }
+zebra-chain = { path = "../zebra-chain", version = "1.0.0", features = ["async-error"] }
 
 [dev-dependencies]
 proptest = { workspace = true }

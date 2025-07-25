@@ -62,9 +62,12 @@ pub struct Config {
     /// `address` can be an IP address or a DNS name. DNS names are
     /// only resolved once, when Zebra starts up.
     ///
+    /// By default, Zebra listens on `[::]` (all IPv6 and IPv4 addresses).
+    /// This enables dual-stack support, accepting both IPv4 and IPv6 connections.
+    ///
     /// If a specific listener address is configured, Zebra will advertise
     /// it to other nodes. But by default, Zebra uses an unspecified address
-    /// ("0.0.0.0" or "\[::\]"), which is not advertised to other nodes.
+    /// ("\[::\]:port"), which is not advertised to other nodes.
     ///
     /// Zebra does not currently support:
     /// - [Advertising a different external IP address #1890](https://github.com/ZcashFoundation/zebra/issues/1890), or
@@ -238,9 +241,7 @@ impl Config {
     pub fn initial_peer_hostnames(&self) -> IndexSet<String> {
         match &self.network {
             Network::Mainnet => self.initial_mainnet_peers.clone(),
-            Network::Testnet(params) if !params.is_regtest() => self.initial_testnet_peers.clone(),
-            // TODO: Add a `disable_peers` field to `Network` to check instead of `is_regtest()` (#8361)
-            Network::Testnet(_params) => IndexSet::new(),
+            Network::Testnet(_params) => self.initial_testnet_peers.clone(),
         }
     }
 
@@ -251,19 +252,22 @@ impl Config {
     ///
     /// If a configured address is an invalid [`SocketAddr`] or DNS name.
     pub async fn initial_peers(&self) -> HashSet<PeerSocketAddr> {
-        // Return early if network is regtest in case there are somehow any entries in the peer cache
-        if self.network.is_regtest() {
-            return HashSet::new();
-        }
-
         // TODO: do DNS and disk in parallel if startup speed becomes important
         let dns_peers =
             Config::resolve_peers(&self.initial_peer_hostnames().iter().cloned().collect()).await;
 
-        // Ignore disk errors because the cache is optional and the method already logs them.
-        let disk_peers = self.load_peer_cache().await.unwrap_or_default();
+        if self.network.is_regtest() {
+            // Only return local peer addresses and skip loading the peer cache on Regtest.
+            dns_peers
+                .into_iter()
+                .filter(PeerSocketAddr::is_localhost)
+                .collect()
+        } else {
+            // Ignore disk errors because the cache is optional and the method already logs them.
+            let disk_peers = self.load_peer_cache().await.unwrap_or_default();
 
-        dns_peers.into_iter().chain(disk_peers).collect()
+            dns_peers.into_iter().chain(disk_peers).collect()
+        }
     }
 
     /// Concurrently resolves `peers` into zero or more IP addresses, with a
@@ -558,7 +562,7 @@ impl Default for Config {
         .collect();
 
         Config {
-            listen_addr: "0.0.0.0:8233"
+            listen_addr: "[::]:8233"
                 .parse()
                 .expect("Hardcoded address should be parseable"),
             external_addr: None,
@@ -616,7 +620,7 @@ impl Default for DConfig {
     fn default() -> Self {
         let config = Config::default();
         Self {
-            listen_addr: "0.0.0.0".to_string(),
+            listen_addr: "[::]".to_string(),
             external_addr: None,
             network: Default::default(),
             testnet_parameters: None,
@@ -668,7 +672,7 @@ impl From<Config> for DConfig {
     ) -> Self {
         let testnet_parameters = network
             .parameters()
-            .filter(|params| !params.is_default_testnet() && !params.is_regtest())
+            .filter(|params| !params.is_default_testnet())
             .map(Into::into);
 
         DConfig {
@@ -841,7 +845,7 @@ impl<'de> Deserialize<'de> for Config {
         };
 
         let [max_connections_per_ip, peerset_initial_target_size] = [
-            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP), 
+            ("max_connections_per_ip", max_connections_per_ip, DEFAULT_MAX_CONNS_PER_IP),
             // If we want Zebra to operate with no network,
             // we should implement a `zebrad` command that doesn't use `zebra-network`.
             ("peerset_initial_target_size", Some(peerset_initial_target_size), DEFAULT_PEERSET_INITIAL_TARGET_SIZE)

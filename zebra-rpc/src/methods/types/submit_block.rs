@@ -6,13 +6,13 @@ use zebra_chain::{block, parameters::GENESIS_PREVIOUS_BLOCK_HASH};
 
 // Allow doc links to these imports.
 #[allow(unused_imports)]
-use crate::methods::get_block_template::GetBlockTemplateHandler;
+use crate::methods::GetBlockTemplateHandler;
 
 /// Optional argument `jsonparametersobject` for `submitblock` RPC request
 ///
 /// See the notes for the [`submit_block`](crate::methods::RpcServer::submit_block) RPC.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize)]
-pub struct JsonParameters {
+pub struct SubmitBlockParameters {
     /// The workid for the block template. Currently unused.
     ///
     /// > If the server provided a workid, it MUST be included with submissions,
@@ -34,7 +34,7 @@ pub struct JsonParameters {
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ErrorResponse {
+pub enum SubmitBlockErrorResponse {
     /// Block was already committed to the non-finalized or finalized state
     Duplicate,
     /// Block was already added to the state queue or channel, but not yet committed to the non-finalized state
@@ -50,21 +50,21 @@ pub enum ErrorResponse {
 /// Zebra never returns "duplicate-invalid", because it does not store invalid blocks.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(untagged)]
-pub enum Response {
+pub enum SubmitBlockResponse {
     /// Block was not successfully submitted, return error
-    ErrorResponse(ErrorResponse),
+    ErrorResponse(SubmitBlockErrorResponse),
     /// Block successfully submitted, returns null
     Accepted,
 }
 
-impl Default for Response {
+impl Default for SubmitBlockResponse {
     fn default() -> Self {
-        Self::ErrorResponse(ErrorResponse::Rejected)
+        Self::ErrorResponse(SubmitBlockErrorResponse::Rejected)
     }
 }
 
-impl From<ErrorResponse> for Response {
-    fn from(error_response: ErrorResponse) -> Self {
+impl From<SubmitBlockErrorResponse> for SubmitBlockResponse {
+    fn from(error_response: SubmitBlockErrorResponse) -> Self {
         Self::ErrorResponse(error_response)
     }
 }

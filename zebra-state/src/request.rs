@@ -860,6 +860,13 @@ pub enum Request {
     /// Returns [`Response::KnownBlock(None)`](Response::KnownBlock) otherwise.
     KnownBlock(block::Hash),
 
+    /// Invalidates a block in the non-finalized state with the provided hash if one is present, removing it and
+    /// its child blocks, and rejecting it during contextual validation if it's resubmitted to the state.
+    InvalidateBlock(block::Hash),
+
+    /// Reconsiders a previously invalidated block in the non-finalized state with the provided hash if one is present.
+    ReconsiderBlock(block::Hash),
+
     /// Performs contextual validation of the given block, but does not commit it to the state.
     ///
     /// Returns [`Response::ValidBlockProposal`] when successful.
@@ -890,6 +897,8 @@ impl Request {
             Request::BestChainNextMedianTimePast => "best_chain_next_median_time_past",
             Request::BestChainBlockHash(_) => "best_chain_block_hash",
             Request::KnownBlock(_) => "known_block",
+            Request::InvalidateBlock(_) => "invalidate_block",
+            Request::ReconsiderBlock(_) => "reconsider_block",
             Request::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
         }
     }
@@ -918,8 +927,14 @@ pub enum ReadRequest {
     Tip,
 
     /// Returns [`ReadResponse::TipPoolValues(Option<(Height, block::Hash, ValueBalance)>)`](ReadResponse::TipPoolValues)
-    /// with the current best chain tip.
+    /// with the pool values of the current best chain tip.
     TipPoolValues,
+
+    /// Looks up the block info after a block by hash or height in the current best chain.
+    ///
+    /// * [`ReadResponse::BlockInfo(Some(pool_values))`](ReadResponse::BlockInfo) if the block is in the best chain;
+    /// * [`ReadResponse::BlockInfo(None)`](ReadResponse::BlockInfo) otherwise.
+    BlockInfo(HashOrHeight),
 
     /// Computes the depth in the current best chain of the block identified by the given hash.
     ///
@@ -1181,6 +1196,10 @@ pub enum ReadRequest {
     /// Returns [`ReadResponse::TipBlockSize(usize)`](ReadResponse::TipBlockSize)
     /// with the current best chain tip block size in bytes.
     TipBlockSize,
+
+    /// Returns [`ReadResponse::NonFinalizedBlocksListener`] with a channel receiver
+    /// allowing the caller to listen for new blocks in the non-finalized state.
+    NonFinalizedBlocksListener,
 }
 
 impl ReadRequest {
@@ -1189,6 +1208,7 @@ impl ReadRequest {
             ReadRequest::UsageInfo => "usage_info",
             ReadRequest::Tip => "tip",
             ReadRequest::TipPoolValues => "tip_pool_values",
+            ReadRequest::BlockInfo(_) => "block_info",
             ReadRequest::Depth(_) => "depth",
             ReadRequest::Block(_) => "block",
             ReadRequest::BlockAndSize(_) => "block_and_size",
@@ -1218,6 +1238,7 @@ impl ReadRequest {
             ReadRequest::SolutionRate { .. } => "solution_rate",
             ReadRequest::CheckBlockProposalValidity(_) => "check_block_proposal_validity",
             ReadRequest::TipBlockSize => "tip_block_size",
+            ReadRequest::NonFinalizedBlocksListener => "non_finalized_blocks_listener",
         }
     }
 
@@ -1266,7 +1287,9 @@ impl TryFrom<Request> for ReadRequest {
             }
 
             Request::CommitSemanticallyVerifiedBlock(_)
-            | Request::CommitCheckpointVerifiedBlock(_) => Err("ReadService does not write blocks"),
+            | Request::CommitCheckpointVerifiedBlock(_)
+            | Request::InvalidateBlock(_)
+            | Request::ReconsiderBlock(_) => Err("ReadService does not write blocks"),
 
             Request::AwaitUtxo(_) => Err("ReadService does not track pending UTXOs. \
                      Manually convert the request to ReadRequest::AnyChainUtxo, \

@@ -1,9 +1,11 @@
 //! Tests for funding streams.
 
-use color_eyre::Report;
-use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
+use std::collections::HashMap;
 
-use crate::block::subsidy::general::block_subsidy;
+use color_eyre::Report;
+use zebra_chain::amount::Amount;
+use zebra_chain::parameters::NetworkUpgrade::*;
+use zebra_chain::parameters::{subsidy::FundingStreamReceiver, NetworkKind};
 
 use super::*;
 

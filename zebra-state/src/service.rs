@@ -45,6 +45,7 @@ use crate::{
     constants::{
         MAX_FIND_BLOCK_HASHES_RESULTS, MAX_FIND_BLOCK_HEADERS_RESULTS, MAX_LEGACY_CHAIN_BLOCKS,
     },
+    response::NonFinalizedBlocksListener,
     service::{
         block_iter::any_ancestor_blocks,
         chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip},
@@ -77,7 +78,8 @@ pub mod arbitrary;
 #[cfg(test)]
 mod tests;
 
-pub use finalized_state::{OutputIndex, OutputLocation, TransactionIndex, TransactionLocation};
+pub use finalized_state::{OutputLocation, TransactionIndex, TransactionLocation};
+use write::NonFinalizedWriteMessage;
 
 use self::queued_blocks::{QueuedCheckpointVerified, QueuedSemanticallyVerified, SentHashes};
 
@@ -125,18 +127,8 @@ pub(crate) struct StateService {
     /// Indexed by their parent block hash.
     finalized_state_queued_blocks: HashMap<block::Hash, QueuedCheckpointVerified>,
 
-    /// A channel to send blocks to the `block_write_task`,
-    /// so they can be written to the [`NonFinalizedState`].
-    non_finalized_block_write_sender:
-        Option<tokio::sync::mpsc::UnboundedSender<QueuedSemanticallyVerified>>,
-
-    /// A channel to send blocks to the `block_write_task`,
-    /// so they can be written to the [`FinalizedState`].
-    ///
-    /// This sender is dropped after the state has finished sending all the checkpointed blocks,
-    /// and the lowest semantically verified block arrives.
-    finalized_block_write_sender:
-        Option<tokio::sync::mpsc::UnboundedSender<QueuedCheckpointVerified>>,
+    /// Channels to send blocks to the block write task.
+    block_write_sender: write::BlockWriteSender,
 
     /// The [`block::Hash`] of the most recent block sent on
     /// `finalized_block_write_sender` or `non_finalized_block_write_sender`.
@@ -236,8 +228,8 @@ impl Drop for StateService {
         // We want to do this here so we get any errors or panics from the block write task before it shuts down.
         self.invalid_block_write_reset_receiver.close();
 
-        std::mem::drop(self.finalized_block_write_sender.take());
-        std::mem::drop(self.non_finalized_block_write_sender.take());
+        std::mem::drop(self.block_write_sender.finalized.take());
+        std::mem::drop(self.block_write_sender.non_finalized.take());
 
         self.clear_finalized_block_queue(
             "dropping the state: dropped unused finalized state queue block",
@@ -334,35 +326,18 @@ impl StateService {
         let (non_finalized_state_sender, non_finalized_state_receiver) =
             watch::channel(NonFinalizedState::new(&finalized_state.network()));
 
-        // Security: The number of blocks in these channels is limited by
-        //           the syncer and inbound lookahead limits.
-        let (non_finalized_block_write_sender, non_finalized_block_write_receiver) =
-            tokio::sync::mpsc::unbounded_channel();
-        let (finalized_block_write_sender, finalized_block_write_receiver) =
-            tokio::sync::mpsc::unbounded_channel();
-        let (invalid_block_reset_sender, invalid_block_write_reset_receiver) =
-            tokio::sync::mpsc::unbounded_channel();
-
         let finalized_state_for_writing = finalized_state.clone();
-        let span = Span::current();
-        let block_write_task = std::thread::spawn(move || {
-            span.in_scope(move || {
-                write::write_blocks_from_channels(
-                    finalized_block_write_receiver,
-                    non_finalized_block_write_receiver,
-                    finalized_state_for_writing,
-                    non_finalized_state,
-                    invalid_block_reset_sender,
-                    chain_tip_sender,
-                    non_finalized_state_sender,
-                )
-            })
-        });
-        let block_write_task = Arc::new(block_write_task);
+        let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
+            write::BlockWriteSender::spawn(
+                finalized_state_for_writing,
+                non_finalized_state,
+                chain_tip_sender,
+                non_finalized_state_sender,
+            );
 
         let read_service = ReadStateService::new(
             &finalized_state,
-            Some(block_write_task),
+            block_write_task,
             non_finalized_state_receiver,
         );
 
@@ -381,8 +356,7 @@ impl StateService {
             full_verifier_utxo_lookahead,
             non_finalized_state_queued_blocks,
             finalized_state_queued_blocks: HashMap::new(),
-            non_finalized_block_write_sender: Some(non_finalized_block_write_sender),
-            finalized_block_write_sender: Some(finalized_block_write_sender),
+            block_write_sender,
             finalized_block_write_last_sent_hash,
             non_finalized_block_write_sent_hashes: SentHashes::default(),
             invalid_block_write_reset_receiver,
@@ -458,7 +432,7 @@ impl StateService {
         let (rsp_tx, rsp_rx) = oneshot::channel();
         let queued = (checkpoint_verified, rsp_tx);
 
-        if self.finalized_block_write_sender.is_some() {
+        if self.block_write_sender.finalized.is_some() {
             // We're still committing checkpoint verified blocks
             if let Some(duplicate_queued) = self
                 .finalized_state_queued_blocks
@@ -545,7 +519,7 @@ impl StateService {
 
             // If we've finished sending finalized blocks, ignore any repeated blocks.
             // (Blocks can be repeated after a syncer reset.)
-            if let Some(finalized_block_write_sender) = &self.finalized_block_write_sender {
+            if let Some(finalized_block_write_sender) = &self.block_write_sender.finalized {
                 let send_result = finalized_block_write_sender.send(queued_block);
 
                 // If the receiver is closed, we can't send any more blocks.
@@ -673,7 +647,7 @@ impl StateService {
         // that are a child of the last block we sent.
         //
         // TODO: configure the state with the last checkpoint hash instead?
-        if self.finalized_block_write_sender.is_some()
+        if self.block_write_sender.finalized.is_some()
             && self
                 .non_finalized_state_queued_blocks
                 .has_queued_children(self.finalized_block_write_last_sent_hash)
@@ -682,7 +656,7 @@ impl StateService {
         {
             // Tell the block write task to stop committing checkpoint verified blocks to the finalized state,
             // and move on to committing semantically verified blocks to the non-finalized state.
-            std::mem::drop(self.finalized_block_write_sender.take());
+            std::mem::drop(self.block_write_sender.finalized.take());
             // Remove any checkpoint-verified block hashes from `non_finalized_block_write_sent_hashes`.
             self.non_finalized_block_write_sent_hashes = SentHashes::default();
             // Mark `SentHashes` as usable by the `can_fork_chain_at()` method.
@@ -697,7 +671,7 @@ impl StateService {
             );
         } else if !self.can_fork_chain_at(&parent_hash) {
             tracing::trace!("unready to verify, returning early");
-        } else if self.finalized_block_write_sender.is_none() {
+        } else if self.block_write_sender.finalized.is_none() {
             // Wait until block commit task is ready to write non-finalized blocks before dequeuing them
             self.send_ready_non_finalized_queued(parent_hash);
 
@@ -738,7 +712,7 @@ impl StateService {
     #[tracing::instrument(level = "debug", skip(self, new_parent))]
     fn send_ready_non_finalized_queued(&mut self, new_parent: block::Hash) {
         use tokio::sync::mpsc::error::SendError;
-        if let Some(non_finalized_block_write_sender) = &self.non_finalized_block_write_sender {
+        if let Some(non_finalized_block_write_sender) = &self.block_write_sender.non_finalized {
             let mut new_parents: Vec<block::Hash> = vec![new_parent];
 
             while let Some(parent_hash) = new_parents.pop() {
@@ -751,9 +725,9 @@ impl StateService {
 
                     self.non_finalized_block_write_sent_hashes
                         .add(&queued_child.0);
-                    let send_result = non_finalized_block_write_sender.send(queued_child);
+                    let send_result = non_finalized_block_write_sender.send(queued_child.into());
 
-                    if let Err(SendError(queued)) = send_result {
+                    if let Err(SendError(NonFinalizedWriteMessage::Commit(queued))) = send_result {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,
@@ -778,6 +752,62 @@ impl StateService {
     /// Return the tip of the current best chain.
     pub fn best_tip(&self) -> Option<(block::Height, block::Hash)> {
         self.read_service.best_tip()
+    }
+
+    fn send_invalidate_block(
+        &self,
+        hash: block::Hash,
+    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+
+        let Some(sender) = &self.block_write_sender.non_finalized else {
+            let _ = rsp_tx.send(Err(
+                "cannot invalidate blocks while still committing checkpointed blocks".into(),
+            ));
+            return rsp_rx;
+        };
+
+        if let Err(tokio::sync::mpsc::error::SendError(error)) =
+            sender.send(NonFinalizedWriteMessage::Invalidate { hash, rsp_tx })
+        {
+            let NonFinalizedWriteMessage::Invalidate { rsp_tx, .. } = error else {
+                unreachable!("should return the same Invalidate message could not be sent");
+            };
+
+            let _ = rsp_tx.send(Err(
+                "failed to send invalidate block request to block write task".into(),
+            ));
+        }
+
+        rsp_rx
+    }
+
+    fn send_reconsider_block(
+        &self,
+        hash: block::Hash,
+    ) -> oneshot::Receiver<Result<Vec<block::Hash>, BoxError>> {
+        let (rsp_tx, rsp_rx) = oneshot::channel();
+
+        let Some(sender) = &self.block_write_sender.non_finalized else {
+            let _ = rsp_tx.send(Err(
+                "cannot reconsider blocks while still committing checkpointed blocks".into(),
+            ));
+            return rsp_rx;
+        };
+
+        if let Err(tokio::sync::mpsc::error::SendError(error)) =
+            sender.send(NonFinalizedWriteMessage::Reconsider { hash, rsp_tx })
+        {
+            let NonFinalizedWriteMessage::Reconsider { rsp_tx, .. } = error else {
+                unreachable!("should return the same Reconsider message could not be sent");
+            };
+
+            let _ = rsp_tx.send(Err(
+                "failed to send reconsider block request to block write task".into(),
+            ));
+        }
+
+        rsp_rx
     }
 
     /// Assert some assumptions about the semantically verified `block` before it is queued.
@@ -1084,6 +1114,48 @@ impl Service<Request> for StateService {
                 .boxed()
             }
 
+            Request::InvalidateBlock(block_hash) => {
+                let rsp_rx = tokio::task::block_in_place(move || {
+                    span.in_scope(|| self.send_invalidate_block(block_hash))
+                });
+
+                let span = Span::current();
+                async move {
+                    rsp_rx
+                        .await
+                        .map_err(|_recv_error| {
+                            BoxError::from("invalidate block request was unexpectedly dropped")
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
+                        .map(Response::Invalidated)
+                }
+                .instrument(span)
+                .boxed()
+            }
+
+            Request::ReconsiderBlock(block_hash) => {
+                let rsp_rx = tokio::task::block_in_place(move || {
+                    span.in_scope(|| self.send_reconsider_block(block_hash))
+                });
+
+                let span = Span::current();
+                async move {
+                    rsp_rx
+                        .await
+                        .map_err(|_recv_error| {
+                            BoxError::from("reconsider block request was unexpectedly dropped")
+                        })
+                        // TODO: replace with Result::flatten once it stabilises
+                        // https://github.com/rust-lang/rust/issues/70142
+                        .and_then(convert::identity)
+                        .map(Response::Reconsidered)
+                }
+                .instrument(span)
+                .boxed()
+            }
+
             // Runs concurrently using the ReadStateService
             Request::Tip
             | Request::Depth(_)
@@ -1238,6 +1310,32 @@ impl Service<ReadRequest> for ReadStateService {
                             tip_hash,
                             value_balance,
                         })
+                    })
+                })
+                .wait_for_panics()
+            }
+
+            // Used by getblock
+            ReadRequest::BlockInfo(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let value_balance = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::block_info(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        // TODO: Do this in the Drop impl with the variant name?
+                        timer.finish(module_path!(), line!(), "ReadRequest::BlockInfo");
+
+                        Ok(ReadResponse::BlockInfo(value_balance))
                     })
                 })
                 .wait_for_panics()
@@ -1715,20 +1813,20 @@ impl Service<ReadRequest> for ReadStateService {
 
                 tokio::task::spawn_blocking(move || {
                     span.in_scope(move || {
-                        let balance = state.non_finalized_state_receiver.with_watch_data(
-                            |non_finalized_state| {
+                        let (balance, received) = state
+                            .non_finalized_state_receiver
+                            .with_watch_data(|non_finalized_state| {
                                 read::transparent_balance(
                                     non_finalized_state.best_chain().cloned(),
                                     &state.db,
                                     addresses,
                                 )
-                            },
-                        )?;
+                            })?;
 
                         // The work is done in the future.
                         timer.finish(module_path!(), line!(), "ReadRequest::AddressBalance");
 
-                        Ok(ReadResponse::AddressBalance(balance))
+                        Ok(ReadResponse::AddressBalance { balance, received })
                     })
                 })
                 .wait_for_panics()
@@ -2029,6 +2127,28 @@ impl Service<ReadRequest> for ReadStateService {
                     })
                 })
                 .wait_for_panics()
+            }
+
+            ReadRequest::NonFinalizedBlocksListener => {
+                // The non-finalized blocks listener is used to notify the state service
+                // about new blocks that have been added to the non-finalized state.
+                let non_finalized_blocks_listener = NonFinalizedBlocksListener::spawn(
+                    self.network.clone(),
+                    self.non_finalized_state_receiver.clone(),
+                );
+
+                async move {
+                    timer.finish(
+                        module_path!(),
+                        line!(),
+                        "ReadRequest::NonFinalizedBlocksListener",
+                    );
+
+                    Ok(ReadResponse::NonFinalizedBlocksListener(
+                        non_finalized_blocks_listener,
+                    ))
+                }
+                .boxed()
             }
         }
     }

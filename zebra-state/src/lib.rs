@@ -57,24 +57,15 @@ pub use service::{
     non_finalized_state::NonFinalizedState,
     spawn_init, spawn_init_read_only,
     watch_receiver::WatchReceiver,
-    OutputIndex, OutputLocation, TransactionIndex, TransactionLocation,
-};
-
-// Allow use in the scanner
-#[cfg(feature = "shielded-scan")]
-pub use service::finalized_state::{
-    SaplingScannedDatabaseEntry, SaplingScannedDatabaseIndex, SaplingScannedResult,
-    SaplingScanningKey,
+    OutputLocation, TransactionIndex, TransactionLocation,
 };
 
 // Allow use in the scanner and external tests
-#[cfg(any(test, feature = "proptest-impl", feature = "shielded-scan"))]
-pub use service::finalized_state::{
-    DiskWriteBatch, FromDisk, ReadDisk, TypedColumnFamily, WriteDisk, WriteTypedBatch,
-};
+#[cfg(any(test, feature = "proptest-impl"))]
+pub use service::finalized_state::{ReadDisk, TypedColumnFamily, WriteTypedBatch};
 
 pub use service::{
-    finalized_state::{IntoDisk, ZebraDb},
+    finalized_state::{DiskWriteBatch, FromDisk, IntoDisk, WriteDisk, ZebraDb},
     ReadStateService,
 };
 

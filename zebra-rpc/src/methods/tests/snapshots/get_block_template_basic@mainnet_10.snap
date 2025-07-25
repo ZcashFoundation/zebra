@@ -1,5 +1,5 @@
 ---
-source: zebra-rpc/src/methods/tests/snapshot/get_block_template_rpcs.rs
+source: zebra-rpc/src/methods/tests/snapshot.rs
 expression: block_template
 ---
 {
@@ -8,20 +8,20 @@ expression: block_template
   ],
   "version": 4,
   "previousblockhash": "0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8",
-  "blockcommitmentshash": "02990723c6b62a724651322d141b4a72a4ffd66518167d809badbd5117d5518a",
-  "lightclientroothash": "02990723c6b62a724651322d141b4a72a4ffd66518167d809badbd5117d5518a",
-  "finalsaplingroothash": "02990723c6b62a724651322d141b4a72a4ffd66518167d809badbd5117d5518a",
+  "blockcommitmentshash": "88700a41ec1166c44b7abe0f23d2c0a417438364bb18e324b5c1c61c9f379c9c",
+  "lightclientroothash": "88700a41ec1166c44b7abe0f23d2c0a417438364bb18e324b5c1c61c9f379c9c",
+  "finalsaplingroothash": "88700a41ec1166c44b7abe0f23d2c0a417438364bb18e324b5c1c61c9f379c9c",
   "defaultroots": {
-    "merkleroot": "7df8ce149b9beafc09b649c2ccfd866ce96d1b94331d9f7f3728cbefa36431f6",
+    "merkleroot": "01b6d9d3deb96e6b776668073f8959c033cc2a8f034ffe32238817c9fb8072b0",
     "chainhistoryroot": "94470fa66ebd1a5fdb109a5aa3f3204f14de3a42135e71aa7f4c44055847e0b5",
-    "authdataroot": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-    "blockcommitmentshash": "02990723c6b62a724651322d141b4a72a4ffd66518167d809badbd5117d5518a"
+    "authdataroot": "a54fe7e2f8ea0d6dc319470cb572d4147e27d7d1740ee4cf214cd05ccb766e8c",
+    "blockcommitmentshash": "88700a41ec1166c44b7abe0f23d2c0a417438364bb18e324b5c1c61c9f379c9c"
   },
   "transactions": [],
   "coinbasetxn": {
-    "data": "0400008085202f89010000000000000000000000000000000000000000000000000000000000000000ffffffff050341be1900ffffffff0480b2e60e0000000017a914adadadadadadadadadadadadadadadadadadadad8738c94d010000000017a91469a9f95a98fe581b6eb52841ef4806dc4402eb908740787d010000000017a914931fec54c1fea86e574462cc32013f5400b8912987286bee000000000017a914d45cb1adffb5215a42720532a076f02c7c778c90870000000041be19000000000000000000000000",
-    "hash": "7df8ce149b9beafc09b649c2ccfd866ce96d1b94331d9f7f3728cbefa36431f6",
-    "authdigest": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "data": "050000800a27a726b4d0d6c20000000041be1900010000000000000000000000000000000000000000000000000000000000000000ffffffff090341be197af09fa693000000000480b2e60e0000000017a9147e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e7e8738c94d010000000017a91469a9f95a98fe581b6eb52841ef4806dc4402eb908740787d010000000017a914931fec54c1fea86e574462cc32013f5400b8912987286bee000000000017a914d45cb1adffb5215a42720532a076f02c7c778c9087000000",
+    "hash": "01b6d9d3deb96e6b776668073f8959c033cc2a8f034ffe32238817c9fb8072b0",
+    "authdigest": "a54fe7e2f8ea0d6dc319470cb572d4147e27d7d1740ee4cf214cd05ccb766e8c",
     "depends": [],
     "fee": 0,
     "sigops": 0,

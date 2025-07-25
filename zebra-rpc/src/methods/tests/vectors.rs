@@ -1,23 +1,31 @@
 //! Fixed test vectors for RPC methods.
 
-use std::sync::Arc;
+use std::{str::FromStr, sync::Arc};
 
 use futures::FutureExt;
 use tower::buffer::Buffer;
 
+use zcash_address::{ToAddress, ZcashAddress};
+use zcash_keys::address::Address;
+use zcash_protocol::consensus::NetworkType;
+use zcash_transparent::address::TransparentAddress;
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{Block, Hash, MAX_BLOCK_BYTES, ZCASH_BLOCK_VERSION},
+    block_info::BlockInfo,
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
-    parameters::Network::*,
+    parameters::{testnet, Network::*, NetworkKind},
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
 };
 use zebra_consensus::MAX_BLOCK_SIGOPS;
-use zebra_network::{address_book_peers::MockAddressBookPeers, types::PeerServices};
+use zebra_network::{
+    address_book_peers::MockAddressBookPeers, types::PeerServices, PeerSocketAddr,
+};
 use zebra_node_services::BoxError;
 use zebra_state::{
     GetBlockTemplateChainInfo, IntoDisk, LatestChainTip, ReadRequest, ReadResponse,
@@ -26,15 +34,17 @@ use zebra_state::{
 use zebra_test::mock_service::MockService;
 
 use crate::methods::{
-    get_block_template::constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
     hex_data::HexData,
     tests::utils::fake_history_tree,
+    types::get_block_template::{
+        constants::{CAPABILITIES_FIELD, MUTABLE_FIELD, NONCE_RANGE_FIELD},
+        GetBlockTemplateRequestMode,
+    },
 };
 
 use super::super::*;
 
 use config::mining;
-use get_block_template::GetBlockTemplateRequestMode;
 use types::long_poll::LONG_POLL_ID_LENGTH;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -42,6 +52,7 @@ async fn rpc_getinfo() {
     let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -52,6 +63,7 @@ async fn rpc_getinfo() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -106,7 +118,14 @@ async fn get_block_data(
     read_state: &ReadStateService,
     block: Arc<Block>,
     height: usize,
-) -> ([u8; 32], [u8; 32], [u8; 32]) {
+    prev_block_info: Option<BlockInfo>,
+) -> (
+    [u8; 32],
+    [u8; 32],
+    [u8; 32],
+    Option<BlockInfo>,
+    Option<ValueBalance<NegativeAllowed>>,
+) {
     let zebra_state::ReadResponse::SaplingTree(sapling_tree) = read_state
         .clone()
         .oneshot(zebra_state::ReadRequest::SaplingTree(HashOrHeight::Height(
@@ -139,10 +158,33 @@ async fn get_block_data(
         Commitment::ChainHistoryRoot(root) => root.bytes_in_display_order(),
         Commitment::ChainHistoryBlockTxAuthCommitment(hash) => hash.bytes_in_display_order(),
     };
+
+    let zebra_state::ReadResponse::BlockInfo(block_info) = read_state
+        .clone()
+        .oneshot(zebra_state::ReadRequest::BlockInfo(HashOrHeight::Height(
+            (height as u32).try_into().unwrap(),
+        )))
+        .await
+        .expect("should have block info for block hash")
+    else {
+        panic!("unexpected response to BlockInfo request")
+    };
+
+    let delta = block_info.as_ref().and_then(|d| {
+        let value_pools = d.value_pools().constrain::<NegativeAllowed>().ok()?;
+        let prev_value_pools = prev_block_info
+            .map(|d| d.value_pools().constrain::<NegativeAllowed>())
+            .unwrap_or(Ok(ValueBalance::<NegativeAllowed>::zero()))
+            .ok()?;
+        (value_pools - prev_value_pools).ok()
+    });
+
     (
         expected_nonce,
         expected_final_sapling_root,
         expected_block_commitments,
+        block_info,
+        delta,
     )
 }
 
@@ -152,13 +194,13 @@ async fn rpc_getblock() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -169,6 +211,7 @@ async fn rpc_getblock() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -180,7 +223,7 @@ async fn rpc_getblock() {
 
     // Make height calls with verbosity=0 and check response
     for (i, block) in blocks.iter().enumerate() {
-        let expected_result = GetBlock::Raw(block.clone().into());
+        let expected_result = GetBlockResponse::Raw(block.clone().into());
 
         let get_block = rpc
             .get_block(i.to_string(), Some(0u8))
@@ -199,7 +242,7 @@ async fn rpc_getblock() {
 
     // Make hash calls with verbosity=0 and check response
     for (i, block) in blocks.iter().enumerate() {
-        let expected_result = GetBlock::Raw(block.clone().into());
+        let expected_result = GetBlockResponse::Raw(block.clone().into());
 
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(0u8))
@@ -221,7 +264,7 @@ async fn rpc_getblock() {
         // Convert negative height to corresponding index
         let index = (neg_height + (blocks.len() as i32)) as usize;
 
-        let expected_result = GetBlock::Raw(blocks[index].clone().into());
+        let expected_result = GetBlockResponse::Raw(blocks[index].clone().into());
 
         let get_block = rpc
             .get_block(neg_height.to_string(), Some(0u8))
@@ -237,19 +280,26 @@ async fn rpc_getblock() {
     let trees = GetBlockTrees { sapling, orchard };
 
     // Make height calls with verbosity=1 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), Some(1u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
+            GetBlockResponse::Object(Box::new(BlockObject {
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -259,7 +309,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -273,27 +323,40 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
-            }
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+            }))
         );
     }
 
     // Make hash calls with verbosity=1 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(1u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
+            GetBlockResponse::Object(Box::new(BlockObject {
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -303,7 +366,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -317,54 +380,65 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
-            }
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+            }))
         );
     }
 
     // Make height calls with verbosity=2 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), Some(2u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         // partially compare the expected and actual GetBlock structs
-        if let GetBlock::Object {
-            hash,
-            confirmations,
-            height,
-            time,
-            tx,
-            trees,
-            size,
-            version,
-            merkle_root,
-            block_commitments,
-            final_sapling_root,
-            final_orchard_root,
-            nonce,
-            bits,
-            difficulty,
-            previous_block_hash,
-            next_block_hash,
-            solution,
-        } = &get_block
-        {
-            assert_eq!(hash, &GetBlockHash(block.hash()));
+        if let GetBlockResponse::Object(obj) = &get_block {
+            let BlockObject {
+                hash,
+                confirmations,
+                height,
+                time,
+                tx,
+                trees,
+                size,
+                version,
+                merkle_root,
+                block_commitments,
+                final_sapling_root,
+                final_orchard_root,
+                nonce,
+                bits,
+                difficulty,
+                previous_block_hash,
+                next_block_hash,
+                solution,
+                chain_supply,
+                value_pools,
+            } = &**obj;
+            assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(
-                size,
-                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
-            );
+            assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -381,15 +455,19 @@ async fn rpc_getblock() {
                         .relative_to_network(&Mainnet)
                 )
             );
-            assert_eq!(
-                previous_block_hash,
-                &Some(GetBlockHash(block.header.previous_block_hash))
-            );
-            assert_eq!(
-                next_block_hash,
-                &blocks.get(i + 1).map(|b| GetBlockHash(b.hash()))
-            );
+            assert_eq!(previous_block_hash, &Some(block.header.previous_block_hash));
+            assert_eq!(next_block_hash, &blocks.get(i + 1).map(|b| b.hash()));
             assert_eq!(solution, &Some(block.header.solution));
+            assert_eq!(
+                *chain_supply,
+                block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *value_pools,
+                block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
+            );
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
@@ -413,46 +491,52 @@ async fn rpc_getblock() {
     }
 
     // Make hash calls with verbosity=2 and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), Some(2u8))
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         // partially compare the expected and actual GetBlock structs
-        if let GetBlock::Object {
-            hash,
-            confirmations,
-            height,
-            time,
-            tx,
-            trees,
-            size,
-            version,
-            merkle_root,
-            block_commitments,
-            final_sapling_root,
-            final_orchard_root,
-            nonce,
-            bits,
-            difficulty,
-            previous_block_hash,
-            next_block_hash,
-            solution,
-        } = &get_block
-        {
-            assert_eq!(hash, &GetBlockHash(block.hash()));
+        if let GetBlockResponse::Object(obj) = &get_block {
+            let BlockObject {
+                hash,
+                confirmations,
+                height,
+                time,
+                tx,
+                trees,
+                size,
+                version,
+                merkle_root,
+                block_commitments,
+                final_sapling_root,
+                final_orchard_root,
+                nonce,
+                bits,
+                difficulty,
+                previous_block_hash,
+                next_block_hash,
+                solution,
+                chain_supply,
+                value_pools,
+            } = &**obj;
+            assert_eq!(hash, &block.hash());
             assert_eq!(confirmations, &((blocks.len() - i) as i64));
             assert_eq!(height, &Some(Height(i.try_into().expect("valid u32"))));
             assert_eq!(time, &Some(block.header.time.timestamp()));
             assert_eq!(trees, trees);
-            assert_eq!(
-                size,
-                &Some(block.zcash_serialize_to_vec().unwrap().len() as i64)
-            );
+            assert_eq!(size, &Some(block.zcash_serialized_size() as i64));
             assert_eq!(version, &Some(block.header.version));
             assert_eq!(merkle_root, &Some(block.header.merkle_root));
             assert_eq!(block_commitments, &Some(expected_block_commitments));
@@ -469,15 +553,19 @@ async fn rpc_getblock() {
                         .relative_to_network(&Mainnet)
                 )
             );
-            assert_eq!(
-                previous_block_hash,
-                &Some(GetBlockHash(block.header.previous_block_hash))
-            );
-            assert_eq!(
-                next_block_hash,
-                &blocks.get(i + 1).map(|b| GetBlockHash(b.hash()))
-            );
+            assert_eq!(previous_block_hash, &Some(block.header.previous_block_hash));
+            assert_eq!(next_block_hash, &blocks.get(i + 1).map(|b| b.hash()));
             assert_eq!(solution, &Some(block.header.solution));
+            assert_eq!(
+                *chain_supply,
+                block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools()))
+            );
+            assert_eq!(
+                *value_pools,
+                block_info.map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta))
+            );
 
             for (actual_tx, expected_tx) in tx.iter().zip(block.transactions.iter()) {
                 if let GetBlockTransaction::Object(boxed_transaction_object) = actual_tx {
@@ -501,19 +589,26 @@ async fn rpc_getblock() {
     }
 
     // Make height calls with no verbosity (defaults to 1) and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(i.to_string(), None)
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
+            GetBlockResponse::Object(Box::new(BlockObject {
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -523,7 +618,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -537,27 +632,39 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
-            }
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+            }))
         );
     }
 
     // Make hash calls with no verbosity (defaults to 1) and check response
+    let mut prev_block_info: Option<BlockInfo> = None;
     for (i, block) in blocks.iter().enumerate() {
         let get_block = rpc
             .get_block(blocks[i].hash().to_string(), None)
             .await
             .expect("We should have a GetBlock struct");
 
-        let (expected_nonce, expected_final_sapling_root, expected_block_commitments) =
-            get_block_data(&read_state, block.clone(), i).await;
+        let (
+            expected_nonce,
+            expected_final_sapling_root,
+            expected_block_commitments,
+            block_info,
+            delta,
+        ) = get_block_data(&read_state, block.clone(), i, prev_block_info).await;
+        prev_block_info = block_info.clone();
 
         assert_eq!(
             get_block,
-            GetBlock::Object {
-                hash: GetBlockHash(block.hash()),
+            GetBlockResponse::Object(Box::new(BlockObject {
+                hash: block.hash(),
                 confirmations: (blocks.len() - i).try_into().expect("valid i64"),
                 height: Some(Height(i.try_into().expect("valid u32"))),
                 time: Some(block.header.time.timestamp()),
@@ -567,7 +674,7 @@ async fn rpc_getblock() {
                     .map(|tx| GetBlockTransaction::Hash(tx.hash()))
                     .collect(),
                 trees,
-                size: None,
+                size: Some(block.zcash_serialized_size() as i64),
                 version: Some(block.header.version),
                 merkle_root: Some(block.header.merkle_root),
                 block_commitments: Some(expected_block_commitments),
@@ -581,10 +688,15 @@ async fn rpc_getblock() {
                         .difficulty_threshold
                         .relative_to_network(&Mainnet)
                 ),
-                previous_block_hash: Some(GetBlockHash(block.header.previous_block_hash)),
-                next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+                previous_block_hash: Some(block.header.previous_block_hash),
+                next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
                 solution: Some(block.header.solution),
-            }
+                chain_supply: block_info
+                    .as_ref()
+                    .map(|d| GetBlockchainInfoBalance::chain_supply(*d.value_pools())),
+                value_pools: block_info
+                    .map(|d| GetBlockchainInfoBalance::value_pools(*d.value_pools(), delta)),
+            }))
         );
     }
 
@@ -600,6 +712,7 @@ async fn rpc_getblock_parse_error() {
     let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     // Init RPC
@@ -611,6 +724,7 @@ async fn rpc_getblock_parse_error() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -649,7 +763,8 @@ async fn rpc_getblock_missing_error() {
     let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let mut state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue) = RpcImpl::new(
@@ -660,6 +775,7 @@ async fn rpc_getblock_missing_error() {
         "RPC test",
         Buffer::new(mempool.clone(), 1),
         Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         NoChainTip,
@@ -673,7 +789,7 @@ async fn rpc_getblock_missing_error() {
     let block_future = tokio::spawn(async move { rpc.get_block("0".to_string(), Some(0u8)).await });
 
     // Make the mock service respond with no block
-    let response_handler = state
+    let response_handler = read_state
         .expect_request(zebra_state::ReadRequest::Block(Height(0).into()))
         .await;
     response_handler.respond(zebra_state::ReadResponse::Block(None));
@@ -696,7 +812,7 @@ async fn rpc_getblock_missing_error() {
     );
 
     mempool.expect_no_requests().await;
-    state.expect_no_requests().await;
+    read_state.expect_no_requests().await;
 
     // The queue task should continue without errors or panics
     let rpc_tx_queue_task_result = rpc_tx_queue.now_or_never();
@@ -709,12 +825,12 @@ async fn rpc_getblockheader() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -725,6 +841,7 @@ async fn rpc_getblockheader() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -736,7 +853,7 @@ async fn rpc_getblockheader() {
 
     // Make height calls with verbose=false and check response
     for (i, block) in blocks.iter().enumerate() {
-        let expected_result = GetBlockHeader::Raw(HexData(
+        let expected_result = GetBlockHeaderResponse::Raw(HexData(
             block
                 .header
                 .clone()
@@ -775,8 +892,8 @@ async fn rpc_getblockheader() {
             [0; 32]
         };
 
-        let expected_result = GetBlockHeader::Object(Box::new(GetBlockHeaderObject {
-            hash: GetBlockHash(hash),
+        let expected_result = GetBlockHeaderResponse::Object(Box::new(BlockHeaderObject {
+            hash,
             confirmations: 11 - i as i64,
             height,
             version: 4,
@@ -792,8 +909,8 @@ async fn rpc_getblockheader() {
                 .header
                 .difficulty_threshold
                 .relative_to_network(&Mainnet),
-            previous_block_hash: GetBlockHash(block.header.previous_block_hash),
-            next_block_hash: blocks.get(i + 1).map(|b| GetBlockHash(b.hash())),
+            previous_block_hash: block.header.previous_block_hash,
+            next_block_hash: blocks.get(i + 1).map(|b| b.hash()),
         }));
 
         for hash_or_height in [HashOrHeight::from(Height(i as u32)), block.hash().into()] {
@@ -810,7 +927,8 @@ async fn rpc_getblockheader() {
         // Convert negative height to corresponding index
         let index = (neg_height + (blocks.len() as i32)) as usize;
 
-        let expected_result = GetBlockHeader::Raw(HexData(blocks[index].header.clone().as_bytes()));
+        let expected_result =
+            GetBlockHeaderResponse::Raw(HexData(blocks[index].header.clone().as_bytes()));
 
         let get_block = rpc
             .get_block_header(neg_height.to_string(), Some(false))
@@ -833,8 +951,8 @@ async fn rpc_getbestblockhash() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // Get the hash of the block at the tip using hardcoded block tip bytes.
@@ -845,7 +963,7 @@ async fn rpc_getbestblockhash() {
     // Get a mempool handle
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service, the tip will be in `NUMBER_OF_BLOCKS`.
-    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -856,6 +974,7 @@ async fn rpc_getbestblockhash() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -887,12 +1006,12 @@ async fn rpc_getrawtransaction() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let (_, read_state, _, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, _, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (tip, tip_sender) = MockChainTip::new();
     tip_sender.send_best_tip_height(Height(10));
@@ -906,6 +1025,7 @@ async fn rpc_getrawtransaction() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -936,12 +1056,12 @@ async fn rpc_getrawtransaction() {
                     }]));
                 });
 
-            let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8));
+            let rpc_req = rpc.get_raw_transaction(tx.hash().encode_hex(), Some(0u8), None);
 
             let (rsp, _) = futures::join!(rpc_req, mempool_req);
             let get_tx = rsp.expect("we should have a `GetRawTransaction` struct");
 
-            if let GetRawTransaction::Raw(raw_tx) = get_tx {
+            if let GetRawTransactionResponse::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
                 unreachable!("Should return a Raw enum")
@@ -971,13 +1091,13 @@ async fn rpc_getrawtransaction() {
         let txid = tx.hash();
         let hex_txid = txid.encode_hex::<String>();
 
-        let get_tx_verbose_0_req = rpc.get_raw_transaction(hex_txid.clone(), Some(0u8));
-        let get_tx_verbose_1_req = rpc.get_raw_transaction(hex_txid, Some(1u8));
+        let get_tx_verbose_0_req = rpc.get_raw_transaction(hex_txid.clone(), Some(0u8), None);
+        let get_tx_verbose_1_req = rpc.get_raw_transaction(hex_txid, Some(1u8), None);
 
         async move {
             let (response, _) = futures::join!(get_tx_verbose_0_req, make_mempool_req(txid));
             let get_tx = response.expect("We should have a GetRawTransaction struct");
-            if let GetRawTransaction::Raw(raw_tx) = get_tx {
+            if let GetRawTransactionResponse::Raw(raw_tx) = get_tx {
                 assert_eq!(raw_tx.as_ref(), tx.zcash_serialize_to_vec().unwrap());
             } else {
                 unreachable!("Should return a Raw enum")
@@ -985,12 +1105,13 @@ async fn rpc_getrawtransaction() {
 
             let (response, _) = futures::join!(get_tx_verbose_1_req, make_mempool_req(txid));
 
-            let transaction_object = match response
-                .expect("We should have a GetRawTransaction struct")
-            {
-                GetRawTransaction::Object(transaction_object) => transaction_object,
-                GetRawTransaction::Raw(_) => panic!("Expected GetRawTransaction::Object, got Raw"),
-            };
+            let transaction_object =
+                match response.expect("We should have a GetRawTransaction struct") {
+                    GetRawTransactionResponse::Object(transaction_object) => transaction_object,
+                    GetRawTransactionResponse::Raw(_) => {
+                        panic!("Expected GetRawTransaction::Object, got Raw")
+                    }
+                };
             let TransactionObject {
                 hex,
                 height,
@@ -1076,12 +1197,12 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // Create a populated state service
-    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue) = RpcImpl::new(
@@ -1091,6 +1212,7 @@ async fn rpc_getaddresstxids_invalid_arguments() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -1148,8 +1270,8 @@ async fn rpc_getaddresstxids_response() {
     for network in Network::iter() {
         let blocks: Vec<Arc<Block>> = network
             .blockchain_map()
-            .iter()
-            .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+            .values()
+            .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
             .collect();
         // The first few blocks after genesis send funds to the same founders reward address,
         // in one output per coinbase transaction.
@@ -1164,7 +1286,7 @@ async fn rpc_getaddresstxids_response() {
             .unwrap();
 
         // Create a populated state service
-        let (_state, read_state, latest_chain_tip, _chain_tip_change) =
+        let (_, read_state, latest_chain_tip, _chain_tip_change) =
             zebra_state::populated_state(blocks.to_owned(), &network).await;
 
         if network == Mainnet {
@@ -1270,6 +1392,7 @@ async fn rpc_getaddresstxids_response_with(
     expected_response_len: usize,
 ) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, rpc_tx_queue) = RpcImpl::new(
@@ -1279,6 +1402,7 @@ async fn rpc_getaddresstxids_response_with(
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state,
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -1327,6 +1451,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
     let _init_guard = zebra_test::init();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let mut read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -1337,6 +1462,7 @@ async fn rpc_getaddressutxos_invalid_arguments() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        Buffer::new(state, 1),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -1363,8 +1489,8 @@ async fn rpc_getaddressutxos_response() {
     let _init_guard = zebra_test::init();
 
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // get the first transaction of the first block
@@ -1376,7 +1502,7 @@ async fn rpc_getaddressutxos_response() {
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create a populated state service
-    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
@@ -1386,6 +1512,7 @@ async fn rpc_getaddressutxos_response() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -1414,8 +1541,8 @@ async fn rpc_getblockcount() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // Get the height of the block at the tip using hardcoded block tip bytes.
@@ -1444,6 +1571,7 @@ async fn rpc_getblockcount() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),
@@ -1487,6 +1615,7 @@ async fn rpc_getblockcount_empty_state() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),
@@ -1584,6 +1713,7 @@ async fn rpc_getpeerinfo() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),
@@ -1628,8 +1758,8 @@ async fn rpc_getblockhash() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -1651,6 +1781,7 @@ async fn rpc_getblockhash() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),
@@ -1667,7 +1798,7 @@ async fn rpc_getblockhash() {
             .await
             .expect("We should have a GetBlockHash struct");
 
-        assert_eq!(get_block_hash, GetBlockHash(block.clone().hash()));
+        assert_eq!(get_block_hash, GetBlockHashResponse(block.clone().hash()));
     }
 
     // Query the hashes using negative indexes
@@ -1679,7 +1810,7 @@ async fn rpc_getblockhash() {
 
         assert_eq!(
             get_block_hash,
-            GetBlockHash(blocks[(10 + (i + 1)) as usize].hash())
+            GetBlockHashResponse(blocks[(10 + (i + 1)) as usize].hash())
         );
     }
 
@@ -1692,12 +1823,12 @@ async fn rpc_getmininginfo() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // Create a populated state service
-    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -1708,6 +1839,7 @@ async fn rpc_getmininginfo() {
         "0.0.1",
         "RPC test",
         MockService::build().for_unit_tests(),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -1728,12 +1860,12 @@ async fn rpc_getnetworksolps() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     // Create a populated state service
-    let (_, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
+    let (state, read_state, tip, _) = zebra_state::populated_state(blocks.clone(), &Mainnet).await;
 
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
@@ -1744,6 +1876,7 @@ async fn rpc_getnetworksolps() {
         "0.0.1",
         "RPC test",
         MockService::build().for_unit_tests(),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
@@ -1791,44 +1924,39 @@ async fn rpc_getnetworksolps() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn rpc_getblocktemplate() {
-    // test getblocktemplate with a miner P2SH address
-    rpc_getblocktemplate_mining_address(true).await;
-    // test getblocktemplate with a miner P2PKH address
-    rpc_getblocktemplate_mining_address(false).await;
-}
-
-async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
+async fn getblocktemplate() {
     let _init_guard = zebra_test::init();
 
+    // TODO Run the test with all possible network types.
+    let net = Network::Mainnet;
+
+    // TODO Run the test with all address types supported for mining.
+    let addr = ZcashAddress::from_transparent_p2pkh(
+        NetworkType::from(NetworkKind::from(&net)),
+        [0x7e; 20],
+    );
+
+    gbt_with(net, addr).await;
+}
+
+async fn gbt_with(net: Network, addr: ZcashAddress) {
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     let read_state: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
 
     let mut mock_sync_status = MockSyncStatus::default();
     mock_sync_status.set_is_close_to_tip(true);
 
-    let network = Network::Mainnet;
-    let miner_address = match use_p2pkh {
-        false => Some(transparent::Address::from_script_hash(
-            network.kind(),
-            [0x7e; 20],
-        )),
-        true => Some(transparent::Address::from_pub_key_hash(
-            network.kind(),
-            [0x7e; 20],
-        )),
-    };
-
-    #[allow(clippy::unnecessary_struct_initialization)]
     let mining_conf = crate::config::mining::Config {
-        miner_address: miner_address.clone(),
+        miner_address: Some(addr.clone()),
         extra_coinbase_data: None,
-        debug_like_zcashd: true,
         internal_miner: true,
     };
 
     // nu5 block height
-    let fake_tip_height = NetworkUpgrade::Nu5.activation_height(&Mainnet).unwrap();
+    let fake_tip_height = NetworkUpgrade::Nu5
+        .activation_height(&net)
+        .expect("nu5 activation height");
     // nu5 block hash
     let fake_tip_hash =
         Hash::from_hex("0000000000d723156d9b65ffcf4984da7a19675ed7e2f06d9e5d5188af087bf8").unwrap();
@@ -1848,12 +1976,13 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     // Init RPC
     let (_tx, rx) = tokio::sync::watch::channel(None);
     let (rpc, _) = RpcImpl::new(
-        Mainnet,
+        net.clone(),
         mining_conf,
         Default::default(),
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
         mock_sync_status.clone(),
@@ -1904,7 +2033,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -1912,18 +2041,17 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         )
     };
 
-    let coinbase_transaction =
+    let coinbase_addr = ZcashAddress::from(
         Transaction::zcash_deserialize(get_block_template.coinbase_txn.data.as_ref())
-            .expect("coinbase transaction data should be deserializable");
-
-    assert_eq!(
-        coinbase_transaction
+            .expect("coinbase transaction data should be deserializable")
             .outputs()
             .first()
-            .unwrap()
-            .address(&network),
-        miner_address
+            .expect("coinbase tx should have at least one output")
+            .address(&net)
+            .expect("coinbase tx output should have an address"),
     );
+
+    assert_eq!(coinbase_addr, addr);
 
     assert_eq!(get_block_template.capabilities, CAPABILITIES_FIELD.to_vec());
     assert_eq!(get_block_template.version, ZCASH_BLOCK_VERSION);
@@ -1952,13 +2080,20 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     assert!(get_block_template.coinbase_txn.required);
     assert!(!get_block_template.coinbase_txn.data.as_ref().is_empty());
     assert_eq!(get_block_template.coinbase_txn.depends.len(), 0);
-    if use_p2pkh {
+
+    let taddr = Address::try_from_zcash_address(&net, addr.clone())
+        .expect("address should be convertible")
+        .to_transparent_address()
+        .expect("address should have a transparent component");
+
+    if matches!(taddr, TransparentAddress::PublicKeyHash(_)) {
         // there is one sig operation if miner address is p2pkh.
         assert_eq!(get_block_template.coinbase_txn.sigops, 1);
     } else {
         // everything in the coinbase is p2sh.
         assert_eq!(get_block_template.coinbase_txn.sigops, 0);
     }
+
     // Coinbase transaction checks for empty blocks.
     assert_eq!(
         get_block_template.coinbase_txn.fee,
@@ -2001,7 +2136,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     let get_block_template_sync_error = rpc
-        .get_block_template(Some(get_block_template::JsonParameters {
+        .get_block_template(Some(GetBlockTemplateParameters {
             mode: GetBlockTemplateRequestMode::Proposal,
             ..Default::default()
         }))
@@ -2014,7 +2149,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
     );
 
     let get_block_template_sync_error = rpc
-        .get_block_template(Some(get_block_template::JsonParameters {
+        .get_block_template(Some(GetBlockTemplateParameters {
             data: Some(HexData("".into())),
             ..Default::default()
         }))
@@ -2028,7 +2163,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
 
     // The long poll id is valid, so it returns a state error instead
     let get_block_template_sync_error = rpc
-        .get_block_template(Some(get_block_template::JsonParameters {
+        .get_block_template(Some(GetBlockTemplateParameters {
             // This must parse as a LongPollId.
             // It must be the correct length and have hex/decimal digits.
             long_poll_id: Some(
@@ -2087,7 +2222,7 @@ async fn rpc_getblocktemplate_mining_address(use_p2pkh: bool) {
         make_mock_read_state_request_handler(),
     );
 
-    let get_block_template::Response::TemplateMode(get_block_template) =
+    let GetBlockTemplateResponse::TemplateMode(get_block_template) =
         get_block_template.expect("unexpected error in getblocktemplate RPC call")
     else {
         panic!(
@@ -2108,8 +2243,8 @@ async fn rpc_submitblock_errors() {
 
     // Create a continuous chain of mainnet blocks from genesis
     let blocks: Vec<Arc<Block>> = zebra_test::vectors::CONTINUOUS_MAINNET_BLOCKS
-        .iter()
-        .map(|(_height, block_bytes)| block_bytes.zcash_deserialize_into().unwrap())
+        .values()
+        .map(|block_bytes| block_bytes.zcash_deserialize_into().unwrap())
         .collect();
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
@@ -2133,6 +2268,7 @@ async fn rpc_submitblock_errors() {
         "0.0.1",
         "RPC test",
         Buffer::new(mempool.clone(), 1),
+        state.clone(),
         Buffer::new(read_state.clone(), 1),
         block_verifier_router,
         MockSyncStatus::default(),
@@ -2148,7 +2284,7 @@ async fn rpc_submitblock_errors() {
 
         assert_eq!(
             submit_block_response,
-            Ok(submit_block::ErrorResponse::Duplicate.into())
+            Ok(SubmitBlockErrorResponse::Duplicate.into())
         );
     }
 
@@ -2161,7 +2297,7 @@ async fn rpc_submitblock_errors() {
 
     assert_eq!(
         submit_block_response,
-        Ok(submit_block::ErrorResponse::Rejected.into())
+        Ok(SubmitBlockErrorResponse::Rejected.into())
     );
 
     mempool.expect_no_requests().await;
@@ -2183,6 +2319,7 @@ async fn rpc_validateaddress() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -2190,6 +2327,18 @@ async fn rpc_validateaddress() {
         None,
     );
 
+    // t1 address: valid
+    let validate_address = rpc
+        .validate_address("t1fMAAnYrpwt1HQ8ZqxeFqVSSi6PQjwTLUm".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "t1 address should be valid on Mainnet"
+    );
+
+    // t3 address: valid
     let validate_address = rpc
         .validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
         .await
@@ -2200,6 +2349,7 @@ async fn rpc_validateaddress() {
         "Mainnet founder address should be valid on Mainnet"
     );
 
+    // t2 address: invalid
     let validate_address = rpc
         .validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
         .await
@@ -2207,8 +2357,34 @@ async fn rpc_validateaddress() {
 
     assert_eq!(
         validate_address,
-        validate_address::Response::invalid(),
+        ValidateAddressResponse::invalid(),
         "Testnet founder address should be invalid on Mainnet"
+    );
+
+    // tex address: valid
+    let validate_address = rpc
+        .validate_address("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "ZIP-230 sample address should be valid on Mainnet"
+    );
+
+    // sprout address: invalid
+    let validate_address = rpc
+        .validate_address(
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya"
+                .to_string(),
+        )
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert_eq!(
+        validate_address,
+        ValidateAddressResponse::invalid(),
+        "Sapling address should be invalid on Mainnet"
     );
 }
 
@@ -2227,6 +2403,7 @@ async fn rpc_z_validateaddress() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -2234,6 +2411,18 @@ async fn rpc_z_validateaddress() {
         None,
     );
 
+    // t1 address: valid
+    let z_validate_address = rpc
+        .z_validate_address("t1fMAAnYrpwt1HQ8ZqxeFqVSSi6PQjwTLUm".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "t1 address should be valid on Mainnet"
+    );
+
+    // t3 address: valid
     let z_validate_address = rpc
         .z_validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
         .await
@@ -2244,6 +2433,7 @@ async fn rpc_z_validateaddress() {
         "Mainnet founder address should be valid on Mainnet"
     );
 
+    // t2 address: invalid
     let z_validate_address = rpc
         .z_validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
         .await
@@ -2251,8 +2441,56 @@ async fn rpc_z_validateaddress() {
 
     assert_eq!(
         z_validate_address,
-        z_validate_address::Response::invalid(),
+        ZValidateAddressResponse::invalid(),
         "Testnet founder address should be invalid on Mainnet"
+    );
+
+    // tex address: valid
+    let z_validate_address = rpc
+        .z_validate_address("tex1s2rt77ggv6q989lr49rkgzmh5slsksa9khdgte".to_string())
+        .await
+        .expect("we should have a z_validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "ZIP-230 sample address should be valid on Mainnet"
+    );
+
+    // sprout address: invalid
+    let z_validate_address = rpc
+        .z_validate_address("zcWsmqT4X2V4jgxbgiCzyrAfRT1vi1F4sn7M5Pkh66izzw8Uk7LBGAH3DtcSMJeUb2pi3W4SQF8LMKkU2cUuVP68yAGcomL".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert_eq!(
+        z_validate_address,
+        ZValidateAddressResponse::invalid(),
+        "Sprout address should be invalid on Mainnet"
+    );
+
+    // sapling address: valid
+    let z_validate_address = rpc
+        .z_validate_address(
+            "zs1z7rejlpsa98s2rrrfkwmaxu53e4ue0ulcrw0h4x5g8jl04tak0d3mm47vdtahatqrlkngh9slya"
+                .to_string(),
+        )
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Sapling address should be valid on Mainnet"
+    );
+
+    // unified address: valid
+    let z_validate_address = rpc
+        .z_validate_address("u1c4ndwzy9hx70zjdtq4qt4x3c7zm0fnh85g9thsc8sunjcpk905w898pdvw82gdpj2p0mggs9tm23u6mzwk3xn4q25fq4czglssz5l6rlj268wfamxn7z4pvmgxwfl55xf0ua2u03afw66579fplkh8mvx2tp6t8er3zvvvtvf8e43mjv7n32st3zpvamfpvmxdrnzesakax8jrq3l3e".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        z_validate_address.is_valid,
+        "Unified address should be valid on Mainnet"
     );
 }
 
@@ -2269,7 +2507,6 @@ async fn rpc_getdifficulty() {
     let mining_conf = mining::Config {
         miner_address: None,
         extra_coinbase_data: None,
-        debug_like_zcashd: true,
         internal_miner: true,
     };
 
@@ -2298,6 +2535,7 @@ async fn rpc_getdifficulty() {
         Default::default(),
         "0.0.1",
         "RPC test",
+        MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         Buffer::new(read_state.clone(), 1),
         MockService::build().for_unit_tests(),
@@ -2420,6 +2658,7 @@ async fn rpc_z_listunifiedreceivers() {
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
         MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
         MockSyncStatus::default(),
         NoChainTip,
         MockAddressBookPeers::default(),
@@ -2435,31 +2674,101 @@ async fn rpc_z_listunifiedreceivers() {
 
     // address taken from https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/test-vectors/zcash/unified_address.json#L4
     let response = rpc.z_list_unified_receivers("u1l8xunezsvhq8fgzfl7404m450nwnd76zshscn6nfys7vyz2ywyh4cc5daaq0c7q2su5lqfh23sp7fkf3kt27ve5948mzpfdvckzaect2jtte308mkwlycj2u0eac077wu70vqcetkxf".to_string()).await.unwrap();
-    assert_eq!(response.orchard(), None);
+    assert_eq!(*response.orchard(), None);
     assert_eq!(
-        response.sapling(),
+        *response.sapling(),
         Some(String::from(
             "zs1mrhc9y7jdh5r9ece8u5khgvj9kg0zgkxzdduyv0whkg7lkcrkx5xqem3e48avjq9wn2rukydkwn"
         ))
     );
     assert_eq!(
-        response.p2pkh(),
+        *response.p2pkh(),
         Some(String::from("t1V9mnyk5Z5cTNMCkLbaDwSskgJZucTLdgW"))
     );
-    assert_eq!(response.p2sh(), None);
+    assert_eq!(*response.p2sh(), None);
 
     // address taken from https://github.com/zcash-hackworks/zcash-test-vectors/blob/master/test-vectors/zcash/unified_address.json#L39
     let response = rpc.z_list_unified_receivers("u12acx92vw49jek4lwwnjtzm0cssn2wxfneu7ryj4amd8kvnhahdrq0htsnrwhqvl92yg92yut5jvgygk0rqfs4lgthtycsewc4t57jyjn9p2g6ffxek9rdg48xe5kr37hxxh86zxh2ef0u2lu22n25xaf3a45as6mtxxlqe37r75mndzu9z2fe4h77m35c5mrzf4uqru3fjs39ednvw9ay8nf9r8g9jx8rgj50mj098exdyq803hmqsek3dwlnz4g5whc88mkvvjnfmjldjs9hm8rx89ctn5wxcc2e05rcz7m955zc7trfm07gr7ankf96jxwwfcqppmdefj8gc6508gep8ndrml34rdpk9tpvwzgdcv7lk2d70uh5jqacrpk6zsety33qcc554r3cls4ajktg03d9fye6exk8gnve562yadzsfmfh9d7v6ctl5ufm9ewpr6se25c47huk4fh2hakkwerkdd2yy3093snsgree5lt6smejfvse8v".to_string()).await.unwrap();
     assert_eq!(
-        response.orchard(),
+        *response.orchard(),
         Some(String::from(
             "u10c5q7qkhu6f0ktaz7jqu4sfsujg0gpsglzudmy982mku7t0uma52jmsaz8h24a3wa7p0jwtsjqt8shpg25cvyexzlsw3jtdz4v6w70lv"
         ))
     );
-    assert_eq!(response.sapling(), None);
+    assert_eq!(*response.sapling(), None);
     assert_eq!(
-        response.p2pkh(),
+        *response.p2pkh(),
         Some(String::from("t1dMjwmwM2a6NtavQ6SiPP8i9ofx4cgfYYP"))
     );
-    assert_eq!(response.p2sh(), None);
+    assert_eq!(*response.p2sh(), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_addnode() {
+    let _init_guard = zebra_test::init();
+    let network = Network::Testnet(Arc::new(testnet::Parameters::new_regtest(
+        Default::default(),
+    )));
+
+    let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
+    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet);
+
+    let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
+        zebra_consensus::Config::default(),
+        &network,
+        state.clone(),
+    )
+    .await;
+
+    //let mock_address_book = MockAddressBookPeers::default();
+    let mock_address_book =
+        zebra_network::address_book_peers::mock::SharedMockAddressBookPeers::default();
+
+    // Init RPC
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        network,
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        Buffer::new(mempool.clone(), 1),
+        Buffer::new(state.clone(), 1),
+        Buffer::new(read_state.clone(), 1),
+        block_verifier_router,
+        MockSyncStatus::default(),
+        tip.clone(),
+        mock_address_book,
+        rx,
+        None,
+    );
+
+    let get_peer_info = rpc
+        .get_peer_info()
+        .await
+        .expect("We should have an array of addresses");
+
+    assert_eq!(get_peer_info, []);
+
+    let addr = PeerSocketAddr::from_str("127.0.0.1:9999").unwrap();
+
+    // Call `add_node`
+    rpc.add_node(addr, AddNodeCommand::Add)
+        .await
+        .expect("We should have an array of addresses");
+
+    let get_peer_info = rpc
+        .get_peer_info()
+        .await
+        .expect("We should have an array of addresses");
+
+    assert_eq!(
+        get_peer_info,
+        [PeerInfo {
+            addr,
+            inbound: false,
+        }]
+    );
+
+    mempool.expect_no_requests().await;
 }
