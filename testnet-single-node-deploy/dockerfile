@@ -17,7 +17,10 @@ RUN pwd && ls -la
 # Build zebrad with the required features
 RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemplate-rpcs"
 
+RUN ls -la target/release/
+RUN find target/release -name "*zebr*" -type f
+
 EXPOSE 18232
 
 # Run the zebra node
-ENTRYPOINT ["target/release/zebrd", "-c", "/app/testnet-single-node-deploy/regtest-config.toml"]
+ENTRYPOINT ["target/release/zebrad", "-c", "/app/testnet-single-node-deploy/regtest-config.toml"]
