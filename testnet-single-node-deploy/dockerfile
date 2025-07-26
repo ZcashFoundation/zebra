@@ -9,9 +9,6 @@ WORKDIR /app
 # Copy the entire repository content (from the parent zebra directory)
 COPY . .
 
-# Copy config file to working directory for easy access
-COPY testnet-single-node-deploy/regtest-config.toml regtest-config.toml
-
 RUN ls -la /app/testnet-single-node-deploy/
 RUN cat /app/testnet-single-node-deploy/regtest-config.toml
 
@@ -21,4 +18,4 @@ RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemp
 EXPOSE 18232
 
 # Run the zebra node
-ENTRYPOINT ["target/release/zebrd", "-c", "regtest-config.toml"]
+ENTRYPOINT ["target/release/zebrd", "-c", "/app/testnet-single-node-deploy/regtest-config.toml"]
