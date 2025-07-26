@@ -6,8 +6,8 @@ RUN apt-get update && apt-get install git build-essential clang -y
 # Set the working directory to the repo root
 WORKDIR /app
 
-# Copy the entire repository content (from parent directory)
-COPY .. .
+# Copy the entire repository content (from the parent zebra directory)
+COPY . .
 
 # Build zebrad with the required features
 RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemplate-rpcs"
@@ -15,7 +15,7 @@ RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemp
 EXPOSE 18232
 
 # Copy the config file from the testnet-single-node-deploy folder
-COPY regtest-config.toml regtest-config.toml
+COPY testnet-single-node-deploy/regtest-config.toml regtest-config.toml
 
 # Run the zebra node
-ENTRYPOINT ["target/release/zebrad", "-c", "regtest-config.toml"]
+ENTRYPOINT ["target/release/zebrad", "-c", "testnet-single-node-deploy/regtest-config.toml"]
