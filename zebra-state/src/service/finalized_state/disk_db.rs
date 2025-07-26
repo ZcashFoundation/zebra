@@ -1393,22 +1393,22 @@ impl DiskDb {
 
         // These flushes can fail during forced shutdown or during Drop after a shutdown,
         // particularly in tests. If they fail, there's nothing we can do about it anyway.
-        if let Err(error) = self.db.flush() {
-            let error = format!("{error:?}");
-            if error.to_ascii_lowercase().contains("shutdown in progress") {
-                debug!(
-                    ?error,
-                    ?path,
-                    "expected shutdown error flushing database SST files to disk"
-                );
-            } else {
-                info!(
-                    ?error,
-                    ?path,
-                    "unexpected error flushing database SST files to disk during shutdown"
-                );
-            }
-        }
+        // if let Err(error) = self.db.flush() {
+        //     let error = format!("{error:?}");
+        //     if error.to_ascii_lowercase().contains("shutdown in progress") {
+        //         debug!(
+        //             ?error,
+        //             ?path,
+        //             "expected shutdown error flushing database SST files to disk"
+        //         );
+        //     } else {
+        //         info!(
+        //             ?error,
+        //             ?path,
+        //             "unexpected error flushing database SST files to disk during shutdown"
+        //         );
+        //     }
+        // }
 
         if let Err(error) = self.db.flush_wal(true) {
             let error = format!("{error:?}");

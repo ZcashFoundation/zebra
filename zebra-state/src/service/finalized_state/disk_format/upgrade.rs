@@ -358,11 +358,7 @@ impl DbFormatChange {
         for (_, bytes) in db.all_address_balances() {
             let bytes = bytes.raw_bytes();
             count += 1;
-            if bytes.len() != 24 {
-                tracing::warn!(len = ?bytes.len(), "unexpected address balance length");
-            } else {
-                AddressBalanceLocation::from_bytes(bytes);
-            }
+            AddressBalanceLocation::from_bytes(bytes);
         }
 
         tracing::warn!(?count, "done checking AddressBalanceLocation lens");
@@ -648,6 +644,12 @@ impl DbFormatChange {
         results.push(Self::format_validity_checks_quick(db));
 
         for upgrade in format_upgrades(None) {
+            tracing::warn!(
+                version = ?upgrade.version(),
+                desc = ?upgrade.description(),
+                "validating format upgrade"
+            );
+
             results.push(upgrade.validate(db, cancel_receiver)?);
         }
 
