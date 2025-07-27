@@ -9,16 +9,8 @@ WORKDIR /app
 # Copy the entire repository content (from the parent zebra directory)
 COPY . .
 
-RUN ls -la /app/
-RUN find /app -name "*testnet*" -type d
-RUN find /app -name "*regtest*" -type f
-RUN pwd && ls -la
-
 # Build zebrad with the required features
 RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemplate-rpcs"
-
-RUN ls -la target/release/
-RUN find target/release -name "*zebr*" -type f
 
 EXPOSE 18232
 
