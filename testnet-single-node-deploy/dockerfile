@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install git build-essential clang -y
 # Set the working directory to the repo root
 WORKDIR /app
 
-# Copy the entire repository content (from the parent zebra directory)
+# Copy files
 COPY . .
 
 # Build zebrad with the required features
