@@ -186,6 +186,7 @@ pub trait Sigops {
     /// Returns the number of transparent signature operations in the
     /// transparent inputs and outputs of the given transaction.
     fn sigops(&self) -> Result<u32, zcash_script::Error> {
+        // We use dummy values for args that don't influence sigops counting.
         let interpreter = get_interpreter(
             &|_, _| None,
             0,
