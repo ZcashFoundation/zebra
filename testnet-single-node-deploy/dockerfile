@@ -1,17 +1,21 @@
-# Use Rust 1.81.0 as the base image
 FROM rust:1.81.0
 
-# Install required dependencies
-RUN apt-get update && apt-get install -y git build-essential clang
+# Set up Rust and cargo
+RUN apt-get update && apt-get install git build-essential clang -y
 
-# Copy the entire project, except whats defined in .dockerignore
+# Set the working directory to the repo root
+WORKDIR /app
+
+# Copy files
 COPY . .
 
-# Build the 'zebrad' binary with the 'getblocktemplate-rpcs' feature enabled
+# Validate the presence of the config file
+RUN test -f testnet-single-node-deploy/regtest-config.toml
+
+# Build zebrad with the required features
 RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemplate-rpcs"
 
-# Expose the default Zebra node RPC port
 EXPOSE 18232
 
-# Set the entrypoint
-ENTRYPOINT ["target/release/zebrad", "-c", "regtest-config.toml"]
+# Run the zebra node
+ENTRYPOINT ["target/release/zebrad", "-c", "/app/testnet-single-node-deploy/regtest-config.toml"]
