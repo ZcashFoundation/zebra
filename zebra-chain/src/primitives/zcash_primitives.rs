@@ -4,7 +4,7 @@
 use std::{io, ops::Deref, sync::Arc};
 
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
-use zcash_protocol::value::{BalanceError, Zatoshis};
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -174,6 +174,14 @@ impl TryFrom<Amount<NonNegative>> for zcash_protocol::value::Zatoshis {
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
         zcash_protocol::value::Zatoshis::from_nonnegative_i64(amount.into())
+    }
+}
+
+impl TryFrom<Amount> for ZatBalance {
+    type Error = BalanceError;
+
+    fn try_from(amount: Amount) -> Result<Self, Self::Error> {
+        ZatBalance::from_i64(amount.into())
     }
 }
 
