@@ -5,7 +5,7 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
-## [Zebra 2.4.1](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.1) - 2025-07-22
+## [Zebra 2.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2) - 2025-07-28
 
 This release fixes a database upgrade bug that was introduced in the 2.4.0
 release (which has been removed). If you have upgraded to 2.4.0, your Zebra
@@ -13,23 +13,27 @@ address index has become corrupted. This does not affect consensus, but will
 make the RPC interface return invalid data for calls like `getaddressutxos` and
 other address-related calls.
 
-Zebra 2.4.1 prints a warning upon starting if you have been impacted by the bug.
+**(Also refer to the 2.4.0 release notes below for important breaking changes.)**
+
+Zebra 2.4.2 prints a warning upon starting if you have been impacted by the bug.
 The log line will look like:
 
 ```
-2025-07-17T17:12:41.636549Z  WARN zebra_state::service::finalized_state::zebra_db: You have been impacted by the Zebra 2.4.0 address indexer corruption bug. If you rely on the data from the RPC interface, you will need to recover your database. Follow the instructions in the 2.4.1 release notes: https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.1 If you just run the node for consensus and don't use data from the RPC interface, you can ignore this warning.
+2025-07-17T17:12:41.636549Z  WARN zebra_state::service::finalized_state::zebra_db: You have been impacted by the Zebra 2.4.0 address indexer corruption bug. If you rely on the data from the RPC interface, you will need to recover your database. Follow the instructions in the 2.4.2 release notes: https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2 If you just run the node for consensus and don't use data from the RPC interface, you can ignore this warning.
 ```
 
 If you rely on the RPC data, you will need to restore your database. If you have
 backed up the state up before upgrading to 2.4.0, you can simply restore the backup
-and run 2.4.1 from it. If you have not, you have two options:
+and run 2.4.2 from it. If you have not, you have two options:
 
 - Stop Zebra, delete the state (e.g. `~/.cache/zebra/state/v27/mainnet` and
-  `testnet` too if applicable), upgrade to 2.4.1 (if you haven't already), and
+  `testnet` too if applicable), upgrade to 2.4.2 (if you haven't already), and
   start Zebra. It will sync from scratch, which will take around 48 hours to
   complete, depending on the machine specifications.
 - Use the `copy-state` subcommand to regenerate a valid state.
-  This will require an additional ~300 GB of free disk size.
+  This will require an additional ~300 GB of free disk size. It is likely that
+  it will take around the same time as syncing from scratch, but it has the
+  advantage of not depending on the network.
   - Stop Zebra.
   - Rename the old corrupted state folder, e.g. `mv ~/.cache/zebra ~/.cache/zebra.old`
   - Copy your current `zebrad.toml` file to a `zebrad-source.toml` file and edit
@@ -51,7 +55,19 @@ and run 2.4.1 from it. If you have not, you have two options:
 Thanks to @ebfull for reporting the bug and helping investigating its cause.
 
 
-## [Zebra 2.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.0) - 2025-07-11
+## Zebra 2.4.1 - \[REMOVED\]
+
+This version of Zebra wasn't fully published; it was tagged but the tag was
+removed, and it was published on `crates.io` but it was yanked. It was not
+published on Docker Hub.
+
+We removed it due to a panic that happened during the pre-release validation.
+However, we determined that the panic was caused by an external tool (`ldb
+checkpoint`) being used internally to make database backups and it was not a bug
+in Zebra.
+
+
+## [Zebra 2.4.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.0) - 2025-07-11 \[REMOVED\]
 
 ### Breaking Changes
 
@@ -66,6 +82,10 @@ This release has the following breaking changes:
   operate normally during that time; the only difference is that some RPC
   responses might return empty or not accurate data (pool values for arbitrary
   block heights and received balances for addresses).
+- While this was never documented as an option for backups, if you relied on the
+  `ldb checkpoint` tool to generate database backups, be advised that the tool
+  is no longer supported and _will_ corrupt databases generated or touched by
+  Zebra 2.4.0 or later releases.
 - The `debug_like_zcashd` config option for mining is no longer available. It
   was not enabled by default; if it is now present in the config file, Zebra
   will panic. Simply delete the config option to fix.
@@ -303,7 +323,7 @@ Thank you to everyone who contributed to this release, we couldn't make Zebra wi
 Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
 @arya2, @gustavovalverde, @oxarbitrage and @upbqdn.
 
-## [Zebra 2.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0) - 2024-10-25 - [YANKED]
+## [Zebra 2.0.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.0.0) - 2024-10-25 - \[REMOVED\]
 
 This release was intended to support NU6 but was pointing to the wrong version
 of dependencies which would make Zebra panic at NU6 activation. Use v2.0.1 instead.
