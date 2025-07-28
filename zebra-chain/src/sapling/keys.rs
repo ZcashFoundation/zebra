@@ -360,6 +360,12 @@ impl ZcashDeserialize for EphemeralPublicKey {
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct ValidatingKey(redjubjub::VerificationKey<SpendAuth>);
 
+impl From<ValidatingKey> for redjubjub::VerificationKey<SpendAuth> {
+    fn from(rk: ValidatingKey) -> Self {
+        rk.0
+    }
+}
+
 impl TryFrom<redjubjub::VerificationKey<SpendAuth>> for ValidatingKey {
     type Error = &'static str;
 
