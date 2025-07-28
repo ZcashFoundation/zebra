@@ -900,7 +900,7 @@ where
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
             &shielded_sighash,
-        )?))
+        )))
     }
 
     /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
@@ -988,7 +988,7 @@ where
         .and(Self::verify_sapling_shielded_data(
             sapling_shielded_data,
             &shielded_sighash,
-        )?)
+        ))
         .and(Self::verify_orchard_shielded_data(
             orchard_bundle,
             &shielded_sighash,
@@ -1154,125 +1154,67 @@ where
     fn verify_sapling_shielded_data<A>(
         sapling_shielded_data: &Option<sapling::ShieldedData<A>>,
         shielded_sighash: &SigHash,
-    ) -> Result<AsyncChecks, TransactionError>
+    ) -> AsyncChecks
     where
         A: sapling::AnchorVariant + Clone,
         sapling::Spend<sapling::PerSpendAnchor>: From<(sapling::Spend<A>, A::Shared)>,
     {
         let mut async_checks = AsyncChecks::new();
 
+        // The Sapling batch verifier checks the following consensus rules:
+        //
+        // # Consensus
+        //
+        // > The proof π_ZKSpend MUST be valid given a primary input formed from the other fields
+        // > except spendAuthSig.
+        //
+        // > The spend authorization signature MUST be a valid SpendAuthSig signature over SigHash
+        // > using rk as the validating key.
+        //
+        // > [NU5 onward] As specified in § 5.4.7 ‘RedDSA, RedJubjub, and RedPallas’ on p. 88, the
+        // > validation of the 𝑅 component of the signature changes to prohibit non-canonical
+        // > encodings.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        //
+        // # Consensus
+        //
+        // > The proof π_ZKOutput MUST be valid given a primary input formed from the other fields
+        // > except C^enc and C^out.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#outputdesc
+        //
+        // # Consensus
+        //
+        // > The Spend transfers and Action transfers of a transaction MUST be consistent with its
+        // > vbalanceSapling value as specified in § 4.13 ‘Balance and Binding Signature (Sapling)’.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
+        //
+        // # Consensus
+        //
+        // > [Sapling onward] If effectiveVersion ≥ 4 and nSpendsSapling + nOutputsSapling > 0,
+        // > then:
+        // >
+        // > – let bvk^{Sapling} and SigHash be as defined in § 4.13;
+        // > – bindingSigSapling MUST represent a valid signature under the transaction binding
+        // >   validating key bvk Sapling of SigHash — i.e.
+        // >   BindingSig^{Sapling}.Validate_{bvk^{Sapling}}(SigHash, bindingSigSapling ) = 1.
+        //
+        // Note that the `if` part is indirectly enforced, since the `sapling_shielded_data` is only
+        // parsed if those conditions apply in [`Transaction::zcash_deserialize`].
+        //
+        // > [NU5 onward] As specified in § 5.4.7, the validation of the 𝑅 component of the
+        // > signature changes to prohibit non-canonical encodings.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
         if let Some(sapling_shielded_data) = sapling_shielded_data {
-            for spend in sapling_shielded_data.spends_per_anchor() {
-                // # Consensus
-                //
-                // > The proof π_ZKSpend MUST be valid
-                // > given a primary input formed from the other
-                // > fields except spendAuthSig.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-                //
-                // Queue the verification of the Groth16 spend proof
-                // for each Spend description while adding the
-                // resulting future to our collection of async
-                // checks that (at a minimum) must pass for the
-                // transaction to verify.
-                async_checks.push(
-                    primitives::groth16::SPEND_VERIFIER
-                        .clone()
-                        .oneshot(DescriptionWrapper(&spend).try_into()?),
-                );
-
-                // # Consensus
-                //
-                // > The spend authorization signature
-                // > MUST be a valid SpendAuthSig signature over
-                // > SigHash using rk as the validating key.
-                //
-                // This is validated by the verifier.
-                //
-                // > [NU5 onward] As specified in § 5.4.7 ‘RedDSA, RedJubjub,
-                // > and RedPallas’ on p. 88, the validation of the 𝑅
-                // > component of the signature changes to prohibit non-canonical encodings.
-                //
-                // This is validated by the verifier, inside the `redjubjub` crate.
-                // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
-                // that enforces the canonical encoding.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-                //
-                // Queue the validation of the RedJubjub spend
-                // authorization signature for each Spend
-                // description while adding the resulting future to
-                // our collection of async checks that (at a
-                // minimum) must pass for the transaction to verify.
-                async_checks.push(
-                    primitives::redjubjub::VERIFIER
-                        .clone()
-                        .oneshot((spend.rk.into(), spend.spend_auth_sig, shielded_sighash).into()),
-                );
-            }
-
-            for output in sapling_shielded_data.outputs() {
-                // # Consensus
-                //
-                // > The proof π_ZKOutput MUST be
-                // > valid given a primary input formed from the other
-                // > fields except C^enc and C^out.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#outputdesc
-                //
-                // Queue the verification of the Groth16 output
-                // proof for each Output description while adding
-                // the resulting future to our collection of async
-                // checks that (at a minimum) must pass for the
-                // transaction to verify.
-                async_checks.push(
-                    primitives::groth16::OUTPUT_VERIFIER
-                        .clone()
-                        .oneshot(DescriptionWrapper(output).try_into()?),
-                );
-            }
-
-            // # Consensus
-            //
-            // > The Spend transfers and Action transfers of a transaction MUST be
-            // > consistent with its vbalanceSapling value as specified in § 4.13
-            // > ‘Balance and Binding Signature (Sapling)’.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
-            //
-            // > [Sapling onward] If effectiveVersion ≥ 4 and
-            // > nSpendsSapling + nOutputsSapling > 0, then:
-            // > – let bvk^{Sapling} and SigHash be as defined in § 4.13;
-            // > – bindingSigSapling MUST represent a valid signature under the
-            // >   transaction binding validating key bvk Sapling of SigHash —
-            // >   i.e. BindingSig^{Sapling}.Validate_{bvk^{Sapling}}(SigHash, bindingSigSapling ) = 1.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            //
-            // This is validated by the verifier. The `if` part is indirectly
-            // enforced, since the `sapling_shielded_data` is only parsed if those
-            // conditions apply in [`Transaction::zcash_deserialize`].
-            //
-            // >   [NU5 onward] As specified in § 5.4.7, the validation of the 𝑅 component
-            // >   of the signature changes to prohibit non-canonical encodings.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            //
-            // This is validated by the verifier, inside the `redjubjub` crate.
-            // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
-            // that enforces the canonical encoding.
-
-            let bvk = sapling_shielded_data.binding_verification_key();
-
-            async_checks.push(
-                primitives::redjubjub::VERIFIER
-                    .clone()
-                    .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
-            );
+            async_checks.push(primitives::sapling::VERIFIER.clone().oneshot(
+                primitives::sapling::Item::new(sapling_shielded_data, shielded_sighash),
+            ));
         }
 
-        Ok(async_checks)
+        async_checks
     }
 
     /// Verifies a transaction's Orchard shielded data.
