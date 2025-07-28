@@ -6645,7 +6645,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-state"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "bincode",
  "chrono",
@@ -6750,7 +6750,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "2.4.0"
+version = "2.4.1"
 dependencies = [
  "abscissa_core",
  "atty",

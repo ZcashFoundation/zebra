@@ -94,7 +94,7 @@ zebra-node-services = { path = "../zebra-node-services", version = "1.0.0", feat
     "rpc-client",
 ] }
 zebra-script = { path = "../zebra-script", version = "1.0.0" }
-zebra-state = { path = "../zebra-state", version = "1.0.0" }
+zebra-state = { path = "../zebra-state", version = "1.0.1" }
 
 [build-dependencies]
 tonic-build = { workspace = true }
@@ -116,7 +116,7 @@ zebra-consensus = { path = "../zebra-consensus", version = "1.0.0", features = [
 zebra-network = { path = "../zebra-network", version = "1.0.0", features = [
     "proptest-impl",
 ] }
-zebra-state = { path = "../zebra-state", version = "1.0.0", features = [
+zebra-state = { path = "../zebra-state", version = "1.0.1", features = [
     "proptest-impl",
 ] }
 

@@ -47,11 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     outputs:
-      state_version: ${{ steps.get-available-disks.outputs.state_version }}
-      cached_disk_name: ${{ steps.get-available-disks.outputs.cached_disk_name }}
-      lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk }}
-      zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk }}
-      zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk }}
+      state_version: ${{ steps.get-available-disks.outputs.state_version || steps.set-release-defaults.outputs.state_version }}
+      cached_disk_name: ${{ steps.get-available-disks.outputs.cached_disk_name || steps.set-release-defaults.outputs.cached_disk_name }}
+      lwd_tip_disk: ${{ steps.get-available-disks.outputs.lwd_tip_disk || steps.set-release-defaults.outputs.lwd_tip_disk }}
+      zebra_tip_disk: ${{ steps.get-available-disks.outputs.zebra_tip_disk || steps.set-release-defaults.outputs.zebra_tip_disk }}
+      zebra_checkpoint_disk: ${{ steps.get-available-disks.outputs.zebra_checkpoint_disk || steps.set-release-defaults.outputs.zebra_checkpoint_disk }}
     permissions:
       contents: 'read'
       id-token: 'write'
@@ -96,8 +96,10 @@ jobs:
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
       # Check if there are cached state disks available for subsequent jobs to use.
+      # Skip disk lookup for releases - they should deploy from scratch or use production disks
       - name: Check if cached state disks exists
         id: get-available-disks
+        if: ${{ github.event_name != 'release' }}
         env:
           GITHUB_REF: ${{ env.SHORT_GITHUB_REF }}
           NETWORK: ${{ env.NETWORK }} # use lowercase version from env, not input
@@ -110,3 +112,14 @@ jobs:
           echo "lwd_tip_disk=${LWD_TIP_DISK}" >> "${GITHUB_OUTPUT}"
           echo "zebra_tip_disk=${ZEBRA_TIP_DISK}" >> "${GITHUB_OUTPUT}"
           echo "zebra_checkpoint_disk=${ZEBRA_CHECKPOINT_DISK}" >> "${GITHUB_OUTPUT}"
+
+      # For releases, set default outputs indicating no cached disks are available
+      - name: Set default outputs for releases
+        id: set-release-defaults
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          echo "state_version=" >> "${GITHUB_OUTPUT}"
+          echo "cached_disk_name=" >> "${GITHUB_OUTPUT}"
+          echo "lwd_tip_disk=false" >> "${GITHUB_OUTPUT}"
+          echo "zebra_tip_disk=false" >> "${GITHUB_OUTPUT}"
+          echo "zebra_checkpoint_disk=false" >> "${GITHUB_OUTPUT}"

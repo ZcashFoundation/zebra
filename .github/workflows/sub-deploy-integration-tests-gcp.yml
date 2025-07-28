@@ -341,7 +341,8 @@ jobs:
     # We run exactly one of without-cached-state or with-cached-state, and we always skip the other one.
     # Normally, if a job is skipped, all the jobs that depend on it are also skipped.
     # So we need to override the default success() check to make this job run.
-    if: ${{ !cancelled() && !failure() && (inputs.saves_to_disk || inputs.force_save_to_disk) }}
+    #! Only create disk images when the test-result job succeeded
+    if: ${{ needs.test-result.result == 'success' && (inputs.saves_to_disk || inputs.force_save_to_disk) }}
     env:
       STATE_VERSION: ${{ needs.test-result.outputs.state_version }}
       CACHED_DISK_NAME: ${{ needs.test-result.outputs.cached_disk_name }}
