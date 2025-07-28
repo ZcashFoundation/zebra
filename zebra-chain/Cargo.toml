@@ -53,6 +53,7 @@ tx_v6 = []
 [dependencies]
 
 # Cryptography
+derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 bitvec = { workspace = true }
 bitflags = { workspace = true }
 bitflags-serde-legacy = { workspace = true }
