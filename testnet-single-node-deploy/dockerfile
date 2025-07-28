@@ -6,14 +6,11 @@ RUN apt-get update && apt-get install git build-essential clang -y
 # Set the working directory to the repo root
 WORKDIR /app
 
-RUN ls -al
-RUN ls -al ./testnet-single-node-deploy
+# Copy files
+COPY . .
 
 # Validate the presence of the config file
 RUN test -f testnet-single-node-deploy/regtest-config.toml
-
-# Copy files
-COPY . .
 
 # Build zebrad with the required features
 RUN cargo build --release --package zebrad --bin zebrad --features="getblocktemplate-rpcs"
