@@ -18,7 +18,6 @@ proptest! {
         let orchard = value_balance1.orchard + value_balance2.orchard;
         let deferred = value_balance1.deferred + value_balance2.deferred;
 
-
         match (transparent, sprout, sapling, orchard, deferred) {
             (Ok(transparent), Ok(sprout), Ok(sapling), Ok(orchard), Ok(deferred)) => prop_assert_eq!(
                 value_balance1 + value_balance2,
