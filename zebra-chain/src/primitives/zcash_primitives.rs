@@ -177,6 +177,14 @@ impl TryFrom<Amount<NonNegative>> for zcash_protocol::value::Zatoshis {
     }
 }
 
+impl TryFrom<Amount> for ZatBalance {
+    type Error = BalanceError;
+
+    fn try_from(amount: Amount) -> Result<Self, Self::Error> {
+        ZatBalance::from_i64(amount.into())
+    }
+}
+
 /// Convert a Zebra Script into a librustzcash one.
 impl From<&Script> for zcash_primitives::legacy::Script {
     fn from(script: &Script) -> Self {
