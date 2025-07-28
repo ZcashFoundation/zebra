@@ -1393,15 +1393,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "equihash"
-version = "0.2.2"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
-dependencies = [
- "blake2b_simd",
- "core2",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1430,7 +1421,8 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0d42773cb15447644d170be20231a3268600e0c4cea8987d013b93ac973d3cf7"
 dependencies = [
  "blake2b_simd",
 ]
@@ -4153,7 +4145,8 @@ dependencies = [
 [[package]]
 name = "sapling-crypto"
 version = "0.5.0"
-source = "git+https://github.com/zcash/sapling-crypto?branch=access-inner-param#a5c746b8bba09b26dc3ec8b94b41d23ceb4c229a"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9d3c081c83f1dc87403d9d71a06f52301c0aa9ea4c17da2a3435bbf493ffba4"
 dependencies = [
  "aes",
  "bellman",
@@ -6185,7 +6178,8 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.8.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c020e943fc2df6303d22b2bcbb3c0fd25f9d2419cbec508d13e66dcd77e354a6"
 dependencies = [
  "bech32",
  "bs58",
@@ -6197,8 +6191,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_client_backend"
-version = "0.19.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+version = "0.19.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bed6bdec743667d0c3b69fa46aaebcce28a3897ab7317165cd1b719c59a732a0"
 dependencies = [
  "base64 0.22.1",
  "bech32",
@@ -6238,7 +6233,8 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bca38087e6524e5f51a5b0fb3fc18f36d7b84bf67b2056f494ca0c281590953d"
 dependencies = [
  "core2",
  "nonempty",
@@ -6247,7 +6243,8 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6257,7 +6254,8 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.9.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20664d96a0e4de98f41b6b7a3b40a527e5f5428ca7f34758a084e60778d3b824"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -6295,8 +6293,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_primitives"
-version = "0.23.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0ff99bb0d3aa7558bbaf51a3d4c072733afe364b45df9b3cc31118dcb644a51"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6305,7 +6304,7 @@ dependencies = [
  "core2",
  "crypto-common 0.2.0-rc.1",
  "document-features",
- "equihash 0.2.2 (git+https://github.com/zcash/librustzcash?branch=update-prover-api)",
+ "equihash",
  "ff",
  "fpe",
  "getset",
@@ -6337,7 +6336,8 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.23.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "655f14667be58b93c4105cddb1b39a9ab94c862c0fff83b42fba55e85ca9159d"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6359,8 +6359,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_protocol"
-version = "0.5.3"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42344f5735237d6e0eedd3680f1c92f64e9c4144045d7b5c82f4867c2cbc0a02"
 dependencies = [
  "core2",
  "document-features",
@@ -6398,7 +6399,8 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.3.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5b1302cf726e88326c2c6e9bbd2634064bb344df7740e0b6bacf2245abd1eebe"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6433,9 +6435,10 @@ dependencies = [
  "chrono",
  "color-eyre",
  "criterion",
+ "derive-getters",
  "dirs",
  "ed25519-zebra",
- "equihash 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "equihash",
  "futures",
  "group",
  "halo2_proofs",
@@ -6493,6 +6496,7 @@ dependencies = [
  "bls12_381",
  "chrono",
  "color-eyre",
+ "derive-getters",
  "futures",
  "futures-util",
  "halo2_proofs",
@@ -6522,6 +6526,7 @@ dependencies = [
  "tracing-futures",
  "tracing-subscriber",
  "zcash_proofs",
+ "zcash_protocol",
  "zebra-chain",
  "zebra-node-services",
  "zebra-script",
@@ -6931,7 +6936,8 @@ dependencies = [
 [[package]]
 name = "zip321"
 version = "0.4.0"
-source = "git+https://github.com/zcash/librustzcash?branch=update-prover-api#231a16d1b5a50471f58374a32011b01a87b170cb"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "41f92f290c86ae1bdcdc4c41ce67fdabf8cd2a75bc89be8235cd5b1354efae06"
 dependencies = [
  "base64 0.22.1",
  "nom",
