@@ -315,6 +315,13 @@ impl NotSmallOrderValueCommitment {
         reversed_bytes
     }
 }
+
+impl From<&NotSmallOrderValueCommitment> for [u8; 32] {
+    fn from(cv: &NotSmallOrderValueCommitment) -> [u8; 32] {
+        cv.0.into()
+    }
+}
+
 impl TryFrom<ValueCommitment> for NotSmallOrderValueCommitment {
     type Error = &'static str;
 
