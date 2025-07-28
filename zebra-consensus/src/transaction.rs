@@ -555,8 +555,6 @@ where
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
-            // If the Groth16 parameter download hangs,
-            // Zebra will timeout here, waiting for the async checks.
             async_checks.check().await?;
 
             tracing::trace!(?tx_id, "finished async checks");
