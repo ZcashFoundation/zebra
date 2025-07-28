@@ -53,11 +53,15 @@ pub enum SerializationError {
 }
 
 impl From<crate::Error> for SerializationError {
-    fn from(value: crate::Error) -> Self {
-        match value {
+    fn from(e: crate::Error) -> Self {
+        match e {
             crate::Error::InvalidConsensusBranchId => Self::Parse("invalid consensus branch id"),
-            crate::Error::Conversion(e) => Self::Io(e),
+            crate::Error::Io(e) => Self::Io(e),
             crate::Error::MissingNetworkUpgrade => Self::Parse("missing network upgrade"),
+            crate::Error::Amount(_) => Self::BadTransactionBalance,
+            crate::Error::Conversion(_) => {
+                Self::Parse("Zebra's type could not be converted to its librustzcash equivalent")
+            }
         }
     }
 }
