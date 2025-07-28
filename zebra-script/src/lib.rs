@@ -210,9 +210,11 @@ impl Sigops for zebra_chain::transaction::Transaction {
     fn scripts(&self) -> impl Iterator<Item = &[u8]> {
         self.inputs()
             .iter()
-            .map(|input| match input {
-                transparent::Input::PrevOut { unlock_script, .. } => unlock_script.as_raw_bytes(),
-                transparent::Input::Coinbase { .. } => &[],
+            .filter_map(|input| match input {
+                transparent::Input::PrevOut { unlock_script, .. } => {
+                    Some(unlock_script.as_raw_bytes())
+                }
+                transparent::Input::Coinbase { .. } => None,
             })
             .chain(self.outputs().iter().map(|o| o.lock_script.as_raw_bytes()))
     }
