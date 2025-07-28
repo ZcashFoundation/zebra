@@ -6749,7 +6749,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "2.4.1"
+version = "2.4.2"
 dependencies = [
  "abscissa_core",
  "atty",
