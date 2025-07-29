@@ -17,7 +17,11 @@ use zebra_chain::{
     chain_sync_status::MockSyncStatus,
     chain_tip::{mock::MockChainTip, NoChainTip},
     history_tree::HistoryTree,
-    parameters::{testnet, Network::*, NetworkKind},
+    parameters::{
+        testnet::{self, Parameters},
+        Network::*,
+        NetworkKind,
+    },
     serialization::{DateTime32, ZcashDeserializeInto, ZcashSerialize},
     transaction::{zip317, UnminedTxId, VerifiedUnminedTx},
     work::difficulty::{CompactDifficulty, ExpandedDifficulty, ParameterDifficulty as _, U256},
@@ -2385,6 +2389,64 @@ async fn rpc_validateaddress() {
         validate_address,
         ValidateAddressResponse::invalid(),
         "Sapling address should be invalid on Mainnet"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rpc_validateaddress_regtest() {
+    let _init_guard = zebra_test::init();
+
+    let (_tx, rx) = tokio::sync::watch::channel(None);
+    let (rpc, _) = RpcImpl::new(
+        Testnet(Arc::new(Parameters::new_regtest(Default::default()))),
+        Default::default(),
+        Default::default(),
+        "0.0.1",
+        "RPC test",
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockService::build().for_unit_tests(),
+        MockSyncStatus::default(),
+        NoChainTip,
+        MockAddressBookPeers::default(),
+        rx,
+        None,
+    );
+
+    // t1 address: invalid
+    let validate_address = rpc
+        .validate_address("t1fMAAnYrpwt1HQ8ZqxeFqVSSi6PQjwTLUm".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert_eq!(
+        validate_address,
+        ValidateAddressResponse::invalid(),
+        "t1 address should be invalid on Regtest"
+    );
+
+    // t3 address: invalid
+    let validate_address = rpc
+        .validate_address("t3fqvkzrrNaMcamkQMwAyHRjfDdM2xQvDTR".to_string())
+        .await
+        .expect("we should have a validate_address::Response");
+
+    assert_eq!(
+        validate_address,
+        ValidateAddressResponse::invalid(),
+        "Mainnet founder address should be invalid on Regtest"
+    );
+
+    // t2 address: valid
+    let validate_address = rpc
+        .validate_address("t2UNzUUx8mWBCRYPRezvA363EYXyEpHokyi".to_string())
+        .await
+        .expect("We should have a validate_address::Response");
+
+    assert!(
+        validate_address.is_valid,
+        "t2 address should be valid on Regtest"
     );
 }
 
