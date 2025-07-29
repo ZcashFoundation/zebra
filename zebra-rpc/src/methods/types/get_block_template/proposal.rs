@@ -170,7 +170,7 @@ impl FromStr for BlockTemplateTimeSource {
 pub fn proposal_block_from_template(
     template: &BlockTemplateResponse,
     time_source: impl Into<Option<BlockTemplateTimeSource>>,
-    network: &Network,
+    net: &Network,
 ) -> Result<Block, SerializationError> {
     let BlockTemplateResponse {
         version,
@@ -210,7 +210,7 @@ pub fn proposal_block_from_template(
         transactions.push(tx_template.data.as_ref().zcash_deserialize_into()?);
     }
 
-    let commitment_bytes = match NetworkUpgrade::current(network, height) {
+    let commitment_bytes = match NetworkUpgrade::current(net, height) {
         NetworkUpgrade::Canopy => chain_history_root.bytes_in_serialized_order(),
         NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu6_1 | NetworkUpgrade::Nu7 => {
             block_commitments_hash.bytes_in_serialized_order()
