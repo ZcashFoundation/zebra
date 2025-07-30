@@ -94,7 +94,6 @@ skip-tree = [
     { name = "synstructure", version = "=0.12.6" },
 
     { name = "windows-sys", version = "=0.52.0" },
-    { name = "windows-sys", version = "=0.59.0" },
 
     { name = "linux-raw-sys", version = "0.4.15" },
 
