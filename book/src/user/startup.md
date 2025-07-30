@@ -14,11 +14,18 @@ In this section, we re-ordered some logs, trimmed (`...`) verbose parts of the l
 
 (The order of the logs or tasks might be different in each Zebra run, because these tasks are run concurrently.)
 
-### Load Configuration
+### Configuration Loading
 
-Zebra loads its configuration from its config file.
+Zebra's configuration is loaded with the following precedence:
 
-Some important parts of the config are:
+1. **Defaults**: All settings have sensible defaults.
+2. **TOML File**: A `zebrad.toml` file can be used to override the defaults.
+3. **Environment Variables**: Any setting can be overridden by an environment variable, which takes the highest precedence.
+
+Environment variables must be prefixed with `ZEBRA_`, and nested fields are separated by a double underscore (`__`). For example, `ZEBRA_NETWORK__NETWORK=Testnet` would override the network setting.
+
+Some important parts of the config that you might want to adjust are:
+
 - `consensus.checkpoint_sync`: use all the checkpoints, or just use the mandatory ones
 - `network.listen_addr`: the Zcash listener port
 - `network.network`: the configured Zcash network (mainnet or testnet)
@@ -27,9 +34,11 @@ Some important parts of the config are:
 - `state.cache_dir`: where the cached state is stored on disk
 - `rpc.listen_addr`: optional JSON-RPC listener port
 
-See [the full list of configuration options](https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html).
+See [the full list of configuration options](https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html) for more details.
 
-```
+A typical startup log will show the loaded configuration:
+
+```rust
 zebrad::commands::start: Starting zebrad
 zebrad::commands::start: config=ZebradConfig {
   consensus: Config { checkpoint_sync: true, ... },
@@ -68,7 +77,7 @@ zebra_state::service: created new read-only state service
 
 Zebra queries DNS seeders for initial peer IP addresses, then tries to connect to `network.peerset_initial_target_size` initial peers.
 
-```
+```rust
 zebrad::commands::start: initializing network
 open_listener{addr=127.0.0.1:8233}: zebra_network::peer_set::initialize: Trying to open Zcash protocol endpoint at 127.0.0.1:8233...
 open_listener{addr=127.0.0.1:8233}: zebra_network::peer_set::initialize: Opened Zcash protocol endpoint at 127.0.0.1:8233
@@ -77,6 +86,7 @@ add_initial_peers: zebra_network::config: resolved seed peer IP addresses seed="
 ...
 add_initial_peers: zebra_network::peer_set::initialize: limiting the initial peers list from 112 to 25
 ```
+
 **DNS Seeder**: A DNS server which returns IP addresses of full nodes on the Zcash network to assist in peer discovery. [Zcash Foundation dnsseeder](https://github.com/ZcashFoundation/dnsseeder)  
 
 #### Connect to Initial Peers
@@ -85,7 +95,7 @@ Zebra connects to the initial peers, and starts an ongoing task to crawl for mor
 
 It also starts a service that responds to Zcash network queries from remote peers.
 
-```
+```rust
 add_initial_peers: zebra_network::peer_set::initialize: connecting to initial peer set initial_peer_count=25 initial_peers={[2a01:4f9:c010:7391::1]:8233, 202.61.207.45:8233, ...}
 add_initial_peers: zebra_network::peer_set::initialize: an initial peer connection failed successes=5 errors=8 addr=89.58.36.182:8233 e=Connection refused (os error 111)
 ...
@@ -97,6 +107,7 @@ crawl_and_dial: zebra_network::peer_set::initialize: starting the peer address c
 #### Requests to Peers
 
 Zebra randomly chooses peers for each request:
+
 - choosing peers that are not already answering a request, and
 - prefers peers that have answered fewer requests recently.
 
@@ -110,7 +121,7 @@ Submitted transactions are retried a few times, using an ongoing retry task.
 
 The RPC service is optional, if it is not configured, its tasks do not run.
 
-```
+```rust
 zebra_rpc::server: Trying to open RPC endpoint at 127.0.0.1:57638...
 zebra_rpc::server: Opened RPC endpoint at 127.0.0.1:57638
 ```
@@ -120,6 +131,7 @@ zebra_rpc::server: Opened RPC endpoint at 127.0.0.1:57638
 Zebra verifies blocks and transactions using these services, which depend on the Sprout and Sapling parameters. If the parameters have not been cached, downloading and verifying them can take a few minutes.
 
 Zebra has two different verification modes for blocks:
+
 - checkpoint: check that the block hashes between checkpoints form a chain
 - full verification: check signatures, proofs, spent transparent outputs, and all the other consensus rules
 
@@ -127,7 +139,7 @@ Mempool transactions are always fully verified.
 
 Zebra also starts ongoing tasks to batch verify signatures and proofs.
 
-```
+```rust
 zebrad::commands::start: initializing verifiers
 init{config=Config { ... } ... }: zebra_consensus::primitives::groth16::params: checking and loading Zcash Sapling and Sprout parameters
 init{config=Config { checkpoint_sync: true, ... } ... }: zebra_consensus::chain: initializing chain verifier tip=None max_checkpoint_height=Height(1644839)
@@ -142,7 +154,7 @@ This involves a number of ongoing tasks.
 
 The mempool isn't activated until Zebra reaches the network consensus chain tip.
 
-```
+```rust
 zebrad::commands::start: initializing mempool
 zebrad::components::mempool::crawler: initializing mempool crawler task
 zebrad::components::mempool::queue_checker: initializing mempool queue checker task
@@ -154,6 +166,7 @@ zebrad::components::mempool::gossip: initializing transaction gossip task
 #### Initialize Block Syncer
 
 Zebra syncs blocks from other peers, verifies them, then gossips their hashes:
+
 1. Download the genesis block by hash
 2. Ask a few peers for the hashes of the next 500 blocks
 3. Download the blocks based on the hashes from peers
@@ -162,7 +175,7 @@ Zebra syncs blocks from other peers, verifies them, then gossips their hashes:
 
 This involves a number of ongoing tasks.
 
-```
+```rust
 zebrad::commands::start: initializing syncer
 zebrad::components::sync::gossip: initializing block gossip task
 ```
@@ -173,7 +186,7 @@ Starting at the cached state chain tip, Zebra syncs to the network consensus cha
 
 Zebra also has an ongoing sync progress task, which logs progress towards the tip every minute.
 
-```
+```rust
 zebrad::commands::start: spawned initial Zebra tasks
 zebrad::components::sync: starting genesis block download and verify
 zebrad::commands::start: initial sync is waiting to download the genesis block sync_percent=0.000 % current_height=None

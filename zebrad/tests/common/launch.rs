@@ -210,11 +210,12 @@ where
 /// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
 ///
 /// If `use_internet_connection` is `false` then spawn, but without any peers.
-/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHE_DIR`
-/// environmental variable to provide an initial state to the zebrad instance.
+/// This prevents it from downloading blocks. Instead, `state.cache_dir` can be
+/// configured to provide an initial state to the zebrad instance (e.g. by setting
+/// the `ZEBRA_STATE__CACHE_DIR` environment variable).
 ///
 /// Returns:
-/// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
+/// - `Ok(Some(zebrad, zebra_rpc_address, config))` on success,
 /// - `Ok(None)` if the test doesn't have the required network or cached state, and
 /// - `Err(_)` if spawning zebrad fails.
 ///
@@ -225,7 +226,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
     test_name: S,
     test_type: TestType,
     use_internet_connection: bool,
-) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>, ZebradConfig)>> {
     let test_name = test_name.as_ref();
 
     // Skip the test unless the user specifically asked for it
@@ -249,7 +250,7 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
         .with_timeout(test_type.zebrad_timeout())
         .with_failure_regex_iter(zebrad_failure_messages, zebrad_ignore_messages);
 
-    Ok(Some((zebrad, config.rpc.listen_addr)))
+    Ok(Some((zebrad, config.rpc.listen_addr, config)))
 }
 
 /// Spawns a zebrad instance on `network` without RPCs or `lightwalletd`.
@@ -261,8 +262,9 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 /// Otherwise, just create an empty state in this test's new temporary directory.
 ///
 /// If `use_internet_connection` is `false` then spawn, but without any peers.
-/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHE_DIR`
-/// environmental variable to provide an initial state to the zebrad instance.
+/// This prevents it from downloading blocks. Instead, `state.cache_dir` can be
+/// configured to provide an initial state to the zebrad instance (e.g. by setting
+/// the `ZEBRA_STATE__CACHE_DIR` environment variable).
 ///
 /// Returns:
 /// - `Ok(Some(zebrad))` on success,
