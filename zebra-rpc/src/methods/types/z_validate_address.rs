@@ -72,7 +72,8 @@ impl From<&Address> for ZValidateAddressType {
     }
 }
 
-/// Validates a Zcash address against a network and returns a structured response.
+/// Checks if a zcash address of type P2PKH, P2SH, TEX, SAPLING or UNIFIED is valid.
+/// Returns information about the given address if valid.
 pub fn z_validateaddress(
     network: Network,
     raw_address: String,
