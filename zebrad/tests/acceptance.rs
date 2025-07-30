@@ -150,6 +150,7 @@ use serde_json::Value;
 use tower::ServiceExt;
 
 use zebra_chain::{
+    amount::Amount,
     block::{self, genesis::regtest_genesis_block, ChainHistoryBlockTxAuthCommitmentHash, Height},
     parameters::{
         testnet::ConfiguredActivationHeights,
@@ -161,12 +162,13 @@ use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{
-        BlockTemplateResponse, GetBlockTemplateParameters, GetBlockTemplateRequestMode,
-        GetBlockTemplateResponse, SubmitBlockErrorResponse, SubmitBlockResponse,
+        BlockTemplateResponse, DefaultRoots, GetBlockTemplateParameters,
+        GetBlockTemplateRequestMode, GetBlockTemplateResponse, SubmitBlockErrorResponse,
+        SubmitBlockResponse, TransactionTemplate,
     },
-    fetch_state_tip_and_local_time,
+    fetch_chain_info,
     methods::{RpcImpl, RpcServer},
-    new_coinbase_with_roots, proposal_block_from_template,
+    proposal_block_from_template,
     server::OPENED_RPC_ENDPOINT_MSG,
     MinerParams, SubmitBlockChannel,
 };
@@ -3471,7 +3473,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let zebra_state::GetBlockTemplateChainInfo {
         chain_history_root, ..
-    } = fetch_state_tip_and_local_time(read_state.clone()).await?;
+    } = fetch_chain_info(read_state.clone()).await?;
 
     let network = base_network_params
         .clone()
@@ -3481,14 +3483,21 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
-    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
+    let coinbase_txn = TransactionTemplate::new_coinbase(
         &network,
         Height(block_template.height()),
         &miner_params,
-        &[],
-        chain_history_root,
+        Amount::zero(),
     )
     .expect("coinbase transaction should be valid under the given parameters");
+
+    let default_roots = DefaultRoots::from_coinbase(
+        &network,
+        Height(block_template.height()),
+        &coinbase_txn,
+        chain_history_root,
+        &[],
+    );
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),
@@ -3538,14 +3547,21 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         }])
         .to_network();
 
-    let (coinbase_txn, default_roots) = new_coinbase_with_roots(
+    let coinbase_txn = TransactionTemplate::new_coinbase(
         &network,
         Height(block_template.height()),
         &miner_params,
-        &[],
-        chain_history_root,
+        Amount::zero(),
     )
     .expect("coinbase transaction should be valid under the given parameters");
+
+    let default_roots = DefaultRoots::from_coinbase(
+        &network,
+        Height(block_template.height()),
+        &coinbase_txn,
+        chain_history_root,
+        &[],
+    );
 
     let block_template = BlockTemplateResponse::new(
         block_template.capabilities().clone(),

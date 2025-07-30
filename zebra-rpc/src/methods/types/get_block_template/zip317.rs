@@ -14,6 +14,7 @@ use rand::{
 };
 
 use zebra_chain::{
+    amount::Amount,
     block::{Height, MAX_BLOCK_BYTES},
     parameters::Network,
     transaction::{self, zip317::BLOCK_UNPAID_ACTION_LIMIT, VerifiedUnminedTx},
@@ -58,8 +59,9 @@ pub fn select_mempool_transactions(
 ) -> Vec<SelectedMempoolTx> {
     // Use a fake coinbase transaction to break the dependency between transaction
     // selection, the miner fee, and the fee payment in the coinbase transaction.
-    let fake_coinbase_tx = TransactionTemplate::new_coinbase(net, height, miner_params, &[])
-        .expect("valid coinbase transaction template");
+    let fake_coinbase_tx =
+        TransactionTemplate::new_coinbase(net, height, miner_params, Amount::zero())
+            .expect("valid coinbase transaction template");
 
     let tx_dependencies = mempool_tx_deps.dependencies();
     let (independent_mempool_txs, mut dependent_mempool_txs): (HashMap<_, _>, HashMap<_, _>) =
