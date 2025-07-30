@@ -37,7 +37,7 @@ impl Prepare for Arc<Block> {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_balance: None,
+            deferred_pool_balance_change: None,
         }
     }
 }
@@ -111,7 +111,7 @@ impl ContextuallyVerifiedBlock {
             height,
             new_outputs,
             transaction_hashes,
-            deferred_balance: _,
+            deferred_pool_balance_change: _,
         } = block.into();
 
         Self {

@@ -6499,6 +6499,7 @@ dependencies = [
  "jubjub",
  "lazy_static",
  "metrics",
+ "mset",
  "num-integer",
  "once_cell",
  "orchard",

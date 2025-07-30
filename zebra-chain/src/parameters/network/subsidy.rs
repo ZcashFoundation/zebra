@@ -289,6 +289,26 @@ const POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET: u32 = 2_726_400;
 /// The start height of post-NU6 funding streams on Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
 
+/// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
+/// coinbase transaction on Mainnet.
+// TODO: Update this with specified values once the ZIP is finalized.
+pub const NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET: [(&str, Amount<NonNegative>); 0] = [];
+
+/// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
+/// coinbase transaction on Testnet.
+// TODO: Update this with specified values once the ZIP is finalized.
+pub const NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET: [(&str, Amount<NonNegative>); 0] = [];
+
+/// The expected total amount of the one-time lockbox disbursement on Mainnet.
+// TODO: Add a reference to the ZIP and update this value if needed.
+pub const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET: Amount<NonNegative> =
+    Amount::new_from_zec(78_750);
+
+/// The expected total amount of the one-time lockbox disbursement on Testnet.
+// TODO: Add a reference to the ZIP and update this value if needed.
+pub const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET: Amount<NonNegative> =
+    Amount::new_from_zec(78_750);
+
 /// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
 /// in [ZIP-1015](https://zips.z.cash/zip-1015).
 const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
@@ -643,6 +663,9 @@ pub enum SubsidyError {
 
     #[error("funding stream expected output not found")]
     FundingStreamNotFound,
+
+    #[error("one-time lockbox disbursement output not found")]
+    OneTimeLockboxDisbursementNotFound,
 
     #[error("miner fees are invalid")]
     InvalidMinerFees,
