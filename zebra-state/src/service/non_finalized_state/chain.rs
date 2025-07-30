@@ -2134,11 +2134,13 @@ where
     }
 }
 
-impl<FL: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<FL>>> for Chain {
+impl<Flavor: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<Flavor>>>
+    for Chain
+{
     #[instrument(skip(self, orchard_shielded_data))]
     fn update_chain_tip_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData<FL>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
     ) -> Result<(), ValidateContextError> {
         if let Some(orchard_shielded_data) = orchard_shielded_data {
             // We do note commitment tree updates in parallel rayon threads.
@@ -2159,7 +2161,7 @@ impl<FL: orchard::ShieldedDataFlavor> UpdateWith<Option<orchard::ShieldedData<FL
     #[instrument(skip(self, orchard_shielded_data))]
     fn revert_chain_with(
         &mut self,
-        orchard_shielded_data: &Option<orchard::ShieldedData<FL>>,
+        orchard_shielded_data: &Option<orchard::ShieldedData<Flavor>>,
         _position: RevertPosition,
     ) {
         if let Some(orchard_shielded_data) = orchard_shielded_data {

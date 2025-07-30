@@ -9,21 +9,22 @@ use hex::FromHex;
 use reddsa::{orchard::Binding, orchard::SpendAuth, Signature};
 
 use crate::{
-    amount,
     block::MAX_BLOCK_BYTES,
-    orchard::{ActionGroup, OrchardVanilla, OrchardZSA, ShieldedDataFlavor},
+    orchard::{ActionGroup, OrchardVanilla, ShieldedDataFlavor},
     parameters::{OVERWINTER_VERSION_GROUP_ID, SAPLING_VERSION_GROUP_ID, TX_V5_VERSION_GROUP_ID},
     primitives::{Halo2Proof, ZkSnarkProof},
     serialization::{
         zcash_deserialize_external_count, zcash_serialize_empty_list,
-        zcash_serialize_external_count, AtLeastOne, CompactSizeMessage, ReadZcashExt,
-        SerializationError, TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto,
-        ZcashSerialize,
+        zcash_serialize_external_count, AtLeastOne, ReadZcashExt, SerializationError,
+        TrustedPreallocate, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize,
     },
 };
 
 #[cfg(feature = "tx-v6")]
-use crate::parameters::TX_V6_VERSION_GROUP_ID;
+use crate::{
+    orchard::OrchardZSA, orchard_zsa::NoBurn, parameters::TX_V6_VERSION_GROUP_ID,
+    serialization::CompactSizeMessage,
+};
 
 use super::*;
 use crate::sapling;
@@ -328,9 +329,9 @@ impl ZcashDeserialize for Option<sapling::ShieldedData<sapling::SharedAnchor>> {
     }
 }
 
-impl<FL: ShieldedDataFlavor> ZcashSerialize for Option<orchard::ShieldedData<FL>>
+impl<Flavor: ShieldedDataFlavor> ZcashSerialize for Option<orchard::ShieldedData<Flavor>>
 where
-    orchard::ShieldedData<FL>: ZcashSerialize,
+    orchard::ShieldedData<Flavor>: ZcashSerialize,
 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         match self {
@@ -397,7 +398,6 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardVanilla> {
     }
 }
 
-// FIXME: Try to avoid duplication with OrchardVanilla version
 #[cfg(feature = "tx-v6")]
 #[allow(clippy::unwrap_in_result)]
 impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
@@ -408,13 +408,13 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
             "V6 transaction must contain exactly one action group"
         );
 
+        // Denoted as `nActionGroupsOrchard` in the spec  (ZIP 230) (must be one for V6/NU7).
+        let csm = CompactSizeMessage::try_from(self.action_groups.len())
+            .unwrap_or_else(|_| unreachable!());
+        csm.zcash_serialize(&mut writer)?;
+
         // FIXME: consider using use zcash_serialize_external_count for or Vec::zcash_serialize
         for action_group in self.action_groups.iter() {
-            // Denoted as `nActionGroupsOrchard` in the spec  (ZIP 230) (must be one for V6/NU7).
-            CompactSizeMessage::try_from(self.action_groups.len())
-                .expect("nActionGroupsOrchard should convert to CompactSizeMessage")
-                .zcash_serialize(&mut writer)?;
-
             // Split the AuthorizedAction
             let (actions, sigs): (Vec<orchard::Action<OrchardZSA>>, Vec<Signature<SpendAuth>>) =
                 action_group
@@ -433,15 +433,14 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
             // Denoted as `anchorOrchard` in the spec.
             action_group.shared_anchor.zcash_serialize(&mut writer)?;
 
-            // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
-            action_group.proof.zcash_serialize(&mut writer)?;
-
             // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
             writer.write_u32::<LittleEndian>(0)?;
 
             // Denoted as `vAssetBurn` in the spec (ZIP 230).
-            #[cfg(feature = "zsa-swap")]
             action_group.burn.zcash_serialize(&mut writer)?;
+
+            // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
+            action_group.proof.zcash_serialize(&mut writer)?;
 
             // Denoted as `vSpendAuthSigsOrchard` in the spec.
             zcash_serialize_external_count(&sigs, &mut writer)?;
@@ -449,13 +448,6 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
 
         // Denoted as `valueBalanceOrchard` in the spec.
         self.value_balance.zcash_serialize(&mut writer)?;
-
-        // Denoted as `vAssetBurn` in the spec (ZIP 230).
-        #[cfg(not(feature = "zsa-swap"))]
-        self.action_groups
-            .first()
-            .burn
-            .zcash_serialize(&mut writer)?;
 
         // Denoted as `bindingSigOrchard` in the spec.
         self.binding_sig.zcash_serialize(&mut writer)?;
@@ -493,7 +485,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
         let flags: orchard::Flags = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `valueBalanceOrchard` in the spec.
-        let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
+        let value_balance: Amount = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `anchorOrchard` in the spec.
         // Consensus: type is `{0 .. 𝑞_ℙ − 1}`. See [`orchard::tree::Root::zcash_deserialize`].
@@ -533,7 +525,8 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
                 shared_anchor,
                 proof,
                 actions,
-                burn: Default::default(),
+                #[cfg(feature = "tx-v6")]
+                burn: NoBurn,
             }),
             value_balance,
             binding_sig,
@@ -590,28 +583,23 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
             // Consensus: type is `{0 .. 𝑞_ℙ − 1}`. See [`orchard::tree::Root::zcash_deserialize`].
             let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
 
+            // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
+            let n_ag_expiry_height = reader.read_u32::<LittleEndian>()?;
+            if n_ag_expiry_height != 0 {
+                return Err(SerializationError::Parse(
+                    "nAGExpiryHeight must be zero for NU7",
+                ));
+            }
+
+            // Denoted as `vAssetBurn` in the spec  (ZIP 230).
+            let burn = (&mut reader).zcash_deserialize_into()?;
+
             // Denoted as `sizeProofsOrchard` and `proofsOrchard` in the spec.
             // Consensus: type is `ZKAction.Proof`, i.e. a byte sequence.
             // https://zips.z.cash/protocol/protocol.pdf#halo2encoding
             let proof: Halo2Proof = (&mut reader).zcash_deserialize_into()?;
 
-            // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
-            let n_ag_expiry_height = reader.read_u32::<LittleEndian>()?;
-            if n_ag_expiry_height != 0 {
-                return Err(SerializationError::Parse("nAGExpiryHeight for V6/NU7"));
-            }
-
-            // Denoted as `vAssetBurn` in the spec  (ZIP 230).
-            #[cfg(feature = "zsa-swap")]
-            let burn = (&mut reader).zcash_deserialize_into()?;
-            #[cfg(not(feature = "zsa-swap"))]
-            let burn = Default::default();
-
             // Denoted as `vSpendAuthSigsOrchard` in the spec.
-            // Consensus: this validates the `spendAuthSig` elements, whose type is
-            // SpendAuthSig^{Orchard}.Signature, i.e.
-            // B^Y^{[ceiling(ℓ_G/8) + ceiling(bitlength(𝑟_G)/8)]} i.e. 64 bytes
-            // See [`Signature::zcash_deserialize`].
             let sigs: Vec<Signature<SpendAuth>> =
                 zcash_deserialize_external_count(actions.len(), &mut reader)?;
 
@@ -637,13 +625,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
         }
 
         // Denoted as `valueBalanceOrchard` in the spec.
-        let value_balance: amount::Amount = (&mut reader).zcash_deserialize_into()?;
-
-        // Denoted as `vAssetBurn` in the spec  (ZIP 230).
-        #[cfg(not(feature = "zsa-swap"))]
-        {
-            action_groups[0].burn = (&mut reader).zcash_deserialize_into()?;
-        }
+        let value_balance: Amount = (&mut reader).zcash_deserialize_into()?;
 
         // Denoted as `bindingSigOrchard` in the spec.
         let binding_sig: Signature<Binding> = (&mut reader).zcash_deserialize_into()?;
@@ -890,9 +872,6 @@ impl ZcashSerialize for Transaction {
                 orchard_shielded_data,
                 orchard_zsa_issue_data,
             } => {
-                // Transaction V6 spec:
-                // https://zips.z.cash/zip-0230#transaction-format
-
                 // Denoted as `nVersionGroupId` in the spec.
                 writer.write_u32::<LittleEndian>(TX_V6_VERSION_GROUP_ID)?;
 
@@ -926,7 +905,8 @@ impl ZcashSerialize for Transaction {
                 // `proofsOrchard`, `vSpendAuthSigsOrchard`, and `bindingSigOrchard`.
                 orchard_shielded_data.zcash_serialize(&mut writer)?;
 
-                // OrchardZSA Issuance Fields.
+                // A bundle of OrchardZSA issuance fields denoted in the spec as `nIssueActions`,
+                // `vIssueActions`, `ik`, and `issueAuthSig`.
                 orchard_zsa_issue_data.zcash_serialize(&mut writer)?;
             }
         }
@@ -1288,12 +1268,6 @@ pub const MIN_TRANSPARENT_TX_V4_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4;
 ///
 /// v5 transactions also have an expiry height and a consensus branch ID.
 pub const MIN_TRANSPARENT_TX_V5_SIZE: u64 = MIN_TRANSPARENT_TX_SIZE + 4 + 4;
-
-/// The minimum transaction size for v6 transactions.
-///
-#[allow(clippy::empty_line_after_doc_comments)]
-/// FIXME: remove "clippy" line above, uncomment line below and specify a proper value and description.
-//pub const MIN_TRANSPARENT_TX_V6_SIZE: u64 = MIN_TRANSPARENT_TX_V5_SIZE;
 
 /// No valid Zcash message contains more transactions than can fit in a single block
 ///

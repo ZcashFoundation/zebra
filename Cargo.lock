@@ -1372,7 +1372,7 @@ dependencies = [
 [[package]]
 name = "equihash"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -1407,7 +1407,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "blake2b_simd",
 ]
@@ -2878,7 +2878,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 [[package]]
 name = "orchard"
 version = "0.8.0"
-source = "git+https://github.com/QED-it/orchard?rev=3394cfc1ac156f9cc7e8507467cd2ac792ce20bd#3394cfc1ac156f9cc7e8507467cd2ac792ce20bd"
+source = "git+https://github.com/QED-it/orchard?rev=831ca109705a409bc3d3b82e76245e45dd0f0812#831ca109705a409bc3d3b82e76245e45dd0f0812"
 dependencies = [
  "aes",
  "bitvec",
@@ -5815,7 +5815,7 @@ checksum = "213b7324336b53d2414b2db8537e56544d981803139155afa84f76eeebb7a546"
 [[package]]
 name = "zcash_address"
 version = "0.3.2"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "bech32",
  "bs58",
@@ -5827,7 +5827,7 @@ dependencies = [
 [[package]]
 name = "zcash_client_backend"
 version = "0.12.1"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "base64 0.21.7",
  "bech32",
@@ -5866,7 +5866,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "byteorder",
  "nonempty",
@@ -5875,7 +5875,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -5885,7 +5885,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.2.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -5922,14 +5922,14 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.15.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "aes",
  "bip0039",
  "blake2b_simd",
  "byteorder",
  "document-features",
- "equihash 0.2.0 (git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq)",
+ "equihash 0.2.0 (git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4)",
  "ff",
  "fpe",
  "group",
@@ -5983,7 +5983,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.1.1"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "document-features",
  "memuse",
@@ -6525,7 +6525,7 @@ dependencies = [
 [[package]]
 name = "zip321"
 version = "0.0.0"
-source = "git+https://github.com/QED-it/librustzcash?branch=pub-burn-read-write-orchard-flavors-eq#a84cfc2daf04d500178daf9a6fd4b2846882c7a6"
+source = "git+https://github.com/QED-it/librustzcash?rev=e88964e248c9038e757771b8225c47ac8772abc4#e88964e248c9038e757771b8225c47ac8772abc4"
 dependencies = [
  "base64 0.21.7",
  "nom",

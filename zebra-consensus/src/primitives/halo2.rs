@@ -19,7 +19,10 @@ use tower::{util::ServiceFn, Service};
 use tower_batch_control::{Batch, BatchControl};
 use tower_fallback::Fallback;
 
-use zebra_chain::orchard::{ActionGroup, OrchardVanilla, OrchardZSA, ShieldedDataFlavor};
+use zebra_chain::orchard::{ActionGroup, OrchardVanilla, ShieldedDataFlavor};
+
+#[cfg(feature = "tx-v6")]
+use zebra_chain::orchard::OrchardZSA;
 
 use crate::BoxError;
 
@@ -75,12 +78,14 @@ pub type BatchVerifyingKey = ItemVerifyingKey;
 /// This is the key used to verify individual items.
 pub type ItemVerifyingKey = VerifyingKey;
 
-// FIXME: Check if the Orchard code (called from the zebra-consensus) checks burn as a part of bidning signature
 lazy_static::lazy_static! {
     /// The halo2 proof verifying key for Orchard Vanilla
     pub static ref VERIFYING_KEY_VANILLA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardVanilla>();
+}
 
-    /// The halo2 proof verifying key for Orchard ZSA
+#[cfg(feature = "tx-v6")]
+lazy_static::lazy_static! {
+    /// The halo2 proof verifying key for OrchardZSA
     pub static ref VERIFYING_KEY_ZSA: ItemVerifyingKey = ItemVerifyingKey::build::<OrchardZSA>();
 }
 
@@ -143,7 +148,7 @@ impl<V: OrchardVerifier> From<&ActionGroup<V>> for Item {
         let anchor = tree::Anchor::from_bytes(action_group.shared_anchor.into()).unwrap();
 
         let flags = orchard::bundle::Flags::from_byte(action_group.flags.bits())
-            .expect("type should not have unexpected bits");
+            .expect("failed to convert flags: action_group.flags contains unexpected bits that are not valid in orchard::bundle::Flags");
 
         let instances = action_group
             .actions()
@@ -242,6 +247,7 @@ pub static VERIFIER_VANILLA: Lazy<VerificationContext> =
     Lazy::new(create_verification_context::<OrchardVanilla>);
 
 /// FIXME: copy a doc from VERIFIER_VANILLA or just refer to its doc?
+#[cfg(feature = "tx-v6")]
 pub static VERIFIER_ZSA: Lazy<VerificationContext> =
     Lazy::new(create_verification_context::<OrchardZSA>);
 
@@ -257,6 +263,7 @@ impl OrchardVerifier for OrchardVanilla {
     }
 }
 
+#[cfg(feature = "tx-v6")]
 impl OrchardVerifier for OrchardZSA {
     const ZSA_ENABLED: bool = true;
 

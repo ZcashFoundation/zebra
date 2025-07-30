@@ -38,7 +38,7 @@ impl IssueData {
     pub(crate) fn note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
         self.0.actions().iter().flat_map(|action| {
             action.notes().iter().map(|note| {
-                // FIXME: Make `ExtractedNoteCommitment::inner` public in `orchard` (this would
+                // TODO: FIXME: Make `ExtractedNoteCommitment::inner` public in `orchard` (this would
                 // eliminate the need for the workaround of converting `pallas::Base` from bytes
                 // here), or introduce a new public method in `orchard::issuance::IssueBundle` to
                 // retrieve note commitments directly from `orchard`.
@@ -60,8 +60,6 @@ impl ZcashSerialize for Option<IssueData> {
     }
 }
 
-// We can't split IssueData out of Option<IssueData> deserialization,
-// because the counts are read along with the arrays.
 impl ZcashDeserialize for Option<IssueData> {
     fn zcash_deserialize<R: io::Read>(reader: R) -> Result<Self, SerializationError> {
         Ok(read_v6_bundle(reader)?.map(IssueData))
@@ -71,7 +69,6 @@ impl ZcashDeserialize for Option<IssueData> {
 #[cfg(any(test, feature = "proptest-impl", feature = "elasticsearch"))]
 impl serde::Serialize for IssueData {
     fn serialize<S: serde::Serializer>(&self, _serializer: S) -> Result<S::Ok, S::Error> {
-        // TODO: FIXME: implement Serde serialization here
-        unimplemented!("Serde serialization for IssueData not implemented");
+        unimplemented!("Serde serialization for IssueData functionality is not needed for Zebra");
     }
 }

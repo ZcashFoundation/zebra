@@ -446,7 +446,22 @@ enum SpendConflictTestInput {
 
         conflict: SpendConflictForTransactionV5,
     },
-    // FIXME: add V6 test
+
+    /// Test V6 transactions to include OrchardZSA nullifier conflicts.
+    #[cfg(feature = "tx-v6")]
+    V6 {
+        #[proptest(
+            strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        first: DisplayToDebug<Transaction>,
+
+        #[proptest(
+            strategy = "Transaction::v6_strategy(LedgerState::default()).prop_map(DisplayToDebug)"
+        )]
+        second: DisplayToDebug<Transaction>,
+
+        conflict: SpendConflictForTransactionV6,
+    },
 }
 
 impl SpendConflictTestInput {
@@ -464,6 +479,17 @@ impl SpendConflictTestInput {
                 (first, second)
             }
             SpendConflictTestInput::V5 {
+                mut first,
+                mut second,
+                conflict,
+            } => {
+                conflict.clone().apply_to(&mut first);
+                conflict.apply_to(&mut second);
+
+                (first, second)
+            }
+            #[cfg(feature = "tx-v6")]
+            SpendConflictTestInput::V6 {
                 mut first,
                 mut second,
                 conflict,
@@ -498,6 +524,8 @@ impl SpendConflictTestInput {
         let (mut first, mut second) = match self {
             SpendConflictTestInput::V4 { first, second, .. } => (first, second),
             SpendConflictTestInput::V5 { first, second, .. } => (first, second),
+            #[cfg(feature = "tx-v6")]
+            SpendConflictTestInput::V6 { first, second, .. } => (first, second),
         };
 
         Self::remove_transparent_conflicts(&mut first, &mut second);
@@ -722,12 +750,11 @@ impl SpendConflictTestInput {
                     ..
                 } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
-                // FIXME: implement for V6
                 #[cfg(feature = "tx-v6")]
                 Transaction::V6 {
-                    orchard_shielded_data: _,
+                    orchard_shielded_data,
                     ..
-                } => {}
+                } => Self::remove_orchard_actions_with_conflicts(orchard_shielded_data, &conflicts),
 
                 // No Spends
                 Transaction::V1 { .. }
@@ -742,8 +769,8 @@ impl SpendConflictTestInput {
     /// present in the `conflicts` set.
     ///
     /// This may clear the entire shielded data.
-    fn remove_orchard_actions_with_conflicts(
-        maybe_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
+    fn remove_orchard_actions_with_conflicts<Flavor: orchard::ShieldedDataFlavor>(
+        maybe_shielded_data: &mut Option<orchard::ShieldedData<Flavor>>,
         conflicts: &HashSet<orchard::Nullifier>,
     ) {
         if let Some(shielded_data) = maybe_shielded_data {
@@ -776,7 +803,16 @@ enum SpendConflictForTransactionV4 {
 enum SpendConflictForTransactionV5 {
     Transparent(Box<TransparentSpendConflict>),
     Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
-    Orchard(Box<OrchardSpendConflict>),
+    Orchard(Box<OrchardSpendConflict<orchard::OrchardVanilla>>),
+}
+
+/// A spend conflict valid for V6 transactions.
+#[cfg(feature = "tx-v6")]
+#[derive(Arbitrary, Clone, Debug)]
+enum SpendConflictForTransactionV6 {
+    Transparent(Box<TransparentSpendConflict>),
+    Sapling(Box<SaplingSpendConflict<sapling::SharedAnchor>>),
+    Orchard(Box<OrchardSpendConflict<orchard::OrchardZSA>>),
 }
 
 /// A conflict caused by spending the same UTXO.
@@ -799,11 +835,11 @@ struct SaplingSpendConflict<A: sapling::AnchorVariant + Clone> {
     fallback_shielded_data: DisplayToDebug<sapling::ShieldedData<A>>,
 }
 
-// FIXME: make it a generic to support V6
 /// A conflict caused by revealing the same Orchard nullifier.
 #[derive(Arbitrary, Clone, Debug)]
-struct OrchardSpendConflict {
-    new_shielded_data: DisplayToDebug<orchard::ShieldedData<orchard::OrchardVanilla>>,
+#[proptest(no_bound)]
+struct OrchardSpendConflict<Flavor: orchard::ShieldedDataFlavor + 'static> {
+    new_shielded_data: DisplayToDebug<orchard::ShieldedData<Flavor>>,
 }
 
 impl SpendConflictForTransactionV4 {
@@ -846,6 +882,31 @@ impl SpendConflictForTransactionV5 {
         };
 
         use SpendConflictForTransactionV5::*;
+        match self {
+            Transparent(transparent_conflict) => transparent_conflict.apply_to(inputs),
+            Sapling(sapling_conflict) => sapling_conflict.apply_to(sapling_shielded_data),
+            Orchard(orchard_conflict) => orchard_conflict.apply_to(orchard_shielded_data),
+        }
+    }
+}
+
+#[cfg(feature = "tx-v6")]
+impl SpendConflictForTransactionV6 {
+    /// Apply a spend conflict to a V6 transaction.
+    ///
+    /// Changes the `transaction_v6` to include the spend that will result in a conflict.
+    pub fn apply_to(self, transaction_v6: &mut Transaction) {
+        let (inputs, sapling_shielded_data, orchard_shielded_data) = match transaction_v6 {
+            Transaction::V6 {
+                inputs,
+                sapling_shielded_data,
+                orchard_shielded_data,
+                ..
+            } => (inputs, sapling_shielded_data, orchard_shielded_data),
+            _ => unreachable!("incorrect transaction version generated for test"),
+        };
+
+        use SpendConflictForTransactionV6::*;
         match self {
             Transparent(transparent_conflict) => transparent_conflict.apply_to(inputs),
             Sapling(sapling_conflict) => sapling_conflict.apply_to(sapling_shielded_data),
@@ -940,7 +1001,7 @@ impl<A: sapling::AnchorVariant + Clone> SaplingSpendConflict<A> {
     }
 }
 
-impl OrchardSpendConflict {
+impl<Flavor: orchard::ShieldedDataFlavor> OrchardSpendConflict<Flavor> {
     /// Apply a Orchard spend conflict.
     ///
     /// Ensures that a transaction's `orchard_shielded_data` has a nullifier used to represent a
@@ -949,10 +1010,7 @@ impl OrchardSpendConflict {
     /// the new action is inserted in the transaction.
     ///
     /// The transaction will then conflict with any other transaction with the same new nullifier.
-    pub fn apply_to(
-        self,
-        orchard_shielded_data: &mut Option<orchard::ShieldedData<orchard::OrchardVanilla>>,
-    ) {
+    pub fn apply_to(self, orchard_shielded_data: &mut Option<orchard::ShieldedData<Flavor>>) {
         if let Some(shielded_data) = orchard_shielded_data.as_mut() {
             // FIXME: works for V5 or V6 with a single action group only
             shielded_data

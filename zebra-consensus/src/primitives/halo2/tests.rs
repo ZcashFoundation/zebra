@@ -18,29 +18,33 @@ use orchard::{
 use rand::rngs::OsRng;
 
 use zebra_chain::{
-    orchard::{OrchardVanilla, ShieldedData},
-    serialization::{AtLeastOne, ZcashDeserializeInto, ZcashSerialize},
+    orchard::{ShieldedData, ShieldedDataFlavor},
+    serialization::{AtLeastOne, ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
 };
 
 use crate::primitives::halo2::*;
 
-// TODO: Add support for OrchardZSA (see OrchardVanilla and AssetBase::native() usage below)
+// FIXME: Where is this function called from?
 #[allow(dead_code, clippy::print_stdout)]
-fn generate_test_vectors() {
-    let proving_key = ProvingKey::build::<OrchardVanilla>();
+fn generate_test_vectors<Flavor: ShieldedDataFlavor>()
+where
+    ShieldedData<Flavor>: ZcashSerialize,
+{
+    let proving_key = ProvingKey::build::<Flavor>();
 
     let rng = OsRng;
 
     let sk = SpendingKey::from_bytes([7; 32]).unwrap();
     let recipient = FullViewingKey::from(&sk).address_at(0u32, Scope::External);
 
+    // FIXME: Add ENABLE_ZSA for OrchardZSA?
     let flags =
         zebra_chain::orchard::Flags::ENABLE_SPENDS | zebra_chain::orchard::Flags::ENABLE_OUTPUTS;
 
     let anchor_bytes = [0; 32];
     let note_value = 10;
 
-    let shielded_data: Vec<ShieldedData<OrchardVanilla>> = (1..=4)
+    let shielded_data: Vec<ShieldedData<Flavor>> = (1..=4)
         .map(|num_recipients| {
             let mut builder = Builder::new(
                 BundleType::Transactional {
@@ -56,13 +60,14 @@ fn generate_test_vectors() {
                         None,
                         recipient,
                         NoteValue::from_raw(note_value),
+                        // FIXME: Use another AssetBase for OrchardZSA?
                         AssetBase::native(),
                         None,
                     )
                     .unwrap();
             }
 
-            let bundle: Bundle<_, i64, OrchardVanilla> = builder.build(rng).unwrap().0;
+            let bundle: Bundle<_, i64, Flavor> = builder.build(rng).unwrap().0;
 
             let bundle = bundle
                 .create_proof(&proving_key, rng)
@@ -70,7 +75,7 @@ fn generate_test_vectors() {
                 .apply_signatures(rng, [0; 32], &[])
                 .unwrap();
 
-            ShieldedData::<OrchardVanilla> {
+            ShieldedData::<Flavor> {
                 action_groups: AtLeastOne::from_one(ActionGroup {
                     flags,
                     shared_anchor: anchor_bytes.try_into().unwrap(),
@@ -81,13 +86,18 @@ fn generate_test_vectors() {
                         .actions()
                         .iter()
                         .map(|a| {
-                            let action = zebra_chain::orchard::Action::<OrchardVanilla> {
+                            let action = zebra_chain::orchard::Action::<Flavor> {
                                 cv: a.cv_net().to_bytes().try_into().unwrap(),
                                 nullifier: a.nullifier().to_bytes().try_into().unwrap(),
                                 rk: <[u8; 32]>::from(a.rk()).into(),
                                 cm_x: pallas::Base::from_repr(a.cmx().into()).unwrap(),
                                 ephemeral_key: a.encrypted_note().epk_bytes.try_into().unwrap(),
-                                enc_ciphertext: a.encrypted_note().enc_ciphertext.0.into(),
+                                enc_ciphertext: a
+                                    .encrypted_note()
+                                    .enc_ciphertext
+                                    .as_ref()
+                                    .try_into()
+                                    .unwrap(),
                                 out_ciphertext: a.encrypted_note().out_ciphertext.into(),
                             };
                             zebra_chain::orchard::shielded_data::AuthorizedAction {
@@ -100,7 +110,7 @@ fn generate_test_vectors() {
                         .unwrap(),
                     // FIXME: use a proper value when implementing V6
                     #[cfg(feature = "tx-v6")]
-                    burn: Default::default(),
+                    burn: bundle.burn().as_slice().into(),
                 }),
                 value_balance: note_value.try_into().unwrap(),
                 binding_sig: <[u8; 64]>::from(bundle.authorization().binding_signature()).into(),
@@ -116,9 +126,9 @@ fn generate_test_vectors() {
     }
 }
 
-async fn verify_orchard_halo2_proofs<V>(
+async fn verify_orchard_halo2_proofs<V, Flavor: OrchardVerifier>(
     verifier: &mut V,
-    shielded_data: Vec<ShieldedData<OrchardVanilla>>,
+    shielded_data: Vec<ShieldedData<Flavor>>,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -144,17 +154,17 @@ where
     Ok(())
 }
 
-// FIXME: add OrchardZSA support
-#[tokio::test(flavor = "multi_thread")]
-async fn verify_generated_halo2_proofs() {
+async fn verify_generated_halo2_proofs<V: OrchardVerifier>(shielded_data_test_vectors: &[&[u8]])
+where
+    Option<ShieldedData<V>>: ZcashDeserialize,
+{
     let _init_guard = zebra_test::init();
 
     // These test vectors are generated by `generate_test_vectors()` function.
-    let shielded_data = zebra_test::vectors::ORCHARD_SHIELDED_DATA
-        .clone()
+    let shielded_data = shielded_data_test_vectors
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<ShieldedData<OrchardVanilla>> = bytes
+            let maybe_shielded_data: Option<ShieldedData<V>> = bytes
                 .zcash_deserialize_into()
                 .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()
@@ -164,7 +174,7 @@ async fn verify_generated_halo2_proofs() {
     // Use separate verifier so shared batch tasks aren't killed when the test ends (#2390)
     let mut verifier = Fallback::new(
         Batch::new(
-            Verifier::new(OrchardVanilla::get_verifying_key()),
+            Verifier::new(V::get_verifying_key()),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -172,7 +182,7 @@ async fn verify_generated_halo2_proofs() {
         tower::service_fn(
             (|item: Item| {
                 ready(
-                    item.verify_single(OrchardVanilla::get_verifying_key())
+                    item.verify_single(V::get_verifying_key())
                         .map_err(Halo2Error::from),
                 )
             }) as fn(_) -> _,
@@ -185,9 +195,22 @@ async fn verify_generated_halo2_proofs() {
         .is_ok());
 }
 
-async fn verify_invalid_orchard_halo2_proofs<V>(
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_generated_halo2_proofs_vanilla() {
+    verify_generated_halo2_proofs::<OrchardVanilla>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA)
+        .await
+}
+
+#[cfg(feature = "tx-v6")]
+#[tokio::test(flavor = "multi_thread")]
+async fn verify_generated_halo2_proofs_zsa() {
+    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA)
+        .await
+}
+
+async fn verify_invalid_orchard_halo2_proofs<V, Flavor: OrchardVerifier>(
     verifier: &mut V,
-    shielded_data: Vec<ShieldedData<OrchardVanilla>>,
+    shielded_data: Vec<ShieldedData<Flavor>>,
 ) -> Result<(), V::Error>
 where
     V: tower::Service<Item, Response = ()>,
@@ -201,6 +224,7 @@ where
 
             ag.flags.remove(zebra_chain::orchard::Flags::ENABLE_SPENDS);
             ag.flags.remove(zebra_chain::orchard::Flags::ENABLE_OUTPUTS);
+            // FIXME: What about zebra_chain::orchard::Flags::ENABLE_ZSA?
 
             tracing::trace!(?ag);
 
@@ -218,17 +242,18 @@ where
     Ok(())
 }
 
-// FIXME: add OrchardZSA support
-#[tokio::test(flavor = "multi_thread")]
-async fn correctly_err_on_invalid_halo2_proofs() {
+async fn correctly_err_on_invalid_halo2_proofs<V: OrchardVerifier>(
+    shielded_data_test_vectors: &[&[u8]],
+) where
+    Option<ShieldedData<V>>: ZcashDeserialize,
+{
     let _init_guard = zebra_test::init();
 
     // These test vectors are generated by `generate_test_vectors()` function.
-    let shielded_data = zebra_test::vectors::ORCHARD_SHIELDED_DATA
-        .clone()
+    let shielded_data = shielded_data_test_vectors
         .iter()
         .map(|bytes| {
-            let maybe_shielded_data: Option<ShieldedData<OrchardVanilla>> = bytes
+            let maybe_shielded_data: Option<ShieldedData<V>> = bytes
                 .zcash_deserialize_into()
                 .expect("a valid orchard::ShieldedData instance");
             maybe_shielded_data.unwrap()
@@ -238,7 +263,7 @@ async fn correctly_err_on_invalid_halo2_proofs() {
     // Use separate verifier so shared batch tasks aren't killed when the test ends (#2390)
     let mut verifier = Fallback::new(
         Batch::new(
-            Verifier::new(OrchardVanilla::get_verifying_key()),
+            Verifier::new(V::get_verifying_key()),
             crate::primitives::MAX_BATCH_SIZE,
             None,
             crate::primitives::MAX_BATCH_LATENCY,
@@ -246,7 +271,7 @@ async fn correctly_err_on_invalid_halo2_proofs() {
         tower::service_fn(
             (|item: Item| {
                 ready(
-                    item.verify_single(OrchardVanilla::get_verifying_key())
+                    item.verify_single(V::get_verifying_key())
                         .map_err(Halo2Error::from),
                 )
             }) as fn(_) -> _,
@@ -259,4 +284,21 @@ async fn correctly_err_on_invalid_halo2_proofs() {
             .await
             .is_err()
     );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
+    correctly_err_on_invalid_halo2_proofs::<OrchardVanilla>(
+        &zebra_test::vectors::ORCHARD_SHIELDED_DATA,
+    )
+    .await
+}
+
+#[cfg(feature = "tx-v6")]
+#[tokio::test(flavor = "multi_thread")]
+async fn correctly_err_on_invalid_halo2_proofs_zsa() {
+    correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(
+        &zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA,
+    )
+    .await
 }
