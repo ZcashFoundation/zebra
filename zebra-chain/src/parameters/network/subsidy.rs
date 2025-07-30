@@ -302,7 +302,7 @@ pub const NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET: [(&str, Amount<NonNegative>); 0] 
 /// The expected total amount of the one-time lockbox disbursement on Mainnet.
 // TODO: Add a reference to the ZIP and update this value if needed.
 pub const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET: Amount<NonNegative> =
-    Amount::new_from_zec(69_300);
+    Amount::new_from_zec(78_750);
 
 /// The expected total amount of the one-time lockbox disbursement on Testnet.
 // TODO: Add a reference to the ZIP and update this value if needed.
