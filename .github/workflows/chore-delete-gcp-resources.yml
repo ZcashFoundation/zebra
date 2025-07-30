@@ -51,13 +51,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@v2.1.11
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@v2.1.5
 
       # Deletes all mainnet and testnet instances older than $DELETE_INSTANCE_DAYS days.
       #
@@ -123,7 +123,7 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@v2.1.11
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_DEPLOYMENTS_SA }}'
