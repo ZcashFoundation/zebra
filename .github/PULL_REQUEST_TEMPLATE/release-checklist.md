@@ -178,14 +178,15 @@ The end of support height is calculated from the current blockchain height:
 - [ ] It is recommended that the following step be run from a fresh checkout of
       the repo, to avoid accidentally publishing files like e.g. logs that might
       be lingering around
-- [ ] Publish the crates to crates.io:
+- [ ] Publish the crates to crates.io; edit the list to only include the crates that
+      have been changed, but keep their overall order:
 
 ```
 for c in zebra-test tower-fallback zebra-chain tower-batch-control zebra-node-services zebra-script zebra-state zebra-consensus zebra-network zebra-rpc zebra-utils zebrad; do cargo release publish --verbose --execute -p $c; done
 ```
 
 - [ ] Check that Zebra can be installed from `crates.io`:
-      `cargo install --locked --force --version 1.minor.patch zebrad && ~/.cargo/bin/zebrad`
+      `cargo install --locked --force --version <version> zebrad && ~/.cargo/bin/zebrad`
       and put the output in a comment on the PR.
 
 ## Publish Docker Images

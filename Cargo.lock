@@ -6637,6 +6637,7 @@ dependencies = [
  "hex",
  "lazy_static",
  "thiserror 2.0.12",
+ "zcash_primitives",
  "zcash_script",
  "zebra-chain",
  "zebra-test",
@@ -6749,7 +6750,7 @@ dependencies = [
 
 [[package]]
 name = "zebrad"
-version = "2.4.1"
+version = "2.4.2"
 dependencies = [
  "abscissa_core",
  "atty",
