@@ -2974,14 +2974,14 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
 
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(
+    let net = Network::new_regtest(
         ConfiguredActivationHeights {
             nu5: Some(100),
             ..Default::default()
         }
         .into(),
     );
-    let mut config = os_assigned_rpc_port_config(false, &network)?;
+    let mut config = os_assigned_rpc_port_config(false, &net)?;
 
     config.state.ephemeral = false;
     config.rpc.indexer_listen_addr = Some(std::net::SocketAddr::from(([127, 0, 0, 1], 0)));
