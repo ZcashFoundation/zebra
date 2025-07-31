@@ -37,6 +37,7 @@ halo2 = { package = "halo2_proofs", version = "0.3" }
 jubjub = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
+mset.workspace = true
 
 chrono = { workspace = true, features = ["clock", "std"] }
 lazy_static = { workspace = true }
