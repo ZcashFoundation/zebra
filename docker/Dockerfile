@@ -116,11 +116,8 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=cache,target=${CARGO_HOME} \
     cargo test --locked --release --workspace --no-run \
     --features "${FEATURES} zebra-checkpoints" && \
-    # Step 2: Copy final binaries needed at runtime
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin
-
-COPY --link ./ ${HOME}
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
