@@ -23,14 +23,14 @@ resolver = "2"
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.11"
 sapling-crypto = "0.5"
-zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "nu6.1-stabilisation" }
+zcash_address = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
 zcash_encoding = "0.3"
 zcash_history = "0.4"
-zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "nu6.1-stabilisation" }
-zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "nu6.1-stabilisation" }
+zcash_keys = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
+zcash_primitives = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
 zcash_proofs = "0.22"
-zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "nu6.1-stabilisation" }
-zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "nu6.1-stabilisation" }
+zcash_transparent = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
+zcash_protocol = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
