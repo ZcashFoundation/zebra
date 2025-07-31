@@ -90,18 +90,55 @@ pub struct ConfiguredLockboxDisbursement {
 
 /// Configurable funding streams for configured Testnets.
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, from = "DConfiguredFundingStreams")]
 pub struct ConfiguredFundingStreams {
-    /// Start and end height for funding streams see [`FundingStreams::height_range`] for more details.
-    pub height_range: Option<std::ops::Range<Height>>,
+    /// Start and end height for funding streams see [`FundingStreams::height_ranges`] for more details.
+    pub height_ranges: Option<Vec<std::ops::Range<Height>>>,
     /// Funding stream recipients, see [`FundingStreams::recipients`] for more details.
     pub recipients: Option<Vec<ConfiguredFundingStreamRecipient>>,
+}
+
+/// An intermediate type used to deserialize [`ConfiguredFundingStreams`].
+#[derive(Clone, Debug, serde::Deserialize)]
+struct DConfiguredFundingStreams {
+    /// Start and end height for funding streams see [`FundingStreams::height_ranges`] for more details.
+    height_ranges: Option<DHeightRanges>,
+    /// Funding stream recipients, see [`FundingStreams::recipients`] for more details.
+    recipients: Option<Vec<ConfiguredFundingStreamRecipient>>,
+}
+
+impl From<DConfiguredFundingStreams> for ConfiguredFundingStreams {
+    fn from(value: DConfiguredFundingStreams) -> Self {
+        Self {
+            height_ranges: value.height_ranges.map(Into::into),
+            recipients: value.recipients,
+        }
+    }
+}
+
+/// An intermediate type used to deserialize [`std::ops::Range<Height>>`].
+#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[serde(untagged)]
+enum DHeightRanges {
+    /// A list of height ranges.
+    Ranges(Vec<std::ops::Range<Height>>),
+    /// A single height range.
+    Range(std::ops::Range<Height>),
+}
+
+impl From<DHeightRanges> for Vec<std::ops::Range<Height>> {
+    fn from(value: DHeightRanges) -> Self {
+        match value {
+            DHeightRanges::Ranges(ranges) => ranges,
+            DHeightRanges::Range(range) => vec![range],
+        }
+    }
 }
 
 impl From<&FundingStreams> for ConfiguredFundingStreams {
     fn from(value: &FundingStreams) -> Self {
         Self {
-            height_range: Some(value.height_range().clone()),
+            height_ranges: Some(value.height_ranges().to_vec()),
             recipients: Some(
                 value
                     .recipients()
@@ -172,7 +209,7 @@ impl ConfiguredFundingStreams {
     /// Returns an empty [`ConfiguredFundingStreams`].
     fn empty() -> Self {
         Self {
-            height_range: None,
+            height_ranges: None,
             recipients: Some(Vec::new()),
         }
     }
@@ -185,9 +222,9 @@ impl ConfiguredFundingStreams {
         parameters_builder: &ParametersBuilder,
     ) -> FundingStreams {
         let network = parameters_builder.to_network_unchecked();
-        let height_range = self
-            .height_range
-            .unwrap_or(default_funding_streams.height_range().clone());
+        let height_ranges = self
+            .height_ranges
+            .unwrap_or(default_funding_streams.height_ranges().to_vec());
 
         let recipients = self
             .recipients
@@ -199,12 +236,14 @@ impl ConfiguredFundingStreams {
             })
             .unwrap_or(default_funding_streams.recipients().clone());
 
-        assert!(
-            height_range.start < height_range.end,
-            "funding stream end height must be above start height"
-        );
+        for height_range in &height_ranges {
+            assert!(
+                height_range.start < height_range.end,
+                "funding stream end height must be above start height"
+            );
+        }
 
-        let funding_streams = FundingStreams::new(height_range.clone(), recipients);
+        let funding_streams = FundingStreams::new(height_ranges.to_vec(), recipients);
 
         check_funding_stream_address_period(&funding_streams, &network);
 
@@ -229,18 +268,22 @@ impl ConfiguredFundingStreams {
 /// Checks that the provided [`FundingStreams`] has sufficient recipient addresses for the
 /// funding stream address period of the provided [`Network`].
 fn check_funding_stream_address_period(funding_streams: &FundingStreams, network: &Network) {
-    let height_range = funding_streams.height_range();
-    let expected_min_num_addresses =
-        1u32.checked_add(funding_stream_address_period(
-            height_range
-                .end
-                .previous()
-                .expect("end height must be above start height and genesis height"),
-            network,
-        ))
-        .expect("no overflow should happen in this sum")
-        .checked_sub(funding_stream_address_period(height_range.start, network))
-        .expect("no overflow should happen in this sub") as usize;
+    let height_ranges = funding_streams.height_ranges();
+    let expected_min_num_addresses = height_ranges
+        .iter()
+        .map(|height_range| {
+            1u32.checked_add(funding_stream_address_period(
+                height_range
+                    .end
+                    .previous()
+                    .expect("end height must be above start height and genesis height"),
+                network,
+            ))
+            .expect("no overflow should happen in this sum")
+            .checked_sub(funding_stream_address_period(height_range.start, network))
+            .expect("no overflow should happen in this sub") as usize
+        })
+        .sum();
 
     for (&receiver, recipient) in funding_streams.recipients() {
         if receiver == FundingStreamReceiver::Deferred {

@@ -121,11 +121,11 @@ pub const LOCKBOX_SPECIFICATION: &str = "https://zips.z.cash/zip-1015";
 /// Funding stream recipients and height ranges.
 #[derive(Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct FundingStreams {
-    /// Start and end Heights for funding streams
+    /// [`Height`] ranges for funding streams
     /// as described in [protocol specification §7.10.1][7.10.1].
     ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    height_range: std::ops::Range<Height>,
+    height_ranges: Vec<std::ops::Range<Height>>,
     /// Funding stream recipients by [`FundingStreamReceiver`].
     recipients: HashMap<FundingStreamReceiver, FundingStreamRecipient>,
 }
@@ -133,18 +133,18 @@ pub struct FundingStreams {
 impl FundingStreams {
     /// Creates a new [`FundingStreams`].
     pub fn new(
-        height_range: std::ops::Range<Height>,
+        height_ranges: Vec<std::ops::Range<Height>>,
         recipients: HashMap<FundingStreamReceiver, FundingStreamRecipient>,
     ) -> Self {
         Self {
-            height_range,
+            height_ranges,
             recipients,
         }
     }
 
     /// Returns height range where these [`FundingStreams`] should apply.
-    pub fn height_range(&self) -> &std::ops::Range<Height> {
-        &self.height_range
+    pub fn height_ranges(&self) -> &[std::ops::Range<Height>] {
+        &self.height_ranges
     }
 
     /// Returns recipients of these [`FundingStreams`].
@@ -207,7 +207,7 @@ lazy_static! {
     /// The pre-NU6 funding streams for Mainnet as described in [protocol specification §7.10.1][7.10.1]
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref PRE_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        height_range: Height(1_046_400)..Height(2_726_400),
+        height_ranges: vec![Height(1_046_400)..Height(2_726_400)],
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
@@ -228,7 +228,7 @@ lazy_static! {
 
     /// The post-NU6 funding streams for Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET,
+        height_ranges: vec![POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET],
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
@@ -246,7 +246,7 @@ lazy_static! {
     /// The pre-NU6 funding streams for Testnet as described in [protocol specification §7.10.1][7.10.1]
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref PRE_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        height_range: Height(1_028_500)..Height(2_796_000),
+        height_ranges: vec![Height(1_028_500)..Height(2_796_000)],
         recipients: [
             (
                 FundingStreamReceiver::Ecc,
@@ -267,7 +267,7 @@ lazy_static! {
 
     /// The post-NU6 funding streams for Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        height_range: POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET,
+        height_ranges: vec![POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET],
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
@@ -636,7 +636,11 @@ pub fn funding_stream_values(
 
     if height >= canopy_height {
         let funding_streams = network.funding_streams(height);
-        if funding_streams.height_range().contains(&height) {
+        if funding_streams
+            .height_ranges()
+            .iter()
+            .any(|r| r.contains(&height))
+        {
             for (&receiver, recipient) in funding_streams.recipients() {
                 // - Spec equation: `fs.value = floor(block_subsidy(height)*(fs.numerator/fs.denominator))`:
                 //   https://zips.z.cash/protocol/protocol.pdf#subsidies
