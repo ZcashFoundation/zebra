@@ -328,7 +328,7 @@ const POST_NU6_FUNDING_STREAM_RANGE_TESTNET: std::ops::Range<Height> =
 
 /// The start height of post-NU6 funding streams on Testnet as described in [ZIP-271](https://zips.z.cash/zip-0271).
 // TODO: De-duplicate this and other start heights with activation height definitions (#9598).
-const POST_NU6_FUNDING_STREAM_ZIP_271_START_HEIGHT_TESTNET: u32 = 3_520_040;
+const POST_NU6_FUNDING_STREAM_ZIP_271_START_HEIGHT_TESTNET: u32 = 3_520_085;
 
 // /// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
 // /// in [ZIP-271](https://zips.z.cash/zip-0271).
