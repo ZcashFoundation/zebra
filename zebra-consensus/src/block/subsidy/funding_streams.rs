@@ -26,15 +26,28 @@ fn funding_stream_address_index(
 
     let funding_streams = network.funding_streams(height);
     let num_addresses = funding_streams.recipient(receiver)?.addresses().len();
+    let height_range_pos = funding_streams
+        .height_ranges()
+        .iter()
+        .position(|range| range.contains(&height))?;
 
-    let index = 1u32
-        .checked_add(funding_stream_address_period(height, network))
-        .expect("no overflow should happen in this sum")
-        .checked_sub(funding_stream_address_period(
-            funding_streams.height_range().start,
-            network,
-        ))
-        .expect("no overflow should happen in this sub") as usize;
+    let (past_height_ranges, [current_height_range, ..]) =
+        funding_streams.height_ranges().split_at(height_range_pos)
+    else {
+        unreachable!("index found with position() must exist in the slice");
+    };
+
+    // Start the index of each height range after the last index of the previous range.
+    // This logic will not re-use any addresses across height ranges.
+    let index = past_height_ranges
+        .iter()
+        .chain(std::iter::once(&(current_height_range.start..height)))
+        .fold(1u32, |acc, height_range| {
+            acc.checked_add(funding_stream_address_period(height_range.end, network))
+                .expect("no overflow should happen in this sum")
+                .checked_sub(funding_stream_address_period(height_range.start, network))
+                .expect("no overflow should happen in this sub")
+        }) as usize;
 
     assert!(index > 0 && index <= num_addresses);
     // spec formula will output an index starting at 1 but
