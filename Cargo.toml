@@ -23,14 +23,14 @@ resolver = "2"
 incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.11"
 sapling-crypto = "0.5"
-zcash_address = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
+zcash_address = { git = "https://github.com/str4d/librustzcash", rev = "92b4488fff78a170cf36fd454cce6c069d790721" }
 zcash_encoding = "0.3"
 zcash_history = "0.4"
-zcash_keys = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
-zcash_primitives = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
+zcash_keys = { git = "https://github.com/str4d/librustzcash", rev = "92b4488fff78a170cf36fd454cce6c069d790721" }
+zcash_primitives = { git = "https://github.com/str4d/librustzcash", rev = "92b4488fff78a170cf36fd454cce6c069d790721" }
 zcash_proofs = "0.22"
-zcash_transparent = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
-zcash_protocol = { git = "https://github.com/str4d/librustzcash", branch = "private-nu6.1-testnet" }
+zcash_transparent = { git = "https://github.com/str4d/librustzcash", rev = "92b4488fff78a170cf36fd454cce6c069d790721" }
+zcash_protocol = { git = "https://github.com/str4d/librustzcash", rev = "92b4488fff78a170cf36fd454cce6c069d790721" }
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"

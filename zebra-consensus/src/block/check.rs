@@ -292,8 +292,11 @@ pub fn miner_fees_are_valid(
         (transparent_value_balance - sapling_value_balance - orchard_value_balance
             + expected_deferred_pool_balance_change.value())
         .map_err(|_| SubsidyError::SumOverflow)?;
-    let total_input_value =
-        (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
+
+    let lockbox_deferred_input = network.lockbox_disbursement_total_amount(height);
+
+    let total_input_value = (expected_block_subsidy + block_miner_fees + lockbox_deferred_input)
+        .map_err(|_| SubsidyError::SumOverflow)?;
 
     // # Consensus
     //
