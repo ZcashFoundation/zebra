@@ -90,7 +90,11 @@ pub struct ConfiguredLockboxDisbursement {
 
 /// Configurable funding streams for configured Testnets.
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
-#[serde(deny_unknown_fields, from = "DConfiguredFundingStreams")]
+#[serde(
+    deny_unknown_fields,
+    from = "DConfiguredFundingStreams",
+    into = "DConfiguredFundingStreams"
+)]
 pub struct ConfiguredFundingStreams {
     /// Start and end height for funding streams see [`FundingStreams::height_ranges`] for more details.
     pub height_ranges: Option<Vec<std::ops::Range<Height>>>,
@@ -99,10 +103,11 @@ pub struct ConfiguredFundingStreams {
 }
 
 /// An intermediate type used to deserialize [`ConfiguredFundingStreams`].
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DConfiguredFundingStreams {
     /// Start and end height for funding streams see [`FundingStreams::height_ranges`] for more details.
-    height_ranges: Option<DHeightRanges>,
+    height_range: Option<DHeightRanges>,
     /// Funding stream recipients, see [`FundingStreams::recipients`] for more details.
     recipients: Option<Vec<ConfiguredFundingStreamRecipient>>,
 }
@@ -110,14 +115,23 @@ struct DConfiguredFundingStreams {
 impl From<DConfiguredFundingStreams> for ConfiguredFundingStreams {
     fn from(value: DConfiguredFundingStreams) -> Self {
         Self {
-            height_ranges: value.height_ranges.map(Into::into),
+            height_ranges: value.height_range.map(Into::into),
+            recipients: value.recipients,
+        }
+    }
+}
+
+impl From<ConfiguredFundingStreams> for DConfiguredFundingStreams {
+    fn from(value: ConfiguredFundingStreams) -> Self {
+        Self {
+            height_range: value.height_ranges.map(DHeightRanges::Ranges),
             recipients: value.recipients,
         }
     }
 }
 
 /// An intermediate type used to deserialize [`std::ops::Range<Height>>`].
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 enum DHeightRanges {
     /// A list of height ranges.
