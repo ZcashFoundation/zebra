@@ -228,7 +228,7 @@ lazy_static! {
 
     /// The post-NU6 funding streams for Mainnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_MAINNET: FundingStreams = FundingStreams {
-        height_ranges: vec![POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET],
+        height_ranges: vec![POST_NU6_FUNDING_STREAM_RANGE_MAINNET],
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
@@ -267,7 +267,7 @@ lazy_static! {
 
     /// The post-NU6 funding streams for Testnet as described in [ZIP-1015](https://zips.z.cash/zip-1015).
     pub static ref POST_NU6_FUNDING_STREAMS_TESTNET: FundingStreams = FundingStreams {
-        height_ranges: vec![POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET],
+        height_ranges: vec![POST_NU6_FUNDING_STREAM_RANGE_TESTNET, POST_NU6_FUNDING_STREAM_RANGE_ZIP_271_TESTNET],
         recipients: [
             (
                 FundingStreamReceiver::Deferred,
@@ -314,14 +314,30 @@ pub const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET: Amount<NonNegative
 const POST_NU6_FUNDING_STREAM_NUM_BLOCKS: u32 = 420_000;
 
 /// The post-NU6 funding stream height range on Mainnet
-const POST_NU6_FUNDING_STREAM_START_RANGE_MAINNET: std::ops::Range<Height> =
+const POST_NU6_FUNDING_STREAM_RANGE_MAINNET: std::ops::Range<Height> =
     Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET)
         ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_MAINNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
 
 /// The post-NU6 funding stream height range on Testnet
-const POST_NU6_FUNDING_STREAM_START_RANGE_TESTNET: std::ops::Range<Height> =
+const POST_NU6_FUNDING_STREAM_RANGE_TESTNET: std::ops::Range<Height> =
     Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET)
         ..Height(POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET + POST_NU6_FUNDING_STREAM_NUM_BLOCKS);
+
+/// The start height of post-NU6 funding streams on Testnet as described in [ZIP-271](https://zips.z.cash/zip-0271).
+// TODO: De-duplicate this and other start heights with activation height definitions (#9598).
+const POST_NU6_FUNDING_STREAM_ZIP_271_START_HEIGHT_TESTNET: u32 = 3_520_000;
+
+/// The number of blocks contained in the post-NU6 funding streams height ranges on Mainnet or Testnet, as specified
+/// in [ZIP-271](https://zips.z.cash/zip-0271).
+const POST_NU6_FUNDING_STREAM_ZIP_271_NUM_BLOCKS: u32 = 1_260_000;
+
+/// The post-NU6 funding stream height range on Testnet specified by [ZIP-271](https://zips.z.cash/zip-0271) and deployed by NU6.1
+const POST_NU6_FUNDING_STREAM_RANGE_ZIP_271_TESTNET: std::ops::Range<Height> =
+    Height(POST_NU6_FUNDING_STREAM_ZIP_271_START_HEIGHT_TESTNET)
+        ..Height(
+            POST_NU6_FUNDING_STREAM_ZIP_271_START_HEIGHT_TESTNET
+                + POST_NU6_FUNDING_STREAM_ZIP_271_NUM_BLOCKS,
+        );
 
 /// Address change interval function here as a constant
 /// as described in [protocol specification §7.10.1][7.10.1].
@@ -542,12 +558,13 @@ pub const FUNDING_STREAM_ZF_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRES
 pub const FUNDING_STREAM_MG_ADDRESSES_TESTNET: [&str; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET] =
     ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"; FUNDING_STREAMS_NUM_ADDRESSES_TESTNET];
 
-/// Number of addresses for each post-NU6 funding stream in the Testnet.
+/// Number of addresses for each post-NU6 funding stream in the Testnet used for
+/// [ZIP-1015](https://zips.z.cash/zip-1015) and [ZIP-271](https://zips.z.cash/zip-0271).
 /// In the spec ([protocol specification §7.10][7.10]) this is defined as: `fs.addressindex(fs.endheight - 1)`
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
+pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 50;
 
 /// List of addresses for the Major Grants post-NU6 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
 pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;
