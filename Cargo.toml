@@ -28,10 +28,12 @@ zcash_client_backend = "0.19"
 zcash_encoding = "0.3"
 zcash_history = "0.4"
 zcash_keys = "0.9"
+zcash_note_encryption = "0.4.1"
 zcash_primitives = "0.23"
 zcash_proofs = "0.23"
 zcash_transparent = "0.3"
 zcash_protocol = "0.5.1"
+zcash_script = "0.3.2"
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"
@@ -124,6 +126,9 @@ sha2 = "0.10"
 spandoc = "0.2"
 static_assertions = "1.1"
 structopt = "0.3"
+anyhow = "1.0"
+strum = "0.27"
+strum_macros = "0.27"
 syn = "2.0.100"
 tempfile = "3.20"
 thiserror = "2.0"
@@ -150,8 +155,17 @@ tracing-test = "0.2.4"
 uint = "0.10"
 vergen-git2 = { version = "1.0", default-features = false }
 x25519-dalek = "2.0.1"
-zcash_note_encryption = "0.4.1"
-zcash_script = "0.3.2"
+
+[patch.crates-io]
+zcash_primitives = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_address = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_client_backend = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_history = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash", branch = "construct-coinbase-txs" }
 
 [workspace.metadata.release]
 

@@ -16,9 +16,10 @@ use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
 use zebra_chain::parameters::Network;
+use zebra_rpc::config::mining::MinerAddressType;
 use zebra_test::{command::TestChild, net::random_known_port};
 use zebrad::{
-    components::{mempool, sync, tracing},
+    components::{mempool, sync, tracing, With},
     config::ZebradConfig,
 };
 
@@ -29,13 +30,13 @@ use crate::common::cached_state::DATABASE_FORMAT_CHECK_INTERVAL;
 /// - an ephemeral state,
 /// - the minimum syncer lookahead limit, and
 /// - shorter task intervals, to improve test coverage.
-pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
+pub fn default_test_config(net: &Network) -> ZebradConfig {
     const TEST_DURATION: Duration = Duration::from_secs(30);
 
     let network = zebra_network::Config {
         network: net.clone(),
         // The OS automatically chooses an unused port.
-        listen_addr: "127.0.0.1:0".parse()?,
+        listen_addr: "127.0.0.1:0".parse().unwrap(),
         crawl_new_peer_interval: TEST_DURATION,
         ..zebra_network::Config::default()
     };
@@ -64,43 +65,26 @@ pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
     let mut state = zebra_state::Config::ephemeral();
     state.debug_validity_check_interval = Some(DATABASE_FORMAT_CHECK_INTERVAL);
 
-    // These are the ZF funding stream addresses for mainnet and testnet.
-    #[allow(unused_mut)]
-    let mut mining = zebra_rpc::config::mining::Config::default();
-
-    let miner_address = if network.network.is_mainnet() {
-        // Mainnet UA
-        "u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a"
-    } else if network.network.is_regtest() {
-        // Regtest UA
-        "uregtest1a2yn922nnxyvnj4qmax07lkr7kmnyxq3rw0paa2kes87h2rapehrzgy8xrq665sg6aatmpgzkngwlumzr40e5y4vc40a809rsyqcwq25xfj5r2sxu774xdt6dj5xckjkv5ll0c2tv6qtsl60mpccwd6m95upy2da0rheqmkmxr7fv9z5uve0kpkmssxcuvzasewwns986yud6aact4y"
-    } else {
-        // Testnet UA
-        "utest1quxrs9munape90f833rnse9s02xwkvrh2yzlvm56rsg2lccpr3kwmprxw4zq6ukkv5ht6uvmzasf9pwwfhpfqct4ghmkp7zka6ufurnc9vkwvzt4jved8hld2cram6x75qxs0dgg3eq8gef8kttpw4eqjywnxpuns0fpfz072whje4xmld6ahy9dezsvzmugemn8lerr47lhcx3rzl6"
-    };
-
-    mining.miner_address = Some(miner_address.parse().expect("hard-coded address is valid"));
-
-    Ok(ZebradConfig {
+    ZebradConfig {
         network,
         state,
         sync,
         mempool,
         consensus,
         tracing,
-        mining,
         ..ZebradConfig::default()
-    })
+    }
+    .with(MinerAddressType::Transparent)
 }
 
 pub fn persistent_test_config(network: &Network) -> Result<ZebradConfig> {
-    let mut config = default_test_config(network)?;
+    let mut config = default_test_config(network);
     config.state.ephemeral = false;
     Ok(config)
 }
 
 pub fn external_address_test_config(network: &Network) -> Result<ZebradConfig> {
-    let mut config = default_test_config(network)?;
+    let mut config = default_test_config(network);
     config.network.external_addr = Some("127.0.0.1:0".parse()?);
     Ok(config)
 }
@@ -158,7 +142,7 @@ pub fn rpc_port_config(
 
     // Write a configuration that has the rpc listen_addr option set
     // TODO: split this config into another function?
-    let mut config = default_test_config(network)?;
+    let mut config = default_test_config(network);
     config.rpc.listen_addr = Some(zebra_rpc_listener);
     if parallel_cpu_threads {
         // Auto-configure to the number of CPU cores: most users configure this
