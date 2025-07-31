@@ -87,6 +87,11 @@ WORKDIR ${HOME}
 ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
+RUN mkdir -p ${CARGO_HOME} && \
+    mkdir -p ${CARGO_TARGET_DIR} && \
+    chown -R ${UID}:${GID} ${CARGO_HOME} && \
+    chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
+
 # Build Zebra test binaries, but don't run them
 #
 # Leverage a cache mount to ${CARGO_HOME} for downloaded dependencies,
@@ -131,9 +136,7 @@ COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # As the build has already run with the root user,
 # we need to set the correct permissions.
-RUN chown -R ${UID}:${GID} ${HOME} && \
-    chown -R ${UID}:${GID} ${CARGO_HOME} && \
-    chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
+RUN chown -R ${UID}:${GID} ${HOME}
 
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
