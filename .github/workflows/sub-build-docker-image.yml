@@ -195,4 +195,4 @@ jobs:
           only-severities: critical,high
           environment: ${{ (github.event_name == 'release' && !github.event.release.prerelease && 'prod') || (github.event_name == 'push' && github.ref_name == 'main' && 'stage') || (github.event_name == 'pull_request' && 'dev') }}
           organization: zfnd
-          github-token: ${{ secrets.GITHUB_TOKEN }} # to be able to write the comment a
+          github-token: ${{ secrets.GITHUB_TOKEN }} # to be able to write the comment
