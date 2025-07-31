@@ -5,9 +5,10 @@ name: Run tests
 # Ensures that only one workflow task will run at a time. Previous builds, if
 # already in process, will get cancelled. Only the latest commit will be allowed
 # to run, cancelling any workflows in between
+
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && 'schedule' || github.event_name == 'workflow_dispatch' && 'manual' || github.head_ref || github.ref_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
   merge_group:
@@ -146,6 +147,8 @@ jobs:
     uses: ./.github/workflows/sub-ci-unit-tests-docker.yml
     with:
       image_digest: ${{ needs.build.outputs.image_digest }}
+      network: ${{ inputs.network || vars.ZCASH_NETWORK || 'Mainnet' }}
+      no_cache: ${{ inputs.no_cache || false }}
     secrets: inherit
 
   # Runs Zebra integration tests
@@ -153,4 +156,11 @@ jobs:
     name: Integration tests
     needs: build
     uses: ./.github/workflows/sub-ci-integration-tests-gcp.yml
+    with:
+      network: ${{ inputs.network || vars.ZCASH_NETWORK || 'Mainnet' }}
+      regenerate-disks: ${{ inputs.regenerate-disks || false }}
+      run-full-sync: ${{ inputs.run-full-sync || false }}
+      run-lwd-sync: ${{ inputs.run-lwd-sync || false }}
+      force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
+      no_cache: ${{ inputs.no_cache || false }}
     secrets: inherit
