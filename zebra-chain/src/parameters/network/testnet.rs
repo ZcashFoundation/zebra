@@ -130,7 +130,7 @@ impl From<ConfiguredFundingStreams> for DConfiguredFundingStreams {
     }
 }
 
-/// An intermediate type used to deserialize [`std::ops::Range<Height>>`].
+/// An intermediate type used to deserialize [`std::ops::Range<Height>`].
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(untagged)]
 enum DHeightRanges {
