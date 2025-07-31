@@ -69,6 +69,16 @@ impl Amount<NonNegative> {
         Self::new(zec_value.checked_mul(COIN).expect("should fit in i64"))
     }
 
+    /// Divide an [`Amount`] by a value that the amount fits into evenly such that there is no remainder.
+    pub const fn div_exact(self, rhs: i64) -> Self {
+        let result = self.0.checked_div(rhs).expect("divisor must be non-zero");
+        if self.0 % rhs != 0 {
+            panic!("divisor must divide amount evenly, no remainder");
+        }
+
+        Self(result, PhantomData)
+    }
+
     /// Create a new non-negative [`Amount`] from a provided value in zatoshis.
     pub const fn new(zatoshis: i64) -> Self {
         assert!(zatoshis <= MAX_MONEY && zatoshis >= 0);

@@ -297,7 +297,10 @@ pub const NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET: [(&str, Amount<NonNegative>); 0] 
 /// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
 /// coinbase transaction on Testnet.
 // TODO: Update this with specified values once the ZIP is finalized.
-pub const NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET: [(&str, Amount<NonNegative>); 0] = [];
+pub const NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET: [(&str, Amount<NonNegative>); 10] = [(
+    "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8",
+    EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET.div_exact(10),
+); 10];
 
 /// The expected total amount of the one-time lockbox disbursement on Mainnet.
 // TODO: Add a reference to the ZIP and update this value if needed.
