@@ -259,7 +259,7 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
     // TODO: Use the specified consensus branch id for NU6.1, 0x4DEC4DF0 (#9598)
-    (Nu6_1, ConsensusBranchId(0x3fa27c1d)),
+    (Nu6_1, ConsensusBranchId(0xdaccf383)),
     #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0x77190ad8)),
 ];
@@ -571,6 +571,7 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
             zcash_protocol::consensus::NetworkUpgrade::Canopy => Self::Canopy,
             zcash_protocol::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
             zcash_protocol::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
+            zcash_protocol::consensus::NetworkUpgrade::Nu6_1 => Self::Nu6_1,
             // zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
         }
     }
