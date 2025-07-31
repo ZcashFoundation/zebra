@@ -1160,7 +1160,7 @@ impl Transaction {
                 ..
             } => Box::new(
                 orchard_shielded_data
-                    .into_iter()
+                    .iter()
                     .flat_map(orchard::ShieldedData::shared_anchors),
             ),
 
@@ -1170,7 +1170,7 @@ impl Transaction {
                 ..
             } => Box::new(
                 orchard_shielded_data
-                    .into_iter()
+                    .iter()
                     .flat_map(orchard::ShieldedData::shared_anchors),
             ),
         }
