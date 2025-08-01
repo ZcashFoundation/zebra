@@ -63,6 +63,19 @@ impl<C> fmt::Debug for Amount<C> {
     }
 }
 
+impl Amount<NonNegative> {
+    /// Create a new non-negative [`Amount`] from a provided value in ZEC.
+    pub const fn new_from_zec(zec_value: i64) -> Self {
+        Self::new(zec_value.checked_mul(COIN).expect("should fit in i64"))
+    }
+
+    /// Create a new non-negative [`Amount`] from a provided value in zatoshis.
+    pub const fn new(zatoshis: i64) -> Self {
+        assert!(zatoshis <= MAX_MONEY && zatoshis >= 0);
+        Self(zatoshis, PhantomData)
+    }
+}
+
 impl<C> Amount<C> {
     /// Convert this amount to a different Amount type if it satisfies the new constraint
     pub fn constrain<C2>(self) -> Result<Amount<C2>>
@@ -75,6 +88,11 @@ impl<C> Amount<C> {
     /// Returns the number of zatoshis in this amount.
     pub fn zatoshis(&self) -> i64 {
         self.0
+    }
+
+    /// Checked subtraction. Computes self - rhs, returning None if overflow occurred.
+    pub fn checked_sub<C2: Constraint>(self, rhs: Amount<C2>) -> Option<Amount> {
+        self.0.checked_sub(rhs.0).and_then(|v| v.try_into().ok())
     }
 
     /// To little endian byte array
@@ -624,5 +642,26 @@ impl ZcashDeserialize for Amount<NonNegative> {
         mut reader: R,
     ) -> Result<Self, crate::serialization::SerializationError> {
         Ok(reader.read_u64::<LittleEndian>()?.try_into()?)
+    }
+}
+
+/// Represents a change to the deferred pool balance from a coinbase transaction.
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct DeferredPoolBalanceChange(Amount);
+
+impl DeferredPoolBalanceChange {
+    /// Creates a new [`DeferredPoolBalanceChange`]
+    pub fn new(amount: Amount) -> Self {
+        Self(amount)
+    }
+
+    /// Creates a new [`DeferredPoolBalanceChange`] with a zero value.
+    pub fn zero() -> Self {
+        Self(Amount::zero())
+    }
+
+    /// Consumes `self` and returns the inner [`Amount`] value.
+    pub fn value(self) -> Amount {
+        self.0
     }
 }

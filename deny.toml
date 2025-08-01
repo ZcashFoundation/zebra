@@ -52,9 +52,6 @@ skip-tree = [
     # wait for ordered-map to release a dependency fix
     { name = "ordered-map", version = "=0.4.2" },
 
-    # wait for `color-eyre` to upgrade
-    { name = "owo-colors", version = "=3.5.0" },
-
     # wait for structopt upgrade (or upgrade to clap 4)
     { name = "clap", version = "=2.34.0" },
 
@@ -96,17 +93,13 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    # wait until zcash_client_backend update rustix
-    { name = "rustix", version = "=0.38.44" },
+    { name = "windows-sys", version = "=0.52.0" },
 
-    # wait for reqwest to update windows-registry
-    { name = "windows-strings", version = "=0.3.1" },
+    { name = "linux-raw-sys", version = "0.4.15" },
 
-    # wait for sentry to update windows-core
-    { name = "windows-core", version = "=0.52.0" },
+    { name = "quick-xml", version = "0.37.5" },
 
-    # wait for `inferno` to upgrade
-    { name = "quick-xml", version = "=0.37.5" }
+    { name = "rustix", version = "0.38.44" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
