@@ -52,7 +52,9 @@ tx_v6 = []
 
 [dependencies]
 
-# Cryptography
+derive-getters = { workspace = true, features = ["auto_copy_getters"] }
+lazy_static = { workspace = true }
+tempfile = { workspace = true }
 bitvec = { workspace = true }
 bitflags = { workspace = true }
 bitflags-serde-legacy = { workspace = true }
@@ -66,8 +68,6 @@ equihash = { workspace = true }
 group = { workspace = true }
 incrementalmerkletree.workspace = true
 jubjub = { workspace = true }
-lazy_static = { workspace = true }
-tempfile = { workspace = true }
 dirs = { workspace = true }
 num-integer = { workspace = true }
 primitive-types = { workspace = true }
