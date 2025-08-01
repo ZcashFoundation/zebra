@@ -13,7 +13,7 @@
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
 
-ARG RUST_VERSION=1.85.0
+ARG RUST_VERSION=1.88.0
 
 # Keep in sync with vars.RUST_PROD_FEATURES in GitHub
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
@@ -23,8 +23,8 @@ ARG UID=10001
 ARG GID=${UID}
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
-ARG CARGO_HOME="/home/.cargo"
-ARG CARGO_TARGET_DIR="/home/target"
+ARG CARGO_HOME="/usr/local/.cargo"
+ARG CARGO_TARGET_DIR="/usr/local/target"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
@@ -62,6 +62,9 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
+# Pre-install required toolchain to avoid runtime updates
+RUN rustup toolchain install stable --no-self-update
+
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
@@ -92,6 +95,8 @@ RUN mkdir -p ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
+# nextest will be installed within the cache mount context below
+
 # Build Zebra test binaries, but don't run them
 #
 # Leverage a cache mount to ${CARGO_HOME} for downloaded dependencies,
@@ -119,12 +124,12 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    # Build all feature combinations used by different tests
-    cargo test --locked --release --workspace --no-run --features "${FEATURES} zebra-checkpoints" && \
-    cargo test --locked --release --workspace --no-run --features "${FEATURES}" && \
-    cargo test --locked --release --lib --no-run --features "zebra-test" --package zebra-state && \
-    cargo test --locked --release --no-run --features "${FEATURES}" --package zebrad --test acceptance && \
-    # Copy binaries
+    # Install nextest within the cache mount context so it's available
+    cargo install cargo-nextest --version 0.9.100 --locked && \
+    # Build test binaries with comprehensive features - no more feature juggling!
+    cargo nextest run --locked --release --no-run \
+    --features "${FEATURES} zebra-checkpoints lightwalletd-grpc-tests proptest-impl indexer sync_to_mandatory_checkpoint_mainnet sync_to_mandatory_checkpoint_testnet sync_past_mandatory_checkpoint_mainnet sync_past_mandatory_checkpoint_testnet" && \
+    # Copy the main binaries
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
     # Copy CARGO_HOME

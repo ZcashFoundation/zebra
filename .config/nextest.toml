@@ -1,0 +1,46 @@
+# Nextest configuration for Zebra
+[profile.default]
+retries = 0
+fail-fast = true
+status-level = "fail"
+
+# CI profile optimized for comprehensive testing
+[profile.ci]
+retries = 1
+fail-fast = false
+status-level = "fail"
+# Store test output for failed tests
+store-output = "never"
+
+# Profile for sync tests (long-running)
+[profile.sync]
+retries = 2
+fail-fast = false
+slow-timeout = { period = "60m", terminate-after = 3 }
+
+# Profile for lightwalletd tests
+[profile.lwd]  
+retries = 1
+slow-timeout = { period = "30m", terminate-after = 2 }
+
+# Profile for state tests
+[profile.state]
+retries = 0
+slow-timeout = { period = "45m", terminate-after = 1 }
+
+# Per-test timeout overrides for extremely long tests
+[[profile.default.overrides]]
+filter = 'test(sync_full_mainnet) or test(sync_full_testnet)'
+slow-timeout = { period = "120m", terminate-after = 1 }
+retries = 3
+
+[[profile.default.overrides]]
+filter = 'test(generate_checkpoints)'
+slow-timeout = { period = "90m", terminate-after = 1 }
+retries = 2
+
+[[profile.default.overrides]]
+filter = 'package(zebra-state) and test(fake_activation_heights)'
+# State tests should be deterministic
+retries = 0
+slow-timeout = { period = "10m", terminate-after = 1 }
