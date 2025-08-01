@@ -3942,8 +3942,10 @@ async fn disconnects_from_misbehaving_peers() -> Result<()> {
 
     tracing::info!("waiting for zebrad nodes to connect");
 
-    // Wait a few seconds for Zebra to start up and make outbound peer connections
-    tokio::time::sleep(LAUNCH_DELAY).await;
+    // Define a connection delay to be applied on top of the launch delay
+    const CONNECTIONS_DELAY: Duration = Duration::from_secs(40);
+    // Wait for Zebra to start up and make outbound peer connections
+    tokio::time::sleep(LAUNCH_DELAY + CONNECTIONS_DELAY).await;
 
     tracing::info!("checking for peers");
 
