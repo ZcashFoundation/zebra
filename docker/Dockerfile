@@ -147,7 +147,7 @@ RUN mkdir -p ${CARGO_HOME} && \
     rm -rf /tmp/cargo-cache
 
 # Copy the lightwalletd binary and source files to be able to run tests
-# COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
+COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories

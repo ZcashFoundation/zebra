@@ -136,42 +136,46 @@ create_owned_directory() {
 [[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
 [[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
-# Runs zebra acceptance tests with nextest and comprehensive features.
-#
-# This function uses nextest with a comprehensive feature set that matches
-# the Dockerfile build to avoid recompilation.
+# Runs workspace-level tests with the comprehensive feature set.
 #
 # Positional Parameters
 #
-# - '$1' is ignored (legacy features parameter, now using comprehensive set)
-# - The remaining params are used as test filters for nextest
-run_cargo_test() {
-  # Use the same comprehensive FEATURES as the Dockerfile build to avoid recompilation
-  # First argument is now ignored (was variable features, now using FEATURES env var)
-  shift
+# - $1: A nextest filter expression (e.g., "not test(some_test)")
+run_workspace_test() {
+  local filter_expr="$1"
+  echo "Running workspace test with filter: ${filter_expr}"
+  exec_as_user cargo nextest run --locked --release --workspace --features "${FEATURES}" \
+    --run-ignored=all --filter-expr "${filter_expr}"
+}
 
-  # Start constructing the nextest command array (use --workspace to match Dockerfile build)
-  local cmd=(cargo nextest run --locked --release --features "${FEATURES}" --workspace)
+# Runs acceptance tests from the 'zebrad' package.
+#
+# Positional Parameters
+#
+# - $1: The name of the test function to run.
+run_acceptance_test() {
+  local test_filter="$1"
+  echo "Running acceptance test: ${test_filter}"
+  exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
+    --package zebrad --test acceptance --run-ignored=all \
+    --filter-expr "test(${test_filter})"
+}
 
-  # Handle test filtering - nextest uses different syntax
-  local test_filter=""
-  for arg in "$@"; do
-    if [[ -n ${arg} ]]; then
-      # Convert test arguments to nextest filter format
-      if [[ "${arg}" != "--test-threads" ]] && [[ "${arg}" != "1" ]]; then
-        test_filter="${test_filter} ${arg}"
-      fi
-    fi
-  done
-
-  # Add test filter if provided
-  if [[ -n "${test_filter// }" ]]; then
-    cmd+=("--filter-expr" "test(${test_filter// /})")
-  fi
-
-  echo "Running: ${cmd[*]}"
-  # Execute directly to become PID 1
-  exec_as_user "${cmd[@]}"
+# Runs library tests from a specific package with specific features.
+#
+# Positional Parameters
+#
+# - $1: The name of the package (e.g., "zebra-state").
+# - $2: The feature set to use for this specific package.
+# - $3: The name of the test function to run.
+run_lib_test() {
+  local package="$1"
+  local features="$2"
+  local test_filter="$3"
+  echo "Running library test: package=${package}, features=${features}, filter=${test_filter}"
+  exec_as_user cargo nextest run --locked --release --lib --features "${features}" \
+    --package "${package}" \
+    --filter-expr "test(${test_filter})"
 }
 
 # Runs tests depending on the env vars.
@@ -181,138 +185,68 @@ run_cargo_test() {
 # - $@: Arbitrary command that will be executed if no test env var is set.
 run_tests() {
   if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
-    # Run unit, basic acceptance tests, and ignored tests, only showing command
-    # output if the test fails. If the lightwalletd environment variables are
-    # set, we will also run those tests.
-    exec_as_user cargo nextest run --locked --release --workspace --features "${FEATURES}" \
-      --filter-expr "not test(check_no_git_dependencies)"
+    # Run unit, basic acceptance tests, and ignored tests.
+    run_workspace_test "not test(check_no_git_dependencies)"
 
   elif [[ "${CHECK_NO_GIT_DEPENDENCIES}" -eq "1" ]]; then
-    # Run the check_no_git_dependencies test.
-    exec_as_user cargo nextest run --locked --release --workspace --features "${FEATURES}" \
-      --filter-expr "test(check_no_git_dependencies)"
+    run_workspace_test "test(check_no_git_dependencies)"
 
   elif [[ "${STATE_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
-    # Run state tests with fake activation heights.
-    # Use package-specific features for zebra-state (zebra-test is needed for fake activation heights)
-    exec_as_user cargo nextest run --locked --release --lib --features "zebra-test" \
-      --package zebra-state \
-      --filter-expr "test(with_fake_activation_heights)"
+    # Run state tests with fake activation heights using package-specific features.
+    run_lib_test "zebra-state" "zebra-test" "with_fake_activation_heights"
 
   elif [[ "${SYNC_LARGE_CHECKPOINTS_EMPTY}" -eq "1" ]]; then
-    # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
-    # state.
-    # Use acceptance tests from zebrad package specifically
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(sync_large_checkpoints_empty)"
+    run_acceptance_test "sync_large_checkpoints_empty"
 
   elif [[ -n "${SYNC_FULL_MAINNET_TIMEOUT_MINUTES}" ]]; then
-    # Run a Zebra full sync test on mainnet.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(sync_full_mainnet)"
+    run_acceptance_test "sync_full_mainnet"
 
   elif [[ -n "${SYNC_FULL_TESTNET_TIMEOUT_MINUTES}" ]]; then
-    # Run a Zebra full sync test on testnet.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(sync_full_testnet)"
+    run_acceptance_test "sync_full_testnet"
 
   elif [[ "${SYNC_TO_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
-    # Run a Zebra sync up to the mandatory checkpoint.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(sync_to_mandatory_checkpoint_${NETWORK,,})"
+    run_acceptance_test "sync_to_mandatory_checkpoint_${NETWORK,,}"
     echo "ran test_disk_rebuild"
 
   elif [[ "${SYNC_UPDATE_MAINNET}" -eq "1" ]]; then
-    # Run a Zebra sync starting at the cached tip, and syncing to the latest
-    # tip.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(sync_update_mainnet)"
+    run_acceptance_test "sync_update_mainnet"
 
   elif [[ "${SYNC_PAST_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
-    # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
-    # past it.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(sync_past_mandatory_checkpoint_${NETWORK,,})"
+    run_acceptance_test "sync_past_mandatory_checkpoint_${NETWORK,,}"
 
   elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
-    # Generate checkpoints after syncing Zebra from a cached state on mainnet.
-    #
-    # TODO: disable or filter out logs like:
-    # test generate_checkpoints_mainnet has been running for over 60 seconds
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(generate_checkpoints_mainnet)"
+    run_acceptance_test "generate_checkpoints_mainnet"
 
   elif [[ "${GENERATE_CHECKPOINTS_TESTNET}" -eq "1" ]]; then
-    # Generate checkpoints after syncing Zebra on testnet.
-    #
-    # This test might fail if testnet is unstable.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(generate_checkpoints_testnet)"
+    run_acceptance_test "generate_checkpoints_testnet"
 
   elif [[ "${LWD_RPC_TEST}" -eq "1" ]]; then
-    # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
-    # Run both the fully synced RPC test and the subtree snapshot test, one test
-    # at a time. Since these tests use the same cached state, a state problem in
-    # the first test can fail the second test.
+    # Run with a single thread as these tests can conflict.
+    echo "Running acceptance test: lwd_rpc_test"
     exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
       --package zebrad --test acceptance --test-threads=1 \
       --filter-expr "test(lwd_rpc_test)"
 
   elif [[ "${LIGHTWALLETD_INTEGRATION}" -eq "1" ]]; then
-    # Test launching lightwalletd with an empty lightwalletd and Zebra state.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(lwd_integration)"
+    run_acceptance_test "lwd_integration"
 
   elif [[ "${LWD_SYNC_FULL}" -eq "1" ]]; then
-    # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(lwd_sync_full)"
+    run_acceptance_test "lwd_sync_full"
 
   elif [[ "${LWD_SYNC_UPDATE}" -eq "1" ]]; then
-    # Starting with a cached Zebra and lightwalletd tip, run a quick update sync.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(lwd_sync_update)"
+    run_acceptance_test "lwd_sync_update"
 
-  # These tests actually use gRPC.
   elif [[ "${LWD_GRPC_WALLET}" -eq "1" ]]; then
-    # Starting with a cached Zebra and lightwalletd tip, test all gRPC calls to
-    # lightwalletd, which calls Zebra.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(lwd_grpc_wallet)"
+    run_acceptance_test "lwd_grpc_wallet"
 
   elif [[ "${LWD_RPC_SEND_TX}" -eq "1" ]]; then
-    # Starting with a cached Zebra and lightwalletd tip, test sending
-    # transactions gRPC call to lightwalletd, which calls Zebra.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(lwd_rpc_send_tx)"
+    run_acceptance_test "lwd_rpc_send_tx"
 
-  # These tests use mining code, but don't use gRPC.
   elif [[ "${RPC_GET_BLOCK_TEMPLATE}" -eq "1" ]]; then
-    # Starting with a cached Zebra tip, test getting a block template from
-    # Zebra's RPC server.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(rpc_get_block_template)"
+    run_acceptance_test "rpc_get_block_template"
 
   elif [[ "${RPC_SUBMIT_BLOCK}" -eq "1" ]]; then
-    # Starting with a cached Zebra tip, test sending a block to Zebra's RPC
-    # port.
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance \
-      --filter-expr "test(rpc_submit_block)"
+    run_acceptance_test "rpc_submit_block"
 
   else
     exec_as_user "$@"
