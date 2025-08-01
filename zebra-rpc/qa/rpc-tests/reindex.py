@@ -23,12 +23,15 @@ class ReindexTest(BitcoinTestFramework):
     def setup_network(self):
         self.nodes = []
         self.is_network_split = False
-        self.nodes.append(start_node(0, self.options.tmpdir))
+        args = [[False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
+
+        self.nodes.append(start_node(0, self.options.tmpdir, args))
 
     def reindex(self, justchainstate=False):
         # When zebra reindexes, it will only do it up to the finalized chain height. 
         # This happens after the first 100 blocks, so we need to generate 100 blocks
         # for the reindex to be able to catch block 1.
+        # https://github.com/ZcashFoundation/zebra/issues/9708
         finalized_height = 100
 
         self.nodes[0].generate(finalized_height)
