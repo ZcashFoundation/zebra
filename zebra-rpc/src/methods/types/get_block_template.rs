@@ -867,17 +867,18 @@ pub fn standard_coinbase_outputs(
         miner_reward.expect("reward calculations are valid for reasonable chain heights");
 
     // Collect all the funding streams and convert them to outputs.
-    let funding_streams_outputs: Vec<(Amount<NonNegative>, &transparent::Address)> =
-        funding_streams
-            .into_iter()
-            .map(|(_receiver, (amount, address))| (amount, address))
-            .collect();
+    let funding_streams_outputs: Vec<(transparent::Address, Amount<NonNegative>)> = funding_streams
+        .into_iter()
+        .map(|(_receiver, (amount, address))| (address.clone(), amount))
+        .collect();
+    let one_time_lockbox_disbursements = network.lockbox_disbursements(height);
 
     // Combine the miner reward and funding streams into a list of coinbase amounts and addresses.
     let mut coinbase_outputs: Vec<(Amount<NonNegative>, transparent::Script)> =
         funding_streams_outputs
             .iter()
-            .map(|(amount, address)| (*amount, address.script()))
+            .chain(&one_time_lockbox_disbursements)
+            .map(|(address, amount)| (*amount, address.script()))
             .collect();
 
     let script = miner_address

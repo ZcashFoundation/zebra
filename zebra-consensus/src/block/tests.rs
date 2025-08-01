@@ -5,7 +5,7 @@ use once_cell::sync::Lazy;
 use tower::{buffer::Buffer, util::BoxService};
 
 use zebra_chain::{
-    amount::MAX_MONEY,
+    amount::{DeferredPoolBalanceChange, MAX_MONEY},
     block::{
         tests::generate::{
             large_multi_transaction_block, large_single_transaction_block_many_inputs,
@@ -20,7 +20,7 @@ use zebra_chain::{
 use zebra_script::Sigops;
 use zebra_test::transcript::{ExpectedTranscriptError, Transcript};
 
-use crate::transaction;
+use crate::{block::check::subsidy_is_valid, transaction};
 
 use super::*;
 
@@ -511,21 +511,18 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
     for (&height, block) in block_iter {
         let height = Height(height);
         if height > network.slow_start_shift() {
-            let coinbase_tx = check::coinbase_is_first(
-                &Block::zcash_deserialize(&block[..]).expect("block should deserialize"),
-            )?;
+            let block = Block::zcash_deserialize(&block[..]).expect("block should deserialize");
+            let coinbase_tx = check::coinbase_is_first(&block)?;
 
             let expected_block_subsidy = block_subsidy(height, &network)?;
-
             // See [ZIP-1015](https://zips.z.cash/zip-1015).
-            let expected_deferred_amount = zebra_chain::parameters::subsidy::funding_stream_values(
-                height,
-                &network,
-                expected_block_subsidy,
-            )
-            .expect("we always expect a funding stream hashmap response even if empty")
-            .remove(&FundingStreamReceiver::Deferred)
-            .unwrap_or_default();
+            let deferred_pool_balance_change =
+                match NetworkUpgrade::Canopy.activation_height(&network) {
+                    Some(activation_height) if height >= activation_height => {
+                        subsidy_is_valid(&block, &network, expected_block_subsidy)?
+                    }
+                    _other => DeferredPoolBalanceChange::zero(),
+                };
 
             assert!(check::miner_fees_are_valid(
                 &coinbase_tx,
@@ -533,7 +530,7 @@ fn miner_fees_validation_for_network(network: Network) -> Result<(), Report> {
                 // Set the miner fees to a high-enough amount.
                 Amount::try_from(MAX_MONEY / 2).unwrap(),
                 expected_block_subsidy,
-                expected_deferred_amount,
+                deferred_pool_balance_change,
                 &network,
             )
             .is_ok(),);
@@ -552,15 +549,12 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
     let height = block.coinbase_height().expect("valid coinbase height");
     let expected_block_subsidy = block_subsidy(height, &network)?;
     // See [ZIP-1015](https://zips.z.cash/zip-1015).
-    let expected_deferred_amount: Amount<zebra_chain::amount::NonNegative> =
-        zebra_chain::parameters::subsidy::funding_stream_values(
-            height,
-            &network,
-            expected_block_subsidy,
-        )
-        .expect("we always expect a funding stream hashmap response even if empty")
-        .remove(&FundingStreamReceiver::Deferred)
-        .unwrap_or_default();
+    let deferred_pool_balance_change = match NetworkUpgrade::Canopy.activation_height(&network) {
+        Some(activation_height) if height >= activation_height => {
+            subsidy_is_valid(&block, &network, expected_block_subsidy)?
+        }
+        _other => DeferredPoolBalanceChange::zero(),
+    };
 
     assert_eq!(
         check::miner_fees_are_valid(
@@ -569,7 +563,7 @@ fn miner_fees_validation_failure() -> Result<(), Report> {
             // Set the miner fee to an invalid amount.
             Amount::zero(),
             expected_block_subsidy,
-            expected_deferred_amount,
+            deferred_pool_balance_change,
             &network
         ),
         Err(BlockError::Transaction(TransactionError::Subsidy(

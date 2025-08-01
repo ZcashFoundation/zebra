@@ -253,11 +253,11 @@ impl DiskWriteBatch {
         utxos_spent_by_block: HashMap<transparent::OutPoint, transparent::Utxo>,
         value_pool: ValueBalance<NonNegative>,
     ) -> Result<(), BoxError> {
-        let new_value_pool = value_pool.add_chain_value_pool_change(
-            finalized
-                .block
-                .chain_value_pool_change(&utxos_spent_by_block, finalized.deferred_balance)?,
-        )?;
+        let new_value_pool =
+            value_pool.add_chain_value_pool_change(finalized.block.chain_value_pool_change(
+                &utxos_spent_by_block,
+                finalized.deferred_pool_balance_change,
+            )?)?;
         let _ = db
             .chain_value_pools_cf()
             .with_batch_for_writing(self)
