@@ -35,12 +35,22 @@ slow-timeout = { period = "120m", terminate-after = 1 }
 retries = 3
 
 [[profile.default.overrides]]
-filter = 'test(generate_checkpoints)'
+filter = 'test(generate_checkpoints_mainnet) or test(generate_checkpoints_testnet)'
 slow-timeout = { period = "90m", terminate-after = 1 }
 retries = 2
 
 [[profile.default.overrides]]
-filter = 'package(zebra-state) and test(fake_activation_heights)'
+filter = 'test(lwd_) or test(lightwalletd_)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 1
+
+[[profile.default.overrides]]
+filter = 'test(sync_large_checkpoints_) or test(sync_to_mandatory_checkpoint_) or test(sync_past_mandatory_checkpoint_)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 2
+
+[[profile.default.overrides]]
+filter = 'package(zebra-state) and test(with_fake_activation_heights)'
 # State tests should be deterministic
 retries = 0
 slow-timeout = { period = "10m", terminate-after = 1 }

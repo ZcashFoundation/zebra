@@ -62,6 +62,10 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
+# Override FEATURES with comprehensive set for testing to avoid feature juggling
+ARG FEATURES="default-release-binaries zebra-checkpoints lightwalletd-grpc-tests proptest-impl indexer sync_to_mandatory_checkpoint_mainnet sync_to_mandatory_checkpoint_testnet sync_past_mandatory_checkpoint_mainnet sync_past_mandatory_checkpoint_testnet"
+ENV FEATURES=${FEATURES}
+
 # Pre-install required toolchain to avoid runtime updates
 RUN rustup toolchain install stable --no-self-update
 
@@ -128,7 +132,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     cargo install cargo-nextest --version 0.9.100 --locked && \
     # Build test binaries with comprehensive features - no more feature juggling!
     cargo nextest run --locked --release --no-run \
-    --features "${FEATURES} zebra-checkpoints lightwalletd-grpc-tests proptest-impl indexer sync_to_mandatory_checkpoint_mainnet sync_to_mandatory_checkpoint_testnet sync_past_mandatory_checkpoint_mainnet sync_past_mandatory_checkpoint_testnet" && \
+    --features "${FEATURES}" && \
     # Copy the main binaries
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
@@ -136,7 +140,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     mkdir -p /tmp/cargo-cache && \
     cp -r ${CARGO_HOME}/. /tmp/cargo-cache/
 
-# Restore CARGO_HOME cache contents
+# Restore cache directories
 RUN mkdir -p ${CARGO_HOME} && \
     cp -r /tmp/cargo-cache/. ${CARGO_HOME}/ && \
     chown -R ${UID}:${GID} ${CARGO_HOME} && \

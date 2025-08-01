@@ -136,29 +136,38 @@ create_owned_directory() {
 [[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
 [[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
-# Runs cargo test with an arbitrary number of arguments.
+# Runs zebra acceptance tests with nextest and comprehensive features.
+#
+# This function uses nextest with a comprehensive feature set that matches
+# the Dockerfile build to avoid recompilation.
 #
 # Positional Parameters
 #
-# - '$1' must contain cargo FEATURES as described here:
-#   https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options
-# - The remaining params will be appended to a command starting with
-#   `exec_as_user cargo test ... -- ...`
+# - '$1' is ignored (legacy features parameter, now using comprehensive set)
+# - The remaining params are used as test filters for nextest
 run_cargo_test() {
-  # Shift the first argument, as it's already included in the cmd
-  local features="$1"
+  # Use the same comprehensive FEATURES as the Dockerfile build to avoid recompilation
+  # First argument is now ignored (was variable features, now using FEATURES env var)
   shift
 
-  # Start constructing the command array
-  local cmd=(cargo test --locked --release --features "${features}" --package zebrad --test acceptance -- --nocapture --include-ignored)
+  # Start constructing the nextest command array (use --workspace to match Dockerfile build)
+  local cmd=(cargo nextest run --locked --release --features "${FEATURES}" --workspace)
 
-  # Loop through the remaining arguments
+  # Handle test filtering - nextest uses different syntax
+  local test_filter=""
   for arg in "$@"; do
     if [[ -n ${arg} ]]; then
-      # If the argument is non-empty, add it to the command
-      cmd+=("${arg}")
+      # Convert test arguments to nextest filter format
+      if [[ "${arg}" != "--test-threads" ]] && [[ "${arg}" != "1" ]]; then
+        test_filter="${test_filter} ${arg}"
+      fi
     fi
   done
+
+  # Add test filter if provided
+  if [[ -n "${test_filter// }" ]]; then
+    cmd+=("--filter-expr" "test(${test_filter// /})")
+  fi
 
   echo "Running: ${cmd[*]}"
   # Execute directly to become PID 1
@@ -175,19 +184,20 @@ run_tests() {
     # Run unit, basic acceptance tests, and ignored tests, only showing command
     # output if the test fails. If the lightwalletd environment variables are
     # set, we will also run those tests.
-    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
-      -- --nocapture --include-ignored --skip check_no_git_dependencies
+    exec_as_user cargo nextest run --locked --release --workspace --features "${FEATURES}" \
+      --filter-expr "not test(check_no_git_dependencies)"
 
   elif [[ "${CHECK_NO_GIT_DEPENDENCIES}" -eq "1" ]]; then
     # Run the check_no_git_dependencies test.
-    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
-      -- --nocapture --include-ignored check_no_git_dependencies
+    exec_as_user cargo nextest run --locked --release --workspace --features "${FEATURES}" \
+      --filter-expr "test(check_no_git_dependencies)"
 
   elif [[ "${STATE_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
     # Run state tests with fake activation heights.
-    exec_as_user cargo test --locked --release --lib --features "zebra-test" \
+    # Use comprehensive features that include zebra-test via proptest-impl
+    exec_as_user cargo nextest run --locked --release --lib --features "${FEATURES}" \
       --package zebra-state \
-      -- --nocapture --include-ignored with_fake_activation_heights
+      --filter-expr "test(with_fake_activation_heights)"
 
   elif [[ "${SYNC_LARGE_CHECKPOINTS_EMPTY}" -eq "1" ]]; then
     # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
@@ -204,7 +214,7 @@ run_tests() {
 
   elif [[ "${SYNC_TO_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync up to the mandatory checkpoint.
-    run_cargo_test "${FEATURES} sync_to_mandatory_checkpoint_${NETWORK,,}" \
+    run_cargo_test "${FEATURES}" \
       "sync_to_mandatory_checkpoint_${NETWORK,,}"
     echo "ran test_disk_rebuild"
 
@@ -216,7 +226,7 @@ run_tests() {
   elif [[ "${SYNC_PAST_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
     # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
     # past it.
-    run_cargo_test "${FEATURES} sync_past_mandatory_checkpoint_${NETWORK,,}" \
+    run_cargo_test "${FEATURES}" \
       "sync_past_mandatory_checkpoint_${NETWORK,,}"
 
   elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
