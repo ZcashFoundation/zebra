@@ -2,13 +2,18 @@
 use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use crate::{
+    amount::{Amount, NonNegative},
     block::{self, Height, HeightDiff},
     parameters::{
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
-        subsidy::{funding_stream_address_period, FUNDING_STREAM_RECEIVER_DENOMINATOR},
+        subsidy::{
+            funding_stream_address_period, FUNDING_STREAM_RECEIVER_DENOMINATOR,
+            NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
+        },
         Network, NetworkKind, NetworkUpgrade,
     },
+    transparent,
     work::difficulty::{ExpandedDifficulty, U256},
 };
 
@@ -73,6 +78,16 @@ impl ConfiguredFundingStreamRecipient {
     }
 }
 
+/// Configurable one-time lockbox disbursement recipients for configured Testnets.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(deny_unknown_fields)]
+pub struct ConfiguredLockboxDisbursement {
+    /// The expected address for the lockbox disbursement output
+    pub address: String,
+    /// The expected disbursement amount
+    pub amount: Amount<NonNegative>,
+}
+
 /// Configurable funding streams for configured Testnets.
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
 #[serde(deny_unknown_fields)]
@@ -108,6 +123,15 @@ impl From<&FundingStreams> for ConfiguredFundingStreams {
     }
 }
 
+impl From<(transparent::Address, Amount<NonNegative>)> for ConfiguredLockboxDisbursement {
+    fn from((address, amount): (transparent::Address, Amount<NonNegative>)) -> Self {
+        Self {
+            address: address.to_string(),
+            amount,
+        }
+    }
+}
+
 impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
     fn from(activation_heights: &BTreeMap<Height, NetworkUpgrade>) -> Self {
         let mut configured_activation_heights = ConfiguredActivationHeights::default();
@@ -135,6 +159,12 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
         }
 
         configured_activation_heights
+    }
+}
+
+impl From<BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
+    fn from(value: BTreeMap<Height, NetworkUpgrade>) -> Self {
+        Self::from(&value)
     }
 }
 
@@ -345,6 +375,8 @@ pub struct ParametersBuilder {
     pre_blossom_halving_interval: HeightDiff,
     /// The post-Blossom halving interval for this network
     post_blossom_halving_interval: HeightDiff,
+    /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for this network
+    lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
 }
 
 impl Default for ParametersBuilder {
@@ -381,6 +413,10 @@ impl Default for ParametersBuilder {
             pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
             post_blossom_halving_interval: POST_BLOSSOM_HALVING_INTERVAL,
             should_allow_unshielded_coinbase_spends: false,
+            lockbox_disbursements: NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET
+                .iter()
+                .map(|(addr, amount)| (addr.to_string(), *amount))
+                .collect(),
         }
     }
 }
@@ -590,6 +626,18 @@ impl ParametersBuilder {
         self
     }
 
+    /// Sets the expected one-time lockbox disbursement outputs for this network
+    pub fn with_lockbox_disbursements(
+        mut self,
+        lockbox_disbursements: Vec<ConfiguredLockboxDisbursement>,
+    ) -> Self {
+        self.lockbox_disbursements = lockbox_disbursements
+            .into_iter()
+            .map(|ConfiguredLockboxDisbursement { address, amount }| (address, amount))
+            .collect();
+        self
+    }
+
     /// Converts the builder to a [`Parameters`] struct
     fn finish(self) -> Parameters {
         let Self {
@@ -606,6 +654,7 @@ impl ParametersBuilder {
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
+            lockbox_disbursements,
         } = self;
         Parameters {
             network_name,
@@ -621,6 +670,7 @@ impl ParametersBuilder {
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
+            lockbox_disbursements,
         }
     }
 
@@ -656,6 +706,7 @@ impl ParametersBuilder {
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
+            lockbox_disbursements,
         } = Self::default();
 
         self.activation_heights == activation_heights
@@ -670,6 +721,7 @@ impl ParametersBuilder {
                 == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
+            && self.lockbox_disbursements == lockbox_disbursements
     }
 }
 
@@ -727,6 +779,8 @@ pub struct Parameters {
     pre_blossom_halving_interval: HeightDiff,
     /// Post-Blossom halving interval for this network
     post_blossom_halving_interval: HeightDiff,
+    /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for this network
+    lockbox_disbursements: Vec<(String, Amount<NonNegative>)>,
 }
 
 impl Default for Parameters {
@@ -767,7 +821,8 @@ impl Parameters {
             .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
             .with_pre_nu6_funding_streams(pre_nu6_funding_streams)
-            .with_post_nu6_funding_streams(post_nu6_funding_streams);
+            .with_post_nu6_funding_streams(post_nu6_funding_streams)
+            .with_lockbox_disbursements(Vec::new());
 
         Self {
             network_name: "Regtest".to_string(),
@@ -803,6 +858,7 @@ impl Parameters {
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
+            lockbox_disbursements,
         } = Self::new_regtest(Default::default());
 
         self.network_name == network_name
@@ -815,6 +871,7 @@ impl Parameters {
                 == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
+            && self.lockbox_disbursements == lockbox_disbursements
     }
 
     /// Returns the network name
@@ -881,6 +938,28 @@ impl Parameters {
     /// Returns the post-Blossom halving interval for this network
     pub fn post_blossom_halving_interval(&self) -> HeightDiff {
         self.post_blossom_halving_interval
+    }
+
+    /// Returns the expected total value of the sum of all NU6.1 one-time lockbox disbursement output values for this network.
+    pub fn lockbox_disbursement_total_amount(&self) -> Amount<NonNegative> {
+        self.lockbox_disbursements()
+            .into_iter()
+            .map(|(_addr, amount)| amount)
+            .reduce(|a, b| (a + b).expect("sum of configured amounts should be valid"))
+            .unwrap_or_default()
+    }
+
+    /// Returns the expected NU6.1 lockbox disbursement outputs for this network.
+    pub fn lockbox_disbursements(&self) -> Vec<(transparent::Address, Amount<NonNegative>)> {
+        self.lockbox_disbursements
+            .iter()
+            .map(|(addr, amount)| {
+                (
+                    addr.parse().expect("hard-coded address must deserialize"),
+                    *amount,
+                )
+            })
+            .collect()
     }
 }
 

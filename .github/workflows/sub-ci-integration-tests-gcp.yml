@@ -75,11 +75,15 @@ jobs:
     needs: [get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ !fromJSON(needs.get-available-disks.outputs.zebra_checkpoint_disk) || github.event.inputs.regenerate-disks == 'true' }}
+    concurrency:
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-to-mandatory-checkpoint', github.run_id) || 'sync-to-mandatory-checkpoint' }}
+      cancel-in-progress: false
     with:
       app_name: zebrad
       test_id: sync-to-mandatory-checkpoint
       test_description: Test sync up to mandatory checkpoint
       test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},SYNC_TO_MANDATORY_CHECKPOINT=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       # This test commonly less than 3 hours by October 2024, but now it takes longer
       is_long_test: true
       needs_zebra_state: false
@@ -88,14 +92,6 @@ jobs:
       disk_suffix: checkpoint
       height_grep_text: 'flushing database to disk .*height.*=.*Height.*\('
     secrets: inherit
-    # We want to prevent multiple checkpoint syncs running at the same time,
-    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
-    # because we might never get a finished sync.
-    #
-    # See the concurrency comment on the zebrad sync-full-mainnet job for details.
-    concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.regenerate-disks == 'true') }}-sync-to-mandatory-checkpoint
-      cancel-in-progress: false
 
   # Test that Zebra syncs and fully validates a few thousand blocks from a cached mandatory checkpoint disk
   #
@@ -134,6 +130,9 @@ jobs:
     needs: [get-available-disks]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     if: ${{ github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet') }}
+    concurrency:
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-mainnet', github.run_id) || 'sync-full-mainnet' }}
+      cancel-in-progress: false
     with:
       app_name: zebrad
       test_id: sync-full-mainnet
@@ -147,19 +146,6 @@ jobs:
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
-    # We want to prevent multiple full zebrad syncs running at the same time,
-    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
-    # because we might never get a finished sync.
-    #
-    # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
-    # (As the general workflow concurrency group just gets matched in Pull Requests,
-    # it has no impact on this job.)
-    #
-    # TODO:
-    # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
-    concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-full-sync == 'true') }}-sync-full-mainnet
-      cancel-in-progress: false
 
   # Test that Zebra can sync to the chain tip, using a cached Zebra tip state,
   # without launching `lightwalletd`.
@@ -236,12 +222,15 @@ jobs:
     name: Zebra tip on testnet
     needs: [get-available-disks-testnet]
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
-    if: ${{ (github.event_name == 'schedule' && vars.SCHEDULE_TESTNET_FULL_SYNC == 'true') || !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    if: ${{ !fromJSON(needs.get-available-disks-testnet.outputs.zebra_tip_disk) || (github.event.inputs.run-full-sync == 'true' && (inputs.network || vars.ZCASH_NETWORK) == 'Testnet') }}
+    concurrency:
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-sync-full-testnet', github.run_id) || 'sync-full-testnet' }}
+      cancel-in-progress: false
     with:
       app_name: zebrad
       test_id: sync-full-testnet
       test_description: Test a full sync up to the tip on testnet
-      test_variables: NETWORK=Testnet,SYNC_FULL_TESTNET=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: NETWORK=Testnet,SYNC_FULL_TESTNET_TIMEOUT_MINUTES=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
       network: Testnet
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
@@ -251,19 +240,6 @@ jobs:
       force_save_to_disk: ${{ inputs.force_save_to_disk || false }}
       height_grep_text: 'current_height.*=.*Height.*\('
     secrets: inherit
-    # We want to prevent multiple full zebrad syncs running at the same time,
-    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
-    # because we might never get a finished sync.
-    #
-    # Instead, we let the first sync complete, then queue the latest pending sync, cancelling any syncs in between.
-    # (As the general workflow concurrency group just gets matched in Pull Requests,
-    # it has no impact on this job.)
-    #
-    # TODO:
-    # - allow multiple manual syncs on a branch by adding '-${{ github.run_id }}' when github.event.inputs.run-full-sync is true
-    concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-full-sync == 'true') }}-sync-full-testnet
-      cancel-in-progress: false
 
   # Test that Zebra can generate testnet checkpoints after syncing to the chain tip,
   # using a cached Zebra tip state.
@@ -312,6 +288,9 @@ jobs:
     uses: ./.github/workflows/sub-deploy-integration-tests-gcp.yml
     # Currently the lightwalletd tests only work on Mainnet
     if: ${{ !cancelled() && !failure() && (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && (fromJSON(needs.get-available-disks.outputs.zebra_tip_disk) || needs.sync-full-mainnet.result == 'success') && (github.event_name == 'schedule' || !fromJSON(needs.get-available-disks.outputs.lwd_tip_disk) || github.event.inputs.run-lwd-sync == 'true' ) }}
+    concurrency:
+      group: ${{ github.event_name == 'workflow_dispatch' && format('manual-{0}-lwd-sync-full', github.run_id) || 'lwd-sync-full' }}
+      cancel-in-progress: false
     with:
       app_name: lightwalletd
       test_id: lwd-sync-full
@@ -326,14 +305,6 @@ jobs:
       disk_prefix: lwd-cache
       height_grep_text: "Waiting for block: "
     secrets: inherit
-    # We want to prevent multiple lightwalletd full syncs running at the same time,
-    # but we don't want to cancel running syncs on `main` if a new PR gets merged,
-    # because we might never get a finished sync.
-    #
-    # See the concurrency comment on the zebrad sync-full-mainnet job for details.
-    concurrency:
-      group: ${{ github.workflow }}−manual-${{ format('{0}', github.event.inputs.run-lwd-sync == 'true') }}-lwd-sync-full
-      cancel-in-progress: false
 
   # Test update sync of lightwalletd with a lightwalletd and Zebra tip state
   # Runs:
