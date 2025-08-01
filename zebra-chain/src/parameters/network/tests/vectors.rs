@@ -309,11 +309,11 @@ fn check_configured_funding_stream_constraints() {
     let configured_funding_streams = [
         Default::default(),
         ConfiguredFundingStreams {
-            height_range: Some(Height(2_000_000)..Height(2_200_000)),
+            height_ranges: Some(vec![Height(2_000_000)..Height(2_200_000)]),
             ..Default::default()
         },
         ConfiguredFundingStreams {
-            height_range: Some(Height(20)..Height(30)),
+            height_ranges: Some(vec![Height(20)..Height(30)]),
             recipients: None,
         },
         ConfiguredFundingStreams {
@@ -364,14 +364,14 @@ fn check_configured_funding_stream_constraints() {
                 )
             };
 
-            let expected_height_range = configured_funding_streams
-                .height_range
+            let expected_height_ranges = configured_funding_streams
+                .height_ranges
                 .clone()
-                .unwrap_or(default_funding_streams.height_range().clone());
+                .unwrap_or(default_funding_streams.height_ranges().to_vec());
 
             assert_eq!(
-                network_funding_streams.height_range().clone(),
-                expected_height_range,
+                network_funding_streams.height_ranges(),
+                expected_height_ranges,
                 "should use default start height when unconfigured"
             );
 
@@ -490,7 +490,7 @@ fn sum_of_one_time_lockbox_disbursements_is_correct() {
 
         let last_nu6_height = nu6_1_activation_height.previous().unwrap();
         let expected_total_lockbox_disbursement_value =
-            lockbox_input_value(&network, last_nu6_height);
+            pre_nu6_1_lockbox_input_value(&network, last_nu6_height);
 
         assert_eq!(
             expected_total_lockbox_disbursement_value,
@@ -503,7 +503,7 @@ fn sum_of_one_time_lockbox_disbursements_is_correct() {
 /// Lockbox funding stream total input value for a block height.
 ///
 /// Assumes a constant funding stream amount per block.
-fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative> {
+fn pre_nu6_1_lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative> {
     let Some(nu6_activation_height) = NetworkUpgrade::Nu6.activation_height(network) else {
         return Amount::zero();
     };
@@ -515,7 +515,11 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
             .get(&FundingStreamReceiver::Deferred)
             .expect("we expect a lockbox funding stream after NU5");
 
-    let post_nu6_funding_stream_height_range = network.post_nu6_funding_streams().height_range();
+    let [post_nu6_funding_stream_height_range, ..] =
+        network.post_nu6_funding_streams().height_ranges()
+    else {
+        return Amount::zero();
+    };
 
     // `min(height, last_height_with_deferred_pool_contribution) - (nu6_activation_height - 1)`,
     // We decrement NU6 activation height since it's an inclusive lower bound.

@@ -20,8 +20,21 @@ fn test_funding_stream_values() -> Result<(), Report> {
     let canopy_activation_height = Canopy.activation_height(network).unwrap();
     let nu6_activation_height = Nu6.activation_height(network).unwrap();
 
-    let dev_fund_height_range = network.pre_nu6_funding_streams().height_range();
-    let nu6_fund_height_range = network.post_nu6_funding_streams().height_range();
+    let dev_fund_height_range = network.pre_nu6_funding_streams().height_ranges()[0].clone();
+    // TODO: Update this test to check the second height range of post-nu6 funding streams (#9598).
+    let nu6_fund_height_range = network.post_nu6_funding_streams().height_ranges()[0].clone();
+
+    assert_eq!(
+        network.pre_nu6_funding_streams().height_ranges().len(),
+        1,
+        "there should only be one pre-nu6 funding stream height range on Mainnet"
+    );
+    assert_eq!(
+        network.post_nu6_funding_streams().height_ranges().len(),
+        1,
+        "there should only be one post-nu6 funding stream height range on Mainnet \
+        (update ahead of NU6.1 Mainnet deployment)"
+    );
 
     let nu6_fund_end = Height(3_146_400);
 

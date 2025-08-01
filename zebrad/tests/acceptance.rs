@@ -3284,7 +3284,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         .clone()
         .with_post_nu6_funding_streams(ConfiguredFundingStreams {
             // Start checking funding streams from block height 1
-            height_range: Some(Height(1)..Height(100)),
+            height_ranges: Some(vec![Height(1)..Height(100)]),
             // Use default post-NU6 recipients
             recipients: None,
         })
@@ -3464,7 +3464,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let network = base_network_params
         .clone()
         .with_post_nu6_funding_streams(ConfiguredFundingStreams {
-            height_range: Some(Height(1)..Height(100)),
+            height_ranges: Some(vec![Height(1)..Height(100)]),
             recipients: make_configured_recipients_with_lockbox_numerator(0),
         })
         .to_network();
@@ -3522,7 +3522,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let network = base_network_params
         .clone()
         .with_post_nu6_funding_streams(ConfiguredFundingStreams {
-            height_range: Some(Height(1)..Height(100)),
+            height_ranges: Some(vec![Height(1)..Height(100)]),
             recipients: make_configured_recipients_with_lockbox_numerator(20),
         })
         .to_network();
