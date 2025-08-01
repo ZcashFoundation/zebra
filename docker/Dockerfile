@@ -119,13 +119,26 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    cargo test --locked --release --workspace --no-run \
-    --features "${FEATURES} zebra-checkpoints" && \
+    # Build all feature combinations used by different tests
+    cargo test --locked --release --workspace --no-run --features "${FEATURES} zebra-checkpoints" && \
+    cargo test --locked --release --workspace --no-run --features "${FEATURES}" && \
+    cargo test --locked --release --lib --no-run --features "zebra-test" --package zebra-state && \
+    cargo test --locked --release --no-run --features "${FEATURES}" --package zebrad --test acceptance && \
+    # Copy binaries
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
-    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin
+    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    # Copy CARGO_HOME
+    mkdir -p /tmp/cargo-cache && \
+    cp -r ${CARGO_HOME}/. /tmp/cargo-cache/
+
+# Restore CARGO_HOME cache contents
+RUN mkdir -p ${CARGO_HOME} && \
+    cp -r /tmp/cargo-cache/. ${CARGO_HOME}/ && \
+    chown -R ${UID}:${GID} ${CARGO_HOME} && \
+    rm -rf /tmp/cargo-cache
 
 # Copy the lightwalletd binary and source files to be able to run tests
-COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
+# COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
