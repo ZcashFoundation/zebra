@@ -3,7 +3,12 @@
 use derive_getters::Getters;
 use derive_new::new;
 use jsonrpsee::core::RpcResult;
-use zebra_chain::{parameters::Network, primitives};
+use zebra_chain::{
+    parameters::{Network, NetworkKind},
+    primitives,
+};
+
+use crate::methods::types::validate_address;
 
 /// `validateaddress` response
 #[derive(
@@ -57,19 +62,22 @@ pub fn validate_address(
         return Ok(ValidateAddressResponse::invalid());
     }
 
-    if address.network() == network.kind() {
-        Ok(ValidateAddressResponse {
-            address: Some(raw_address),
-            is_valid: true,
-            is_script: Some(address.is_script_hash()),
-        })
-    } else {
+    // Testnet & regtest share format; only mainnet differs.
+    let addr_is_mainnet = matches!(address.network(), NetworkKind::Mainnet);
+    let net_is_mainnet = network.kind() == NetworkKind::Mainnet;
+
+    if addr_is_mainnet != net_is_mainnet {
         tracing::info!(
             ?network,
             address_network = ?address.network(),
             "invalid address in validateaddress RPC: Zebra's configured network must match address network"
         );
-
-        Ok(ValidateAddressResponse::invalid())
+        return Ok(validate_address::ValidateAddressResponse::invalid());
     }
+
+    Ok(validate_address::ValidateAddressResponse {
+        address: Some(raw_address),
+        is_valid: true,
+        is_script: Some(address.is_script_hash()),
+    })
 }
