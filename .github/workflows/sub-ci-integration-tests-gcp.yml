@@ -138,7 +138,7 @@ jobs:
       test_id: sync-full-mainnet
       test_description: Test a full sync up to the tip
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: NETWORK=Mainnet,NEXTEST_PROFILE=sync-full-mainnet,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: NETWORK=Mainnet,NEXTEST_PROFILE=sync-full-mainnet,SYNC_FULL_MAINNET_TIMEOUT_MINUTES=0,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false
@@ -230,7 +230,7 @@ jobs:
       app_name: zebrad
       test_id: sync-full-testnet
       test_description: Test a full sync up to the tip on testnet
-      test_variables: NETWORK=Testnet,NEXTEST_PROFILE=sync-full-testnet,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: NETWORK=Testnet,NEXTEST_PROFILE=sync-full-testnet,SYNC_FULL_TESTNET_TIMEOUT_MINUTES=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
       network: Testnet
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
