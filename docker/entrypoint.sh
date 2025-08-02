@@ -136,122 +136,8 @@ create_owned_directory() {
 [[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
 [[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
-# Runs workspace-level tests with the comprehensive feature set.
-#
-# Positional Parameters
-#
-# - $1: A nextest filter expression (e.g., "not test(some_test)")
-run_workspace_test() {
-  local filter_expr="$1"
-  echo "Running workspace test with filter: ${filter_expr}"
-  exec_as_user cargo nextest run --locked --release --workspace --features "${FEATURES}" \
-    --run-ignored=all --filter-expr "${filter_expr}"
-}
-
-# Runs acceptance tests from the 'zebrad' package.
-#
-# Positional Parameters
-#
-# - $1: The name of the test function to run.
-run_acceptance_test() {
-  local test_filter="$1"
-  echo "Running acceptance test: ${test_filter}"
-  exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-    --package zebrad --test acceptance --run-ignored=all \
-    --filter-expr "test(${test_filter})"
-}
-
-# Runs library tests from a specific package with specific features.
-#
-# Positional Parameters
-#
-# - $1: The name of the package (e.g., "zebra-state").
-# - $2: The feature set to use for this specific package.
-# - $3: The name of the test function to run.
-run_lib_test() {
-  local package="$1"
-  local features="$2"
-  local test_filter="$3"
-  echo "Running library test: package=${package}, features=${features}, filter=${test_filter}"
-  exec_as_user cargo nextest run --locked --release --lib --features "${features}" \
-    --package "${package}" \
-    --filter-expr "test(${test_filter})"
-}
-
-# Runs tests depending on the env vars.
-#
-# ## Positional Parameters
-#
-# - $@: Arbitrary command that will be executed if no test env var is set.
-run_tests() {
-  if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
-    # Run unit, basic acceptance tests, and ignored tests.
-    run_workspace_test "not test(check_no_git_dependencies)"
-
-  elif [[ "${CHECK_NO_GIT_DEPENDENCIES}" -eq "1" ]]; then
-    run_workspace_test "test(check_no_git_dependencies)"
-
-  elif [[ "${STATE_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
-    # Run state tests with fake activation heights using package-specific features.
-    run_lib_test "zebra-state" "zebra-test" "with_fake_activation_heights"
-
-  elif [[ "${SYNC_LARGE_CHECKPOINTS_EMPTY}" -eq "1" ]]; then
-    run_acceptance_test "sync_large_checkpoints_empty"
-
-  elif [[ -n "${SYNC_FULL_MAINNET_TIMEOUT_MINUTES}" ]]; then
-    run_acceptance_test "sync_full_mainnet"
-
-  elif [[ -n "${SYNC_FULL_TESTNET_TIMEOUT_MINUTES}" ]]; then
-    run_acceptance_test "sync_full_testnet"
-
-  elif [[ "${SYNC_TO_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
-    run_acceptance_test "sync_to_mandatory_checkpoint_${NETWORK,,}"
-    echo "ran test_disk_rebuild"
-
-  elif [[ "${SYNC_UPDATE_MAINNET}" -eq "1" ]]; then
-    run_acceptance_test "sync_update_mainnet"
-
-  elif [[ "${SYNC_PAST_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
-    run_acceptance_test "sync_past_mandatory_checkpoint_${NETWORK,,}"
-
-  elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
-    run_acceptance_test "generate_checkpoints_mainnet"
-
-  elif [[ "${GENERATE_CHECKPOINTS_TESTNET}" -eq "1" ]]; then
-    run_acceptance_test "generate_checkpoints_testnet"
-
-  elif [[ "${LWD_RPC_TEST}" -eq "1" ]]; then
-    # Run with a single thread as these tests can conflict.
-    echo "Running acceptance test: lwd_rpc_test"
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" \
-      --package zebrad --test acceptance --test-threads=1 \
-      --filter-expr "test(lwd_rpc_test)"
-
-  elif [[ "${LIGHTWALLETD_INTEGRATION}" -eq "1" ]]; then
-    run_acceptance_test "lwd_integration"
-
-  elif [[ "${LWD_SYNC_FULL}" -eq "1" ]]; then
-    run_acceptance_test "lwd_sync_full"
-
-  elif [[ "${LWD_SYNC_UPDATE}" -eq "1" ]]; then
-    run_acceptance_test "lwd_sync_update"
-
-  elif [[ "${LWD_GRPC_WALLET}" -eq "1" ]]; then
-    run_acceptance_test "lwd_grpc_wallet"
-
-  elif [[ "${LWD_RPC_SEND_TX}" -eq "1" ]]; then
-    run_acceptance_test "lwd_rpc_send_tx"
-
-  elif [[ "${RPC_GET_BLOCK_TEMPLATE}" -eq "1" ]]; then
-    run_acceptance_test "rpc_get_block_template"
-
-  elif [[ "${RPC_SUBMIT_BLOCK}" -eq "1" ]]; then
-    run_acceptance_test "rpc_submit_block"
-
-  else
-    exec_as_user "$@"
-  fi
-}
+# All test filtering and scoping logic has been moved to .config/nextest.toml
+# No conditional test logic needed - nextest.toml handles everything!
 
 # Main Script Logic
 #
@@ -305,8 +191,14 @@ test)
   if [[ "$1" == "zebrad" ]]; then
     shift
     exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+  elif [[ -n "${NEXTEST_PROFILE}" ]]; then
+    # Minimal nextest approach - let NEXTEST_PROFILE handle test selection/configuration
+    echo "Running tests with nextest profile: ${NEXTEST_PROFILE}"
+    echo "Features: ${FEATURES}"
+    exec_as_user cargo nextest run --locked --release --features "${FEATURES}"
   else
-    run_tests "$@"
+    # Fallback for any other command when NEXTEST_PROFILE is not set
+    exec_as_user "$@"
   fi
   ;;
 monitoring)

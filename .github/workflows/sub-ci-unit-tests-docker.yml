@@ -52,7 +52,7 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
-          -e RUN_ALL_TESTS=1 \
+          -e NEXTEST_PROFILE=ci \
           -e FEATURES="journald prometheus filter-reload" \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
@@ -89,7 +89,7 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
-          -e STATE_FAKE_ACTIVATION_HEIGHTS=1 \
+          -e NEXTEST_PROFILE=state-fake-activation-heights \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -117,7 +117,7 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
-          -e SYNC_LARGE_CHECKPOINTS_EMPTY=1 \
+          -e NEXTEST_PROFILE=sync-large-checkpoints-empty \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -145,8 +145,8 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
+          -e NEXTEST_PROFILE=lwd-integration \
           -e ZEBRA_TEST_LIGHTWALLETD=1 \
-          -e LIGHTWALLETD_INTEGRATION=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -197,7 +197,7 @@ jobs:
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
-          -e CHECK_NO_GIT_DEPENDENCIES=1 \
+          -e NEXTEST_PROFILE=check-no-git-dependencies \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \

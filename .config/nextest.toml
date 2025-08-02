@@ -1,56 +1,147 @@
 # Nextest configuration for Zebra
+# This file centralizes all test execution configuration, timeouts, and retries.
+# Uses advanced filtersets to eliminate conditional logic in entrypoint.sh.
+#
+# Advanced Filtersets Used:
+# - `package(name)` - Target specific packages/crates
+# - `test(=name)` - Exact test name matching
+# - `test(~pattern)` - Contains matching for test names
+# - `package(pkg) and test(pattern)` - Combined package + test filtering
+# - Eliminates need for --package, --lib, --test flags in entrypoint.sh
+#
+# Reference: https://nexte.st/docs/filtersets/reference/
+
 [profile.default]
 retries = 0
 fail-fast = true
 status-level = "fail"
 
-# CI profile optimized for comprehensive testing
+# CI profile for comprehensive testing (excludes only the longest-running tests)
 [profile.ci]
 retries = 1
 fail-fast = false
 status-level = "fail"
-# Store test output for failed tests
-store-output = "never"
+filter = 'not test(check_no_git_dependencies)'
 
-# Profile for sync tests (long-running)
-[profile.sync]
-retries = 2
-fail-fast = false
-slow-timeout = { period = "60m", terminate-after = 3 }
+# Profiles for specific test categories using advanced filtersets
 
-# Profile for lightwalletd tests
-[profile.lwd]  
-retries = 1
-slow-timeout = { period = "30m", terminate-after = 2 }
-
-# Profile for state tests
-[profile.state]
+[profile.check-no-git-dependencies]
+filter = 'test(=check_no_git_dependencies)'
 retries = 0
-slow-timeout = { period = "45m", terminate-after = 1 }
 
-# Per-test timeout overrides for extremely long tests
+[profile.state-fake-activation-heights]
+# Uses package() and test() filtersets to target zebra-state lib tests with fake activation heights
+filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
+retries = 0
+slow-timeout = { period = "10m", terminate-after = 1 }
+
+# Sync tests - using package() and test() filtersets for better targeting
+[profile.sync-large-checkpoints-empty]
+filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 2
+
+[profile.sync-full-mainnet]
+filter = 'package(zebrad) and test(=sync_full_mainnet)'
+slow-timeout = { period = "120m", terminate-after = 1 }
+retries = 3
+
+[profile.sync-full-testnet]
+filter = 'package(zebrad) and test(=sync_full_testnet)'
+slow-timeout = { period = "120m", terminate-after = 1 }
+retries = 3
+
+[profile.sync-to-mandatory-checkpoint]
+filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 2
+
+[profile.sync-update-mainnet]
+filter = 'package(zebrad) and test(=sync_update_mainnet)'
+slow-timeout = { period = "30m", terminate-after = 2 }
+retries = 1
+
+[profile.sync-past-mandatory-checkpoint]
+filter = 'package(zebrad) and test(~sync_past_mandatory_checkpoint_)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 2
+
+[profile.generate-checkpoints-mainnet]
+filter = 'package(zebrad) and test(=generate_checkpoints_mainnet)'
+slow-timeout = { period = "90m", terminate-after = 1 }
+retries = 2
+
+[profile.generate-checkpoints-testnet]
+filter = 'package(zebrad) and test(=generate_checkpoints_testnet)'
+slow-timeout = { period = "90m", terminate-after = 1 }
+retries = 2
+
+# LWD tests - using advanced filtersets and test-threads
+[profile.lwd-rpc-test]
+filter = 'package(zebrad) and test(=lwd_rpc_test)'
+test-threads = 1  # Run sequentially to avoid conflicts
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 1
+
+[profile.lwd-integration]
+filter = 'package(zebrad) and test(=lwd_integration)'
+slow-timeout = { period = "30m", terminate-after = 2 }
+retries = 1
+
+[profile.lwd-sync-full]
+filter = 'package(zebrad) and test(=lwd_sync_full)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 1
+
+[profile.lwd-sync-update]
+filter = 'package(zebrad) and test(=lwd_sync_update)'
+slow-timeout = { period = "30m", terminate-after = 2 }
+retries = 1
+
+[profile.lwd-grpc-wallet]
+filter = 'package(zebrad) and test(=lwd_grpc_wallet)'
+slow-timeout = { period = "60m", terminate-after = 2 }
+retries = 1
+
+[profile.lwd-rpc-send-tx]
+filter = 'package(zebrad) and test(=lwd_rpc_send_tx)'
+slow-timeout = { period = "30m", terminate-after = 2 }
+retries = 1
+
+# RPC tests
+[profile.rpc-get-block-template]
+filter = 'package(zebrad) and test(=rpc_get_block_template)'
+slow-timeout = { period = "30m", terminate-after = 2 }
+retries = 1
+
+[profile.rpc-submit-block]
+filter = 'package(zebrad) and test(=rpc_submit_block)'
+slow-timeout = { period = "30m", terminate-after = 2 }
+retries = 1
+
+# Per-test timeout overrides using advanced filtersets
 [[profile.default.overrides]]
-filter = 'test(sync_full_mainnet) or test(sync_full_testnet)'
+filter = 'test(~sync_full_)'
 slow-timeout = { period = "120m", terminate-after = 1 }
 retries = 3
 
 [[profile.default.overrides]]
-filter = 'test(generate_checkpoints_mainnet) or test(generate_checkpoints_testnet)'
+filter = 'test(~generate_checkpoints_)'
 slow-timeout = { period = "90m", terminate-after = 1 }
 retries = 2
 
 [[profile.default.overrides]]
-filter = 'test(lwd_) or test(lightwalletd_)'
+filter = 'test(~lwd_) or test(~lightwalletd_)'
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 1
 
 [[profile.default.overrides]]
-filter = 'test(sync_large_checkpoints_) or test(sync_to_mandatory_checkpoint_) or test(sync_past_mandatory_checkpoint_)'
+filter = 'test(~sync_large_checkpoints_) or test(~sync_to_mandatory_checkpoint_) or test(~sync_past_mandatory_checkpoint_)'
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 2
 
 [[profile.default.overrides]]
-filter = 'package(zebra-state) and test(with_fake_activation_heights)'
+filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
 # State tests should be deterministic
 retries = 0
 slow-timeout = { period = "10m", terminate-after = 1 }
