@@ -2721,7 +2721,10 @@ where
                     .map(|(receiver, value)| {
                         let address = funding_stream_address(height, &network, receiver);
                         types::subsidy::FundingStream::new_internal(
-                            is_nu6, receiver, value, address,
+                            is_nu6,
+                            receiver,
+                            value,
+                            address.as_ref(),
                         )
                     })
                     .collect()

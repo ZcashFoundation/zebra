@@ -849,7 +849,7 @@ pub fn standard_coinbase_outputs(
     // Optional TODO: move this into a zebra_consensus function?
     let funding_streams: HashMap<
         FundingStreamReceiver,
-        (Amount<NonNegative>, &transparent::Address),
+        (Amount<NonNegative>, transparent::Address),
     > = funding_streams
         .into_iter()
         .filter_map(|(receiver, amount)| {

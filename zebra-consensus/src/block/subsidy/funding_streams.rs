@@ -24,7 +24,7 @@ fn funding_stream_address_index(
         return None;
     }
 
-    let funding_streams = network.funding_streams(height);
+    let funding_streams = network.funding_streams(height)?;
     let num_addresses = funding_streams.recipient(receiver)?.addresses().len();
 
     let index = 1u32
@@ -50,8 +50,12 @@ pub fn funding_stream_address(
     height: Height,
     network: &Network,
     receiver: FundingStreamReceiver,
-) -> Option<&transparent::Address> {
+) -> Option<transparent::Address> {
     let index = funding_stream_address_index(height, network, receiver)?;
-    let funding_streams = network.funding_streams(height);
-    funding_streams.recipient(receiver)?.addresses().get(index)
+    let funding_streams = network.funding_streams(height)?;
+    funding_streams
+        .recipient(receiver)?
+        .addresses()
+        .get(index)
+        .cloned()
 }

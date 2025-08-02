@@ -22,10 +22,10 @@ fn minimal_coinbase() -> Result<(), Box<dyn std::error::Error>> {
             nu6: Some(1),
             ..Default::default()
         })
-        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+        .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(10)),
             recipients: None,
-        })
+        }])
         .to_network();
 
     let outputs = standard_coinbase_outputs(
