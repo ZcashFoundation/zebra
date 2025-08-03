@@ -1,150 +1,132 @@
 # Nextest configuration for Zebra
-# This file centralizes test execution configuration, timeouts, and retries.
-# Uses per-test overrides with filtersets to eliminate conditional logic in entrypoint.sh.
+# This file centralizes all test execution configuration.
 #
-# Reference: https://nexte.st/docs/configuration/per-test-overrides/
+# It uses `default-filter` within platform-specific overrides to select which tests to run for each profile.
+# See: https://nexte.st/docs/configuration/per-test-overrides/#supported-overrides
+#
+# The entrypoint.sh can be simplified to `cargo nextest run --profile <name>`.
 
 [profile.default]
 retries = 0
 fail-fast = true
 status-level = "fail"
 
-# CI profile for comprehensive testing (excludes only the longest-running tests)
+# --- CI profile ---
+# Runs all tests except 'check_no_git_dependencies'
 [profile.ci]
 retries = 1
 fail-fast = false
 status-level = "fail"
 
 [[profile.ci.overrides]]
-filter = 'not test(=check_no_git_dependencies)'
+default-filter = 'not test(check_no_git_dependencies)'
 
-# Profiles for specific test categories using per-test overrides
+# --- Individual Test Profiles ---
 
 [profile.check-no-git-dependencies]
 retries = 0
-
 [[profile.check-no-git-dependencies.overrides]]
-filter = 'test(=check_no_git_dependencies)'
+default-filter = 'test(check_no_git_dependencies)'
 
 [profile.state-fake-activation-heights]
 retries = 0
 slow-timeout = { period = "10m", terminate-after = 1 }
-
 [[profile.state-fake-activation-heights.overrides]]
-filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
+default-filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
 
-# Sync tests - using per-test overrides for better targeting
 [profile.sync-large-checkpoints-empty]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 2
-
 [[profile.sync-large-checkpoints-empty.overrides]]
-filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'
+default-filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'
 
 [profile.sync-full-mainnet]
 slow-timeout = { period = "120m", terminate-after = 1 }
 retries = 3
-
 [[profile.sync-full-mainnet.overrides]]
-filter = 'package(zebrad) and test(=sync_full_mainnet)'
+default-filter = 'package(zebrad) and test(=sync_full_mainnet)'
 
 [profile.sync-full-testnet]
 slow-timeout = { period = "120m", terminate-after = 1 }
 retries = 3
-
 [[profile.sync-full-testnet.overrides]]
-filter = 'package(zebrad) and test(=sync_full_testnet)'
+default-filter = 'package(zebrad) and test(=sync_full_testnet)'
 
 [profile.sync-to-mandatory-checkpoint]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 2
-
 [[profile.sync-to-mandatory-checkpoint.overrides]]
-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
+default-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
 
 [profile.sync-update-mainnet]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
-
 [[profile.sync-update-mainnet.overrides]]
-filter = 'package(zebrad) and test(=sync_update_mainnet)'
+default-filter = 'package(zebrad) and test(=sync_update_mainnet)'
 
 [profile.sync-past-mandatory-checkpoint]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 2
-
 [[profile.sync-past-mandatory-checkpoint.overrides]]
-filter = 'package(zebrad) and test(~sync_past_mandatory_checkpoint_)'
+default-filter = 'package(zebrad) and test(~sync_past_mandatory_checkpoint_)'
 
 [profile.generate-checkpoints-mainnet]
 slow-timeout = { period = "90m", terminate-after = 1 }
 retries = 2
-
 [[profile.generate-checkpoints-mainnet.overrides]]
-filter = 'package(zebrad) and test(=generate_checkpoints_mainnet)'
+default-filter = 'package(zebrad) and test(=generate_checkpoints_mainnet)'
 
 [profile.generate-checkpoints-testnet]
 slow-timeout = { period = "90m", terminate-after = 1 }
 retries = 2
-
 [[profile.generate-checkpoints-testnet.overrides]]
-filter = 'package(zebrad) and test(=generate_checkpoints_testnet)'
+default-filter = 'package(zebrad) and test(=generate_checkpoints_testnet)'
 
-# LWD tests - using per-test overrides and test-threads
 [profile.lwd-rpc-test]
-test-threads = 1  # Run sequentially to avoid conflicts
+test-threads = 1
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 1
-
 [[profile.lwd-rpc-test.overrides]]
-filter = 'package(zebrad) and test(=lwd_rpc_test)'
+default-filter = 'package(zebrad) and test(=lwd_rpc_test)'
 
 [profile.lwd-integration]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
-
 [[profile.lwd-integration.overrides]]
-filter = 'package(zebrad) and test(=lwd_integration)'
+default-filter = 'package(zebrad) and test(=lwd_integration)'
 
 [profile.lwd-sync-full]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 1
-
 [[profile.lwd-sync-full.overrides]]
-filter = 'package(zebrad) and test(=lwd_sync_full)'
+default-filter = 'package(zebrad) and test(=lwd_sync_full)'
 
 [profile.lwd-sync-update]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
-
 [[profile.lwd-sync-update.overrides]]
-filter = 'package(zebrad) and test(=lwd_sync_update)'
+default-filter = 'package(zebrad) and test(=lwd_sync_update)'
 
 [profile.lwd-grpc-wallet]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 1
-
 [[profile.lwd-grpc-wallet.overrides]]
-filter = 'package(zebrad) and test(=lwd_grpc_wallet)'
+default-filter = 'package(zebrad) and test(=lwd_grpc_wallet)'
 
 [profile.lwd-rpc-send-tx]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
-
 [[profile.lwd-rpc-send-tx.overrides]]
-filter = 'package(zebrad) and test(=lwd_rpc_send_tx)'
+default-filter = 'package(zebrad) and test(=lwd_rpc_send_tx)'
 
-# RPC tests
 [profile.rpc-get-block-template]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
-
 [[profile.rpc-get-block-template.overrides]]
-filter = 'package(zebrad) and test(=rpc_get_block_template)'
+default-filter = 'package(zebrad) and test(=rpc_get_block_template)'
 
 [profile.rpc-submit-block]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
-
 [[profile.rpc-submit-block.overrides]]
-filter = 'package(zebrad) and test(=rpc_submit_block)'
+default-filter = 'package(zebrad) and test(=rpc_submit_block)'
