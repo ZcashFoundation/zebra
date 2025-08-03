@@ -2,13 +2,6 @@
 # This file centralizes test execution configuration, timeouts, and retries.
 # Uses per-test overrides with filtersets to eliminate conditional logic in entrypoint.sh.
 #
-# Advanced Filtersets Used:
-# - `package(name)` - Target specific packages/crates
-# - `test(=name)` - Exact test name matching
-# - `test(~pattern)` - Contains matching for test names
-# - `package(pkg) and test(pattern)` - Combined package + test filtering
-# - Eliminates need for --package, --lib, --test flags in entrypoint.sh
-#
 # Reference: https://nexte.st/docs/configuration/per-test-overrides/
 
 [profile.default]
@@ -155,30 +148,3 @@ retries = 1
 
 [[profile.rpc-submit-block.overrides]]
 filter = 'package(zebrad) and test(=rpc_submit_block)'
-
-# Per-test timeout overrides using advanced filtersets
-[[profile.default.overrides]]
-filter = 'test(~sync_full_)'
-slow-timeout = { period = "120m", terminate-after = 1 }
-retries = 3
-
-[[profile.default.overrides]]
-filter = 'test(~generate_checkpoints_)'
-slow-timeout = { period = "90m", terminate-after = 1 }
-retries = 2
-
-[[profile.default.overrides]]
-filter = 'test(~lwd_) or test(~lightwalletd_)'
-slow-timeout = { period = "60m", terminate-after = 2 }
-retries = 1
-
-[[profile.default.overrides]]
-filter = 'test(~sync_large_checkpoints_) or test(~sync_to_mandatory_checkpoint_) or test(~sync_past_mandatory_checkpoint_)'
-slow-timeout = { period = "60m", terminate-after = 2 }
-retries = 2
-
-[[profile.default.overrides]]
-filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
-# State tests should be deterministic
-retries = 0
-slow-timeout = { period = "10m", terminate-after = 1 }
