@@ -104,7 +104,10 @@ RUN cargo install cargo-nextest --locked && \
     cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
-    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin
+    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    # Set proper ownership
+    chown -R ${UID}:${GID} ${CARGO_HOME} && \
+    chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
