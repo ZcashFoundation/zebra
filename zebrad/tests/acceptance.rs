@@ -214,7 +214,6 @@ use common::{
         spawn_zebrad_for_rpc, spawn_zebrad_without_rpc, ZebradTestDirExt, BETWEEN_NODES_DELAY,
         EXTENDED_LAUNCH_DELAY, LAUNCH_DELAY,
     },
-    lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc},
     sync::{
         create_cached_database_height, sync_until, MempoolBehavior, LARGE_CHECKPOINT_TEST_HEIGHT,
         LARGE_CHECKPOINT_TIMEOUT, MEDIUM_CHECKPOINT_TEST_HEIGHT, STOP_AT_HEIGHT_REGEX,
@@ -223,6 +222,9 @@ use common::{
     },
     test_type::TestType::{self, *},
 };
+
+#[cfg(feature = "lightwalletd-grpc-tests")]
+use common::lightwalletd::{can_spawn_lightwalletd_for_rpc, spawn_lightwalletd_for_rpc};
 
 /// The maximum amount of time that we allow the creation of a future to block the `tokio` executor.
 ///
@@ -1783,6 +1785,7 @@ fn non_blocking_logger() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[cfg(not(target_os = "windows"))]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lwd_integration() -> Result<()> {
     lwd_integration_test(LaunchWithEmptyState {
         launches_lightwalletd: true,
@@ -1795,6 +1798,7 @@ fn lwd_integration() -> Result<()> {
 ///
 /// This test might work on Windows.
 #[test]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 fn sync_update_mainnet() -> Result<()> {
     lwd_integration_test(UpdateZebraCachedStateNoRpc)
 }
@@ -1808,6 +1812,7 @@ fn sync_update_mainnet() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[cfg(not(target_os = "windows"))]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lwd_sync_update() -> Result<()> {
     if common::lightwalletd::zebra_skip_lightwalletd_tests() {
         return Ok(());
@@ -1825,6 +1830,7 @@ fn lwd_sync_update() -> Result<()> {
 #[test]
 #[ignore]
 #[cfg(not(target_os = "windows"))]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lwd_sync_full() -> Result<()> {
     if common::lightwalletd::zebra_skip_lightwalletd_tests() {
         return Ok(());
@@ -1849,6 +1855,7 @@ fn lwd_sync_full() -> Result<()> {
 #[tokio::test]
 #[ignore]
 #[cfg(not(target_os = "windows"))]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 async fn lightwalletd_test_suite() -> Result<()> {
     lwd_integration_test(LaunchWithEmptyState {
         launches_lightwalletd: true,
@@ -1858,6 +1865,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
     lwd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
     // These tests are now controlled by environment variables instead of compile-time features
+    #[cfg(feature = "lightwalletd-grpc-tests")]
     {
         // Do the quick tests first
 
@@ -1896,6 +1904,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 /// # Panics
 ///
 #[tracing::instrument]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lwd_integration_test(test_type: TestType) -> Result<()> {
     let _init_guard = zebra_test::init();
 
@@ -2514,6 +2523,7 @@ fn delete_old_databases() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 async fn lwd_rpc_send_tx() -> Result<()> {
     if std::env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
         return Ok(());
@@ -2528,6 +2538,7 @@ async fn lwd_rpc_send_tx() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[tokio::test]
 #[ignore]
+#[cfg(feature = "lightwalletd-grpc-tests")]
 async fn lwd_grpc_wallet() -> Result<()> {
     if std::env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
         return Ok(());
@@ -3618,7 +3629,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 //       and waiting until the db format downgrade is complete.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
-
+#[cfg(feature = "indexer")]
 async fn has_spending_transaction_ids() -> Result<()> {
     use std::sync::Arc;
     use tower::Service;

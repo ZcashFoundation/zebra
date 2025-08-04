@@ -16,6 +16,7 @@ pub mod config;
 pub mod failure_messages;
 pub mod get_block_template_rpcs;
 pub mod launch;
+#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod lightwalletd;
 pub mod regtest;
 pub mod sync;
