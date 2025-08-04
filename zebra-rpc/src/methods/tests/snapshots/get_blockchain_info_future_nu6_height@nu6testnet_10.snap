@@ -49,12 +49,6 @@ expression: info
       "chainValue": 0.0,
       "chainValueZat": 0,
       "monitored": false
-    },
-    {
-      "id": "deferred",
-      "chainValue": 0.0,
-      "chainValueZat": 0,
-      "monitored": false
     }
   ],
   "upgrades": {

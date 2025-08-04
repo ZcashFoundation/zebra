@@ -7,14 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## Unreleased
 
-### Added
-- RPCs which return value pools now return the pool with id "lockbox" using the "deferred"
-  value pool as source. The source of truth continue to be the "deferred" pool until it is decided 
-  to fully rename it and remove "deferred" as a value pool id in the GetBlock and GetBlockchainInfo
-  RPCs.
 
 ### Changed
-- Slice `[GetBlockchainInfoBalance; 6]` type is aliased as `BlockchainValuePoolBalances`
+- Value pool "deferred" changes its identifier to "lockbox". `GetBlock` and `GetBlockchainInfo` 
+  RPCs returning value pools will now return the `lockbox` to the `FS_DEFERRED`
+  value pool to match [reference implementation](https://github.com/zcash/zcash/pull/6912/files#diff-decae4be02fb8a47ab4557fe74a9cb853bdfa3ec0fa1b515c0a1e5de91f4ad0bR276).
+  This only applies at the RPC layer. 
+- Slice `[GetBlockchainInfoBalance; 5]` type is aliased as `BlockchainValuePoolBalances`
 
 ## [Zebra 2.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2) - 2025-07-28
 
