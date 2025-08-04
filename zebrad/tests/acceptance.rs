@@ -1321,8 +1321,11 @@ fn sync_to_mandatory_checkpoint_for_network(network: Network) -> Result<()> {
 /// activation on mainnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "sync_past_mandatory_checkpoint_mainnet", test)]
+#[test]
 fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
+    if std::env::var("ZEBRA_TEST_SYNC_PAST_CHECKPOINT").is_err() {
+        return Ok(());
+    }
     let _init_guard = zebra_test::init();
     let network = Mainnet;
     sync_past_mandatory_checkpoint(network)
@@ -1334,8 +1337,11 @@ fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
 /// activation on testnet. If the state has already synced past the mandatory checkpoint
 /// activation by 1200 blocks, it will fail.
 #[allow(dead_code)]
-#[cfg_attr(feature = "sync_past_mandatory_checkpoint_testnet", test)]
+#[test]
 fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
+    if std::env::var("ZEBRA_TEST_SYNC_PAST_CHECKPOINT").is_err() {
+        return Ok(());
+    }
     let _init_guard = zebra_test::init();
     let network = Network::new_default_testnet();
     sync_past_mandatory_checkpoint(network)
@@ -1798,7 +1804,6 @@ fn sync_update_mainnet() -> Result<()> {
 /// This test only runs when:
 /// - the `ZEBRA_TEST_LIGHTWALLETD`, `ZEBRA_CACHE_DIR`, and
 ///   `LWD_CACHE_DIR` env vars are set, and
-
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
@@ -1814,7 +1819,6 @@ fn lwd_sync_update() -> Result<()> {
 ///
 /// This test only runs when:
 /// - the `ZEBRA_TEST_LIGHTWALLETD` and `ZEBRA_CACHE_DIR` env vars are set, and
-
 ///
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
@@ -1840,8 +1844,6 @@ fn lwd_sync_full() -> Result<()> {
 ///   - run a quick update sync,
 ///   - run a send transaction gRPC test,
 ///   - run read-only gRPC tests.
-///
-
 ///
 /// These tests don't work on Windows, so they are always skipped on that platform.
 #[tokio::test]
@@ -1882,7 +1884,6 @@ async fn lightwalletd_test_suite() -> Result<()> {
 
 /// Run a lightwalletd integration test with a configuration for `test_type`.
 ///
-
 /// - [`FullSyncFromGenesis`]
 /// - [`UpdateCachedState`]
 ///
@@ -1894,7 +1895,6 @@ async fn lightwalletd_test_suite() -> Result<()> {
 ///
 /// # Panics
 ///
-
 #[tracing::instrument]
 fn lwd_integration_test(test_type: TestType) -> Result<()> {
     let _init_guard = zebra_test::init();
