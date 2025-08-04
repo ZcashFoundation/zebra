@@ -169,16 +169,39 @@ impl From<BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
 impl ConfiguredFundingStreams {
     /// Converts a [`ConfiguredFundingStreams`] to a [`FundingStreams`], using the provided default values
     /// if `height_range` or `recipients` are None.
-    fn convert(self, parameters_builder: &ParametersBuilder) -> Option<FundingStreams> {
+    ///
+    /// # Panics
+    ///
+    /// If a default is required but was not passed
+    fn convert_with_default(
+        self,
+        default_funding_streams: Option<FundingStreams>,
+        parameters_builder: &ParametersBuilder,
+    ) -> FundingStreams {
         let network = parameters_builder.to_network_unchecked();
-        let height_range = self.height_range?;
+        let height_range = self.height_range.unwrap_or_else(|| {
+            default_funding_streams
+                .as_ref()
+                .expect("default required")
+                .height_range()
+                .clone()
+        });
 
-        let recipients = self.recipients.map(|recipients| {
-            recipients
-                .into_iter()
-                .map(ConfiguredFundingStreamRecipient::into_recipient)
-                .collect()
-        })?;
+        let recipients = self
+            .recipients
+            .map(|recipients| {
+                recipients
+                    .into_iter()
+                    .map(ConfiguredFundingStreamRecipient::into_recipient)
+                    .collect()
+            })
+            .unwrap_or_else(|| {
+                default_funding_streams
+                    .as_ref()
+                    .expect("default required")
+                    .recipients()
+                    .clone()
+            });
 
         assert!(
             height_range.start < height_range.end,
@@ -203,7 +226,7 @@ impl ConfiguredFundingStreams {
          greater than denominator of {FUNDING_STREAM_RECEIVER_DENOMINATOR}"
         );
 
-        Some(funding_streams)
+        funding_streams
     }
 }
 
@@ -476,15 +499,20 @@ impl ParametersBuilder {
     }
 
     /// Sets funding streams to be used in the [`Parameters`] being built.
+    ///
+    /// # Panics
+    ///
+    /// If `funding_streams` is longer than `FUNDING_STREAMS_TESTNET`, and one
+    /// of the extra streams requires a default value.
     pub fn with_funding_streams(mut self, funding_streams: Vec<ConfiguredFundingStreams>) -> Self {
-        let original_len = funding_streams.len();
         self.funding_streams = funding_streams
             .into_iter()
-            .filter_map(|streams| streams.convert(&self))
+            .enumerate()
+            .map(|(idx, streams)| {
+                let default_streams = FUNDING_STREAMS_TESTNET.get(idx).cloned();
+                streams.convert_with_default(default_streams, &self)
+            })
             .collect();
-        if self.funding_streams.len() != original_len {
-            self.funding_streams = FUNDING_STREAMS_TESTNET.clone();
-        }
         self.should_lock_funding_stream_address_period = true;
         self
     }
@@ -589,8 +617,10 @@ impl ParametersBuilder {
         // TODO: Always check funding stream address period once the testnet parameters are being serialized (#8920).
         #[cfg(not(any(test, feature = "proptest-impl")))]
         {
-            check_funding_stream_address_period(&self.pre_nu6_funding_streams, &network);
-            check_funding_stream_address_period(&self.post_nu6_funding_streams, &network);
+            for fs in self.funding_streams.iter() {
+                // Check that the funding streams are valid for the configured Testnet parameters.
+                check_funding_stream_address_period(fs, &network);
+            }
         }
 
         network

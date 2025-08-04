@@ -342,39 +342,58 @@ fn check_configured_funding_stream_constraints() {
     ];
 
     for configured_funding_streams in configured_funding_streams {
-        let (network_funding_streams, default_funding_streams) = (
-            testnet::Parameters::build()
-                .with_funding_streams(vec![configured_funding_streams.clone()])
-                .to_network()
-                .all_funding_streams()
-                .clone(),
-            FUNDING_STREAMS_TESTNET.clone(),
-        );
+        for is_pre_nu6 in [false, true] {
+            let (network_funding_streams, default_funding_streams) = if is_pre_nu6 {
+                (
+                    testnet::Parameters::build()
+                        .with_funding_streams(vec![configured_funding_streams.clone()])
+                        .to_network()
+                        .all_funding_streams()[0]
+                        .clone(),
+                    FUNDING_STREAMS_TESTNET[0].clone(),
+                )
+            } else {
+                (
+                    testnet::Parameters::build()
+                        .with_funding_streams(vec![
+                            Default::default(),
+                            configured_funding_streams.clone(),
+                        ])
+                        .to_network()
+                        .all_funding_streams()[1]
+                        .clone(),
+                    FUNDING_STREAMS_TESTNET[1].clone(),
+                )
+            };
 
-        let expected_height_range = configured_funding_streams.height_range.clone().unwrap();
+            let expected_height_range = configured_funding_streams
+                .height_range
+                .clone()
+                .unwrap_or(default_funding_streams.height_range().clone());
 
-        assert_eq!(
-            network_funding_streams[0].height_range().clone(),
-            expected_height_range,
-            "should use default start height when unconfigured"
-        );
+            assert_eq!(
+                network_funding_streams.height_range().clone(),
+                expected_height_range,
+                "should use default start height when unconfigured"
+            );
 
-        let expected_recipients = configured_funding_streams
-            .recipients
-            .clone()
-            .map(|recipients| {
-                recipients
-                    .into_iter()
-                    .map(ConfiguredFundingStreamRecipient::into_recipient)
-                    .collect()
-            })
-            .unwrap_or(default_funding_streams[0].recipients().clone());
+            let expected_recipients = configured_funding_streams
+                .recipients
+                .clone()
+                .map(|recipients| {
+                    recipients
+                        .into_iter()
+                        .map(ConfiguredFundingStreamRecipient::into_recipient)
+                        .collect()
+                })
+                .unwrap_or(default_funding_streams.recipients().clone());
 
-        assert_eq!(
-            network_funding_streams[0].recipients().clone(),
-            expected_recipients,
-            "should use default start height when unconfigured"
-        );
+            assert_eq!(
+                network_funding_streams.recipients().clone(),
+                expected_recipients,
+                "should use default start height when unconfigured"
+            );
+        }
     }
 
     std::panic::set_hook(Box::new(|_| {}));
