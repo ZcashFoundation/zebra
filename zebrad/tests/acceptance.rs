@@ -200,9 +200,7 @@ use zebra_test::{
 use zebra_network::constants::PORT_IN_USE_ERROR;
 
 use common::{
-    cached_state::{
-        wait_for_state_version_message, wait_for_state_version_upgrade,
-    },
+    cached_state::{wait_for_state_version_message, wait_for_state_version_upgrade},
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{
         config_file_full_path, configs_dir, default_test_config, external_address_test_config,
