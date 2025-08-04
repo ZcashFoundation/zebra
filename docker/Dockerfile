@@ -23,8 +23,8 @@ ARG UID=10001
 ARG GID=${UID}
 ARG USER="zebra"
 ARG HOME="/home/${USER}"
-ARG CARGO_HOME="/usr/local/.cargo"
-ARG CARGO_TARGET_DIR="/usr/local/target"
+ARG CARGO_HOME="${HOME}/.cargo"
+ARG CARGO_TARGET_DIR="${HOME}/target"
 
 # This stage prepares Zebra's build deps and captures build args as env vars.
 FROM rust:${RUST_VERSION}-bookworm AS deps
@@ -105,9 +105,6 @@ RUN cargo install cargo-nextest --locked && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
-    # Set proper ownership
-    chown -R ${UID}:${GID} ${CARGO_HOME} && \
-    chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
 # Copy the lightwalletd binary and source files to be able to run tests
 COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
