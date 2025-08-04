@@ -43,11 +43,5 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 tracing-error = { workspace = true }
 tracing = { workspace = true }
 
-# feature-gated dependencies
-tonic-build = { workspace = true, optional = true }
-
 [dev-dependencies]
 tempfile = { workspace = true }
-
-[features]
-tonic-build = ["dep:tonic-build"]

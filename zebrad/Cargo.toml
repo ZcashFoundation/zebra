@@ -52,9 +52,6 @@ features = [
 ]
 
 [features]
-# This feature is enabled for test builds, and activates test-only code.
-lightwalletd-grpc-tests = ["tonic-build"]
-
 # In release builds, don't compile debug logging code, to improve performance.
 default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
 
@@ -129,7 +126,8 @@ proptest-impl = [
 
 
 
-
+# The gRPC tests also need an installed lightwalletd binary
+lightwalletd-grpc-tests = ["tonic-build"]
 
 
 # tokio-console support
@@ -251,6 +249,7 @@ console-subscriber = { workspace = true, optional = true }
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
+# test feature lightwalletd-grpc-tests
 tonic-build = { workspace = true, optional = true }
 
 [dev-dependencies]

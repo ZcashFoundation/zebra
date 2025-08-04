@@ -6712,7 +6712,6 @@ dependencies = [
  "thiserror 2.0.12",
  "tinyvec",
  "tokio",
- "tonic-build",
  "tower 0.4.13",
  "tracing",
  "tracing-error",

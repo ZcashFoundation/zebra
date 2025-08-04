@@ -1863,7 +1863,6 @@ async fn lightwalletd_test_suite() -> Result<()> {
         lwd_integration_test(UpdateCachedState)?;
 
         // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
-        #[cfg(feature = "lightwalletd-grpc-tests")]
         common::lightwalletd::wallet_grpc_test::run().await?;
 
         // Then do the slow tests
