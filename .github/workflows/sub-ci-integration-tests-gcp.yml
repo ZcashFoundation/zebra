@@ -106,7 +106,7 @@ jobs:
       app_name: zebrad
       test_id: sync-past-mandatory-checkpoint
       test_description: Test full validation sync from a cached state
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-past-mandatory-checkpoint,ZEBRA_TEST_SYNC_PAST_CHECKPOINT=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-past-mandatory-checkpoint-${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }},ZEBRA_TEST_SYNC_PAST_CHECKPOINT=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint

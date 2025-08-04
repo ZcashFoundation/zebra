@@ -44,9 +44,13 @@ default-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
 slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=sync_update_mainnet)'
 
-[profile.sync-past-mandatory-checkpoint]
+[profile.sync-past-mandatory-checkpoint-mainnet]
 slow-timeout = { period = "60m", terminate-after = 2 }
-default-filter = 'package(zebrad) and test(~sync_past_mandatory_checkpoint_)'
+default-filter = 'package(zebrad) and test(=sync_past_mandatory_checkpoint_mainnet)'
+
+[profile.sync-past-mandatory-checkpoint-testnet]
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=sync_past_mandatory_checkpoint_testnet)'
 
 [profile.generate-checkpoints-mainnet]
 slow-timeout = { period = "90m", terminate-after = 1 }
