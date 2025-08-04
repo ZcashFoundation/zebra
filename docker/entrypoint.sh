@@ -196,7 +196,7 @@ test)
     # handle all test selection and configuration.
     echo "Running tests with nextest profile: ${NEXTEST_PROFILE}"
     echo "Features: ${FEATURES}"
-    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" --run-ignored=all
+    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" --run-ignored=all --hide-progress-bar
   else
     # Fallback for any other command when NEXTEST_PROFILE is not set
     exec_as_user "$@"

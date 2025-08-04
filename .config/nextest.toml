@@ -9,7 +9,7 @@
 [profile.default]
 retries = 0
 fail-fast = true
-status-level = "fail"
+status-level = "pass"
 
 # --- CI profile ---
 # Runs all tests except 'check_no_git_dependencies'

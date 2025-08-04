@@ -66,10 +66,6 @@ FROM deps AS tests
 ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
 ENV FEATURES=${FEATURES}
 
-# Pre-install required toolchain to avoid runtime updates and install nextest
-RUN rustup toolchain install stable --no-self-update && \
-    cargo install cargo-nextest --locked
-
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
 ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
@@ -101,7 +97,7 @@ ARG CARGO_TARGET_DIR
 COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # Build Zebra test binaries, but don't run them
-RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
+RUN cargo test --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
@@ -109,8 +105,11 @@ RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     chown -R ${UID}:${GID} ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
+# Install nextest to run tests
+RUN cargo install cargo-nextest --locked
+
 # Copy the lightwalletd binary and source files to be able to run tests
-COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
+# COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
