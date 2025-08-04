@@ -63,7 +63,7 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 FROM deps AS tests
 
 # Use minimal feature set - tests are now controlled by environment variables per CI job
-ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests"
+ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
 ENV FEATURES=${FEATURES}
 
 # Pre-install required toolchain to avoid runtime updates
@@ -94,70 +94,27 @@ WORKDIR ${HOME}
 ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
-RUN mkdir -p ${CARGO_HOME} && \
-    mkdir -p ${CARGO_TARGET_DIR} && \
+# nextest will be installed within the cache mount context below
+
+# Copy source code first to ensure consistent timestamps
+COPY --link --chown=${UID}:${GID} ./ ${HOME}
+
+# Build Zebra test binaries, but don't run them
+RUN cargo install cargo-nextest --locked && \
+    cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
+    # Copy binaries to standard location
+    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
+    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
+    # Set proper ownership
     chown -R ${UID}:${GID} ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
-# nextest will be installed within the cache mount context below
-
-# Build Zebra test binaries, but don't run them
-#
-# Leverage a cache mount to ${CARGO_HOME} for downloaded dependencies,
-# and for git repository dependencies, and a cache mount to ${CARGO_TARGET_DIR}
-# for compiled dependencies which will speed up subsequent builds.
-# We use bind mounts to each crate directory to avoid having to copy the
-# source code into the container. Once built, copy the executable to an
-# output directory before the cache mounted ${CARGO_TARGET_DIR} is unmounted.
-
-RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
-    --mount=type=bind,source=tower-fallback,target=tower-fallback \
-    --mount=type=bind,source=zebra-chain,target=zebra-chain \
-    --mount=type=bind,source=zebra-consensus,target=zebra-consensus \
-    --mount=type=bind,source=zebra-grpc,target=zebra-grpc \
-    --mount=type=bind,source=zebra-network,target=zebra-network \
-    --mount=type=bind,source=zebra-node-services,target=zebra-node-services \
-    --mount=type=bind,source=zebra-rpc,target=zebra-rpc \
-    --mount=type=bind,source=zebra-scan,target=zebra-scan \
-    --mount=type=bind,source=zebra-script,target=zebra-script \
-    --mount=type=bind,source=zebra-state,target=zebra-state \
-    --mount=type=bind,source=zebra-test,target=zebra-test \
-    --mount=type=bind,source=zebra-utils,target=zebra-utils \
-    --mount=type=bind,source=zebrad,target=zebrad \
-    --mount=type=bind,source=Cargo.toml,target=Cargo.toml \
-    --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
-    --mount=type=cache,target=${CARGO_TARGET_DIR} \
-    --mount=type=cache,target=${CARGO_HOME} \
-    # Install nextest within the cache mount context so it's available
-    cargo install cargo-nextest --locked && \
-    # Build test binaries - features specified via comprehensive test override in Dockerfile
-    cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
-    # Copy the main binaries
-    cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
-    cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
-    # Copy CARGO_HOME
-    mkdir -p /tmp/cargo-cache && \
-    cp -r ${CARGO_HOME}/. /tmp/cargo-cache/
-
-# Restore cache directories
-RUN mkdir -p ${CARGO_HOME} && \
-    cp -r /tmp/cargo-cache/. ${CARGO_HOME}/ && \
-    chown -R ${UID}:${GID} ${CARGO_HOME} && \
-    rm -rf /tmp/cargo-cache
-
 # Copy the lightwalletd binary and source files to be able to run tests
-# COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
+COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
 COPY --link --from=tianon/gosu:bookworm /gosu /usr/local/bin/
-
-# Copy source code for building and running tests
-COPY --link --chown=${UID}:${GID} ./ ${HOME}
-
-# As the build has already run with the root user,
-# we need to set the correct permissions.
-RUN chown -R ${UID}:${GID} ${HOME}
 
 COPY --link --chown=${UID}:${GID} ./docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
