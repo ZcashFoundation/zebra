@@ -202,7 +202,6 @@ use zebra_network::constants::PORT_IN_USE_ERROR;
 use common::{
     cached_state::{
         wait_for_state_version_message, wait_for_state_version_upgrade,
-        DATABASE_FORMAT_UPGRADE_IS_LONG,
     },
     check::{is_zebrad_version, EphemeralCheck, EphemeralConfig},
     config::{
@@ -1951,7 +1950,7 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
     //
     // If incompletely upgraded states get written to the CI cache,
     // change DATABASE_FORMAT_UPGRADE_IS_LONG to true.
-    if !DATABASE_FORMAT_UPGRADE_IS_LONG {
+    if !common::cached_state::DATABASE_FORMAT_UPGRADE_IS_LONG {
         if test_type.launches_lightwalletd() {
             tracing::info!(
                 ?test_type,
@@ -2094,7 +2093,7 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
                 // Wait for the state to upgrade, if the upgrade is long.
                 // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false,
                 // or combine "wait for sync" with "wait for state version upgrade".
-                if DATABASE_FORMAT_UPGRADE_IS_LONG {
+                if common::cached_state::DATABASE_FORMAT_UPGRADE_IS_LONG {
                     wait_for_state_version_upgrade(
                         &mut zebrad,
                         &state_version_message,
@@ -2112,7 +2111,7 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
 
             // Wait for the state to upgrade, if the upgrade is long.
             // If this line hangs, change DATABASE_FORMAT_UPGRADE_IS_LONG to false.
-            if DATABASE_FORMAT_UPGRADE_IS_LONG {
+            if common::cached_state::DATABASE_FORMAT_UPGRADE_IS_LONG {
                 wait_for_state_version_upgrade(
                     &mut zebrad,
                     &state_version_message,
