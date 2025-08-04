@@ -158,7 +158,7 @@ The Zebra team created tests for the interaction of `zebrad` and `lightwalletd`.
 To run all the Zebra `lightwalletd` tests:
 1. install `lightwalletd`
 2. install `protoc`
-3. build Zebra with `--features=lightwalletd-grpc-tests`
+3. `export ZEBRA_TEST_LIGHTWALLETD=1` to run the `lightwalletd` gRPC tests
 
 Please refer to [acceptance](https://github.com/ZcashFoundation/zebra/blob/main/zebrad/tests/acceptance.rs) tests documentation in the `Lightwalletd tests` section.
 

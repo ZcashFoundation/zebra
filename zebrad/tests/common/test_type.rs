@@ -40,7 +40,7 @@ pub enum TestType {
     ///
     /// This test requires a cached Zebra state.
     //
-    // Only used with `--features=lightwalletd-grpc-tests`.
+
     #[allow(dead_code)]
     FullSyncFromGenesis {
         /// Should the test allow a cached lightwalletd state?

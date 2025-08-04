@@ -23,9 +23,8 @@ use zebra_test::{
 
 use super::{config::testdir, launch::ZebradTestDirExt, test_type::TestType};
 
-#[cfg(feature = "lightwalletd-grpc-tests")]
+// These modules are always compiled, but tests are controlled by ZEBRA_TEST_LIGHTWALLETD environment variable
 pub mod send_transaction_test;
-#[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod sync;
 #[cfg(feature = "lightwalletd-grpc-tests")]
 pub mod wallet_grpc;

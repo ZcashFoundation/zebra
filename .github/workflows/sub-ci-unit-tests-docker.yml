@@ -53,7 +53,7 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=ci \
-          -e FEATURES="journald prometheus filter-reload" \
+          -e ZEBRA_TEST_GENERATE_CHECKPOINTS=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -90,6 +90,7 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=state-fake-activation-heights \
+          -e TEST_FAKE_ACTIVATION_HEIGHTS=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -118,6 +119,7 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=sync-large-checkpoints-empty \
+          -e ZEBRA_TEST_LARGE_CHECKPOINTS=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -150,6 +152,9 @@ jobs:
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
+          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
+          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
+          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
           ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
 
   # Run a matrix of configuration tests against the Docker image

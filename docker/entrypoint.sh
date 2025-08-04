@@ -192,7 +192,8 @@ test)
     shift
     exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
   elif [[ -n "${NEXTEST_PROFILE}" ]]; then
-    # Minimal nextest approach - let NEXTEST_PROFILE handle test selection/configuration
+    # Minimal nextest approach - the NEXTEST_PROFILE environment variable and nextest.toml
+    # handle all test selection and configuration.
     echo "Running tests with nextest profile: ${NEXTEST_PROFILE}"
     echo "Features: ${FEATURES}"
     exec_as_user cargo nextest run --locked --release --features "${FEATURES}"

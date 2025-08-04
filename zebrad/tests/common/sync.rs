@@ -41,11 +41,10 @@ pub const SYNC_FINISHED_REGEX: &str =
     r"finished initial sync to chain tip, using gossiped blocks .*sync_percent.*=.*100\.";
 
 /// The text that should be logged every time Zebra checks the sync progress.
-#[cfg(feature = "lightwalletd-grpc-tests")]
+
 pub const SYNC_PROGRESS_REGEX: &str = r"sync_percent";
 
 /// The text that should be logged when Zebra loads its compiled-in checkpoints.
-#[cfg(feature = "zebra-checkpoints")]
 pub const CHECKPOINT_VERIFIER_REGEX: &str =
     r"initializing block verifier router.*max_checkpoint_height.*=.*Height";
 

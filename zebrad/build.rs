@@ -58,7 +58,7 @@ fn main() {
         }
     }
 
-    #[cfg(feature = "lightwalletd-grpc-tests")]
+    #[cfg(feature = "zebra-test")]
     tonic_build::configure()
         .build_client(true)
         .build_server(false)

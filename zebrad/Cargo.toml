@@ -52,11 +52,15 @@ features = [
 ]
 
 [features]
+# This feature is enabled for test builds, and activates test-only code.
+lightwalletd-grpc-tests = ["tonic-build"]
+
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar", "prometheus"]
+default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
+
 
 # Default features for official ZF binary release builds
-default-release-binaries = ["default", "sentry"]
+default = ["default-release-binaries"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -123,13 +127,10 @@ proptest-impl = [
     "zebra-chain/proptest-impl",
 ]
 
-# Build the zebra-checkpoints utility for checkpoint generation tests
-zebra-checkpoints = [
-    "zebra-utils/zebra-checkpoints",
-]
 
-# The gRPC tests also need an installed lightwalletd binary
-lightwalletd-grpc-tests = ["tonic-build"]
+
+
+
 
 # tokio-console support
 #
@@ -144,11 +145,10 @@ lightwalletd-grpc-tests = ["tonic-build"]
 # https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
 tokio-console = ["console-subscriber"]
 
-# TODO: replace with environmental variables that skip the tests when not set (part of #2995)
-sync_to_mandatory_checkpoint_mainnet = []
-sync_to_mandatory_checkpoint_testnet = []
-sync_past_mandatory_checkpoint_mainnet = []
-sync_past_mandatory_checkpoint_testnet = []
+# Sync checkpoint tests are now controlled by environment variables:
+# - ZEBRA_TEST_SYNC_TO_CHECKPOINT=1 enables sync to checkpoint tests
+# - ZEBRA_TEST_SYNC_PAST_CHECKPOINT=1 enables sync past checkpoint tests
+# - Use ZEBRA_NETWORK environment variable to control mainnet/testnet
 
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 
@@ -251,7 +251,6 @@ console-subscriber = { workspace = true, optional = true }
 [build-dependencies]
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
-# test feature lightwalletd-grpc-tests
 tonic-build = { workspace = true, optional = true }
 
 [dev-dependencies]
@@ -278,7 +277,7 @@ tokio-stream = { workspace = true }
 
 zcash_keys = { workspace = true }
 
-# test feature lightwalletd-grpc-tests
+
 prost = { workspace = true }
 tonic = { workspace = true }
 

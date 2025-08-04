@@ -4,7 +4,7 @@
 # It uses `default-filter` within platform-specific overrides to select which tests to run for each profile.
 # See: https://nexte.st/docs/configuration/per-test-overrides/#supported-overrides
 #
-# The entrypoint.sh can be simplified to `cargo nextest run --profile <name>`.
+# The entrypoint.sh can be simplified to `cargo nextest run`, relying on the NEXTEST_PROFILE env var.
 
 [profile.default]
 retries = 0
@@ -19,6 +19,7 @@ fail-fast = false
 status-level = "fail"
 
 [[profile.ci.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'not test(check_no_git_dependencies)'
 
 # --- Individual Test Profiles ---
@@ -26,60 +27,70 @@ default-filter = 'not test(check_no_git_dependencies)'
 [profile.check-no-git-dependencies]
 retries = 0
 [[profile.check-no-git-dependencies.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'test(check_no_git_dependencies)'
 
 [profile.state-fake-activation-heights]
 retries = 0
 slow-timeout = { period = "10m", terminate-after = 1 }
 [[profile.state-fake-activation-heights.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
 
 [profile.sync-large-checkpoints-empty]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 2
 [[profile.sync-large-checkpoints-empty.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'
 
 [profile.sync-full-mainnet]
 slow-timeout = { period = "120m", terminate-after = 1 }
 retries = 3
 [[profile.sync-full-mainnet.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=sync_full_mainnet)'
 
 [profile.sync-full-testnet]
 slow-timeout = { period = "120m", terminate-after = 1 }
 retries = 3
 [[profile.sync-full-testnet.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=sync_full_testnet)'
 
 [profile.sync-to-mandatory-checkpoint]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 2
 [[profile.sync-to-mandatory-checkpoint.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
 
 [profile.sync-update-mainnet]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
 [[profile.sync-update-mainnet.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=sync_update_mainnet)'
 
 [profile.sync-past-mandatory-checkpoint]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 2
 [[profile.sync-past-mandatory-checkpoint.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(~sync_past_mandatory_checkpoint_)'
 
 [profile.generate-checkpoints-mainnet]
 slow-timeout = { period = "90m", terminate-after = 1 }
 retries = 2
 [[profile.generate-checkpoints-mainnet.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=generate_checkpoints_mainnet)'
 
 [profile.generate-checkpoints-testnet]
 slow-timeout = { period = "90m", terminate-after = 1 }
 retries = 2
 [[profile.generate-checkpoints-testnet.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=generate_checkpoints_testnet)'
 
 [profile.lwd-rpc-test]
@@ -87,46 +98,54 @@ test-threads = 1
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 1
 [[profile.lwd-rpc-test.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=lwd_rpc_test)'
 
 [profile.lwd-integration]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
 [[profile.lwd-integration.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=lwd_integration)'
 
 [profile.lwd-sync-full]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 1
 [[profile.lwd-sync-full.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=lwd_sync_full)'
 
 [profile.lwd-sync-update]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
 [[profile.lwd-sync-update.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=lwd_sync_update)'
 
 [profile.lwd-grpc-wallet]
 slow-timeout = { period = "60m", terminate-after = 2 }
 retries = 1
 [[profile.lwd-grpc-wallet.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=lwd_grpc_wallet)'
 
 [profile.lwd-rpc-send-tx]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
 [[profile.lwd-rpc-send-tx.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=lwd_rpc_send_tx)'
 
 [profile.rpc-get-block-template]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
 [[profile.rpc-get-block-template.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=rpc_get_block_template)'
 
 [profile.rpc-submit-block]
 slow-timeout = { period = "30m", terminate-after = 2 }
 retries = 1
 [[profile.rpc-submit-block.overrides]]
+platform = 'aarch64-unknown-linux-gnu'
 default-filter = 'package(zebrad) and test(=rpc_submit_block)'

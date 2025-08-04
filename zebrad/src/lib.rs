@@ -95,7 +95,7 @@
 //! ### Testing
 //!
 //! * `proptest-impl`: enable randomised test data generation.
-//! * `lightwalletd-grpc-tests`: enable Zebra JSON-RPC tests that query `lightwalletd` using gRPC.
+
 //!
 //! ### Experimental
 //!

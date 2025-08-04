@@ -73,7 +73,7 @@
 //! - `ZEBRA_CACHE_DIR` env variable: The path to a Zebra cached state directory.
 //!   If not set, it defaults to `/zebrad-cache`.
 //! - `LWD_CACHE_DIR` env variable: The path to a lightwalletd database.
-//! - `--features lightwalletd-grpc-tests` cargo flag: The flag given to cargo to build the source code of the running test.
+//! - `ZEBRA_TEST_LIGHTWALLETD` env var: Needs to be present to run any of the lightwalletd tests.
 //!
 //! Here are some examples of running each test:
 //!
@@ -100,12 +100,12 @@
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 //! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test lwd_rpc_send_tx --features lightwalletd-grpc-tests -- --ignored --nocapture
+//! $ cargo test lwd_rpc_send_tx -- --ignored --nocapture
 //!
 //! $ export ZEBRA_TEST_LIGHTWALLETD=true
 //! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
 //! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test lwd_grpc_wallet --features lightwalletd-grpc-tests -- --ignored --nocapture
+//! $ cargo test lwd_grpc_wallet -- --ignored --nocapture
 //! ```
 //!
 //! ## Getblocktemplate tests
@@ -1155,6 +1155,10 @@ fn activate_mempool_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_large_checkpoints_empty() -> Result<()> {
+    if std::env::var("ZEBRA_TEST_LARGE_CHECKPOINTS").is_err() {
+        return Ok(());
+    }
+
     let reuse_tempdir = sync_until(
         LARGE_CHECKPOINT_TEST_HEIGHT,
         &Mainnet,
@@ -1282,20 +1286,32 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 // and then use them to more quickly run the sync_past_mandatory_checkpoint tests.
 
 /// Sync up to the mandatory checkpoint height on mainnet and stop.
-#[allow(dead_code)]
-#[cfg_attr(feature = "sync_to_mandatory_checkpoint_mainnet", test)]
+///
+/// Set ZEBRA_TEST_SYNC_TO_CHECKPOINT=1 to enable this test.
+#[test]
+#[ignore]
 fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
-    let _init_guard = zebra_test::init();
-    let network = Mainnet;
-    create_cached_database(network)
+    sync_to_mandatory_checkpoint_for_network(Mainnet)
 }
 
 /// Sync to the mandatory checkpoint height testnet and stop.
-#[allow(dead_code)]
-#[cfg_attr(feature = "sync_to_mandatory_checkpoint_testnet", test)]
+///
+/// Set ZEBRA_TEST_SYNC_TO_CHECKPOINT=1 to enable this test.
+#[test]
+#[ignore]
 fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
+    sync_to_mandatory_checkpoint_for_network(Network::new_default_testnet())
+}
+
+/// Helper function for sync to checkpoint tests
+fn sync_to_mandatory_checkpoint_for_network(network: Network) -> Result<()> {
+    use std::env;
+
+    if env::var("ZEBRA_TEST_SYNC_TO_CHECKPOINT").is_err() {
+        return Ok(());
+    }
+
     let _init_guard = zebra_test::init();
-    let network = Network::new_default_testnet();
     create_cached_database(network)
 }
 
@@ -1782,13 +1798,15 @@ fn sync_update_mainnet() -> Result<()> {
 /// This test only runs when:
 /// - the `ZEBRA_TEST_LIGHTWALLETD`, `ZEBRA_CACHE_DIR`, and
 ///   `LWD_CACHE_DIR` env vars are set, and
-/// - Zebra is compiled with `--features=lightwalletd-grpc-tests`.
+
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[cfg(not(target_os = "windows"))]
-#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lwd_sync_update() -> Result<()> {
+    if common::lightwalletd::zebra_skip_lightwalletd_tests() {
+        return Ok(());
+    }
     lwd_integration_test(UpdateCachedState)
 }
 
@@ -1796,15 +1814,17 @@ fn lwd_sync_update() -> Result<()> {
 ///
 /// This test only runs when:
 /// - the `ZEBRA_TEST_LIGHTWALLETD` and `ZEBRA_CACHE_DIR` env vars are set, and
-/// - Zebra is compiled with `--features=lightwalletd-grpc-tests`.
+
 ///
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[test]
 #[ignore]
 #[cfg(not(target_os = "windows"))]
-#[cfg(feature = "lightwalletd-grpc-tests")]
 fn lwd_sync_full() -> Result<()> {
+    if common::lightwalletd::zebra_skip_lightwalletd_tests() {
+        return Ok(());
+    }
     lwd_integration_test(FullSyncFromGenesis {
         allow_lightwalletd_cached_state: false,
     })
@@ -1821,7 +1841,7 @@ fn lwd_sync_full() -> Result<()> {
 ///   - run a send transaction gRPC test,
 ///   - run read-only gRPC tests.
 ///
-/// The lightwalletd full, update, and gRPC tests only run with `--features=lightwalletd-grpc-tests`.
+
 ///
 /// These tests don't work on Windows, so they are always skipped on that platform.
 #[tokio::test]
@@ -1835,8 +1855,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
     // Only runs when ZEBRA_CACHE_DIR is set.
     lwd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
-    // These tests need the compile-time gRPC feature
-    #[cfg(feature = "lightwalletd-grpc-tests")]
+    // These tests are now controlled by environment variables instead of compile-time features
     {
         // Do the quick tests first
 
@@ -1844,6 +1863,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
         lwd_integration_test(UpdateCachedState)?;
 
         // Only runs when LWD_CACHE_DIR and ZEBRA_CACHE_DIR are set
+        #[cfg(feature = "lightwalletd-grpc-tests")]
         common::lightwalletd::wallet_grpc_test::run().await?;
 
         // Then do the slow tests
@@ -1863,7 +1883,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 
 /// Run a lightwalletd integration test with a configuration for `test_type`.
 ///
-/// Tests that sync `lightwalletd` to the chain tip require the `lightwalletd-grpc-tests` feature`:
+
 /// - [`FullSyncFromGenesis`]
 /// - [`UpdateCachedState`]
 ///
@@ -1875,8 +1895,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
 ///
 /// # Panics
 ///
-/// If the `test_type` requires `--features=lightwalletd-grpc-tests`,
-/// but Zebra was not compiled with that feature.
+
 #[tracing::instrument]
 fn lwd_integration_test(test_type: TestType) -> Result<()> {
     let _init_guard = zebra_test::init();
@@ -2045,7 +2064,6 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
     // Wait for zebrad and lightwalletd to sync, if needed.
     let (mut zebrad, lightwalletd) = if test_type.needs_zebra_cached_state() {
         if let Some((lightwalletd, lightwalletd_rpc_port)) = lightwalletd_and_port {
-            #[cfg(feature = "lightwalletd-grpc-tests")]
             {
                 use common::lightwalletd::sync::wait_for_zebrad_and_lightwalletd_sync;
 
@@ -2079,14 +2097,6 @@ fn lwd_integration_test(test_type: TestType) -> Result<()> {
 
                 (zebrad, Some(lightwalletd))
             }
-
-            #[cfg(not(feature = "lightwalletd-grpc-tests"))]
-            panic!(
-                "the {test_type:?} test requires `cargo test --feature lightwalletd-grpc-tests`\n\
-                 zebrad: {zebrad:?}\n\
-                 lightwalletd: {lightwalletd:?}\n\
-                 lightwalletd_rpc_port: {lightwalletd_rpc_port:?}"
-            );
         } else {
             // We're just syncing Zebra, so there's no lightwalletd to check
             tracing::info!(?test_type, "waiting for zebrad to sync to the tip");
@@ -2505,9 +2515,10 @@ fn delete_old_databases() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[tokio::test]
 #[ignore]
-#[cfg(feature = "lightwalletd-grpc-tests")]
-#[cfg(not(target_os = "windows"))]
 async fn lwd_rpc_send_tx() -> Result<()> {
+    if std::env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
+        return Ok(());
+    }
     common::lightwalletd::send_transaction_test::run().await
 }
 
@@ -2518,9 +2529,10 @@ async fn lwd_rpc_send_tx() -> Result<()> {
 /// This test doesn't work on Windows, so it is always skipped on that platform.
 #[tokio::test]
 #[ignore]
-#[cfg(feature = "lightwalletd-grpc-tests")]
-#[cfg(not(target_os = "windows"))]
 async fn lwd_grpc_wallet() -> Result<()> {
+    if std::env::var("ZEBRA_TEST_LIGHTWALLETD").is_err() {
+        return Ok(());
+    }
     common::lightwalletd::wallet_grpc_test::run().await
 }
 
@@ -2581,8 +2593,10 @@ fn end_of_support_is_checked_at_start() -> Result<()> {
 /// See [`common::checkpoints`] for more information.
 #[tokio::test]
 #[ignore]
-#[cfg(feature = "zebra-checkpoints")]
 async fn generate_checkpoints_mainnet() -> Result<()> {
+    if std::env::var("ZEBRA_TEST_GENERATE_CHECKPOINTS").is_err() {
+        return Ok(());
+    }
     common::checkpoints::run(Mainnet).await
 }
 
@@ -2593,8 +2607,10 @@ async fn generate_checkpoints_mainnet() -> Result<()> {
 /// See [`common::checkpoints`] for more information.
 #[tokio::test]
 #[ignore]
-#[cfg(feature = "zebra-checkpoints")]
 async fn generate_checkpoints_testnet() -> Result<()> {
+    if std::env::var("ZEBRA_TEST_GENERATE_CHECKPOINTS").is_err() {
+        return Ok(());
+    }
     common::checkpoints::run(Network::new_default_testnet()).await
 }
 
@@ -3603,7 +3619,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 //       and waiting until the db format downgrade is complete.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore]
-#[cfg(feature = "indexer")]
+
 async fn has_spending_transaction_ids() -> Result<()> {
     use std::sync::Arc;
     use tower::Service;

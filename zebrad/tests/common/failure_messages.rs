@@ -130,7 +130,6 @@ pub const LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES: &[&str] = &[
 ///
 /// These `zebra-checkpoints` messages show that checkpoint generation has failed.
 /// So when we see them in the logs, we make the test fail.
-#[cfg(feature = "zebra-checkpoints")]
 pub const ZEBRA_CHECKPOINTS_FAILURE_MESSAGES: &[&str] = &[
     // Rust-specific panics
     "The application panicked",

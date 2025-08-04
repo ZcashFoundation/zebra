@@ -62,8 +62,8 @@ ENV SHORT_SHA=${SHORT_SHA:-}
 # An entrypoint.sh is only available in this step for easier test handling with variables.
 FROM deps AS tests
 
-# Override FEATURES with comprehensive set for testing to avoid feature juggling
-ARG FEATURES="default-release-binaries zebra-checkpoints lightwalletd-grpc-tests proptest-impl indexer sync_to_mandatory_checkpoint_mainnet sync_to_mandatory_checkpoint_testnet sync_past_mandatory_checkpoint_mainnet sync_past_mandatory_checkpoint_testnet"
+# Use minimal feature set - tests are now controlled by environment variables per CI job
+ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests"
 ENV FEATURES=${FEATURES}
 
 # Pre-install required toolchain to avoid runtime updates
@@ -130,9 +130,8 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=cache,target=${CARGO_HOME} \
     # Install nextest within the cache mount context so it's available
     cargo install cargo-nextest --locked && \
-    # Build test binaries with comprehensive features - no more feature juggling!
-    cargo nextest run --locked --release --no-run \
-    --features "${FEATURES}" && \
+    # Build test binaries - features specified via comprehensive test override in Dockerfile
+    cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy the main binaries
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
@@ -194,7 +193,7 @@ RUN --mount=type=bind,source=tower-batch-control,target=tower-batch-control \
     --mount=type=bind,source=Cargo.lock,target=Cargo.lock \
     --mount=type=cache,target=${CARGO_TARGET_DIR} \
     --mount=type=cache,target=${CARGO_HOME} \
-    cargo build --locked --release --features "${FEATURES}" --package zebrad --bin zebrad && \
+    cargo build --locked --release --package zebrad --bin zebrad && \
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin
 
 # This stage starts from scratch using Debian and copies the built zebrad binary
