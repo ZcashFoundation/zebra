@@ -66,8 +66,9 @@ FROM deps AS tests
 ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints"
 ENV FEATURES=${FEATURES}
 
-# Pre-install required toolchain to avoid runtime updates
-RUN rustup toolchain install stable --no-self-update
+# Pre-install required toolchain to avoid runtime updates and install nextest
+RUN rustup toolchain install stable --no-self-update && \
+    cargo install cargo-nextest --locked
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
 ARG ZEBRA_SKIP_IPV6_TESTS
@@ -100,8 +101,7 @@ ARG CARGO_TARGET_DIR
 COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
 # Build Zebra test binaries, but don't run them
-RUN cargo install cargo-nextest --locked && \
-    cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
+RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
