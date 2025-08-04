@@ -255,7 +255,8 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
         assert!(
             recipient.addresses().len() >= expected_min_num_addresses,
             "recipients must have a sufficient number of addresses for height range, \
-         minimum num addresses required: {expected_min_num_addresses}"
+         minimum num addresses required: {expected_min_num_addresses}, given: {}",
+            recipient.addresses().len()
         );
 
         for address in recipient.addresses() {
@@ -823,9 +824,7 @@ impl Parameters {
         self.slow_start_shift
     }
 
-    /// Returns funding streams for this network. Will incorporate
-    /// `pre_nu6_funding_streams` and `post_nu6_funding_streams` if they were
-    /// specified.
+    /// Returns funding streams for this network.
     pub fn funding_streams(&self) -> &Vec<FundingStreams> {
         &self.funding_streams
     }
