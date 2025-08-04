@@ -30,6 +30,9 @@ ARG CARGO_TARGET_DIR="${HOME}/target"
 FROM rust:${RUST_VERSION}-bookworm AS deps
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
+# Make the build platform available as a variable
+ARG BUILDPLATFORM
+
 # Install zebra build deps
 RUN apt-get -qq update && \
     apt-get -qq install -y --no-install-recommends \
@@ -91,13 +94,26 @@ WORKDIR ${HOME}
 ARG CARGO_HOME
 ARG CARGO_TARGET_DIR
 
-# nextest will be installed within the cache mount context below
+# Download and install the pre-built cargo-nextest binary.
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends curl && \
+    mkdir -p "${CARGO_HOME}/bin" && \
+    case ${BUILDPLATFORM} in \
+        "linux/amd64") ARCH="linux" ;; \
+        "linux/arm64") ARCH="linux-arm" ;; \
+        *) echo "Unsupported architecture: ${BUILDPLATFORM}"; exit 1 ;; \
+    esac && \
+    curl -LsSf "https://get.nexte.st/latest/${ARCH}" | tar zxf - -C "${CARGO_HOME}/bin" && \
+    apt-get -qq remove --purge -y curl && \
+    apt-get -qq autoremove -y && \
+    rm -rf /var/lib/apt/lists/* /tmp/*
 
 # Copy source code first to ensure consistent timestamps
 COPY --link --chown=${UID}:${GID} ./ ${HOME}
 
-# Build Zebra test binaries, but don't run them
-RUN cargo test --locked --release --no-run --features "${FEATURES}" && \
+# Build Zebra test binaries using nextest, but don't run them.
+# This also copies the necessary binaries to /usr/local/bin.
+RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     # Copy binaries to standard location
     cp ${CARGO_TARGET_DIR}/release/zebrad /usr/local/bin && \
     cp ${CARGO_TARGET_DIR}/release/zebra-checkpoints /usr/local/bin && \
@@ -105,11 +121,8 @@ RUN cargo test --locked --release --no-run --features "${FEATURES}" && \
     chown -R ${UID}:${GID} ${CARGO_HOME} && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
-# Install nextest to run tests
-RUN cargo install cargo-nextest --locked
-
 # Copy the lightwalletd binary and source files to be able to run tests
-# COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
+COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories
