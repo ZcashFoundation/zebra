@@ -136,9 +136,6 @@ create_owned_directory() {
 [[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
 [[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
-# All test filtering and scoping logic has been moved to .config/nextest.toml
-# No conditional test logic needed - nextest.toml handles everything!
-
 # Main Script Logic
 #
 # 1. First check if ZEBRA_CONF_PATH is explicitly set or if a file exists at that path
@@ -192,13 +189,10 @@ test)
     shift
     exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
   elif [[ -n "${NEXTEST_PROFILE}" ]]; then
-    # Minimal nextest approach - the NEXTEST_PROFILE environment variable and nextest.toml
-    # handle all test selection and configuration.
+    # All test filtering and scoping logic is handled by .config/nextest.toml
     echo "Running tests with nextest profile: ${NEXTEST_PROFILE}"
-    echo "Features: ${FEATURES}"
     exec_as_user cargo nextest run --locked --release --features "${FEATURES}" --run-ignored=all --hide-progress-bar
   else
-    # Fallback for any other command when NEXTEST_PROFILE is not set
     exec_as_user "$@"
   fi
   ;;

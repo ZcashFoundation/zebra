@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7-labs
+# syntax=docker/dockerfile:1
 # check=skip=UndefinedVar,UserExist # We use gosu in the entrypoint instead of USER directive
 
 # If you want to include a file in the Docker image, add it to .dockerignore.

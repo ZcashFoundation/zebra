@@ -132,7 +132,6 @@ zebra-checkpoints = [
 # The gRPC tests also need an installed lightwalletd binary
 lightwalletd-grpc-tests = ["tonic-build"]
 
-
 # tokio-console support
 #
 # To activate this feature, run:
@@ -145,11 +144,6 @@ lightwalletd-grpc-tests = ["tonic-build"]
 # For more details, see:
 # https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
 tokio-console = ["console-subscriber"]
-
-# Sync checkpoint tests are now controlled by environment variables:
-# - ZEBRA_TEST_SYNC_TO_CHECKPOINT=1 enables sync to checkpoint tests
-# - ZEBRA_TEST_SYNC_PAST_CHECKPOINT=1 enables sync past checkpoint tests
-# - Use ZEBRA_NETWORK environment variable to control mainnet/testnet
 
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 

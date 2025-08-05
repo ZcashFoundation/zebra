@@ -196,7 +196,7 @@ jobs:
       test_id: generate-checkpoints-mainnet
       test_description: Generate Zebra checkpoints on mainnet
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: NETWORK=Mainnet,NEXTEST_PROFILE=generate-checkpoints-mainnet,ZEBRA_TEST_GENERATE_CHECKPOINTS=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: NETWORK=Mainnet,NEXTEST_PROFILE=generate-checkpoints-mainnet,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
       needs_zebra_state: true
       # sync-update-mainnet updates the disk on every PR, so we don't need to do it here
       saves_to_disk: false
@@ -261,7 +261,7 @@ jobs:
       app_name: zebrad
       test_id: generate-checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
-      test_variables: NETWORK=Testnet,NEXTEST_PROFILE=generate-checkpoints-testnet,ZEBRA_TEST_GENERATE_CHECKPOINTS=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: NETWORK=Testnet,NEXTEST_PROFILE=generate-checkpoints-testnet,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
       network: Testnet
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed

@@ -134,8 +134,8 @@
 //!
 //! Generate checkpoints on mainnet and testnet using a cached state:
 //! ```console
-//! GENERATE_CHECKPOINTS_MAINNET=1 FEATURES=zebra-checkpoints ZEBRA_CACHE_DIR=/path/to/zebra/state docker/entrypoint.sh
-//! GENERATE_CHECKPOINTS_TESTNET=1 FEATURES=zebra-checkpoints ZEBRA_CACHE_DIR=/path/to/zebra/state docker/entrypoint.sh
+//! FEATURES=zebra-checkpoints ZEBRA_CACHE_DIR=/path/to/zebra/state docker/entrypoint.sh
+//! FEATURES=zebra-checkpoints ZEBRA_CACHE_DIR=/path/to/zebra/state docker/entrypoint.sh
 //! ```
 //!
 //! ## Disk Space for Testing
@@ -1286,8 +1286,6 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
 // and then use them to more quickly run the sync_past_mandatory_checkpoint tests.
 
 /// Sync up to the mandatory checkpoint height on mainnet and stop.
-///
-/// Set ZEBRA_TEST_SYNC_TO_CHECKPOINT=1 to enable this test.
 #[test]
 #[ignore]
 fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
@@ -1295,8 +1293,6 @@ fn sync_to_mandatory_checkpoint_mainnet() -> Result<()> {
 }
 
 /// Sync to the mandatory checkpoint height testnet and stop.
-///
-/// Set ZEBRA_TEST_SYNC_TO_CHECKPOINT=1 to enable this test.
 #[test]
 #[ignore]
 fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {

@@ -10,9 +10,9 @@
 fail-fast = true
 status-level = "pass"
 
-# --- CI profile ---
+# --- All Tests profile ---
 # Runs all tests except 'check_no_git_dependencies'
-[profile.ci]
+[profile.all-tests]
 default-filter = 'not test(check_no_git_dependencies)'
 
 # --- Individual Test Profiles ---
