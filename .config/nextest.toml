@@ -30,18 +30,22 @@ default-filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'
 
 [profile.sync-full-mainnet]
 slow-timeout = { period = "120m", terminate-after = 1 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(=sync_full_mainnet)'
 
 [profile.sync-full-testnet]
 slow-timeout = { period = "120m", terminate-after = 1 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(=sync_full_testnet)'
 
 [profile.sync-to-mandatory-checkpoint]
 slow-timeout = { period = "60m", terminate-after = 2 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
 
 [profile.sync-update-mainnet]
 slow-timeout = { period = "30m", terminate-after = 2 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(=sync_update_mainnet)'
 
 [profile.sync-past-mandatory-checkpoint-mainnet]
@@ -54,10 +58,12 @@ default-filter = 'package(zebrad) and test(=sync_past_mandatory_checkpoint_testn
 
 [profile.generate-checkpoints-mainnet]
 slow-timeout = { period = "90m", terminate-after = 1 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(=generate_checkpoints_mainnet)'
 
 [profile.generate-checkpoints-testnet]
 slow-timeout = { period = "90m", terminate-after = 1 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(=generate_checkpoints_testnet)'
 
 [profile.lwd-rpc-test]
@@ -71,10 +77,12 @@ default-filter = 'package(zebrad) and test(=lwd_integration)'
 
 [profile.lwd-sync-full]
 slow-timeout = { period = "60m", terminate-after = 2 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(=lwd_sync_full)'
 
 [profile.lwd-sync-update]
 slow-timeout = { period = "30m", terminate-after = 2 }
+success-output = "immediate"
 default-filter = 'package(zebrad) and test(=lwd_sync_update)'
 
 [profile.lwd-grpc-wallet]
