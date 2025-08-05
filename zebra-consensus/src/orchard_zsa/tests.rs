@@ -24,14 +24,14 @@ use zebra_chain::{
 
 use zebra_test::{
     transcript::{ExpectedTranscriptError, Transcript},
-    vectors::ORCHARD_WORKFLOW_BLOCKS_ZSA,
+    vectors::ORCHARD_ZSA_WORKFLOW_BLOCKS,
 };
 
 use crate::{block::Request, Config};
 
 fn create_transcript_data() -> impl Iterator<Item = (Request, Result<Hash, ExpectedTranscriptError>)>
 {
-    let workflow_blocks = ORCHARD_WORKFLOW_BLOCKS_ZSA.iter().map(|block_bytes| {
+    let workflow_blocks = ORCHARD_ZSA_WORKFLOW_BLOCKS.iter().map(|block_bytes| {
         Arc::new(Block::zcash_deserialize(&block_bytes[..]).expect("block should deserialize"))
     });
 
