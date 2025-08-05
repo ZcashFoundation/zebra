@@ -122,4 +122,24 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
     Ok(())
 }
 
-//TODO: add test to check if funding streams ranges do not overlap
+//Test if funding streams ranges do not overlap
+#[test]
+fn test_funding_stream_ranges_dont_overlap() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+    for network in Network::iter() {
+        let funding_streams = network.all_funding_streams();
+        // This is quadratic but it's fine since the number of funding streams is small.
+        for i in 0..funding_streams.len() {
+            for j in (i + 1)..funding_streams.len() {
+                let range_a = funding_streams[i].height_range();
+                let range_b = funding_streams[j].height_range();
+                assert!(
+                    // https://stackoverflow.com/a/325964
+                    !(range_a.start < range_b.end && range_b.start < range_a.end),
+                    "Funding streams {i} and {j} overlap: {range_a:?} and {range_b:?}",
+                );
+            }
+        }
+    }
+    Ok(())
+}

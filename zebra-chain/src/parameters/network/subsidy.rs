@@ -204,7 +204,10 @@ impl FundingStreamRecipient {
 }
 
 lazy_static! {
-    /// The funding streams for Mainnet as described in [protocol specification §7.10.1][7.10.1]
+    /// The funding streams for Mainnet as described in:
+    /// - [protocol specification §7.10.1][7.10.1]
+    /// - [ZIP-1015](https://zips.z.cash/zip-1015)
+    ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAMS_MAINNET: Vec<FundingStreams> = vec![
         FundingStreams {
@@ -243,7 +246,11 @@ lazy_static! {
         },
     ];
 
-    /// The funding streams for Testnet as described in [protocol specification §7.10.1][7.10.1]
+    /// The funding streams for Testnet as described in:
+    ///
+    /// - [protocol specification §7.10.1][7.10.1]
+    /// - [ZIP-1015](https://zips.z.cash/zip-1015)
+    ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAMS_TESTNET: Vec<FundingStreams> = vec![
         FundingStreams {

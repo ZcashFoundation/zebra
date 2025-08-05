@@ -303,7 +303,7 @@ pub async fn run() -> Result<()> {
     let mut all_balance_streams = Vec::new();
     for &fs_receiver in network
         .funding_streams(lwd_tip_height)
-        .unwrap_or(network.all_funding_streams().last().unwrap().clone())
+        .unwrap_or(network.all_funding_streams().last().unwrap())
         .recipients()
         .keys()
     {

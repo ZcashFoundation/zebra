@@ -916,13 +916,10 @@ impl Network {
     }
 
     /// Returns post-Canopy funding streams for this network at the provided height
-    pub fn funding_streams(&self, height: Height) -> Option<FundingStreams> {
-        for streams in self.all_funding_streams() {
-            if streams.height_range().contains(&height) {
-                return Some(streams.clone());
-            }
-        }
-        None
+    pub fn funding_streams(&self, height: Height) -> Option<&FundingStreams> {
+        self.all_funding_streams()
+            .iter()
+            .find(|&streams| streams.height_range().contains(&height))
     }
 
     /// Returns post-Canopy funding streams for this network at the provided height

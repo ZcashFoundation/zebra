@@ -202,7 +202,7 @@ pub fn subsidy_is_valid(
         let mut has_expected_output = |address, expected_amount| {
             coinbase_outputs.remove(&Output::new_coinbase(
                 expected_amount,
-                subsidy::new_coinbase_script(&address),
+                subsidy::new_coinbase_script(address),
             ))
         };
 
@@ -217,13 +217,13 @@ pub fn subsidy_is_valid(
         // TODO: Add references to the one-time lockbox disbursement & community coinholder funding model ZIPs
         //       (https://zips.z.cash/draft-ecc-lockbox-disbursement, https://zips.z.cash/draft-ecc-community-and-coinholder)
         let expected_one_time_lockbox_disbursements = network.lockbox_disbursements(height);
-        for (address, expected_amount) in expected_one_time_lockbox_disbursements {
-            if !has_expected_output(address, expected_amount) {
+        for (address, expected_amount) in &expected_one_time_lockbox_disbursements {
+            if !has_expected_output(address, *expected_amount) {
                 Err(SubsidyError::OneTimeLockboxDisbursementNotFound)?;
             }
 
             deferred_pool_balance_change = deferred_pool_balance_change
-                .checked_sub(expected_amount)
+                .checked_sub(*expected_amount)
                 .expect("should be a valid Amount");
         }
 

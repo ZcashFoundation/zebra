@@ -50,12 +50,8 @@ pub fn funding_stream_address(
     height: Height,
     network: &Network,
     receiver: FundingStreamReceiver,
-) -> Option<transparent::Address> {
+) -> Option<&transparent::Address> {
     let index = funding_stream_address_index(height, network, receiver)?;
     let funding_streams = network.funding_streams(height)?;
-    funding_streams
-        .recipient(receiver)?
-        .addresses()
-        .get(index)
-        .cloned()
+    funding_streams.recipient(receiver)?.addresses().get(index)
 }
