@@ -7,9 +7,8 @@ use crate::{
     block::Height,
     parameters::{
         subsidy::{
-            block_subsidy, funding_stream_values, FundingStreamReceiver,
+            block_subsidy, funding_stream_values, FundingStreamReceiver, FUNDING_STREAMS_TESTNET,
             FUNDING_STREAM_ECC_ADDRESSES_MAINNET, FUNDING_STREAM_ECC_ADDRESSES_TESTNET,
-            POST_NU6_FUNDING_STREAMS_TESTNET, PRE_NU6_FUNDING_STREAMS_TESTNET,
         },
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreamRecipient,
@@ -347,20 +346,23 @@ fn check_configured_funding_stream_constraints() {
             let (network_funding_streams, default_funding_streams) = if is_pre_nu6 {
                 (
                     testnet::Parameters::build()
-                        .with_pre_nu6_funding_streams(configured_funding_streams.clone())
+                        .with_funding_streams(vec![configured_funding_streams.clone()])
                         .to_network()
-                        .pre_nu6_funding_streams()
+                        .all_funding_streams()[0]
                         .clone(),
-                    PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
+                    FUNDING_STREAMS_TESTNET[0].clone(),
                 )
             } else {
                 (
                     testnet::Parameters::build()
-                        .with_post_nu6_funding_streams(configured_funding_streams.clone())
+                        .with_funding_streams(vec![
+                            Default::default(),
+                            configured_funding_streams.clone(),
+                        ])
                         .to_network()
-                        .post_nu6_funding_streams()
+                        .all_funding_streams()[1]
                         .clone(),
-                    POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
+                    FUNDING_STREAMS_TESTNET[1].clone(),
                 )
             };
 
@@ -398,19 +400,19 @@ fn check_configured_funding_stream_constraints() {
 
     // should panic when there are fewer addresses than the max funding stream address index.
     let expected_panic_num_addresses = std::panic::catch_unwind(|| {
-        testnet::Parameters::build().with_pre_nu6_funding_streams(ConfiguredFundingStreams {
+        testnet::Parameters::build().with_funding_streams(vec![ConfiguredFundingStreams {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 10,
                 addresses: Some(vec![]),
             }]),
             ..Default::default()
-        });
+        }]);
     });
 
     // should panic when sum of numerators is greater than funding stream denominator.
     let expected_panic_numerator = std::panic::catch_unwind(|| {
-        testnet::Parameters::build().with_pre_nu6_funding_streams(ConfiguredFundingStreams {
+        testnet::Parameters::build().with_funding_streams(vec![ConfiguredFundingStreams {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 101,
@@ -421,12 +423,12 @@ fn check_configured_funding_stream_constraints() {
                 ),
             }]),
             ..Default::default()
-        });
+        }]);
     });
 
     // should panic when recipient addresses are for Mainnet.
     let expected_panic_wrong_addr_network = std::panic::catch_unwind(|| {
-        testnet::Parameters::build().with_pre_nu6_funding_streams(ConfiguredFundingStreams {
+        testnet::Parameters::build().with_funding_streams(vec![ConfiguredFundingStreams {
             recipients: Some(vec![ConfiguredFundingStreamRecipient {
                 receiver: FundingStreamReceiver::Ecc,
                 numerator: 10,
@@ -437,7 +439,7 @@ fn check_configured_funding_stream_constraints() {
                 ),
             }]),
             ..Default::default()
-        });
+        }]);
     });
 
     // drop panic hook before expecting errors.
@@ -515,7 +517,7 @@ fn lockbox_input_value(network: &Network, height: Height) -> Amount<NonNegative>
             .get(&FundingStreamReceiver::Deferred)
             .expect("we expect a lockbox funding stream after NU5");
 
-    let post_nu6_funding_stream_height_range = network.post_nu6_funding_streams().height_range();
+    let post_nu6_funding_stream_height_range = network.all_funding_streams()[1].height_range();
 
     // `min(height, last_height_with_deferred_pool_contribution) - (nu6_activation_height - 1)`,
     // We decrement NU6 activation height since it's an inclusive lower bound.

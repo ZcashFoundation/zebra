@@ -1,0 +1,254 @@
+# Default configuration for zebrad.
+#
+# This file can be used as a skeleton for custom configs.
+#
+# Unspecified fields use default values. Optional fields are Some(field) if the
+# field is present and None if it is absent.
+#
+# This file is generated as an example using zebrad's current defaults.
+# You should set only the config options you want to keep, and delete the rest.
+# Only a subset of fields are present in the skeleton, since optional values
+# whose default is None are omitted.
+#
+# The config format (including a complete list of sections and fields) is
+# documented here:
+# https://docs.rs/zebrad/latest/zebrad/config/struct.ZebradConfig.html
+#
+# zebrad attempts to load configs in the following order:
+#
+# 1. The -c flag on the command line, e.g., `zebrad -c myconfig.toml start`;
+# 2. The file `zebrad.toml` in the users's preference directory (platform-dependent);
+# 3. The default config.
+#
+# The user's preference directory and the default path to the `zebrad` config are platform dependent,
+# based on `dirs::preference_dir`, see https://docs.rs/dirs/latest/dirs/fn.preference_dir.html :
+#
+# | Platform | Value                                 | Example                                        |
+# | -------- | ------------------------------------- | ---------------------------------------------- |
+# | Linux    | `$XDG_CONFIG_HOME` or `$HOME/.config` | `/home/alice/.config/zebrad.toml`              |
+# | macOS    | `$HOME/Library/Preferences`           | `/Users/Alice/Library/Preferences/zebrad.toml` |
+# | Windows  | `{FOLDERID_RoamingAppData}`           | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
+
+[consensus]
+checkpoint_sync = true
+
+[mempool]
+eviction_memory_time = "1h"
+tx_cost_limit = 80000000
+
+[metrics]
+
+[mining]
+
+[network]
+cache_dir = true
+crawl_new_peer_interval = "1m 1s"
+initial_mainnet_peers = [
+    "dnsseed.z.cash:8233",
+    "dnsseed.str4d.xyz:8233",
+    "mainnet.seeder.zfnd.org:8233",
+    "mainnet.is.yolo.money:8233",
+]
+initial_testnet_peers = []
+listen_addr = "0.0.0.0:8233"
+max_connections_per_ip = 1
+network = "Testnet"
+peerset_initial_target_size = 25
+
+[network.testnet_parameters]
+network_name = "ConfiguredTestnet_1"
+network_magic = [0, 0, 0, 0]
+slow_start_interval = 0
+target_difficulty_limit = "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+disable_pow = true
+genesis_hash = "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08"
+
+[network.testnet_parameters.activation_heights]
+BeforeOverwinter = 1
+Overwinter = 207_500
+Sapling = 280_000
+Blossom = 584_000
+Heartwood = 903_800
+Canopy = 1_028_500
+NU5 = 1_842_420
+NU6 = 2_000_000
+"NU6.1" = 2_000_001
+NU7 = 2_000_002
+
+[network.testnet_parameters.pre_nu6_funding_streams.height_range]
+start = 0
+end = 100
+
+[[network.testnet_parameters.post_nu6_funding_streams.recipients]]
+receiver = "ECC"
+numerator = 7
+addresses = [
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+]
+
+[[network.testnet_parameters.post_nu6_funding_streams.recipients]]
+receiver = "ZcashFoundation"
+numerator = 5
+addresses = [
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+    "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz",
+]
+
+[[network.testnet_parameters.funding_streams]]
+
+[network.testnet_parameters.funding_streams.height_range]
+start = 1028500
+end = 2796000
+
+[[network.testnet_parameters.funding_streams.recipients]]
+receiver = "ZcashFoundation"
+numerator = 5
+addresses = ["t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v", "t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v"]
+
+[[network.testnet_parameters.funding_streams.recipients]]
+receiver = "ECC"
+numerator = 7
+addresses = ["t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz", "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz", "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz", "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz", "t2NNHrgPpE388atmWSF4DxAb3xAoW5Yp45M", "t2VMN28itPyMeMHBEd9Z1hm6YLkQcGA1Wwe", "t2CHa1TtdfUV8UYhNm7oxbzRyfr8616BYh2", "t2F77xtr28U96Z2bC53ZEdTnQSUAyDuoa67", "t2ARrzhbgcpoVBDPivUuj6PzXzDkTBPqfcT", "t278aQ8XbvFR15mecRguiJDQQVRNnkU8kJw", "t2Dp1BGnZsrTXZoEWLyjHmg3EPvmwBnPDGB", "t2KzeqXgf4ju33hiSqCuKDb8iHjPCjMq9iL", "t2Nyxqv1BiWY1eUSiuxVw36oveawYuo18tr", "t2DKFk5JRsVoiuinK8Ti6eM4Yp7v8BbfTyH", "t2CUaBca4k1x36SC4q8Nc8eBoqkMpF3CaLg", "t296SiKL7L5wvFmEdMxVLz1oYgd6fTfcbZj", "t29fBCFbhgsjL3XYEZ1yk1TUh7eTusB6dPg", "t2FGofLJXa419A76Gpf5ncxQB4gQXiQMXjK", "t2ExfrnRVnRiXDvxerQ8nZbcUQvNvAJA6Qu", "t28JUffLp47eKPRHKvwSPzX27i9ow8LSXHx", "t2JXWPtrtyL861rFWMZVtm3yfgxAf4H7uPA", "t2QdgbJoWfYHgyvEDEZBjHmgkr9yNJff3Hi", "t2QW43nkco8r32ZGRN6iw6eSzyDjkMwCV3n", "t2DgYDXMJTYLwNcxighQ9RCgPxMVATRcUdC", "t2Bop7dg33HGZx3wunnQzi2R2ntfpjuti3M", "t2HVeEwovcLq9RstAbYkqngXNEsCe2vjJh9", "t2HxbP5keQSx7p592zWQ5bJ5GrMmGDsV2Xa", "t2TJzUg2matao3mztBRJoWnJY6ekUau6tPD", "t29pMzxmo6wod25YhswcjKv3AFRNiBZHuhj", "t2QBQMRiJKYjshJpE6RhbF7GLo51yE6d4wZ", "t2F5RqnqguzZeiLtYHFx4yYfy6pDnut7tw5", "t2CHvyZANE7XCtg8AhZnrcHCC7Ys1jJhK13", "t2BRzpMdrGWZJ2upsaNQv6fSbkbTy7EitLo", "t2BFixHGQMAWDY67LyTN514xRAB94iEjXp3", "t2Uvz1iVPzBEWfQBH1p7NZJsFhD74tKaG8V", "t2CmFDj5q6rJSRZeHf1SdrowinyMNcj438n", "t2ErNvWEReTfPDBaNizjMPVssz66aVZh1hZ", "t2GeJQ8wBUiHKDVzVM5ZtKfY5reCg7CnASs", "t2L2eFtkKv1G6j55kLytKXTGuir4raAy3yr", "t2EK2b87dpPazb7VvmEGc8iR6SJ289RywGL", "t2DJ7RKeZJxdA4nZn8hRGXE8NUyTzjujph9", "t2K1pXo4eByuWpKLkssyMLe8QKUbxnfFC3H", "t2TB4mbSpuAcCWkH94Leb27FnRxo16AEHDg", "t2Phx4gVL4YRnNsH3jM1M7jE4Fo329E66Na", "t2VQZGmeNomN8c3USefeLL9nmU6M8x8CVzC", "t2RicCvTVTY5y9JkreSRv3Xs8q2K67YxHLi", "t2JrSLxTGc8wtPDe9hwbaeUjCrCfc4iZnDD", "t2Uh9Au1PDDSw117sAbGivKREkmMxVC5tZo", "t2FDwoJKLeEBMTy3oP7RLQ1Fihhvz49a3Bv", "t2FY18mrgtb7QLeHA8ShnxLXuW8cNQ2n1v8", "t2L15TkDYum7dnQRBqfvWdRe8Yw3jVy9z7g"]
+
+[[network.testnet_parameters.funding_streams.recipients]]
+receiver = "MajorGrants"
+numerator = 8
+addresses = ["t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P", "t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P"]
+
+[[network.testnet_parameters.funding_streams]]
+
+[network.testnet_parameters.funding_streams.height_range]
+start = 2976000
+end = 3216000
+
+[[network.testnet_parameters.funding_streams.recipients]]
+receiver = "MajorGrants"
+numerator = 8
+addresses = ["t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu", "t2HifwjUj9uyxr9bknR8LFuQbc98c3vkXtu"]
+
+[[network.testnet_parameters.funding_streams.recipients]]
+receiver = "Deferred"
+numerator = 12
+addresses = []
+
+
+[rpc]
+debug_force_finished_sync = false
+parallel_cpu_threads = 0
+
+[state]
+cache_dir = "cache_dir"
+delete_old_database = true
+ephemeral = false
+
+[sync]
+checkpoint_verify_concurrency_limit = 1000
+download_concurrency_limit = 50
+full_verify_concurrency_limit = 20
+parallel_cpu_threads = 0
+
+[tracing]
+buffer_limit = 128000
+force_use_color = false
+use_color = true
+use_journald = false
