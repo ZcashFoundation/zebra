@@ -16,7 +16,6 @@ use tracing::Span;
 use zebra_chain::{
     common::atomic_write,
     parameters::{
-        subsidy::FundingStreams,
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreams,
             ConfiguredLockboxDisbursement, RegtestParameters,
@@ -601,6 +600,7 @@ struct DTestnetParameters {
     activation_heights: Option<ConfiguredActivationHeights>,
     pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
     post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    funding_streams: Option<Vec<ConfiguredFundingStreams>>,
     pre_blossom_halving_interval: Option<u32>,
     lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
 }
@@ -641,14 +641,6 @@ impl Default for DConfig {
 
 impl From<Arc<testnet::Parameters>> for DTestnetParameters {
     fn from(params: Arc<testnet::Parameters>) -> Self {
-        fn replace_empty_with_none(fs: &FundingStreams) -> Option<ConfiguredFundingStreams> {
-            if fs.recipients().is_empty() {
-                None
-            } else {
-                Some(fs.into())
-            }
-        }
-
         Self {
             network_name: Some(params.network_name().to_string()),
             network_magic: Some(params.network_magic().0),
@@ -657,8 +649,9 @@ impl From<Arc<testnet::Parameters>> for DTestnetParameters {
             disable_pow: Some(params.disable_pow()),
             genesis_hash: Some(params.genesis_hash().to_string()),
             activation_heights: Some(params.activation_heights().into()),
-            pre_nu6_funding_streams: replace_empty_with_none(params.pre_nu6_funding_streams()),
-            post_nu6_funding_streams: replace_empty_with_none(params.post_nu6_funding_streams()),
+            pre_nu6_funding_streams: None,
+            post_nu6_funding_streams: None,
+            funding_streams: Some(params.funding_streams().iter().map(Into::into).collect()),
             pre_blossom_halving_interval: Some(
                 params
                     .pre_blossom_halving_interval()
@@ -755,11 +748,20 @@ impl<'de> Deserialize<'de> for Config {
                              activation_heights,
                              pre_nu6_funding_streams,
                              post_nu6_funding_streams,
+                             funding_streams,
                              ..
-                         }| RegtestParameters {
-                            activation_heights: activation_heights.unwrap_or_default(),
-                            pre_nu6_funding_streams,
-                            post_nu6_funding_streams,
+                         }| {
+                            let mut funding_streams_vec = funding_streams.unwrap_or_default();
+                            if let Some(funding_streams) = post_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
+                            if let Some(funding_streams) = pre_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
+                            RegtestParameters {
+                                activation_heights: activation_heights.unwrap_or_default(),
+                                funding_streams: Some(funding_streams_vec),
+                            }
                         },
                     )
                     .unwrap_or_default();
@@ -778,6 +780,7 @@ impl<'de> Deserialize<'de> for Config {
                     activation_heights,
                     pre_nu6_funding_streams,
                     post_nu6_funding_streams,
+                    funding_streams,
                     pre_blossom_halving_interval,
                     lockbox_disbursements,
                 }),
@@ -824,14 +827,17 @@ impl<'de> Deserialize<'de> for Config {
                 }
 
                 // Set configured funding streams after setting any parameters that affect the funding stream address period.
-
-                if let Some(funding_streams) = pre_nu6_funding_streams {
-                    params_builder = params_builder.with_pre_nu6_funding_streams(funding_streams);
-                }
+                let mut funding_streams_vec = funding_streams.unwrap_or_default();
 
                 if let Some(funding_streams) = post_nu6_funding_streams {
-                    params_builder = params_builder.with_post_nu6_funding_streams(funding_streams);
+                    funding_streams_vec.insert(0, funding_streams);
                 }
+
+                if let Some(funding_streams) = pre_nu6_funding_streams {
+                    funding_streams_vec.insert(0, funding_streams);
+                }
+
+                params_builder = params_builder.with_funding_streams(funding_streams_vec);
 
                 if let Some(lockbox_disbursements) = lockbox_disbursements {
                     params_builder =

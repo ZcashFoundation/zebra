@@ -3289,12 +3289,12 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let network = base_network_params
         .clone()
-        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+        .with_funding_streams(vec![ConfiguredFundingStreams {
             // Start checking funding streams from block height 1
             height_range: Some(Height(1)..Height(100)),
             // Use default post-NU6 recipients
             recipients: None,
-        })
+        }])
         .to_network();
 
     tracing::info!("built configured Testnet, starting state service and block verifier");
@@ -3470,10 +3470,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
 
     let network = base_network_params
         .clone()
-        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+        .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(0),
-        })
+        }])
         .to_network();
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(
@@ -3528,10 +3528,10 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     // Use an invalid coinbase transaction (with an output value less than the `block_subsidy + miner_fees - expected_lockbox_funding_stream`)
     let network = base_network_params
         .clone()
-        .with_post_nu6_funding_streams(ConfiguredFundingStreams {
+        .with_funding_streams(vec![ConfiguredFundingStreams {
             height_range: Some(Height(1)..Height(100)),
             recipients: make_configured_recipients_with_lockbox_numerator(20),
-        })
+        }])
         .to_network();
 
     let (coinbase_txn, default_roots) = generate_coinbase_and_roots(

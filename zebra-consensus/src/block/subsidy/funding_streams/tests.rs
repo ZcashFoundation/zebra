@@ -20,8 +20,8 @@ fn test_funding_stream_values() -> Result<(), Report> {
     let canopy_activation_height = Canopy.activation_height(network).unwrap();
     let nu6_activation_height = Nu6.activation_height(network).unwrap();
 
-    let dev_fund_height_range = network.pre_nu6_funding_streams().height_range();
-    let nu6_fund_height_range = network.post_nu6_funding_streams().height_range();
+    let dev_fund_height_range = network.all_funding_streams()[0].height_range();
+    let nu6_fund_height_range = network.all_funding_streams()[1].height_range();
 
     let nu6_fund_end = Height(3_146_400);
 
@@ -95,7 +95,11 @@ fn test_funding_stream_values() -> Result<(), Report> {
 fn test_funding_stream_addresses() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
     for network in Network::iter() {
-        for (receiver, recipient) in network.pre_nu6_funding_streams().recipients() {
+        for (receiver, recipient) in network
+            .all_funding_streams()
+            .iter()
+            .flat_map(|fs| fs.recipients())
+        {
             for address in recipient.addresses() {
                 let expected_network_kind = match network.kind() {
                     NetworkKind::Mainnet => NetworkKind::Mainnet,
@@ -115,5 +119,27 @@ fn test_funding_stream_addresses() -> Result<(), Report> {
         }
     }
 
+    Ok(())
+}
+
+//Test if funding streams ranges do not overlap
+#[test]
+fn test_funding_stream_ranges_dont_overlap() -> Result<(), Report> {
+    let _init_guard = zebra_test::init();
+    for network in Network::iter() {
+        let funding_streams = network.all_funding_streams();
+        // This is quadratic but it's fine since the number of funding streams is small.
+        for i in 0..funding_streams.len() {
+            for j in (i + 1)..funding_streams.len() {
+                let range_a = funding_streams[i].height_range();
+                let range_b = funding_streams[j].height_range();
+                assert!(
+                    // https://stackoverflow.com/a/325964
+                    !(range_a.start < range_b.end && range_b.start < range_a.end),
+                    "Funding streams {i} and {j} overlap: {range_a:?} and {range_b:?}",
+                );
+            }
+        }
+    }
     Ok(())
 }

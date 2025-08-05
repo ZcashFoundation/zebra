@@ -8,8 +8,8 @@ use crate::{
         constants::{magics, SLOW_START_INTERVAL, SLOW_START_SHIFT},
         network_upgrade::TESTNET_ACTIVATION_HEIGHTS,
         subsidy::{
-            funding_stream_address_period, FUNDING_STREAM_RECEIVER_DENOMINATOR,
-            NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
+            funding_stream_address_period, FUNDING_STREAMS_MAINNET, FUNDING_STREAMS_TESTNET,
+            FUNDING_STREAM_RECEIVER_DENOMINATOR, NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET,
         },
         Network, NetworkKind, NetworkUpgrade,
     },
@@ -22,9 +22,7 @@ use super::{
     subsidy::{
         FundingStreamReceiver, FundingStreamRecipient, FundingStreams,
         BLOSSOM_POW_TARGET_SPACING_RATIO, POST_BLOSSOM_HALVING_INTERVAL,
-        POST_NU6_FUNDING_STREAMS_MAINNET, POST_NU6_FUNDING_STREAMS_TESTNET,
-        PRE_BLOSSOM_HALVING_INTERVAL, PRE_NU6_FUNDING_STREAMS_MAINNET,
-        PRE_NU6_FUNDING_STREAMS_TESTNET,
+        PRE_BLOSSOM_HALVING_INTERVAL,
     },
 };
 
@@ -171,15 +169,23 @@ impl From<BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
 impl ConfiguredFundingStreams {
     /// Converts a [`ConfiguredFundingStreams`] to a [`FundingStreams`], using the provided default values
     /// if `height_range` or `recipients` are None.
+    ///
+    /// # Panics
+    ///
+    /// If a default is required but was not passed
     fn convert_with_default(
         self,
-        default_funding_streams: FundingStreams,
+        default_funding_streams: Option<FundingStreams>,
         parameters_builder: &ParametersBuilder,
     ) -> FundingStreams {
         let network = parameters_builder.to_network_unchecked();
-        let height_range = self
-            .height_range
-            .unwrap_or(default_funding_streams.height_range().clone());
+        let height_range = self.height_range.unwrap_or_else(|| {
+            default_funding_streams
+                .as_ref()
+                .expect("default required")
+                .height_range()
+                .clone()
+        });
 
         let recipients = self
             .recipients
@@ -189,7 +195,13 @@ impl ConfiguredFundingStreams {
                     .map(ConfiguredFundingStreamRecipient::into_recipient)
                     .collect()
             })
-            .unwrap_or(default_funding_streams.recipients().clone());
+            .unwrap_or_else(|| {
+                default_funding_streams
+                    .as_ref()
+                    .expect("default required")
+                    .recipients()
+                    .clone()
+            });
 
         assert!(
             height_range.start <= height_range.end,
@@ -357,10 +369,8 @@ pub struct ParametersBuilder {
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Slow start interval for this network
     slow_start_interval: Height,
-    /// Pre-NU6 funding streams for this network
-    pre_nu6_funding_streams: FundingStreams,
-    /// Post-NU6 funding streams for this network
-    post_nu6_funding_streams: FundingStreams,
+    /// Funding streams for this network
+    funding_streams: Vec<FundingStreams>,
     /// A flag indicating whether to allow changes to fields that affect
     /// the funding stream address period.
     should_lock_funding_stream_address_period: bool,
@@ -407,8 +417,7 @@ impl Default for ParametersBuilder {
                 .to_expanded()
                 .expect("difficulty limits are valid expanded values"),
             disable_pow: false,
-            pre_nu6_funding_streams: PRE_NU6_FUNDING_STREAMS_TESTNET.clone(),
-            post_nu6_funding_streams: POST_NU6_FUNDING_STREAMS_TESTNET.clone(),
+            funding_streams: FUNDING_STREAMS_TESTNET.clone(),
             should_lock_funding_stream_address_period: false,
             pre_blossom_halving_interval: PRE_BLOSSOM_HALVING_INTERVAL,
             post_blossom_halving_interval: POST_BLOSSOM_HALVING_INTERVAL,
@@ -547,42 +556,29 @@ impl ParametersBuilder {
         self
     }
 
-    /// Sets pre-NU6 funding streams to be used in the [`Parameters`] being built.
-    /// Clears pre-NU6 funding streams if provided with a `None` value.
-    pub fn with_pre_nu6_funding_streams(
-        mut self,
-        funding_streams: impl Into<Option<ConfiguredFundingStreams>>,
-    ) -> Self {
-        if let Some(funding_streams) = funding_streams.into() {
-            self.pre_nu6_funding_streams = funding_streams
-                .convert_with_default(PRE_NU6_FUNDING_STREAMS_TESTNET.clone(), &self);
-            self.should_lock_funding_stream_address_period = true;
-        } else {
-            self.pre_nu6_funding_streams = FundingStreams::empty();
-        }
-        self
-    }
-
-    /// Sets post-NU6 funding streams to be used in the [`Parameters`] being built.
-    /// Clears post-NU6 funding streams if provided with a `None` value.
-    pub fn with_post_nu6_funding_streams(
-        mut self,
-        funding_streams: impl Into<Option<ConfiguredFundingStreams>>,
-    ) -> Self {
-        if let Some(funding_streams) = funding_streams.into() {
-            self.post_nu6_funding_streams = funding_streams
-                .convert_with_default(POST_NU6_FUNDING_STREAMS_TESTNET.clone(), &self);
-            self.should_lock_funding_stream_address_period = true;
-        } else {
-            self.post_nu6_funding_streams = FundingStreams::empty();
-        }
+    /// Sets funding streams to be used in the [`Parameters`] being built.
+    ///
+    /// # Panics
+    ///
+    /// If `funding_streams` is longer than `FUNDING_STREAMS_TESTNET`, and one
+    /// of the extra streams requires a default value.
+    pub fn with_funding_streams(mut self, funding_streams: Vec<ConfiguredFundingStreams>) -> Self {
+        self.funding_streams = funding_streams
+            .into_iter()
+            .enumerate()
+            .map(|(idx, streams)| {
+                let default_streams = FUNDING_STREAMS_TESTNET.get(idx).cloned();
+                streams.convert_with_default(default_streams, &self)
+            })
+            .collect();
+        self.should_lock_funding_stream_address_period = true;
         self
     }
 
     /// Clears funding streams from the [`Parameters`] being built.
-    pub fn clear_funding_streams(self) -> Self {
-        self.with_pre_nu6_funding_streams(None)
-            .with_post_nu6_funding_streams(None)
+    pub fn clear_funding_streams(mut self) -> Self {
+        self.funding_streams = vec![];
+        self
     }
 
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
@@ -646,8 +642,7 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
-            pre_nu6_funding_streams,
-            post_nu6_funding_streams,
+            funding_streams,
             should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
             disable_pow,
@@ -663,8 +658,7 @@ impl ParametersBuilder {
             activation_heights,
             slow_start_interval,
             slow_start_shift: Height(slow_start_interval.0 / 2),
-            pre_nu6_funding_streams,
-            post_nu6_funding_streams,
+            funding_streams,
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
@@ -684,8 +678,10 @@ impl ParametersBuilder {
         let network = self.to_network_unchecked();
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
-        check_funding_stream_address_period(&self.pre_nu6_funding_streams, &network);
-        check_funding_stream_address_period(&self.post_nu6_funding_streams, &network);
+        for fs in self.funding_streams.iter() {
+            // Check that the funding streams are valid for the configured Testnet parameters.
+            check_funding_stream_address_period(fs, &network);
+        }
 
         network
     }
@@ -698,8 +694,7 @@ impl ParametersBuilder {
             genesis_hash,
             activation_heights,
             slow_start_interval,
-            pre_nu6_funding_streams,
-            post_nu6_funding_streams,
+            funding_streams,
             should_lock_funding_stream_address_period: _,
             target_difficulty_limit,
             disable_pow,
@@ -713,8 +708,7 @@ impl ParametersBuilder {
             && self.network_magic == network_magic
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
-            && self.pre_nu6_funding_streams == pre_nu6_funding_streams
-            && self.post_nu6_funding_streams == post_nu6_funding_streams
+            && self.funding_streams == funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends
@@ -730,10 +724,8 @@ impl ParametersBuilder {
 pub struct RegtestParameters {
     /// The configured network upgrade activation heights to use on Regtest
     pub activation_heights: ConfiguredActivationHeights,
-    /// Configured pre-NU6 funding streams
-    pub pre_nu6_funding_streams: Option<ConfiguredFundingStreams>,
-    /// Configured post-NU6 funding streams
-    pub post_nu6_funding_streams: Option<ConfiguredFundingStreams>,
+    /// Configured funding streams
+    pub funding_streams: Option<Vec<ConfiguredFundingStreams>>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -764,10 +756,8 @@ pub struct Parameters {
     slow_start_interval: Height,
     /// Slow start shift for this network, always half the slow start interval
     slow_start_shift: Height,
-    /// Pre-NU6 funding streams for this network
-    pre_nu6_funding_streams: FundingStreams,
-    /// Post-NU6 funding streams for this network
-    post_nu6_funding_streams: FundingStreams,
+    /// Funding streams for this network
+    funding_streams: Vec<FundingStreams>,
     /// Target difficulty limit for this network
     target_difficulty_limit: ExpandedDifficulty,
     /// A flag for disabling proof-of-work checks when Zebra is validating blocks
@@ -805,8 +795,7 @@ impl Parameters {
     pub fn new_regtest(
         RegtestParameters {
             activation_heights,
-            pre_nu6_funding_streams,
-            post_nu6_funding_streams,
+            funding_streams,
         }: RegtestParameters,
     ) -> Self {
         let parameters = Self::build()
@@ -820,8 +809,7 @@ impl Parameters {
             // most network upgrades are disabled by default for Regtest in zcashd
             .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
-            .with_pre_nu6_funding_streams(pre_nu6_funding_streams)
-            .with_post_nu6_funding_streams(post_nu6_funding_streams)
+            .with_funding_streams(funding_streams.unwrap_or_default())
             .with_lockbox_disbursements(Vec::new());
 
         Self {
@@ -851,8 +839,7 @@ impl Parameters {
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
-            pre_nu6_funding_streams: _,
-            post_nu6_funding_streams: _,
+            funding_streams,
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
@@ -865,6 +852,7 @@ impl Parameters {
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
+            && self.funding_streams == funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends
@@ -904,14 +892,9 @@ impl Parameters {
         self.slow_start_shift
     }
 
-    /// Returns pre-NU6 funding streams for this network
-    pub fn pre_nu6_funding_streams(&self) -> &FundingStreams {
-        &self.pre_nu6_funding_streams
-    }
-
-    /// Returns post-NU6 funding streams for this network
-    pub fn post_nu6_funding_streams(&self) -> &FundingStreams {
-        &self.post_nu6_funding_streams
+    /// Returns funding streams for this network.
+    pub fn funding_streams(&self) -> &Vec<FundingStreams> {
+        &self.funding_streams
     }
 
     /// Returns the target difficulty limit for this network
@@ -1000,40 +983,19 @@ impl Network {
         }
     }
 
-    /// Returns pre-NU6 funding streams for this network
-    ///
-    /// Commonly referred to as the "Dev Fund".
-    ///
-    /// Defined in [Zcash Protocol Specification §7.10.1][7.10.1]
-    ///
-    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub fn pre_nu6_funding_streams(&self) -> &FundingStreams {
-        if let Self::Testnet(params) = self {
-            params.pre_nu6_funding_streams()
-        } else {
-            &PRE_NU6_FUNDING_STREAMS_MAINNET
-        }
-    }
-
-    /// Returns post-NU6 funding streams for this network
-    ///
-    /// Defined in [Zcash Protocol Specification §7.10.1][7.10.1]
-    ///
-    /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
-    pub fn post_nu6_funding_streams(&self) -> &FundingStreams {
-        if let Self::Testnet(params) = self {
-            params.post_nu6_funding_streams()
-        } else {
-            &POST_NU6_FUNDING_STREAMS_MAINNET
-        }
+    /// Returns post-Canopy funding streams for this network at the provided height
+    pub fn funding_streams(&self, height: Height) -> Option<&FundingStreams> {
+        self.all_funding_streams()
+            .iter()
+            .find(|&streams| streams.height_range().contains(&height))
     }
 
     /// Returns post-Canopy funding streams for this network at the provided height
-    pub fn funding_streams(&self, height: Height) -> &FundingStreams {
-        if NetworkUpgrade::current(self, height) < NetworkUpgrade::Nu6 {
-            self.pre_nu6_funding_streams()
+    pub fn all_funding_streams(&self) -> &Vec<FundingStreams> {
+        if let Self::Testnet(params) = self {
+            params.funding_streams()
         } else {
-            self.post_nu6_funding_streams()
+            &FUNDING_STREAMS_MAINNET
         }
     }
 
