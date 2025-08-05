@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 ## Unreleased
 
 
-### Changed
+### Breaking Changes
 - Value pool "deferred" changes its identifier to "lockbox". `GetBlock` and `GetBlockchainInfo` 
   RPCs returning value pools will now return the `lockbox` to the `FS_DEFERRED`
   value pool to match [reference implementation](https://github.com/zcash/zcash/pull/6912/files#diff-decae4be02fb8a47ab4557fe74a9cb853bdfa3ec0fa1b515c0a1e5de91f4ad0bR276).
