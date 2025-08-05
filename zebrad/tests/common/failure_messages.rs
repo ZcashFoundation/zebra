@@ -49,7 +49,6 @@ pub const ZEBRA_FAILURE_MESSAGES: &[&str] = &[
 ///
 /// These `lightwalletd` messages show that the `lightwalletd` integration test has failed.
 /// So when we see them in the logs, we make the test fail.
-#[cfg(feature = "lightwalletd-grpc-tests")]
 pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
     // Go-specific panics
     "panic:",
@@ -119,7 +118,6 @@ pub const LIGHTWALLETD_FAILURE_MESSAGES: &[&str] = &[
 ///
 /// These `lightwalletd` messages look like failure messages, but they are actually ok.
 /// So when we see them in the logs, we make the test continue.
-#[cfg(feature = "lightwalletd-grpc-tests")]
 pub const LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES: &[&str] = &[
     // Exceptions to lightwalletd custom RPC error messages:
     //
@@ -132,6 +130,7 @@ pub const LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES: &[&str] = &[
 ///
 /// These `zebra-checkpoints` messages show that checkpoint generation has failed.
 /// So when we see them in the logs, we make the test fail.
+#[cfg(feature = "zebra-checkpoints")]
 pub const ZEBRA_CHECKPOINTS_FAILURE_MESSAGES: &[&str] = &[
     // Rust-specific panics
     "The application panicked",

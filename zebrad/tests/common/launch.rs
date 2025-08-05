@@ -24,11 +24,10 @@ use zebra_test::{
 };
 use zebrad::config::ZebradConfig;
 
-use crate::common::config::testdir;
-
-#[cfg(feature = "lightwalletd-grpc-tests")]
-use crate::common::lightwalletd::zebra_skip_lightwalletd_tests;
-use crate::common::{sync::FINISH_PARTIAL_SYNC_TIMEOUT, test_type::TestType};
+use crate::common::{
+    config::testdir, lightwalletd::zebra_skip_lightwalletd_tests,
+    sync::FINISH_PARTIAL_SYNC_TIMEOUT, test_type::TestType,
+};
 
 /// After we launch `zebrad`, wait this long for the command to start up,
 /// take the actions expected by the tests, and log the expected logs.
@@ -346,7 +345,6 @@ pub fn can_spawn_zebrad_for_test_type<S: AsRef<str> + Debug>(
     // Skip the test unless the user specifically asked for it
     //
     // TODO: pass test_type to zebra_skip_lightwalletd_tests() and check for lightwalletd launch in there
-    #[cfg(feature = "lightwalletd-grpc-tests")]
     if test_type.launches_lightwalletd() && zebra_skip_lightwalletd_tests() {
         return false;
     }

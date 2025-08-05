@@ -10,23 +10,19 @@ use indexmap::IndexSet;
 
 use zebra_chain::parameters::Network;
 use zebra_network::CacheDir;
-use zebra_test::prelude::*;
+use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
     cached_state::ZEBRA_CACHE_DIR,
     config::{default_test_config, random_known_rpc_port_config},
-    failure_messages::{PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES},
-    launch::{LIGHTWALLETD_DELAY, LIGHTWALLETD_FULL_SYNC_TIP_DELAY, LIGHTWALLETD_UPDATE_TIP_DELAY},
-    sync::FINISH_PARTIAL_SYNC_TIMEOUT,
-};
-
-#[cfg(feature = "lightwalletd-grpc-tests")]
-use super::{
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
+        PROCESS_FAILURE_MESSAGES, ZEBRA_FAILURE_MESSAGES,
     },
+    launch::{LIGHTWALLETD_DELAY, LIGHTWALLETD_FULL_SYNC_TIP_DELAY, LIGHTWALLETD_UPDATE_TIP_DELAY},
     lightwalletd::LWD_CACHE_DIR,
+    sync::FINISH_PARTIAL_SYNC_TIMEOUT,
 };
 
 use TestType::*;
@@ -44,7 +40,7 @@ pub enum TestType {
     ///
     /// This test requires a cached Zebra state.
     //
-
+    // Only used with `--features=lightwalletd-grpc-tests`.
     #[allow(dead_code)]
     FullSyncFromGenesis {
         /// Should the test allow a cached lightwalletd state?
@@ -115,7 +111,6 @@ impl TestType {
     }
 
     /// Does this test need a `lightwalletd` cached state?
-    #[cfg(feature = "lightwalletd-grpc-tests")]
     pub fn needs_lightwalletd_cached_state(&self) -> bool {
         // Handle the lightwalletd state directory based on the test type:
         // - LaunchWithEmptyState, UpdateZebraCachedStateNoRpc: ignore the state directory
@@ -132,7 +127,6 @@ impl TestType {
     }
 
     /// Does this test allow a `lightwalletd` cached state, even if it is not required?
-    #[cfg(feature = "lightwalletd-grpc-tests")]
     pub fn allow_lightwalletd_cached_state(&self) -> bool {
         match self {
             LaunchWithEmptyState { .. } => false,
@@ -147,7 +141,6 @@ impl TestType {
     }
 
     /// Can this test create a new `LWD_CACHE_DIR` cached state?
-    #[cfg(feature = "lightwalletd-grpc-tests")]
     pub fn can_create_lightwalletd_cached_state(&self) -> bool {
         match self {
             LaunchWithEmptyState { .. } | UseAnyState => false,
@@ -232,7 +225,6 @@ impl TestType {
     }
 
     /// Returns the `lightwalletd` state path for this test, if set, and if allowed for this test.
-    #[cfg(feature = "lightwalletd-grpc-tests")]
     pub fn lightwalletd_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
         let test_name = test_name.as_ref();
 
@@ -281,7 +273,6 @@ impl TestType {
 
     /// Returns the `lightwalletd` timeout for this test type.
     #[track_caller]
-    #[cfg(feature = "lightwalletd-grpc-tests")]
     pub fn lightwalletd_timeout(&self) -> Duration {
         if !self.launches_lightwalletd() {
             panic!("lightwalletd must not be launched in the {self:?} test");
@@ -325,10 +316,7 @@ impl TestType {
     /// Returns `lightwalletd` log regexes that indicate the tests have failed,
     /// and regexes of any failures that should be ignored.
     #[track_caller]
-    #[cfg(feature = "lightwalletd-grpc-tests")]
     pub fn lightwalletd_failure_messages(&self) -> (Vec<String>, Vec<String>) {
-        use zebra_test::command::NO_MATCHES_REGEX_ITER;
-
         if !self.launches_lightwalletd() {
             panic!("lightwalletd must not be launched in the {self:?} test");
         }

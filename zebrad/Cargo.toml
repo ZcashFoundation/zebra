@@ -124,7 +124,10 @@ proptest-impl = [
     "zebra-chain/proptest-impl",
 ]
 
-
+# Build the zebra-checkpoints utility for checkpoint generation tests
+zebra-checkpoints = [
+    "zebra-utils/zebra-checkpoints",
+]
 
 # The gRPC tests also need an installed lightwalletd binary
 lightwalletd-grpc-tests = ["tonic-build"]
@@ -276,7 +279,7 @@ tokio-stream = { workspace = true }
 
 zcash_keys = { workspace = true }
 
-
+# test feature lightwalletd-grpc-tests
 prost = { workspace = true }
 tonic = { workspace = true }
 

@@ -85,7 +85,7 @@ jobs:
         rust: [stable, beta]
         # We only test with default features in this workflow
         # Other feature combinations are tested in specific workflows
-        features: ["default-release-binaries lightwalletd-grpc-tests"]
+        features: ["default-release-binaries"]
         exclude:
         # We're excluding macOS beta for the following reasons:
         # - the concurrent macOS runner limit is much lower than the Linux limit
