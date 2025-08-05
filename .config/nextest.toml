@@ -1,10 +1,5 @@
 # Nextest configuration for Zebra
 # This file centralizes all test execution configuration.
-#
-# It uses `default-filter` within platform-specific overrides to select which tests to run for each profile.
-# See: https://nexte.st/docs/configuration/per-test-overrides/#supported-overrides
-#
-# The entrypoint.sh can be simplified to `cargo nextest run`, relying on the NEXTEST_PROFILE env var.
 
 [profile.default]
 fail-fast = true
@@ -29,17 +24,17 @@ slow-timeout = { period = "60m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'
 
 [profile.sync-full-mainnet]
-slow-timeout = { period = "120m", terminate-after = 1 }
+slow-timeout = { period = "30000m", terminate-after = 1 }
 success-output = "immediate"
 default-filter = 'package(zebrad) and test(=sync_full_mainnet)'
 
 [profile.sync-full-testnet]
-slow-timeout = { period = "120m", terminate-after = 1 }
+slow-timeout = { period = "1500m", terminate-after = 1 }
 success-output = "immediate"
 default-filter = 'package(zebrad) and test(=sync_full_testnet)'
 
 [profile.sync-to-mandatory-checkpoint]
-slow-timeout = { period = "60m", terminate-after = 2 }
+slow-timeout = { period = "1500m", terminate-after = 1 }
 success-output = "immediate"
 default-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
 
@@ -76,7 +71,7 @@ slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=lwd_integration)'
 
 [profile.lwd-sync-full]
-slow-timeout = { period = "60m", terminate-after = 2 }
+slow-timeout = { period = "30000m", terminate-after = 1 }
 success-output = "immediate"
 default-filter = 'package(zebrad) and test(=lwd_sync_full)'
 
