@@ -13,7 +13,6 @@ and this project adheres to [Semantic Versioning](https://semver.org).
   RPCs returning value pools will now return the `lockbox` to the `FS_DEFERRED`
   value pool to match [reference implementation](https://github.com/zcash/zcash/pull/6912/files#diff-decae4be02fb8a47ab4557fe74a9cb853bdfa3ec0fa1b515c0a1e5de91f4ad0bR276).
   This only applies at the RPC layer. 
-- Slice `[GetBlockchainInfoBalance; 5]` type is aliased as `BlockchainValuePoolBalances`
 
 ## [Zebra 2.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2) - 2025-07-28
 

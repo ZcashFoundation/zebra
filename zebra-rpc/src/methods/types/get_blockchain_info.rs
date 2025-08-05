@@ -83,7 +83,7 @@ impl GetBlockchainInfoBalance {
     }
 
     /// Creates a [`GetBlockchainInfoBalance`] for the Lockbox pool.
-    pub fn lockbox(amount: Amount<NonNegative>, delta: Option<Amount<NegativeAllowed>>) -> Self {
+    pub fn deferred(amount: Amount<NonNegative>, delta: Option<Amount<NegativeAllowed>>) -> Self {
         Self::new_internal("lockbox", amount, delta)
     }
 
@@ -109,7 +109,7 @@ impl GetBlockchainInfoBalance {
                 value_balance.orchard_amount(),
                 delta_balance.map(|b| b.orchard_amount()),
             ),
-            Self::lockbox(
+            Self::deferred(
                 value_balance.deferred_amount(),
                 delta_balance.map(|b| b.deferred_amount()),
             ),
