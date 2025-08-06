@@ -34,24 +34,21 @@
 //!   If not set, it defaults to `/zebrad-cache`. For some sync tests, this directory needs to be
 //!   created in the file system with write permissions.
 //!
-//! Here are some examples on how to run each of the tests:
+//! Here are some examples on how to run each of the tests using nextest profiles:
 //!
 //! ```console
-//! $ cargo test sync_large_checkpoints_empty -- --ignored --nocapture
+//! $ cargo nextest run --profile sync-large-checkpoints-empty
 //!
-//! $ cargo test sync_large_checkpoints_mempool_mainnet -- --ignored --nocapture
+//! $ ZEBRA_CACHE_DIR="/zebrad-cache" cargo nextest run --profile sync-full-mainnet
 //!
+//! $ ZEBRA_CACHE_DIR="/zebrad-cache" cargo nextest run --profile sync-full-testnet
+//! ```
+//!
+//! For tests that require a cache directory, you may need to create it first:
+//! ```console
 //! $ export ZEBRA_CACHE_DIR="/zebrad-cache"
 //! $ sudo mkdir -p "$ZEBRA_CACHE_DIR"
 //! $ sudo chmod 777 "$ZEBRA_CACHE_DIR"
-//! $ export SYNC_FULL_MAINNET_TIMEOUT_MINUTES=600
-//! $ cargo test sync_full_mainnet -- --ignored --nocapture
-//!
-//! $ export ZEBRA_CACHE_DIR="/zebrad-cache"
-//! $ sudo mkdir -p "$ZEBRA_CACHE_DIR"
-//! $ sudo chmod 777 "$ZEBRA_CACHE_DIR"
-//! $ export SYNC_FULL_TESTNET_TIMEOUT_MINUTES=600
-//! $ cargo test sync_full_testnet -- --ignored --nocapture
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
@@ -59,53 +56,31 @@
 //! ## Lightwalletd tests
 //!
 //! The lightwalletd software is an interface service that uses zebrad or zcashd RPC methods to serve wallets or other applications with blockchain content in an efficient manner.
-//! There are several versions of lightwalled in the form of different forks. The original
-//! repo is <https://github.com/zcash/lightwalletd>, zecwallet Lite uses a custom fork: <https://github.com/adityapk00/lightwalletd>.
-//! Initially this tests were made with `adityapk00/lightwalletd` fork but changes for fast spendability support had
-//! been made to `zcash/lightwalletd` only.
 //!
-//! We expect `adityapk00/lightwalletd` to remain working with Zebra but for this tests we are using `zcash/lightwalletd`.
+//! Zebra's lightwalletd tests are executed using nextest profiles.
+//! Some tests require environment variables to be set:
 //!
-//! Zebra lightwalletd tests are not all marked as ignored but none will run unless
-//! at least the `ZEBRA_TEST_LIGHTWALLETD` environment variable is present:
-//!
-//! - `ZEBRA_TEST_LIGHTWALLETD` env variable: Needs to be present to run any of the lightwalletd tests.
-//! - `ZEBRA_CACHE_DIR` env variable: The path to a Zebra cached state directory.
-//!   If not set, it defaults to `/zebrad-cache`.
-//! - `LWD_CACHE_DIR` env variable: The path to a lightwalletd database.
-//! - `--features lightwalletd-grpc-tests` cargo flag: The flag given to cargo to build the source code of the running test.
+//! - `ZEBRA_TEST_LIGHTWALLETD`: Must be set to run any of the lightwalletd tests.
+//! - `ZEBRA_CACHE_DIR`: The path to a Zebra cached state directory.
+//! - `LWD_CACHE_DIR`: The path to a lightwalletd database.
 //!
 //! Here are some examples of running each test:
 //!
 //! ```console
-//! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ cargo test lwd_integration -- --nocapture
+//! # Run the lightwalletd integration test
+//! $ ZEBRA_TEST_LIGHTWALLETD=1 cargo nextest run --profile lwd-integration
 //!
-//! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test lwd_sync_update -- --nocapture
+//! # Run the lightwalletd update sync test
+//! $ ZEBRA_TEST_LIGHTWALLETD=1 ZEBRA_CACHE_DIR="/path/to/zebra/state" LWD_CACHE_DIR="/path/to/lightwalletd/database" cargo nextest run --profile lwd-sync-update
 //!
-//! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ cargo test lwd_sync_full -- --ignored --nocapture
+//! # Run the lightwalletd full sync test
+//! $ ZEBRA_TEST_LIGHTWALLETD=1 ZEBRA_CACHE_DIR="/path/to/zebra/state" cargo nextest run --profile lwd-sync-full
 //!
-//! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ cargo test lightwalletd_test_suite -- --ignored --nocapture
+//! # Run the lightwalletd gRPC wallet test (requires --features lightwalletd-grpc-tests)
+//! $ ZEBRA_TEST_LIGHTWALLETD=1 ZEBRA_CACHE_DIR="/path/to/zebra/state" LWD_CACHE_DIR="/path/to/lightwalletd/database" cargo nextest run --profile lwd-grpc-wallet --features lightwalletd-grpc-tests
 //!
-//! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ cargo test lwd_rpc_test -- --ignored --nocapture
-//!
-//! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test lwd_rpc_send_tx --features lightwalletd-grpc-tests -- --ignored --nocapture
-//!
-//! $ export ZEBRA_TEST_LIGHTWALLETD=true
-//! $ export ZEBRA_CACHE_DIR="/path/to/zebra/state"
-//! $ export LWD_CACHE_DIR="/path/to/lightwalletd/database"
-//! $ cargo test lwd_grpc_wallet --features lightwalletd-grpc-tests -- --ignored --nocapture
+//! # Run the lightwalletd send transaction test (requires --features lightwalletd-grpc-tests)
+//! $ ZEBRA_TEST_LIGHTWALLETD=1 ZEBRA_CACHE_DIR="/path/to/zebra/state" LWD_CACHE_DIR="/path/to/lightwalletd/database" cargo nextest run --profile lwd-rpc-send-tx --features lightwalletd-grpc-tests
 //! ```
 //!
 //! ## Getblocktemplate tests
@@ -113,19 +88,19 @@
 //! Example of how to run the rpc_get_block_template test:
 //!
 //! ```console
-//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test rpc_get_block_template --release -- --ignored --nocapture
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo nextest run --profile rpc-get-block-template
 //! ```
 //!
-//! Example of how to run the submit_block test:
+//! Example of how to run the rpc_submit_block test:
 //!
 //! ```console
-//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test submit_block --release -- --ignored --nocapture
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo nextest run --profile rpc-submit-block
 //! ```
 //!
-//! Example of how to run the has_spending_transaction_ids test:
+//! Example of how to run the has_spending_transaction_ids test (requires indexer feature):
 //!
 //! ```console
-//! RUST_LOG=info ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test has_spending_transaction_ids --features "indexer" --release -- --ignored --nocapture
+//! RUST_LOG=info ZEBRA_CACHE_DIR=/path/to/zebra/state cargo nextest run --profile indexer-has-spending-transaction-ids --features "indexer"
 //! ```
 //!
 //! Please refer to the documentation of each test for more information.
@@ -135,10 +110,15 @@
 //! Generate checkpoints on mainnet and testnet using a cached state:
 //! ```console
 //! # Generate checkpoints for mainnet:
-//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test --release --features "zebra-checkpoints" generate_checkpoints_mainnet -- --ignored --nocapture
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo nextest run --profile generate-checkpoints-mainnet
 //!
 //! # Generate checkpoints for testnet:
-//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test --release --features "zebra-checkpoints" generate_checkpoints_testnet -- --ignored --nocapture
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo nextest run --profile generate-checkpoints-testnet
+//! ```
+//!
+//! You can also use the entrypoint script directly:
+//! ```console
+//! FEATURES=zebra-checkpoints ZEBRA_CACHE_DIR=/path/to/zebra/state docker/entrypoint.sh
 //! ```
 //!
 //! ## Disk Space for Testing
