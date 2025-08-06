@@ -134,8 +134,11 @@
 //!
 //! Generate checkpoints on mainnet and testnet using a cached state:
 //! ```console
-//! FEATURES=zebra-checkpoints ZEBRA_CACHE_DIR=/path/to/zebra/state docker/entrypoint.sh
-//! FEATURES=zebra-checkpoints ZEBRA_CACHE_DIR=/path/to/zebra/state docker/entrypoint.sh
+//! # Generate checkpoints for mainnet:
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test --release --features "zebra-checkpoints" generate_checkpoints_mainnet -- --ignored --nocapture
+//!
+//! # Generate checkpoints for testnet:
+//! ZEBRA_CACHE_DIR=/path/to/zebra/state cargo test --release --features "zebra-checkpoints" generate_checkpoints_testnet -- --ignored --nocapture
 //! ```
 //!
 //! ## Disk Space for Testing
@@ -1156,8 +1159,8 @@ fn activate_mempool_mainnet() -> Result<()> {
 #[ignore]
 fn sync_large_checkpoints_empty() -> Result<()> {
     if std::env::var("ZEBRA_TEST_LARGE_CHECKPOINTS").is_err() {
-        eprintln!(
-            "Skipped sync_large_checkpoints_empty, set the ZEBRA_TEST_LARGE_CHECKPOINTS environmental variable to run the test",
+        tracing::warn!(
+            "Skipped sync_large_checkpoints_empty, set the ZEBRA_TEST_LARGE_CHECKPOINTS environmental variable to run the test"
         );
         return Ok(());
     }
@@ -1272,7 +1275,7 @@ fn full_sync_test(network: Network, timeout_argument_name: &str) -> Result<()> {
             SYNC_FINISHED_REGEX,
         )
     } else {
-        eprintln!(
+        tracing::warn!(
             "Skipped full sync test for {network}, \
             set the {timeout_argument_name:?} environmental variable to run the test",
         );
@@ -1323,8 +1326,8 @@ fn sync_to_mandatory_checkpoint_for_network(network: Network) -> Result<()> {
 #[test]
 fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
     if std::env::var("ZEBRA_TEST_SYNC_PAST_CHECKPOINT").is_err() {
-        eprintln!(
-            "Skipped sync_past_mandatory_checkpoint_mainnet, set the ZEBRA_TEST_SYNC_PAST_CHECKPOINT environmental variable to run the test",
+        tracing::warn!(
+            "Skipped sync_past_mandatory_checkpoint_mainnet, set the ZEBRA_TEST_SYNC_PAST_CHECKPOINT environmental variable to run the test"
         );
         return Ok(());
     }
@@ -1342,8 +1345,8 @@ fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
 #[test]
 fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
     if std::env::var("ZEBRA_TEST_SYNC_PAST_CHECKPOINT").is_err() {
-        eprintln!(
-            "Skipped sync_past_mandatory_checkpoint_testnet, set the ZEBRA_TEST_SYNC_PAST_CHECKPOINT environmental variable to run the test",
+        tracing::warn!(
+            "Skipped sync_past_mandatory_checkpoint_testnet, set the ZEBRA_TEST_SYNC_PAST_CHECKPOINT environmental variable to run the test"
         );
         return Ok(());
     }
