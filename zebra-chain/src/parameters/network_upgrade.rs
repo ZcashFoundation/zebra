@@ -150,6 +150,7 @@ pub(super) const TESTNET_ACTIVATION_HEIGHTS: &[(block::Height, NetworkUpgrade)] 
     (block::Height(1_028_500), Canopy),
     (block::Height(1_842_420), Nu5),
     (block::Height(2_976_000), Nu6),
+    (block::Height(3_536_500), Nu6_1),
 ];
 
 /// Fake testnet network upgrade activation heights, used in tests.
@@ -257,7 +258,6 @@ pub(crate) const CONSENSUS_BRANCH_IDS: &[(NetworkUpgrade, ConsensusBranchId)] = 
     (Canopy, ConsensusBranchId(0xe9ff75a6)),
     (Nu5, ConsensusBranchId(0xc2d6d0b4)),
     (Nu6, ConsensusBranchId(0xc8e71055)),
-    #[cfg(any(test, feature = "zebra-test"))]
     (Nu6_1, ConsensusBranchId(0x4dec4df0)),
     #[cfg(any(test, feature = "zebra-test"))]
     (Nu7, ConsensusBranchId(0x77190ad8)),

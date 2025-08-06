@@ -343,7 +343,7 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 // TODO: Update this constant to the correct value after NU6.1 & NU7 activation,
 // pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_140); // NU6.1
 // pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_160); // NU7
-pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_120);
+pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = Version(170_130);
 
 /// The default RTT estimate for peer responses.
 ///
