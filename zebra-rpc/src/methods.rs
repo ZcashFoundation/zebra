@@ -3077,6 +3077,9 @@ impl GetInfoResponse {
     }
 }
 
+/// Type alias for the array of `GetBlockchainInfoBalance` objects
+pub type BlockchainValuePoolBalances = [GetBlockchainInfoBalance; 5];
+
 /// Response to a `getblockchaininfo` RPC request.
 ///
 /// See the notes for the [`Rpc::get_blockchain_info` method].
@@ -3132,7 +3135,7 @@ pub struct GetBlockchainInfoResponse {
 
     /// Value pool balances
     #[serde(rename = "valuePools")]
-    value_pools: [GetBlockchainInfoBalance; 5],
+    value_pools: BlockchainValuePoolBalances,
 
     /// Status of network upgrades
     upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
@@ -3178,7 +3181,7 @@ impl GetBlockchainInfoResponse {
         best_block_hash: block::Hash,
         estimated_height: Height,
         chain_supply: GetBlockchainInfoBalance,
-        value_pools: [GetBlockchainInfoBalance; 5],
+        value_pools: BlockchainValuePoolBalances,
         upgrades: IndexMap<ConsensusBranchIdHex, NetworkUpgradeInfo>,
         consensus: TipConsensusBranch,
         headers: Height,
@@ -3591,7 +3594,7 @@ pub struct BlockObject {
     /// Value pool balances
     #[serde(rename = "valuePools")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    value_pools: Option<[GetBlockchainInfoBalance; 5]>,
+    value_pools: Option<BlockchainValuePoolBalances>,
 
     /// Information about the note commitment trees.
     #[getter(copy)]

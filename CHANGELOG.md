@@ -5,6 +5,16 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+
+### Breaking Changes
+
+- Value pool "deferred" changes its identifier to "lockbox". `getblock` and `getblockchaininfo` 
+  RPC methods will now return `lockbox` as the `FS_DEFERRED`
+  value pool to match [reference implementation](https://github.com/zcash/zcash/pull/6912/files#diff-decae4be02fb8a47ab4557fe74a9cb853bdfa3ec0fa1b515c0a1e5de91f4ad0bR276).
+  This only applies at the RPC layer. 
+
 ## [Zebra 2.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2) - 2025-07-28
 
 This release fixes a database upgrade bug that was introduced in the 2.4.0
