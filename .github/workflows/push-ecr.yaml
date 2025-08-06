@@ -80,7 +80,11 @@ jobs:
           # Build docker container with multiple tags
           DOCKER_BUILD_ARGS=()
           DOCKER_BUILD_ARGS+=("-t" "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST")
-          DOCKER_BUILD_ARGS+=("-t" "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION")
+          
+          # Only add IMAGE_TAG_VERSION if it's not empty
+          if [ -n "$IMAGE_TAG_VERSION" ]; then
+            DOCKER_BUILD_ARGS+=("-t" "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION")
+          fi
           
           # Add exact tag if it exists
           if [ -n "$GIT_TAG" ]; then
@@ -105,25 +109,27 @@ jobs:
           
           # Push all tags with error handling
           for tag in "$IMAGE_TAG_LATEST" "$IMAGE_TAG_VERSION" "$GIT_TAG"; do
-                # Skip empty tags (e.g., if GIT_TAG is unset)
-                [ -z "$tag" ] && continue
-
-                image="$ECR_REGISTRY/$ECR_REPOSITORY:$tag"
-                echo "Pushing $image…"
-                if ! docker push "$image"; then
-                  echo "Failed to push $image"
-                  exit 1
-                fi
-              done
+            # Skip empty tags (e.g., if IMAGE_TAG_VERSION or GIT_TAG is unset)
+            [ -z "$tag" ] && continue
+            image="$ECR_REGISTRY/$ECR_REPOSITORY:$tag"
+            echo "Pushing $image…"
+            if ! docker push "$image"; then
+              echo "Failed to push $image"
+              exit 1
+            fi
+          done
           
           # Output the image URIs
           echo "image_latest=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST" >> $GITHUB_OUTPUT
-          echo "image_version=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION" >> $GITHUB_OUTPUT
+          
+          if [ -n "$IMAGE_TAG_VERSION" ]; then
+            echo "image_version=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_VERSION" >> $GITHUB_OUTPUT
+          fi
           
           if [ -n "$GIT_TAG" ]; then
             echo "image_exact_tag=$ECR_REGISTRY/$ECR_REPOSITORY:$GIT_TAG" >> $GITHUB_OUTPUT
           fi
-
+          
           # Print the public repository URL
           echo ""
           echo "====================================="
