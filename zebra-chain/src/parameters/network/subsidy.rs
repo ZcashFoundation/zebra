@@ -12,7 +12,7 @@
 //! Typically, consensus parameters are accessed via a function that takes a
 //! `Network` and `block::Height`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use lazy_static::lazy_static;
 
@@ -20,7 +20,6 @@ use crate::{
     amount::{self, Amount, NonNegative, COIN},
     block::{Height, HeightDiff},
     parameters::{Network, NetworkUpgrade},
-    transaction::Transaction,
     transparent,
 };
 
@@ -780,14 +779,4 @@ pub fn miner_subsidy(
             .sum();
 
     expected_block_subsidy - total_funding_stream_amount?
-}
-
-/// Returns all output amounts in `Transaction`.
-pub fn output_amounts(transaction: &Transaction) -> HashSet<Amount<NonNegative>> {
-    transaction
-        .outputs()
-        .iter()
-        .map(|o| &o.value)
-        .cloned()
-        .collect()
 }
