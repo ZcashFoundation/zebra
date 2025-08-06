@@ -268,8 +268,10 @@ pub fn miner_fees_are_valid(
     expected_deferred_pool_balance_change: DeferredPoolBalanceChange,
     network: &Network,
 ) -> Result<(), BlockError> {
-    let transparent_value_balance = zebra_chain::parameters::subsidy::output_amounts(coinbase_tx)
+    let transparent_value_balance = coinbase_tx
+        .outputs()
         .iter()
+        .map(|output| output.value())
         .sum::<Result<Amount<NonNegative>, AmountError>>()
         .map_err(|_| SubsidyError::SumOverflow)?
         .constrain()
@@ -293,10 +295,9 @@ pub fn miner_fees_are_valid(
             + expected_deferred_pool_balance_change.value())
         .map_err(|_| SubsidyError::SumOverflow)?;
 
-    let lockbox_deferred_input = network.lockbox_disbursement_total_amount(height);
+    let total_input_value =
+        (expected_block_subsidy + block_miner_fees).map_err(|_| SubsidyError::SumOverflow)?;
 
-    let total_input_value = (expected_block_subsidy + block_miner_fees + lockbox_deferred_input)
-        .map_err(|_| SubsidyError::SumOverflow)?;
     // # Consensus
     //
     // > [Pre-NU6] The total output of a coinbase transaction MUST NOT be greater than its total
