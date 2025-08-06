@@ -56,9 +56,15 @@ proptest-impl = [
     "rand_chacha",
     "tokio/tracing",
     "zebra-test",
+    "orchard/test-dependencies"
 ]
 
 bench = ["zebra-test"]
+
+# Support for transaction version 6
+tx-v6 = [
+    "nonempty"
+]
 
 [dependencies]
 
@@ -68,7 +74,8 @@ bitflags = "2.5.0"
 bitflags-serde-legacy = "0.1.1"
 blake2b_simd = "1.0.2"
 blake2s_simd = "1.0.2"
-bridgetree = "0.6.0"
+# TODO: Revert to "0.6.0" (or appropriate version) when the ZSA orchard fork is updated.
+bridgetree = "0.4.0"
 bs58 = { version = "0.5.1", features = ["check"] }
 byteorder = "1.5.0"
 
@@ -103,6 +110,9 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
+
+# Used for orchard serialization
+nonempty = { version = "0.7", optional = true }
 
 # Time
 chrono = { version = "0.4.38", default-features = false, features = ["clock", "std", "serde"] }
@@ -170,6 +180,8 @@ tokio = { version = "1.41.0", features = ["full", "tracing", "test-util"] }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.0-beta.41" }
 
+orchard = { workspace = true, features = ["test-dependencies"] }
+
 [[bench]]
 name = "block"
 harness = false
@@ -178,3 +190,6 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }

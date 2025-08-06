@@ -9,58 +9,39 @@ use crate::serialization::{SerializationError, ZcashDeserialize, ZcashSerialize}
 /// A ciphertext component for encrypted output notes.
 ///
 /// Corresponds to the Orchard 'encCiphertext's
-#[derive(Deserialize, Serialize)]
-pub struct EncryptedNote(#[serde(with = "BigArray")] pub(crate) [u8; 580]);
+#[derive(Deserialize, Serialize, Clone, Debug, Eq, PartialEq)]
+pub struct EncryptedNote<const SIZE: usize>(#[serde(with = "BigArray")] pub(crate) [u8; SIZE]);
 
-// These impls all only exist because of array length restrictions.
-// TODO: use const generics https://github.com/ZcashFoundation/zebra/issues/2042
-
-impl Copy for EncryptedNote {}
-
-impl Clone for EncryptedNote {
-    fn clone(&self) -> Self {
-        *self
+impl<const SIZE: usize> From<[u8; SIZE]> for EncryptedNote<SIZE> {
+    fn from(bytes: [u8; SIZE]) -> Self {
+        Self(bytes)
     }
 }
 
-impl fmt::Debug for EncryptedNote {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("EncryptedNote")
-            .field(&hex::encode(&self.0[..]))
-            .finish()
-    }
-}
-
-impl Eq for EncryptedNote {}
-
-impl From<[u8; 580]> for EncryptedNote {
-    fn from(bytes: [u8; 580]) -> Self {
-        EncryptedNote(bytes)
-    }
-}
-
-impl From<EncryptedNote> for [u8; 580] {
-    fn from(enc_ciphertext: EncryptedNote) -> Self {
+impl<const SIZE: usize> From<EncryptedNote<SIZE>> for [u8; SIZE] {
+    fn from(enc_ciphertext: EncryptedNote<SIZE>) -> Self {
         enc_ciphertext.0
     }
 }
 
-impl PartialEq for EncryptedNote {
-    fn eq(&self, other: &Self) -> bool {
-        self.0[..] == other.0[..]
+impl<const SIZE: usize> TryFrom<&[u8]> for EncryptedNote<SIZE> {
+    type Error = std::array::TryFromSliceError;
+
+    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(Self(bytes.try_into()?))
     }
 }
 
-impl ZcashSerialize for EncryptedNote {
+impl<const SIZE: usize> ZcashSerialize for EncryptedNote<SIZE> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
         writer.write_all(&self.0[..])?;
         Ok(())
     }
 }
 
-impl ZcashDeserialize for EncryptedNote {
+impl<const SIZE: usize> ZcashDeserialize for EncryptedNote<SIZE> {
     fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
-        let mut bytes = [0; 580];
+        let mut bytes = [0; SIZE];
         reader.read_exact(&mut bytes[..])?;
         Ok(Self(bytes))
     }
@@ -126,33 +107,56 @@ impl ZcashDeserialize for WrappedNoteKey {
 }
 
 #[cfg(test)]
-use proptest::prelude::*;
-#[cfg(test)]
-proptest! {
+mod tests {
+    use crate::{
+        orchard::{OrchardVanilla, ShieldedDataFlavor, WrappedNoteKey},
+        serialization::{ZcashDeserialize, ZcashSerialize},
+    };
 
-    #[test]
-    fn encrypted_ciphertext_roundtrip(ec in any::<EncryptedNote>()) {
-        let _init_guard = zebra_test::init();
+    #[cfg(feature = "tx-v6")]
+    use crate::orchard::OrchardZSA;
 
+    use proptest::prelude::*;
+
+    fn roundtrip_encrypted_note<EncryptedNote>(note: &EncryptedNote) -> EncryptedNote
+    where
+        EncryptedNote: ZcashSerialize + ZcashDeserialize,
+    {
         let mut data = Vec::new();
-
-        ec.zcash_serialize(&mut data).expect("EncryptedNote should serialize");
-
-        let ec2 = EncryptedNote::zcash_deserialize(&data[..]).expect("randomized EncryptedNote should deserialize");
-
-        prop_assert_eq![ec, ec2];
+        note.zcash_serialize(&mut data)
+            .expect("EncryptedNote should serialize");
+        EncryptedNote::zcash_deserialize(&data[..])
+            .expect("randomized EncryptedNote should deserialize")
     }
 
-    #[test]
-    fn out_ciphertext_roundtrip(oc in any::<WrappedNoteKey>()) {
-        let _init_guard = zebra_test::init();
+    proptest! {
+        #[test]
+        fn encrypted_ciphertext_roundtrip_orchard_vanilla(ec in any::<<OrchardVanilla as ShieldedDataFlavor>::EncryptedNote>()) {
+            let _init_guard = zebra_test::init();
+            let ec2 = roundtrip_encrypted_note(&ec);
+            prop_assert_eq![ec, ec2];
+        }
 
-        let mut data = Vec::new();
 
-        oc.zcash_serialize(&mut data).expect("WrappedNoteKey should serialize");
+        #[cfg(feature = "tx-v6")]
+        #[test]
+        fn encrypted_ciphertext_roundtrip_orchard_zsa(ec in any::<<OrchardZSA as ShieldedDataFlavor>::EncryptedNote>()) {
+            let _init_guard = zebra_test::init();
+            let ec2 = roundtrip_encrypted_note(&ec);
+            prop_assert_eq![ec, ec2];
+        }
 
-        let oc2 = WrappedNoteKey::zcash_deserialize(&data[..]).expect("randomized WrappedNoteKey should deserialize");
+        #[test]
+        fn out_ciphertext_roundtrip(oc in any::<WrappedNoteKey>()) {
+            let _init_guard = zebra_test::init();
 
-        prop_assert_eq![oc, oc2];
+            let mut data = Vec::new();
+
+            oc.zcash_serialize(&mut data).expect("WrappedNoteKey should serialize");
+
+            let oc2 = WrappedNoteKey::zcash_deserialize(&data[..]).expect("randomized WrappedNoteKey should deserialize");
+
+            prop_assert_eq![oc, oc2];
+        }
     }
 }

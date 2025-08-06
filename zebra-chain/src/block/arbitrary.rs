@@ -452,7 +452,7 @@ impl Block {
                                 sapling_tree.append(*sapling_note_commitment).unwrap();
                             }
                             for orchard_note_commitment in transaction.orchard_note_commitments() {
-                                orchard_tree.append(*orchard_note_commitment).unwrap();
+                                orchard_tree.append(orchard_note_commitment).unwrap();
                             }
                         }
                         new_transactions.push(Arc::new(transaction));

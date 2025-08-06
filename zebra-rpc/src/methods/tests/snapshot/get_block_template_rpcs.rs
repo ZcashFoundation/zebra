@@ -149,6 +149,7 @@ pub async fn test_responses<State, ReadState>(
     );
 
     if network.is_a_test_network() && !network.is_default_testnet() {
+        // FIXME: Would this work after Nu7 activation?
         let fake_future_nu6_block_height =
             NetworkUpgrade::Nu6.activation_height(network).unwrap().0 + 100_000;
         let get_block_subsidy = get_block_template_rpc

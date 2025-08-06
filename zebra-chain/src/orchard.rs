@@ -6,6 +6,7 @@ mod action;
 mod address;
 mod commitment;
 mod note;
+mod shielded_data_flavor;
 mod sinsemilla;
 
 #[cfg(any(test, feature = "proptest-impl"))]
@@ -23,3 +24,7 @@ pub use commitment::{CommitmentRandomness, NoteCommitment, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use shielded_data::{AuthorizedAction, Flags, ShieldedData};
+pub use shielded_data_flavor::{OrchardVanilla, ShieldedDataFlavor};
+
+#[cfg(feature = "tx-v6")]
+pub use shielded_data_flavor::OrchardZSA;

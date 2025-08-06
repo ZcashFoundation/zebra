@@ -175,7 +175,7 @@ impl Block {
     }
 
     /// Access the [orchard note commitments](pallas::Base) from all transactions in this block.
-    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = &pallas::Base> {
+    pub fn orchard_note_commitments(&self) -> impl Iterator<Item = pallas::Base> + '_ {
         self.transactions
             .iter()
             .flat_map(|transaction| transaction.orchard_note_commitments())

@@ -12,7 +12,7 @@ use tower::{service_fn, ServiceExt};
 use zebra_chain::{
     amount::{Amount, NonNegative},
     block::{self, Block, Height},
-    orchard::AuthorizedAction,
+    orchard::{AuthorizedAction, OrchardVanilla},
     parameters::{Network, NetworkUpgrade},
     primitives::{ed25519, x25519, Groth16Proof},
     sapling,
@@ -166,7 +166,7 @@ fn v5_transaction_with_no_inputs_fails_validation() {
     .find(|transaction| {
         transaction.inputs().is_empty()
             && transaction.sapling_spends_per_anchor().next().is_none()
-            && transaction.orchard_actions().next().is_none()
+            && transaction.orchard_action_count() == 0
             && transaction.joinsplit_count() == 0
             && (!transaction.outputs().is_empty() || transaction.sapling_outputs().next().is_some())
     })
@@ -800,7 +800,7 @@ fn v5_transaction_with_no_outputs_fails_validation() {
     .find(|transaction| {
         transaction.outputs().is_empty()
             && transaction.sapling_outputs().next().is_none()
-            && transaction.orchard_actions().next().is_none()
+            && transaction.orchard_action_count() == 0
             && transaction.joinsplit_count() == 0
             && (!transaction.inputs().is_empty()
                 || transaction.sapling_spends_per_anchor().next().is_some())
@@ -2795,8 +2795,7 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
 
         // Check if the coinbase outputs are decryptable with an all-zero key.
         if heartwood_onward
-            && (coinbase_tx.sapling_outputs().count() > 0
-                || coinbase_tx.orchard_actions().count() > 0)
+            && (coinbase_tx.sapling_outputs().count() > 0 || coinbase_tx.orchard_action_count() > 0)
         {
             // We are only truly decrypting something if it's Heartwood-onward
             // and there are relevant outputs.
@@ -2808,7 +2807,7 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
         // For remaining transactions, check if existing outputs are NOT decryptable
         // with an all-zero key, if applicable.
         for tx in block.transactions.iter().skip(1) {
-            let has_outputs = tx.sapling_outputs().count() > 0 || tx.orchard_actions().count() > 0;
+            let has_outputs = tx.sapling_outputs().count() > 0 || tx.orchard_action_count() > 0;
             if has_outputs && heartwood_onward {
                 tested_non_coinbase_txs += 1;
                 check::coinbase_outputs_are_decryptable(tx, &network, height).expect_err(
@@ -2830,9 +2829,9 @@ fn coinbase_outputs_are_decryptable_for_historical_blocks_for_network(
 /// Given an Orchard action as a base, fill fields related to note encryption
 /// from the given test vector and returned the modified action.
 fn fill_action_with_note_encryption_test_vector(
-    action: &zebra_chain::orchard::Action,
+    action: &zebra_chain::orchard::Action<OrchardVanilla>,
     v: &zebra_test::vectors::TestVector,
-) -> zebra_chain::orchard::Action {
+) -> zebra_chain::orchard::Action<OrchardVanilla> {
     let mut action = action.clone();
     action.cv = v.cv_net.try_into().expect("test vector must be valid");
     action.cm_x = pallas::Base::from_repr(v.cmx).unwrap();
