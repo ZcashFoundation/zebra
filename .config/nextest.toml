@@ -95,3 +95,15 @@ default-filter = 'package(zebrad) and test(=rpc_get_block_template)'
 [profile.rpc-submit-block]
 slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=rpc_submit_block)'
+
+[profile.indexer-has-spending-transaction-ids]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=has_spending_transaction_ids)'
+
+[profile.lightwalletd-test-suite]
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=lightwalletd_test_suite)'
+
+[profile.rpc-z-getsubtreesbyindex-snapshot]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test)'
