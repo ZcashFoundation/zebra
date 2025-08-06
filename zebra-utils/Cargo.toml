@@ -98,7 +98,6 @@ tokio = { workspace = true, features = ["full"], optional = true }
 jsonrpc = { workspace = true, optional = true }
 
 zcash_primitives = { workspace = true, optional = true }
-zcash_client_backend = { workspace = true, optional = true }
 zcash_protocol.workspace = true
 
 # For the openapi generator
