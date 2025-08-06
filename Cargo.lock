@@ -6285,7 +6285,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42344f5735237d6e0eedd3680f1c92f64e9c4144045d7b5c82f4867c2cbc0a02"
 dependencies = [
  "core2",
+ "document-features",
  "hex",
+ "memuse",
 ]
 
 [[package]]
@@ -6429,11 +6431,13 @@ dependencies = [
  "tracing",
  "uint 0.10.0",
  "x25519-dalek",
+ "zcash_address 0.8.0",
  "zcash_address 0.9.0",
  "zcash_encoding",
  "zcash_history",
  "zcash_note_encryption",
  "zcash_primitives",
+ "zcash_protocol 0.5.4",
  "zcash_protocol 0.6.0",
  "zcash_transparent 0.4.0",
  "zebra-test",
@@ -6574,9 +6578,11 @@ dependencies = [
  "tonic-reflection",
  "tower 0.4.13",
  "tracing",
+ "zcash_address 0.8.0",
  "zcash_address 0.9.0",
  "zcash_keys",
  "zcash_primitives",
+ "zcash_protocol 0.5.4",
  "zcash_protocol 0.6.0",
  "zcash_transparent 0.4.0",
  "zebra-chain",

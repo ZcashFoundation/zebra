@@ -576,6 +576,21 @@ impl From<zcash_protocol::consensus::NetworkUpgrade> for NetworkUpgrade {
     }
 }
 
+impl From<zcash_protocol05::consensus::NetworkUpgrade> for NetworkUpgrade {
+    fn from(nu: zcash_protocol05::consensus::NetworkUpgrade) -> Self {
+        match nu {
+            zcash_protocol05::consensus::NetworkUpgrade::Overwinter => Self::Overwinter,
+            zcash_protocol05::consensus::NetworkUpgrade::Sapling => Self::Sapling,
+            zcash_protocol05::consensus::NetworkUpgrade::Blossom => Self::Blossom,
+            zcash_protocol05::consensus::NetworkUpgrade::Heartwood => Self::Heartwood,
+            zcash_protocol05::consensus::NetworkUpgrade::Canopy => Self::Canopy,
+            zcash_protocol05::consensus::NetworkUpgrade::Nu5 => Self::Nu5,
+            zcash_protocol05::consensus::NetworkUpgrade::Nu6 => Self::Nu6,
+            // zcash_protocol::consensus::NetworkUpgrade::Nu7 => Self::Nu7,
+        }
+    }
+}
+
 impl ConsensusBranchId {
     /// The value used by `zcashd` RPCs for missing consensus branch IDs.
     ///

@@ -3299,7 +3299,11 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
         mining_config
             .miner_address
             .clone()
-            .expect("mining address should be configured"),
+            .expect("mining address should be configured")
+            // TODO: remove the lines below when the zcash_address08 hack is removed
+            .encode()
+            .parse()
+            .expect("miner_address must be a valid Zcash address"),
     )
     .expect("configured mining address should be valid");
 

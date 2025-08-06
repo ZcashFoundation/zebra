@@ -1,7 +1,7 @@
 //! Tests for types and functions for the `getblocktemplate` RPC.
 
+use zcash_address08::TryFromAddress;
 use zcash_keys::address::Address;
-use zcash_transparent::address::TransparentAddress;
 
 use zebra_chain::{
     amount::Amount,
@@ -31,7 +31,7 @@ fn minimal_coinbase() -> Result<(), Box<dyn std::error::Error>> {
     let outputs = standard_coinbase_outputs(
         &regtest,
         Height(1),
-        &Address::from(TransparentAddress::PublicKeyHash([0x42; 20])),
+        &Address::try_from_transparent_p2pkh(regtest.kind().into(), [0x42; 20]).unwrap(),
         Amount::zero(),
     );
 

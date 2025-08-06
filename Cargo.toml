@@ -24,6 +24,7 @@ incrementalmerkletree = { version = "0.8.2", features = ["legacy-api"] }
 orchard = "0.11"
 sapling-crypto = "0.5"
 zcash_address = "0.9"
+zcash_address08 = { version = "0.8", package = "zcash_address" }
 #zcash_client_backend = "0.18"
 zcash_encoding = "0.3"
 zcash_history = "0.4"
@@ -32,6 +33,7 @@ zcash_primitives = "0.24"
 zcash_proofs = "0.24"
 zcash_transparent = "0.4"
 zcash_protocol = "0.6"
+zcash_protocol05 = { version = "0.5", package = "zcash_protocol" }
 zip32 = "0.2"
 abscissa_core = "0.7"
 atty = "0.2.14"

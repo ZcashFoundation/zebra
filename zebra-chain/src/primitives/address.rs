@@ -206,3 +206,19 @@ impl From<&NetworkKind> for NetworkType {
         (*network).into()
     }
 }
+
+impl From<&NetworkKind> for zcash_protocol05::consensus::NetworkType {
+    fn from(network: &NetworkKind) -> Self {
+        (*network).into()
+    }
+}
+
+impl From<NetworkKind> for zcash_protocol05::consensus::NetworkType {
+    fn from(network: NetworkKind) -> Self {
+        match network {
+            NetworkKind::Mainnet => zcash_protocol05::consensus::NetworkType::Main,
+            NetworkKind::Testnet => zcash_protocol05::consensus::NetworkType::Test,
+            NetworkKind::Regtest => zcash_protocol05::consensus::NetworkType::Regtest,
+        }
+    }
+}

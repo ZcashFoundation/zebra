@@ -77,9 +77,11 @@ serde = { workspace = true, features = ["serde_derive"] }
 nix = { workspace = true, features = ["signal"] }
 
 zcash_address = { workspace = true }
+zcash_address08 = { workspace = true }
 zcash_keys = { workspace = true }
 zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 zcash_protocol = { workspace = true }
+zcash_protocol05 = { workspace = true }
 zcash_transparent = { workspace = true }
 
 # Test-only feature proptest-impl

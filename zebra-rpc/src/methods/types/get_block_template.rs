@@ -471,6 +471,10 @@ where
         // Check that the configured miner address is valid.
         let miner_address = conf.miner_address.map(|zaddr| {
             if zaddr.can_receive_as(PoolType::Transparent) {
+                let zaddr: zcash_address08::ZcashAddress = zaddr
+                    .encode()
+                    .parse()
+                    .expect("miner_address must be a valid Zcash address");
                 Address::try_from_zcash_address(net, zaddr)
                     .expect("miner_address must be a valid Zcash address")
             } else {
@@ -881,11 +885,14 @@ pub fn standard_coinbase_outputs(
             .map(|(address, amount)| (*amount, address.script()))
             .collect();
 
-    let script = miner_address
-        .to_transparent_address()
-        .expect("address must have a transparent component")
-        .script()
-        .into();
+    // TODO: revert to into when zcash_keys is updated
+    let script = transparent::Script::new(
+        &miner_address
+            .to_transparent_address()
+            .expect("address must have a transparent component")
+            .script()
+            .0,
+    );
 
     // The HashMap returns funding streams in an arbitrary order,
     // but Zebra's snapshot tests expect the same order every time.
