@@ -67,7 +67,7 @@ fn main() {
         .expect("Failed to generate lightwalletd gRPC files");
 
     // Add custom git tag and commit information
-    // Use environment variables if available (from CI/CD), otherwise try git commands
+    // Use environment variables if available (from CI/CD), otherwise try git commands (Can be problematic as the docker image shouldn't have the .git folder in it)
     let git_tag = std::env::var("GIT_TAG")
         .unwrap_or_else(|_| run_git_command(&["describe", "--exact-match", "--tags"], "none"));
     let git_commit = std::env::var("GIT_COMMIT_FULL")
