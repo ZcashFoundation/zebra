@@ -100,6 +100,16 @@ skip-tree = [
     { name = "windows-sys", version = "=0.52.0" },
 
     { name = "quick-xml", version = "0.37.5" },
+
+    { name = "indexmap", version = "1.9" },
+
+    { name = "hashbrown", version = "0.12" },
+
+    { name = "getrandom", version = "0.2" },
+
+    { name = "rand", version = "0.8" },
+    { name = "rand_core", version = "0.6" },
+    { name = "rand_chacha", version = "0.3" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
