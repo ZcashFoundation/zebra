@@ -22,8 +22,8 @@ pub const ESTIMATED_RELEASE_HEIGHT: u32 = 3_021_400;
 ///
 /// - Zebra will exit with a panic if the current tip height is bigger than the
 ///   `ESTIMATED_RELEASE_HEIGHT` plus this number of days.
-/// - Currently set to 16 weeks.
-pub const EOS_PANIC_AFTER: u32 = 112;
+/// - Currently set to 15 weeks.
+pub const EOS_PANIC_AFTER: u32 = 105;
 
 /// The number of days before the end of support where Zebra will display warnings.
 pub const EOS_WARN_AFTER: u32 = EOS_PANIC_AFTER - 14;
