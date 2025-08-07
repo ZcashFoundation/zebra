@@ -66,6 +66,7 @@ tower = { workspace = true }
 tonic = { workspace = true }
 tonic-reflection = { workspace = true }
 prost = { workspace = true }
+tonic-prost = { workspace = true }
 tokio-stream = { workspace = true }
 
 tracing = { workspace = true }
@@ -97,7 +98,7 @@ zebra-script = { path = "../zebra-script", version = "2.0.0" }
 zebra-state = { path = "../zebra-state", version = "2.0.0" }
 
 [build-dependencies]
-tonic-build = { workspace = true }
+tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
