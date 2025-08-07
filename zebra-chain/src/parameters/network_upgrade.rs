@@ -25,7 +25,6 @@ const NETWORK_UPGRADES_IN_ORDER: &[NetworkUpgrade] = &[
     Canopy,
     Nu5,
     Nu6,
-    #[cfg(any(test, feature = "zebra-test"))]
     Nu6_1,
     #[cfg(any(test, feature = "zebra-test"))]
     Nu7,
