@@ -99,11 +99,7 @@ skip-tree = [
 
     { name = "windows-sys", version = "=0.52.0" },
 
-    { name = "linux-raw-sys", version = "0.4.15" },
-
     { name = "quick-xml", version = "0.37.5" },
-
-    { name = "rustix", version = "0.38.44" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
