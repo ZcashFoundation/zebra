@@ -6494,7 +6494,7 @@ dependencies = [
 
 [[package]]
 name = "zebra-node-services"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "color-eyre",
  "jsonrpsee-types",
