@@ -63,7 +63,7 @@ jobs:
           # Custom directory tests
           - id: custom-dirs-conf
             name: Custom cache and cookie directories
-            env_vars: "-e ZEBRA_CACHE_DIR=/tmp/zebra-cache"
+            env_vars: "-e STATE_CACHE_DIR=/tmp/zebra-cache"
             grep_patterns: '-e "Opened Zebra state cache at /tmp/zebra-cache"'
 
           # Feature-based configurations

@@ -14,7 +14,7 @@ use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
-    cached_state::ZEBRA_CACHE_DIR,
+    cached_state::STATE_CACHE_DIR,
     config::{default_test_config, random_known_rpc_port_config},
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
@@ -152,13 +152,13 @@ impl TestType {
     /// Returns the Zebra state path for this test, if set.
     #[allow(clippy::print_stderr)]
     pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
-        match env::var_os(ZEBRA_CACHE_DIR) {
+        match env::var_os(STATE_CACHE_DIR) {
             Some(path) => Some(path.into()),
             None => {
                 let test_name = test_name.as_ref();
                 eprintln!(
                     "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {ZEBRA_CACHE_DIR:?} environment variable to run the test",
+                     set the {STATE_CACHE_DIR:?} environment variable to run the test",
                 );
 
                 None

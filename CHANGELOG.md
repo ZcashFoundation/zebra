@@ -1777,7 +1777,7 @@ The sync performance of `lightwalletd` is also improved.
 - Update timeout for Zebra sync tests (#4918)
 - Improve test reliability and performance (#4869)
 - Use `FuturesOrdered` in `fallback_verification` test (#4867)
-- Skip some RPC tests when `ZEBRA_SKIP_NETWORK_TESTS` is set (#4849)
+- Skip some RPC tests when `SKIP_NETWORK_TESTS` is set (#4849)
 - Truncate the number of transactions in send transaction test (#4848)
 
 ## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-29
@@ -3211,7 +3211,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Failed tests in the cached state CI workflow are no longer ignored (#2403)
 - Stop skipping the cached sync tests in CI (#2402)
 - Fix intermittent errors in the groth16 verifier tests (#2412)
-- Skip IPv6 tests when ZEBRA_SKIP_IPV6_TESTS environmental variable is set (#2405)
+- Skip IPv6 tests when SKIP_IPV6_TESTS environmental variable is set (#2405)
 - Stop failing after the mandatory Canopy checkpoint due to incorrect coinbase script verification (#2404)
 - Improved docs and panic messages for zebra_test::command (#2406)
 - Gossip dynamic local listener ports to peers (#2277)
@@ -3643,7 +3643,7 @@ Some notable changes include:
 #### Testing
 - Bump CI build and test timeouts to 60 minutes (#1757)
 - Run CI workflow on push to main & manual request (#1748)
-- Set ZEBRA_SKIP_NETWORK_TESTS using Windows syntax (#1782)
+- Set SKIP_NETWORK_TESTS using Windows syntax (#1782)
 - Fix Windows build failures due to disk space (#1726)
 - Fix acceptance test timeouts, cleanup, and diagnostics (#1736, #1766, #1770, #1777)
 

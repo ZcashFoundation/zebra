@@ -172,7 +172,7 @@ impl MempoolBehavior {
 /// If `check_legacy_chain` is true, make sure the logs contain the legacy chain check.
 ///
 /// If your test environment does not have network access, skip
-/// this test by setting the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// this test by setting the `SKIP_NETWORK_TESTS` env var.
 ///
 /// # Test Status
 ///
@@ -328,10 +328,10 @@ pub fn check_sync_logs_until(
 
 /// Returns the cache directory for Zebra's state.
 ///
-/// It checks the `ZEBRA_CACHE_DIR` environment variable and returns its value if set.
+/// It checks the `STATE_CACHE_DIR` environment variable and returns its value if set.
 /// Otherwise, it defaults to `"/zebrad-cache"`.
 fn get_zebra_cached_state_dir() -> PathBuf {
-    env::var("ZEBRA_CACHE_DIR")
+    env::var("STATE_CACHE_DIR")
         .unwrap_or_else(|_| "/zebrad-cache".to_string())
         .into()
 }
@@ -365,7 +365,7 @@ pub fn cached_mandatory_checkpoint_test_config(network: &Network) -> Result<Zebr
 /// Typically this is `STOP_AT_HEIGHT_REGEX`,
 /// with an extra check for checkpoint or full validation.
 ///
-/// This test ignores the `ZEBRA_SKIP_NETWORK_TESTS` env var.
+/// This test ignores the `SKIP_NETWORK_TESTS` env var.
 ///
 /// # Test Status
 ///
