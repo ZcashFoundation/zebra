@@ -11,8 +11,7 @@ Support for NU6.1 testnet activation.
 
 ### Breaking Changes
 
-- Renamed `legacy_sigop_count` to `sigops` in
-  `BlockError::TooManyTransparentSignatureOperations` and `Response::Block`.
+- Renamed `legacy_sigop_count` to `sigops` in `BlockError::TooManyTransparentSignatureOperations` and `transaction::Response::Block`.
 
 
 ## [1.0.0] - 2025-07-11
