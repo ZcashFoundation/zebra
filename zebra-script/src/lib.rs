@@ -63,7 +63,7 @@ impl From<zcash_script::Error> for Error {
 
 /// Get the interpreter according to the feature flag
 fn get_interpreter(
-    sighash: zcash_script::SighashCalculator,
+    sighash: zcash_script::SighashCalculator<'_>,
     lock_time: u32,
     is_final: bool,
     #[allow(unused)] flags: zcash_script::VerificationFlags,

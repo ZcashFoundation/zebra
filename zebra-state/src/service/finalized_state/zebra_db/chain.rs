@@ -77,33 +77,33 @@ impl ZebraDb {
     // Column family convenience methods
 
     /// Returns a typed handle to the `history_tree` column family.
-    pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf {
+    pub(crate) fn history_tree_cf(&self) -> HistoryTreePartsCf<'_> {
         HistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a legacy typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreePartsCf {
+    pub(crate) fn legacy_history_tree_cf(&self) -> LegacyHistoryTreePartsCf<'_> {
         LegacyHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a generic raw key typed handle to the `history_tree` column family.
     /// This should not be used in new code.
-    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf {
+    pub(crate) fn raw_history_tree_cf(&self) -> RawHistoryTreePartsCf<'_> {
         RawHistoryTreePartsCf::new(&self.db, HISTORY_TREE)
             .expect("column family was created when database was created")
     }
 
     /// Returns a typed handle to the chain value pools column family.
-    pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf {
+    pub(crate) fn chain_value_pools_cf(&self) -> ChainValuePoolsCf<'_> {
         ChainValuePoolsCf::new(&self.db, CHAIN_VALUE_POOLS)
             .expect("column family was created when database was created")
     }
 
     /// Returns a typed handle to the block data column family.
-    pub(crate) fn block_info_cf(&self) -> BlockInfoCf {
+    pub(crate) fn block_info_cf(&self) -> BlockInfoCf<'_> {
         BlockInfoCf::new(&self.db, BLOCK_INFO)
             .expect("column family was created when database was created")
     }

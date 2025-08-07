@@ -776,7 +776,7 @@ impl DiskDb {
     ///
     /// RocksDB iterators are ordered by increasing key bytes by default.
     /// Otherwise, if `reverse` is `true`, the iterator is ordered by decreasing key bytes.
-    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode
+    fn zs_iter_mode<R>(range: &R, reverse: bool) -> rocksdb::IteratorMode<'_>
     where
         R: RangeBounds<Vec<u8>>,
     {
