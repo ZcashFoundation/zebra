@@ -93,6 +93,10 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
+    # wait for librustzcash to update tonic
+    { name = "tonic", version = "0.12" },
+    { name = "prost-types", version = "0.13" },
+
     { name = "windows-sys", version = "=0.52.0" },
 
     { name = "linux-raw-sys", version = "0.4.15" },
