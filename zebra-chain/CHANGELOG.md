@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.0.0] - 2025-08-07
 
-Support for NU6.1 testnet activation.
+Support for NU6.1 testnet activation; added testnet activation height for NU6.1.
 
 ### Breaking Changes
 
