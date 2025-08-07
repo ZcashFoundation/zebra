@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## [Zebra 2.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.5.0) - 2025-08-07
 
-This release includes the implementation of Zcash **Network Upgrade 6.1** (NU6.1) and sets its activation height on the public Testnet at block **3,536,500**. Please update your Testnet nodes as soon as possible to ensure compatibility.
+This release includes the implementation of Zcash **Network Upgrade 6.1** (NU6.1) on Testnet and sets its activation height on the public Testnet at block **3,536,500**. Please update your Testnet nodes as soon as possible to ensure compatibility.
 
 ### Breaking Changes
 
