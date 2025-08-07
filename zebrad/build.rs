@@ -68,11 +68,10 @@ fn main() {
 
     // Add custom git tag and commit information
     // Use environment variables if available (from CI/CD), otherwise try git commands (Can be problematic as the docker image shouldn't have the .git folder in it)
-    let git_tag = std::env::var("GIT_TAG")
-        .unwrap_or_else(|_| run_git_command(&["describe", "--exact-match", "--tags"], "none"));
     let git_commit = std::env::var("GIT_COMMIT_FULL")
         .unwrap_or_else(|_| run_git_command(&["rev-parse", "HEAD"], "none"));
-
+    let git_tag = std::env::var("GIT_TAG")
+        .unwrap_or_else(|_| run_git_command(&["describe", "--exact-match", "--tags"], "none"));
     println!("cargo:rustc-env=GIT_TAG={}", git_tag);
     println!("cargo:rustc-env=GIT_COMMIT_FULL={}", git_commit);
 }
