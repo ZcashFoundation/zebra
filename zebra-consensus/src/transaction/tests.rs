@@ -2126,8 +2126,9 @@ async fn v5_coinbase_transaction_expiry_height() {
 
     // Setting the new expiry height as the block height will activate NU6, so we need to set NU6
     // for the tx as well.
+    let height = new_expiry_height;
     new_transaction
-        .update_network_upgrade(NetworkUpgrade::Nu6)
+        .update_network_upgrade(NetworkUpgrade::current(&network, height))
         .expect("updating the network upgrade for a V5 tx should succeed");
 
     let verification_result = verifier
@@ -2137,7 +2138,7 @@ async fn v5_coinbase_transaction_expiry_height() {
             transaction: Arc::new(new_transaction.clone()),
             known_utxos: Arc::new(HashMap::new()),
             known_outpoint_hashes: Arc::new(HashSet::new()),
-            height: new_expiry_height,
+            height,
             time: DateTime::<Utc>::MAX_UTC,
         })
         .await;
