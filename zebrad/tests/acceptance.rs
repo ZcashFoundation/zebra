@@ -1138,9 +1138,8 @@ fn activate_mempool_mainnet() -> Result<()> {
 #[test]
 #[ignore]
 fn sync_large_checkpoints_empty() -> Result<()> {
-    // Check both old and new variable names for backwards compatibility
-    if std::env::var("TEST_LARGE_CHECKPOINTS").is_err()
-        && std::env::var("TEST_LARGE_CHECKPOINTS").is_err() {
+    // Skip unless explicitly enabled
+    if std::env::var("TEST_LARGE_CHECKPOINTS").is_err() {
         tracing::warn!(
             "Skipped sync_large_checkpoints_empty, set the TEST_LARGE_CHECKPOINTS environmental variable to run the test"
         );
@@ -1291,9 +1290,8 @@ fn sync_to_mandatory_checkpoint_testnet() -> Result<()> {
 fn sync_to_mandatory_checkpoint_for_network(network: Network) -> Result<()> {
     use std::env;
 
-    // Check both old and new variable names for backwards compatibility
-    if env::var("TEST_SYNC_TO_CHECKPOINT").is_err()
-        && env::var("TEST_SYNC_TO_CHECKPOINT").is_err() {
+    // Skip unless explicitly enabled
+    if env::var("TEST_SYNC_TO_CHECKPOINT").is_err() {
         return Ok(());
     }
 
@@ -1309,9 +1307,8 @@ fn sync_to_mandatory_checkpoint_for_network(network: Network) -> Result<()> {
 #[allow(dead_code)]
 #[test]
 fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
-    // Check both old and new variable names for backwards compatibility
-    if std::env::var("TEST_SYNC_PAST_CHECKPOINT").is_err()
-        && std::env::var("TEST_SYNC_PAST_CHECKPOINT").is_err() {
+    // Skip unless explicitly enabled
+    if std::env::var("TEST_SYNC_PAST_CHECKPOINT").is_err() {
         tracing::warn!(
             "Skipped sync_past_mandatory_checkpoint_mainnet, set the TEST_SYNC_PAST_CHECKPOINT environmental variable to run the test"
         );
@@ -1330,9 +1327,8 @@ fn sync_past_mandatory_checkpoint_mainnet() -> Result<()> {
 #[allow(dead_code)]
 #[test]
 fn sync_past_mandatory_checkpoint_testnet() -> Result<()> {
-    // Check both old and new variable names for backwards compatibility
-    if std::env::var("TEST_SYNC_PAST_CHECKPOINT").is_err()
-        && std::env::var("TEST_SYNC_PAST_CHECKPOINT").is_err() {
+    // Skip unless explicitly enabled
+    if std::env::var("TEST_SYNC_PAST_CHECKPOINT").is_err() {
         tracing::warn!(
             "Skipped sync_past_mandatory_checkpoint_testnet, set the TEST_SYNC_PAST_CHECKPOINT environmental variable to run the test"
         );
