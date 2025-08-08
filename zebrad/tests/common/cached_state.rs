@@ -31,8 +31,8 @@ use crate::common::{
     test_type::TestType,
 };
 
-/// The environmental variable that holds the path to a directory containing a cached Zebra state.
-pub const STATE_CACHE_DIR: &str = "STATE_CACHE_DIR";
+// Deprecated: tests should read the cache dir from `ZEBRA_STATE__CACHE_DIR` if they need
+// an external cached state directory. The actual application reads this via config-rs.
 
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///

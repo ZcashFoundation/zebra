@@ -14,7 +14,6 @@ use zebra_test::{command::NO_MATCHES_REGEX_ITER, prelude::*};
 use zebrad::config::ZebradConfig;
 
 use super::{
-    cached_state::STATE_CACHE_DIR,
     config::{default_test_config, random_known_rpc_port_config},
     failure_messages::{
         LIGHTWALLETD_EMPTY_ZEBRA_STATE_IGNORE_MESSAGES, LIGHTWALLETD_FAILURE_MESSAGES,
@@ -26,6 +25,38 @@ use super::{
 };
 
 use TestType::*;
+
+/// Returns the default platform-specific lightwalletd cache directory.
+fn default_lwd_cache_dir() -> PathBuf {
+    // Mirror zebra_state::default_cache_dir() layout but for lwd
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home)
+                .join("Library")
+                .join("Caches")
+                .join("lwd");
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+            return PathBuf::from(local_app_data).join("lwd");
+        }
+    }
+
+    // Linux / Other: $XDG_CACHE_HOME/lwd or $HOME/.cache/lwd
+    if let Some(xdg) = std::env::var_os("XDG_CACHE_HOME") {
+        return PathBuf::from(xdg).join("lwd");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return PathBuf::from(home).join(".cache").join("lwd");
+    }
+
+    // Fallback: temp dir
+    std::env::temp_dir().join("lwd")
+}
 
 /// The type of integration test that we're running.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -152,18 +183,29 @@ impl TestType {
     /// Returns the Zebra state path for this test, if set.
     #[allow(clippy::print_stderr)]
     pub fn zebrad_state_path<S: AsRef<str>>(&self, test_name: S) -> Option<PathBuf> {
-        match env::var_os(STATE_CACHE_DIR) {
-            Some(path) => Some(path.into()),
-            None => {
-                let test_name = test_name.as_ref();
+        // Load the effective config (defaults + optional TOML + env overrides)
+        let test_name = test_name.as_ref();
+        let cfg = match ZebradConfig::load(None) {
+            Ok(c) => c,
+            Err(_) => {
                 eprintln!(
                     "skipped {test_name:?} {self:?} lightwalletd test, \
-                     set the {STATE_CACHE_DIR:?} environment variable to run the test",
+                     could not load Zebra configuration",
                 );
-
-                None
+                return None;
             }
+        };
+
+        // Skip if the configured state is ephemeral; otherwise use the configured cache_dir
+        if cfg.state.ephemeral {
+            eprintln!(
+                "skipped {test_name:?} {self:?} lightwalletd test, \
+                 configure a persistent state cache (e.g., set [state].ephemeral=false and [state].cache_dir)",
+            );
+            return None;
         }
+
+        Some(cfg.state.cache_dir)
     }
 
     /// Returns a Zebra config for this test.
@@ -241,23 +283,38 @@ impl TestType {
             return None;
         }
 
-        match env::var_os(LWD_CACHE_DIR) {
-            Some(path) => Some(path.into()),
-            None => {
-                if self.needs_lightwalletd_cached_state() {
-                    tracing::info!(
-                        "skipped {test_name:?} {self:?} lightwalletd test, \
-                         set the {LWD_CACHE_DIR:?} environment variable to run the test",
-                    );
-                } else if self.allow_lightwalletd_cached_state() {
-                    tracing::info!(
-                        "running {test_name:?} {self:?} lightwalletd test without cached state, \
-                         set the {LWD_CACHE_DIR:?} environment variable to run with cached state",
-                    );
-                }
+        // Explicit override via env var takes precedence
+        if let Some(path) = env::var_os(LWD_CACHE_DIR) {
+            return Some(path.into());
+        }
 
+        // Otherwise, try a deterministic platform default
+        let default_path = default_lwd_cache_dir();
+
+        if self.needs_lightwalletd_cached_state() {
+            // Only run if a cached state actually exists at the default path
+            if default_path.exists() {
+                Some(default_path)
+            } else {
+                tracing::info!(
+                    ?default_path,
+                    "skipped {test_name:?} {self:?} lightwalletd test: no cached state found at default path",
+                );
                 None
             }
+        } else if self.allow_lightwalletd_cached_state() {
+            // Use default if present; otherwise run without cached state
+            if default_path.exists() {
+                Some(default_path)
+            } else {
+                tracing::info!(
+                    ?default_path,
+                    "running {test_name:?} {self:?} lightwalletd test without cached state (no default found)",
+                );
+                None
+            }
+        } else {
+            None
         }
     }
 

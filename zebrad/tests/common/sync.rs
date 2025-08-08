@@ -5,7 +5,7 @@
 //! Test functions in this file will not be run.
 //! This file is only for test library code.
 
-use std::{env, path::PathBuf, time::Duration};
+use std::{path::PathBuf, time::Duration};
 
 use tempfile::TempDir;
 
@@ -326,14 +326,14 @@ pub fn check_sync_logs_until(
     Ok(zebrad)
 }
 
-/// Returns the cache directory for Zebra's state.
+/// Returns the cache directory for Zebra's state, as configured via config-rs.
 ///
-/// It checks the `STATE_CACHE_DIR` environment variable and returns its value if set.
-/// Otherwise, it defaults to `"/zebrad-cache"`.
+/// Uses the resolved configuration from `ZebradConfig::load(None)`, which
+/// incorporates defaults, optional TOML, and environment overrides.
 fn get_zebra_cached_state_dir() -> PathBuf {
-    env::var("STATE_CACHE_DIR")
-        .unwrap_or_else(|_| "/zebrad-cache".to_string())
-        .into()
+    ZebradConfig::load(None)
+        .map(|c| c.state.cache_dir)
+        .unwrap_or_else(|_| "/zebrad-cache".into())
 }
 
 /// Returns a test config for caching Zebra's state up to the mandatory checkpoint.

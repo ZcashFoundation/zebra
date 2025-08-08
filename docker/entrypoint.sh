@@ -8,9 +8,8 @@
 
 set -eo pipefail
 
-# Default cache directories for local runs/tests (not managed by config-rs)
-: "${STATE_CACHE_DIR:=${HOME}/.cache/zebra}"
-: "${LWD_CACHE_DIR:=${HOME}/.cache/lwd}"
+# Lightwalletd uses its own data dir; tests and CI should pass it directly to lightwalletd.
+# No default is needed here; avoid duplicating configuration in the entrypoint.
 
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
