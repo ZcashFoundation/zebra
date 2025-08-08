@@ -53,10 +53,11 @@ features = [
 
 [features]
 # In release builds, don't compile debug logging code, to improve performance.
-default = ["release_max_level_info", "progress-bar", "prometheus"]
+default-release-binaries = ["release_max_level_info", "progress-bar", "prometheus", "sentry"]
+
 
 # Default features for official ZF binary release builds
-default-release-binaries = ["default", "sentry"]
+default = ["default-release-binaries"]
 
 # Production features that activate extra dependencies, or extra features in dependencies
 
@@ -143,12 +144,6 @@ lightwalletd-grpc-tests = ["tonic-build"]
 # For more details, see:
 # https://github.com/tokio-rs/console/blob/main/console-subscriber/README.md#enabling-tokio-instrumentation
 tokio-console = ["console-subscriber"]
-
-# TODO: replace with environmental variables that skip the tests when not set (part of #2995)
-sync_to_mandatory_checkpoint_mainnet = []
-sync_to_mandatory_checkpoint_testnet = []
-sync_past_mandatory_checkpoint_mainnet = []
-sync_past_mandatory_checkpoint_testnet = []
 
 tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 

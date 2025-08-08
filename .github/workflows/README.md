@@ -206,26 +206,34 @@ Our use of patch workflows (`.patch.yml` and `.patch-external.yml`) is a workaro
 
 ## Test Execution Strategy
 
-### Test Orchestration
+### Test Orchestration with Nextest
 
-Our test execution is centralized through our Docker [entrypoint script](http://../../docker/entrypoint.sh), providing a unified way to run tests both in CI and locally.
+Our test execution is centralized through our Docker [entrypoint script](http://../../docker/entrypoint.sh) and orchestrated by `cargo nextest`. This provides a unified and efficient way to run tests both in CI and locally.
 
-#### Environment Variable-driven Testing
+#### Nextest Profile-driven Testing
+
+We use `nextest` profiles defined in [`.config/nextest.toml`](../../.config/nextest.toml) to manage test suites. A single environment variable, `NEXTEST_PROFILE`, selects the profile to run.
 
 ```bash
-# Full test suite
-docker run --rm -e RUN_ALL_TESTS=1 zebra-tests
+# Run the full test suite using the 'all-tests' profile
+docker run --rm -e NEXTEST_PROFILE=all-tests zebra-tests
 
-# Specific test suites
-docker run --rm -e LIGHTWALLETD_INTEGRATION=1 zebra-tests
+# Run a specific test suite, like the lightwalletd integration tests
+docker run --rm -e NEXTEST_PROFILE=lwd-integration zebra-tests
 ```
 
 #### Test Categories
 
-- Full suite (`RUN_ALL_TESTS`)
-- Integration tests (`LIGHTWALLETD_INTEGRATION`)
-- Network sync (`SYNC_LARGE_CHECKPOINTS_EMPTY`, `SYNC_UPDATE`)
-- State management (`SYNC_TO_MANDATORY_CHECKPOINT`)
+Our tests are organized into different categories:
+
+- **Unit & Integration Tests**: Basic functionality and component testing
+- **Network Sync Tests**: Testing blockchain synchronization from various states
+- **Lightwalletd Tests**: Integration with the lightwalletd service
+- **RPC Tests**: JSON-RPC endpoint functionality
+- **Checkpoint Tests**: Blockchain checkpoint generation and validation
+
+Each test category has specific profiles that can be run individually using the `NEXTEST_PROFILE` environment variable.
+
 
 ### Pull Request Testing
 

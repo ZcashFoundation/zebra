@@ -136,148 +136,6 @@ create_owned_directory() {
 [[ -n ${ZEBRA_COOKIE_DIR} ]] && create_owned_directory "${ZEBRA_COOKIE_DIR}"
 [[ -n ${LOG_FILE} ]] && create_owned_directory "$(dirname "${LOG_FILE}")"
 
-# Runs cargo test with an arbitrary number of arguments.
-#
-# Positional Parameters
-#
-# - '$1' must contain cargo FEATURES as described here:
-#   https://doc.rust-lang.org/cargo/reference/features.html#command-line-feature-options
-# - The remaining params will be appended to a command starting with
-#   `exec_as_user cargo test ... -- ...`
-run_cargo_test() {
-  # Shift the first argument, as it's already included in the cmd
-  local features="$1"
-  shift
-
-  # Start constructing the command array
-  local cmd=(cargo test --locked --release --features "${features}" --package zebrad --test acceptance -- --nocapture --include-ignored)
-
-  # Loop through the remaining arguments
-  for arg in "$@"; do
-    if [[ -n ${arg} ]]; then
-      # If the argument is non-empty, add it to the command
-      cmd+=("${arg}")
-    fi
-  done
-
-  echo "Running: ${cmd[*]}"
-  # Execute directly to become PID 1
-  exec_as_user "${cmd[@]}"
-}
-
-# Runs tests depending on the env vars.
-#
-# ## Positional Parameters
-#
-# - $@: Arbitrary command that will be executed if no test env var is set.
-run_tests() {
-  if [[ "${RUN_ALL_TESTS}" -eq "1" ]]; then
-    # Run unit, basic acceptance tests, and ignored tests, only showing command
-    # output if the test fails. If the lightwalletd environment variables are
-    # set, we will also run those tests.
-    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
-      -- --nocapture --include-ignored --skip check_no_git_dependencies
-
-  elif [[ "${CHECK_NO_GIT_DEPENDENCIES}" -eq "1" ]]; then
-    # Run the check_no_git_dependencies test.
-    exec_as_user cargo test --locked --release --workspace --features "${FEATURES}" \
-      -- --nocapture --include-ignored check_no_git_dependencies
-
-  elif [[ "${STATE_FAKE_ACTIVATION_HEIGHTS}" -eq "1" ]]; then
-    # Run state tests with fake activation heights.
-    exec_as_user cargo test --locked --release --lib --features "zebra-test" \
-      --package zebra-state \
-      -- --nocapture --include-ignored with_fake_activation_heights
-
-  elif [[ "${SYNC_LARGE_CHECKPOINTS_EMPTY}" -eq "1" ]]; then
-    # Test that Zebra syncs and checkpoints a few thousand blocks from an empty
-    # state.
-    run_cargo_test "${FEATURES}" "sync_large_checkpoints_"
-
-  elif [[ -n "${SYNC_FULL_MAINNET_TIMEOUT_MINUTES}" ]]; then
-    # Run a Zebra full sync test on mainnet.
-    run_cargo_test "${FEATURES}" "sync_full_mainnet"
-
-  elif [[ -n "${SYNC_FULL_TESTNET_TIMEOUT_MINUTES}" ]]; then
-    # Run a Zebra full sync test on testnet.
-    run_cargo_test "${FEATURES}" "sync_full_testnet"
-
-  elif [[ "${SYNC_TO_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
-    # Run a Zebra sync up to the mandatory checkpoint.
-    run_cargo_test "${FEATURES} sync_to_mandatory_checkpoint_${NETWORK,,}" \
-      "sync_to_mandatory_checkpoint_${NETWORK,,}"
-    echo "ran test_disk_rebuild"
-
-  elif [[ "${SYNC_UPDATE_MAINNET}" -eq "1" ]]; then
-    # Run a Zebra sync starting at the cached tip, and syncing to the latest
-    # tip.
-    run_cargo_test "${FEATURES}" "sync_update_mainnet"
-
-  elif [[ "${SYNC_PAST_MANDATORY_CHECKPOINT}" -eq "1" ]]; then
-    # Run a Zebra sync starting at the cached mandatory checkpoint, and syncing
-    # past it.
-    run_cargo_test "${FEATURES} sync_past_mandatory_checkpoint_${NETWORK,,}" \
-      "sync_past_mandatory_checkpoint_${NETWORK,,}"
-
-  elif [[ "${GENERATE_CHECKPOINTS_MAINNET}" -eq "1" ]]; then
-    # Generate checkpoints after syncing Zebra from a cached state on mainnet.
-    #
-    # TODO: disable or filter out logs like:
-    # test generate_checkpoints_mainnet has been running for over 60 seconds
-    run_cargo_test "${FEATURES}" "generate_checkpoints_mainnet"
-
-  elif [[ "${GENERATE_CHECKPOINTS_TESTNET}" -eq "1" ]]; then
-    # Generate checkpoints after syncing Zebra on testnet.
-    #
-    # This test might fail if testnet is unstable.
-    run_cargo_test "${FEATURES}" "generate_checkpoints_testnet"
-
-  elif [[ "${LWD_RPC_TEST}" -eq "1" ]]; then
-    # Starting at a cached Zebra tip, test a JSON-RPC call to Zebra.
-    # Run both the fully synced RPC test and the subtree snapshot test, one test
-    # at a time. Since these tests use the same cached state, a state problem in
-    # the first test can fail the second test.
-    run_cargo_test "${FEATURES}" "--test-threads" "1" "lwd_rpc_test"
-
-  elif [[ "${LIGHTWALLETD_INTEGRATION}" -eq "1" ]]; then
-    # Test launching lightwalletd with an empty lightwalletd and Zebra state.
-    run_cargo_test "${FEATURES}" "lwd_integration"
-
-  elif [[ "${LWD_SYNC_FULL}" -eq "1" ]]; then
-    # Starting at a cached Zebra tip, run a lightwalletd sync to tip.
-    run_cargo_test "${FEATURES}" "lwd_sync_full"
-
-  elif [[ "${LWD_SYNC_UPDATE}" -eq "1" ]]; then
-    # Starting with a cached Zebra and lightwalletd tip, run a quick update sync.
-    run_cargo_test "${FEATURES}" "lwd_sync_update"
-
-  # These tests actually use gRPC.
-  elif [[ "${LWD_GRPC_WALLET}" -eq "1" ]]; then
-    # Starting with a cached Zebra and lightwalletd tip, test all gRPC calls to
-    # lightwalletd, which calls Zebra.
-    run_cargo_test "${FEATURES}" "lwd_grpc_wallet"
-
-  elif [[ "${LWD_RPC_SEND_TX}" -eq "1" ]]; then
-    # Starting with a cached Zebra and lightwalletd tip, test sending
-    # transactions gRPC call to lightwalletd, which calls Zebra.
-    run_cargo_test "${FEATURES}" "lwd_rpc_send_tx"
-
-  # These tests use mining code, but don't use gRPC.
-  elif [[ "${RPC_GET_BLOCK_TEMPLATE}" -eq "1" ]]; then
-    # Starting with a cached Zebra tip, test getting a block template from
-    # Zebra's RPC server.
-    run_cargo_test "${FEATURES}" "rpc_get_block_template"
-
-  elif [[ "${RPC_SUBMIT_BLOCK}" -eq "1" ]]; then
-    # Starting with a cached Zebra tip, test sending a block to Zebra's RPC
-    # port.
-    run_cargo_test "${FEATURES}" "rpc_submit_block"
-
-  else
-    exec_as_user "$@"
-  fi
-}
-
 # Main Script Logic
 #
 # 1. First check if ZEBRA_CONF_PATH is explicitly set or if a file exists at that path
@@ -330,8 +188,12 @@ test)
   if [[ "$1" == "zebrad" ]]; then
     shift
     exec_as_user zebrad --config "${ZEBRA_CONF_PATH}" "$@"
+  elif [[ -n "${NEXTEST_PROFILE}" ]]; then
+    # All test filtering and scoping logic is handled by .config/nextest.toml
+    echo "Running tests with nextest profile: ${NEXTEST_PROFILE}"
+    exec_as_user cargo nextest run --locked --release --features "${FEATURES}" --run-ignored=all --hide-progress-bar
   else
-    run_tests "$@"
+    exec_as_user "$@"
   fi
   ;;
 monitoring)
