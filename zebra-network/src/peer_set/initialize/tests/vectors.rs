@@ -8,10 +8,10 @@
 //! ## Failures due to Configured Network Interfaces
 //!
 //! If your test environment does not have any IPv6 interfaces configured, skip IPv6 tests
-//! by setting the `ZEBRA_SKIP_IPV6_TESTS` environmental variable.
+//! by setting the `SKIP_IPV6_TESTS` environmental variable.
 //!
 //! If it does not have any IPv4 interfaces, or IPv4 localhost is not on `127.0.0.1`,
-//! skip all the network tests by setting the `ZEBRA_SKIP_NETWORK_TESTS` environmental variable.
+//! skip all the network tests by setting the `SKIP_NETWORK_TESTS` environmental variable.
 
 use std::{
     net::{Ipv4Addr, SocketAddr},

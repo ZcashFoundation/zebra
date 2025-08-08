@@ -147,7 +147,7 @@ jobs:
         # Windows runners have an unreliable network.
         shell: bash
         if: matrix.os != 'macos-latest'
-        run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+        run: echo "SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
 
       - name: Minimise proptest cases on macOS and Windows
         # We set cases to 1, because some tests already run 1 case by default.
@@ -171,7 +171,7 @@ jobs:
       # Explicitly run any tests that are usually #[ignored]
 
       - name: Run zebrad large sync tests${{ matrix.features }}
-        # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to ZEBRA_SKIP_NETWORK_TESTS
+        # Skip the entire step on Ubuntu and Windows, because the test would be skipped anyway due to SKIP_NETWORK_TESTS
         if: matrix.os == 'macos-latest'
         run: |
           cargo test --features "${{ matrix.features }}" --release --verbose --package zebrad --test acceptance -- --nocapture --include-ignored sync_large_checkpoints_

@@ -84,7 +84,7 @@ jobs:
       - name: Skip network tests on Ubuntu
         # Ubuntu runners don't have reliable network or DNS during test steps.
         shell: bash
-        run: echo "ZEBRA_SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
+        run: echo "SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
 
       - name: Minimise proptest cases in Coverage tests
         # We set cases to 1, because some tests already run 1 case by default.
