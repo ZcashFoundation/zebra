@@ -97,7 +97,10 @@ endpoint_addr = "127.0.0.1:9999"
     let config = ZebradConfig::load(Some(config_path)).expect("load config from file");
 
     assert_eq!(config.network.network.to_string(), "Testnet");
-    assert_eq!(config.rpc.listen_addr.unwrap().to_string(), "127.0.0.1:8232");
+    assert_eq!(
+        config.rpc.listen_addr.unwrap().to_string(),
+        "127.0.0.1:8232"
+    );
     assert_eq!(
         config.metrics.endpoint_addr.unwrap().to_string(),
         "127.0.0.1:9999"
@@ -125,7 +128,10 @@ fn config_env_override_defaults() {
     let config = ZebradConfig::load(None).expect("load config with env vars");
 
     assert_eq!(config.network.network.to_string(), "Testnet");
-    assert_eq!(config.rpc.listen_addr.unwrap().to_string(), "127.0.0.1:8232");
+    assert_eq!(
+        config.rpc.listen_addr.unwrap().to_string(),
+        "127.0.0.1:8232"
+    );
 }
 
 #[test]
@@ -151,7 +157,10 @@ listen_addr = "127.0.0.1:8233"
     let config = ZebradConfig::load(Some(config_path)).expect("load config");
 
     assert_eq!(config.network.network.to_string(), "Testnet");
-    assert_eq!(config.rpc.listen_addr.unwrap().to_string(), "127.0.0.1:8232");
+    assert_eq!(
+        config.rpc.listen_addr.unwrap().to_string(),
+        "127.0.0.1:8232"
+    );
 }
 
 #[test]
@@ -179,7 +188,10 @@ fn config_invalid_env_values_error() {
     env.set_var("ZEBRA_RPC__LISTEN_ADDR", "invalid_address");
 
     let result = ZebradConfig::load(None);
-    assert!(result.is_err(), "Should fail with invalid RPC listen address");
+    assert!(
+        result.is_err(),
+        "Should fail with invalid RPC listen address"
+    );
 }
 
 #[test]
@@ -279,5 +291,3 @@ fn zebra_mining_miner_address_from_toml() {
         miner_address
     );
 }
-
-
