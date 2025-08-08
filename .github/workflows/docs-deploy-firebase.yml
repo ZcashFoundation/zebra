@@ -107,7 +107,7 @@ jobs:
       - name: Authenticate to Google Cloud
         if: github.repository_owner == 'ZcashFoundation'
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@v2.1.12
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
@@ -158,7 +158,7 @@ jobs:
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
 
-      - uses: Swatinem/rust-cache@v2.7.8
+      - uses: Swatinem/rust-cache@v2.8.0
 
       - name: Build internal docs
         run: |
@@ -168,7 +168,7 @@ jobs:
       - name: Authenticate to Google Cloud
         if: github.repository_owner == 'ZcashFoundation'
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@v2.1.12
         with:
           workload_identity_provider: '${{ vars.GCP_WIF }}'
           service_account: '${{ vars.GCP_FIREBASE_SA }}'
