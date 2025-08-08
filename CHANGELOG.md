@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## Unreleased
 
+### Breaking Changes
+
+- Migrate `zebrad` to a layered configuration using config-rs. Environment variables must use the
+  `ZEBRA_SECTION__KEY` format (double underscore for nesting), for example:
+  `ZEBRA_NETWORK__NETWORK`, `ZEBRA_RPC__LISTEN_ADDR`, `ZEBRA_RPC__ENABLE_COOKIE_AUTH`,
+  `ZEBRA_RPC__COOKIE_DIR`, `ZEBRA_TRACING__FILTER`, `ZEBRA_STATE__CACHE_DIR`,
+  `ZEBRA_MINING__MINER_ADDRESS`. Legacy `ZEBRA_*` test/path variables and `ZEBRA_RUST_LOG` are no
+  longer honored. Update any scripts, Docker configs, or systemd units that relied on the old names
+  ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
+
+- Docker entrypoint simplified: it no longer generates a `zebrad.toml` or translates legacy Docker
+  environment variables. To use a file, set `CONFIG_FILE_PATH` (the entrypoint forwards it via
+  `--config`). Otherwise, configure via `ZEBRA_*` variables. `ZEBRA_CONF_PATH` has been removed in
+  favor of `CONFIG_FILE_PATH`. Docker setups that used variables like `ZEBRA_RPC_PORT`,
+  `ZEBRA_COOKIE_DIR`, `NETWORK`, `ENABLE_COOKIE_AUTH`, or `MINER_ADDRESS` must switch to the
+  config-rs equivalents shown above ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
+
+### Changed
+
+- `zebrad` now loads configuration from defaults, an optional TOML file, and environment variables,
+  with precedence: Env > TOML > Defaults ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
+- Docker and book documentation updated to describe `CONFIG_FILE_PATH` and `ZEBRA_*` environment
+  variable usage; removed references to `ZEBRA_CONF_PATH` and legacy Docker variables
+  ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
 
 ## [Zebra 2.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.5.0) - 2025-08-07
 
