@@ -204,7 +204,7 @@ impl ConfiguredFundingStreams {
             });
 
         assert!(
-            height_range.start < height_range.end,
+            height_range.start <= height_range.end,
             "funding stream end height must be above start height"
         );
 
@@ -227,6 +227,26 @@ impl ConfiguredFundingStreams {
         );
 
         funding_streams
+    }
+
+    /// Converts the [`ConfiguredFundingStreams`] to a [`FundingStreams`].
+    ///
+    /// # Panics
+    ///
+    /// If `height_range` is None.
+    pub fn into_funding_streams_unchecked(self) -> FundingStreams {
+        let height_range = self.height_range.expect("must have height range");
+        let recipients = self
+            .recipients
+            .into_iter()
+            .flat_map(|recipients| {
+                recipients
+                    .into_iter()
+                    .map(ConfiguredFundingStreamRecipient::into_recipient)
+            })
+            .collect();
+
+        FundingStreams::new(height_range, recipients)
     }
 }
 
@@ -255,8 +275,7 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
         assert!(
             recipient.addresses().len() >= expected_min_num_addresses,
             "recipients must have a sufficient number of addresses for height range, \
-         minimum num addresses required: {expected_min_num_addresses}, given: {}",
-            recipient.addresses().len()
+         minimum num addresses required: {expected_min_num_addresses}, receiver: {receiver:?}, recipient: {recipient:?}"
         );
 
         for address in recipient.addresses() {
@@ -297,6 +316,44 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU7` network upgrade.
     #[serde(rename = "NU7")]
     pub nu7: Option<u32>,
+}
+
+impl ConfiguredActivationHeights {
+    /// Converts a [`ConfiguredActivationHeights`] to one that uses the default values for Regtest where
+    /// no activation heights are specified.
+    fn for_regtest(self) -> Self {
+        let Self {
+            before_overwinter,
+            overwinter,
+            sapling,
+            blossom,
+            heartwood,
+            canopy,
+            nu5,
+            nu6,
+            nu6_1,
+            nu7,
+        } = self;
+
+        let overwinter = overwinter.or(before_overwinter).or(Some(1));
+        let sapling = sapling.or(overwinter);
+        let blossom = blossom.or(sapling);
+        let heartwood = heartwood.or(blossom);
+        let canopy = canopy.or(heartwood);
+
+        Self {
+            before_overwinter,
+            overwinter,
+            sapling,
+            blossom,
+            heartwood,
+            canopy,
+            nu5,
+            nu6,
+            nu6_1,
+            nu7,
+        }
+    }
 }
 
 /// Builder for the [`Parameters`] struct.
@@ -518,6 +575,12 @@ impl ParametersBuilder {
         self
     }
 
+    /// Clears funding streams from the [`Parameters`] being built.
+    pub fn clear_funding_streams(mut self) -> Self {
+        self.funding_streams = vec![];
+        self
+    }
+
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
     // TODO: Accept a hex-encoded String instead?
     pub fn with_target_difficulty_limit(
@@ -615,13 +678,9 @@ impl ParametersBuilder {
         let network = self.to_network_unchecked();
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
-        // TODO: Always check funding stream address period once the testnet parameters are being serialized (#8920).
-        #[cfg(not(any(test, feature = "proptest-impl")))]
-        {
-            for fs in self.funding_streams.iter() {
-                // Check that the funding streams are valid for the configured Testnet parameters.
-                check_funding_stream_address_period(fs, &network);
-            }
+        for fs in self.funding_streams.iter() {
+            // Check that the funding streams are valid for the configured Testnet parameters.
+            check_funding_stream_address_period(fs, &network);
         }
 
         network
@@ -657,6 +716,24 @@ impl ParametersBuilder {
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
             && self.lockbox_disbursements == lockbox_disbursements
+    }
+}
+
+/// A struct of parameters for configuring Regtest in Zebra.
+#[derive(Default, Clone)]
+pub struct RegtestParameters {
+    /// The configured network upgrade activation heights to use on Regtest
+    pub activation_heights: ConfiguredActivationHeights,
+    /// Configured funding streams
+    pub funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+}
+
+impl From<ConfiguredActivationHeights> for RegtestParameters {
+    fn from(value: ConfiguredActivationHeights) -> Self {
+        Self {
+            activation_heights: value,
+            ..Default::default()
+        }
     }
 }
 
@@ -716,11 +793,11 @@ impl Parameters {
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     pub fn new_regtest(
-        ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
+        RegtestParameters {
+            activation_heights,
+            funding_streams,
+        }: RegtestParameters,
     ) -> Self {
-        #[cfg(any(test, feature = "proptest-impl"))]
-        let nu5 = nu5.or(Some(100));
-
         let parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
@@ -730,19 +807,10 @@ impl Parameters {
             .with_slow_start_interval(Height::MIN)
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
-            .with_activation_heights(ConfiguredActivationHeights {
-                canopy: Some(1),
-                nu5,
-                nu6,
-                nu7,
-                ..Default::default()
-            })
+            .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
+            .with_funding_streams(funding_streams.unwrap_or_default())
             .with_lockbox_disbursements(Vec::new());
-
-        // TODO: Always clear funding streams on Regtest once the testnet parameters are being serialized (#8920).
-        // #[cfg(not(any(test, feature = "proptest-impl")))]
-        let parameters = parameters.with_funding_streams(Default::default());
 
         Self {
             network_name: "Regtest".to_string(),

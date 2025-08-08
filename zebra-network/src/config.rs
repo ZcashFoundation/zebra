@@ -18,7 +18,7 @@ use zebra_chain::{
     parameters::{
         testnet::{
             self, ConfiguredActivationHeights, ConfiguredFundingStreams,
-            ConfiguredLockboxDisbursement,
+            ConfiguredLockboxDisbursement, RegtestParameters,
         },
         Magic, Network, NetworkKind,
     },
@@ -742,11 +742,31 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let configured_activation_heights = testnet_parameters
-                    .and_then(|params| params.activation_heights)
+                let params = testnet_parameters
+                    .map(
+                        |DTestnetParameters {
+                             activation_heights,
+                             pre_nu6_funding_streams,
+                             post_nu6_funding_streams,
+                             funding_streams,
+                             ..
+                         }| {
+                            let mut funding_streams_vec = funding_streams.unwrap_or_default();
+                            if let Some(funding_streams) = post_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
+                            if let Some(funding_streams) = pre_nu6_funding_streams {
+                                funding_streams_vec.insert(0, funding_streams);
+                            }
+                            RegtestParameters {
+                                activation_heights: activation_heights.unwrap_or_default(),
+                                funding_streams: Some(funding_streams_vec),
+                            }
+                        },
+                    )
                     .unwrap_or_default();
 
-                Network::new_regtest(configured_activation_heights)
+                Network::new_regtest(params)
             }
             (
                 NetworkKind::Testnet,

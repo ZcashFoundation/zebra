@@ -122,6 +122,7 @@ async fn test_z_get_treestate() {
             nu5: Some(10),
             ..Default::default()
         })
+        .clear_funding_streams()
         .with_network_name("custom_testnet")
         .to_network();
 
