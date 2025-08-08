@@ -14,7 +14,7 @@ These parameters are built into the `zebrad` binary. They are predefined keys th
 
 https://zips.z.cash/protocol/protocol.pdf#grothparameters
 
-Zebra uses the [bellman crate groth16 implementation](https://github.com/zkcrypto/bellman/blob/main/src/groth16/mod.rs) for all groth16 types.
+Zebra uses the [bellman crate groth16 implementation](https://github.com/zkcrypto/bellman/tree/main/groth16) for all groth16 types.
 
 Each time a transaction has any sprout joinsplit, sapling spend or sapling output these loaded parameters will be used for the verification process. Zebra verifies in parallel and by batches, these parameters are used on each verification done.
 
