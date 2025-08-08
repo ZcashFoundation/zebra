@@ -81,7 +81,7 @@ For more details about checkpoint lists, see the [`zebra-checkpoints` README.](h
 To update the testnet checkpoints, `zebra-checkpoints` needs to connect to a testnet node.
 
 To launch a testnet node, you can either:
-- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://docs.rs/zebra-network/latest/zebra_network/struct.Config.html#structfield.network), or
+- start `zebrad` [with a `zebrad.toml` with `network.network` set to `Testnet`](https://docs.rs/zebra-network/latest/zebra_network/config/struct.Config.html#structfield.network), or
 - run `zcashd -testnet`.
 
 Then use the commands above to regenerate the checkpoints.
