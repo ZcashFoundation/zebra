@@ -46,16 +46,13 @@ create_owned_directory() {
 }
 
 # --- Optional config file support ---
-# If provided, pass a config file path through to zebrad. Prefer CONFIG_FILE_PATH; ZEBRA_CONF_PATH is deprecated.
+# If provided, pass a config file path through to zebrad via CONFIG_FILE_PATH.
 
 # If the user provided a config file path we pass it to zebrad.
 CONFIG_ARGS=()
 if [[ -n ${CONFIG_FILE_PATH} && -f ${CONFIG_FILE_PATH} ]]; then
     echo "INFO: Using config file at ${CONFIG_FILE_PATH}"
     CONFIG_ARGS=(--config "${CONFIG_FILE_PATH}")
-elif [[ -n ${ZEBRA_CONF_PATH} && -f ${ZEBRA_CONF_PATH} ]]; then
-    echo "INFO: Using config file at ${ZEBRA_CONF_PATH} (deprecated: use CONFIG_FILE_PATH)"
-    CONFIG_ARGS=(--config "${ZEBRA_CONF_PATH}")
 fi
 
 # Main Script Logic
