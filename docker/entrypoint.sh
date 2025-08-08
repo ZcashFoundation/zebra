@@ -8,8 +8,6 @@
 
 set -eo pipefail
 
-# Lightwalletd uses its own data dir; tests and CI should pass it directly to lightwalletd.
-# No default is needed here; avoid duplicating configuration in the entrypoint.
 
 # Use gosu to drop privileges and execute the given command as the specified UID:GID
 exec_as_user() {
