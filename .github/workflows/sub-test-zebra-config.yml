@@ -13,10 +13,16 @@ on:
       docker_image:
         required: true
         type: string
-        description: "Docker image to test, including digest (e.g., gcr.io/example/zebrad@sha256:...)"
+        description: Docker image to test, including digest (e.g., gcr.io/example/zebrad@sha256:...)
+
+permissions: read-all
 
 jobs:
   test-configurations:
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     # Use the matrix 'name' for the job name for clarity in UI
     name: Test ${{ matrix.name }}
     timeout-minutes: 30
@@ -29,54 +35,59 @@ jobs:
           - id: default-conf
             name: Default config
             env_vars: ""
-            grep_patterns: '-e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"'
+            grep_patterns: -e "net.*=.*Main.*estimated progress to chain tip.*BeforeOverwinter"
 
           - id: testnet-conf
             name: Testnet config
-            env_vars: "-e NETWORK=Testnet"
-            grep_patterns: '-e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"'
+            env_vars: -e ZEBRA_NETWORK__NETWORK=Testnet
+            grep_patterns: -e "net.*=.*Test.*estimated progress to chain tip.*BeforeOverwinter"
 
           # Only runs when using the CI image, because the CD image doesn't have the custom config file
           # available in the tests/common/configs directory
           - id: custom-conf
             name: Custom config
-            env_vars: '-e ZEBRA_CONF_PATH="/home/zebra/zebrad/tests/common/configs/custom-conf.toml"'
-            grep_patterns: '-e "extra_coinbase_data:\\sSome\\(\\\"do you even shield\\?\\\"\\)"'
+            env_vars: -e CONFIG_FILE_PATH=/home/zebra/zebrad/tests/common/configs/custom-conf.toml
+            grep_patterns: -e "extra_coinbase_data:\\sSome\\(\\\"do you even shield\\?\\\"\\)"
 
           # RPC configuration tests
           - id: rpc-conf
             name: RPC config
-            env_vars: "-e ZEBRA_RPC_PORT=8232"
-            grep_patterns: '-e "Opened RPC endpoint at.*0.0.0.0:8232"'
+            env_vars: -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232
+            grep_patterns: -e "Opened RPC endpoint at.*0.0.0.0:8232"
 
           - id: rpc-custom-conf
             name: RPC with custom port
-            env_vars: "-e ZEBRA_RPC_PORT=28232 -e RPC_LISTEN_ADDR=127.0.0.1"
-            grep_patterns: '-e "Opened RPC endpoint at.*127.0.0.1:28232"'
+            env_vars: -e ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:28232
+            grep_patterns: -e "Opened RPC endpoint at.*127.0.0.1:28232"
 
           # Custom directory tests
           - id: rpc-cookie-conf
             name: RPC with custom cookie dir
-            env_vars: "-e ZEBRA_RPC_PORT=8232 -e ENABLE_COOKIE_AUTH=true -e ZEBRA_COOKIE_DIR=/home/zebra/.config/cookie"
-            grep_patterns: '-e "RPC auth cookie written to disk"'
+            env_vars: |
+              -e ZEBRA_RPC__LISTEN_ADDR=0.0.0.0:8232
+              -e ZEBRA_RPC__ENABLE_COOKIE_AUTH=true
+              -e ZEBRA_RPC__COOKIE_DIR=/home/zebra/.config/cookie
+            grep_patterns: -e "RPC auth cookie written to disk"
 
           # Custom directory tests
           - id: custom-dirs-conf
             name: Custom cache and cookie directories
-            env_vars: "-e STATE_CACHE_DIR=/tmp/zebra-cache"
-            grep_patterns: '-e "Opened Zebra state cache at /tmp/zebra-cache"'
+            env_vars: -e STATE_CACHE_DIR=/tmp/zebra-cache
+            grep_patterns: -e "Opened Zebra state cache at /tmp/zebra-cache"
 
           # Feature-based configurations
           - id: prometheus-feature
             name: Prometheus metrics
-            env_vars: "-e FEATURES=prometheus -e METRICS_ENDPOINT_PORT=9999"
-            grep_patterns: '-e "0.0.0.0:9999"'
+            env_vars: |
+              -e FEATURES=prometheus
+              -e ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
+            grep_patterns: -e "0.0.0.0:9999"
 
           # Mining configuration
           - id: mining-config
             name: Mining configuration
-            env_vars: '-e MINER_ADDRESS="u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a"'
-            grep_patterns: '-e "miner_address = \\\"u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a\\\""'
+            env_vars: -e MINER_ADDRESS="u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a"
+            grep_patterns: -e "miner_address = \\\"u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a\\\""
 
     steps:
       - uses: actions/checkout@v4.2.2

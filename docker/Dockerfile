@@ -122,7 +122,7 @@ RUN cargo nextest run --locked --release --no-run --features "${FEATURES}" && \
     chown -R ${UID}:${GID} ${CARGO_TARGET_DIR}
 
 # Copy the lightwalletd binary and source files to be able to run tests
-# COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
+COPY --link --from=electriccoinco/lightwalletd:v0.4.17 /usr/local/bin/lightwalletd /usr/local/bin/
 
 # Copy the gosu binary to be able to run the entrypoint as non-root user
 # and allow to change permissions for mounted cache directories

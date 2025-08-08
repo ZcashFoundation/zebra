@@ -52,13 +52,13 @@ create_owned_directory() {
 # If provided, pass a config file path through to zebrad. Prefer CONFIG_FILE_PATH; ZEBRA_CONF_PATH is deprecated.
 
 # If the user provided a config file path we pass it to zebrad.
-CONFIG_ARG=""
+CONFIG_ARGS=()
 if [[ -n ${CONFIG_FILE_PATH} && -f ${CONFIG_FILE_PATH} ]]; then
     echo "INFO: Using config file at ${CONFIG_FILE_PATH}"
-    CONFIG_ARG="--config ${CONFIG_FILE_PATH}"
+    CONFIG_ARGS=(--config "${CONFIG_FILE_PATH}")
 elif [[ -n ${ZEBRA_CONF_PATH} && -f ${ZEBRA_CONF_PATH} ]]; then
     echo "INFO: Using config file at ${ZEBRA_CONF_PATH} (deprecated: use CONFIG_FILE_PATH)"
-    CONFIG_ARG="--config ${ZEBRA_CONF_PATH}"
+    CONFIG_ARGS=(--config "${ZEBRA_CONF_PATH}")
 fi
 
 # Main Script Logic
@@ -68,13 +68,13 @@ fi
 case "$1" in
 --* | -* | zebrad)
   shift
-  exec_as_user zebrad "${CONFIG_ARG}" "$@"
+  exec_as_user zebrad "${CONFIG_ARGS[@]}" "$@"
   ;;
 test)
   shift
   if [[ "$1" == "zebrad" ]]; then
     shift
-    exec_as_user zebrad "${CONFIG_ARG}" "$@"
+    exec_as_user zebrad "${CONFIG_ARGS[@]}" "$@"
   elif [[ -n "${NEXTEST_PROFILE}" ]]; then
     # All test filtering and scoping logic is handled by .config/nextest.toml
     echo "Running tests with nextest profile: ${NEXTEST_PROFILE}"
