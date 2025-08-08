@@ -42,6 +42,16 @@ deny = [
 #
 # Certain crates/versions that will be skipped when doing duplicate detection.
 skip = [
+    # Allow mixed versions pulled in by transitive dev/test deps vs runtime deps
+    # ron 0.7.x is required by insta; 0.8.x is required by config
+    { name = "ron", version = "=0.7.1" },
+
+    # Older base64 pulled in via ron/config; newer via networking stack
+    { name = "base64", version = "=0.21.7" },
+
+    # Keep older toml_datetime required via jsonrpsee-proc-macros -> toml_edit 0.22.x
+    # We can't upgrade jsonrpsee yet to 0.25.x (as it introduces breaking changes)
+    { name = "toml_datetime", version = "=0.6.11" },
 ]
 
 # Similarly to `skip` allows you to skip certain crates during duplicate
@@ -95,11 +105,8 @@ skip-tree = [
 
     { name = "windows-sys", version = "=0.52.0" },
 
-    { name = "linux-raw-sys", version = "0.4.15" },
+    # removed: quick-xml no longer in dependency graph at this version
 
-    { name = "quick-xml", version = "0.37.5" },
-
-    { name = "rustix", version = "0.38.44" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
