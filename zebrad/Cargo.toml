@@ -1,7 +1,7 @@
 [package]
 # Crate metadata
 name = "zebrad"
-version = "2.4.2"
+version = "2.5.0"
 authors = ["Zcash Foundation <zebra@zfnd.org>"]
 description = "The Zcash Foundation's independent, consensus-compatible implementation of a Zcash node"
 license = "MIT OR Apache-2.0"
@@ -152,19 +152,19 @@ tx_v6 = ["zebra-chain/tx_v6", "zebra-state/tx_v6", "zebra-consensus/tx_v6"]
 comparison-interpreter = ["zebra-script/comparison-interpreter"]
 
 [dependencies]
-zebra-chain = { path = "../zebra-chain", version = "1.0.0" }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0" }
-zebra-network = { path = "../zebra-network", version = "1.0.0" }
-zebra-node-services = { path = "../zebra-node-services", version = "1.0.0", features = ["rpc-client"] }
-zebra-rpc = { path = "../zebra-rpc", version = "1.0.0" }
-zebra-state = { path = "../zebra-state", version = "1.0.1" }
+zebra-chain = { path = "../zebra-chain", version = "2.0.0" }
+zebra-consensus = { path = "../zebra-consensus", version = "2.0.0" }
+zebra-network = { path = "../zebra-network", version = "1.1.0" }
+zebra-node-services = { path = "../zebra-node-services", version = "1.0.1", features = ["rpc-client"] }
+zebra-rpc = { path = "../zebra-rpc", version = "2.0.0" }
+zebra-state = { path = "../zebra-state", version = "2.0.0" }
 # zebra-script is not used directly, but we list it here to enable the
 # "comparison-interpreter" feature. (Feature unification will take care of
 # enabling it in the other imports of zcash-script.)
-zebra-script = { path = "../zebra-script", version = "1.0.0" }
+zebra-script = { path = "../zebra-script", version = "2.0.0" }
 
 # Required for crates.io publishing, but it's only used in tests
-zebra-utils = { path = "../zebra-utils", version = "1.0.0", optional = true }
+zebra-utils = { path = "../zebra-utils", version = "2.0.0", optional = true }
 
 abscissa_core = { workspace = true }
 clap = { workspace = true, features = ["cargo"] }
@@ -286,12 +286,12 @@ proptest-derive = { workspace = true }
 # enable span traces and track caller in tests
 color-eyre = { workspace = true }
 
-zebra-chain = { path = "../zebra-chain", version = "1.0.0", features = ["proptest-impl"] }
-zebra-consensus = { path = "../zebra-consensus", version = "1.0.0", features = ["proptest-impl"] }
-zebra-network = { path = "../zebra-network", version = "1.0.0", features = ["proptest-impl"] }
-zebra-state = { path = "../zebra-state", version = "1.0.1", features = ["proptest-impl"] }
+zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = ["proptest-impl"] }
+zebra-consensus = { path = "../zebra-consensus", version = "2.0.0", features = ["proptest-impl"] }
+zebra-network = { path = "../zebra-network", version = "1.1.0", features = ["proptest-impl"] }
+zebra-state = { path = "../zebra-state", version = "2.0.0", features = ["proptest-impl"] }
 
-zebra-test = { path = "../zebra-test", version = "1.0.0" }
+zebra-test = { path = "../zebra-test", version = "1.0.1" }
 
 # Used by the checkpoint generation tests via the zebra-checkpoints feature
 # (the binaries in this crate won't be built unless their features are enabled).
@@ -302,7 +302,7 @@ zebra-test = { path = "../zebra-test", version = "1.0.0" }
 # When `-Z bindeps` is stabilised, enable this binary dependency instead:
 # https://github.com/rust-lang/cargo/issues/9096
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
-zebra-utils = { path = "../zebra-utils", version = "1.0.0" }
+zebra-utils = { path = "../zebra-utils", version = "2.0.0" }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
