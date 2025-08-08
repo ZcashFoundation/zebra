@@ -67,6 +67,8 @@ on:
       # configuration files
       - ".cargo/config.toml"
       - "**/clippy.toml"
+      # supply chain security
+      - "**/deny.toml"
       # workflow definitions
       - "docker/**"
       - ".dockerignore"
@@ -94,6 +96,8 @@ on:
       # configuration files
       - ".cargo/config.toml"
       - "**/clippy.toml"
+      # supply chain security
+      - "**/deny.toml"
       # workflow definitions
       - "docker/**"
       - ".dockerignore"

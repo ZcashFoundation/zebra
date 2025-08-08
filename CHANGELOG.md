@@ -5,6 +5,33 @@ All notable changes to Zebra are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org).
 
+## Unreleased
+
+
+## [Zebra 2.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.5.0) - 2025-08-07
+
+This release includes the implementation of Zcash **Network Upgrade 6.1** (NU6.1) on Testnet and sets its activation height on the public Testnet at block **3,536,500**. Please update your Testnet nodes as soon as possible to ensure compatibility.
+
+### Breaking Changes
+
+- Value pool "deferred" changes its identifier to "lockbox". `getblock` and `getblockchaininfo` RPC methods will now return `lockbox` as the `FS_DEFERRED` value pool to match [zcashd](https://github.com/zcash/zcash/pull/6912/files#diff-decae4be02fb8a47ab4557fe74a9cb853bdfa3ec0fa1b515c0a1e5de91f4ad0bR276). ([#9684](https://github.com/ZcashFoundation/zebra/pull/9684))
+
+### Added
+
+- Implement one-time lockbox disbursement mechanism for NU6.1 ([#9603](https://github.com/ZcashFoundation/zebra/pull/9603), [#9757](https://github.com/ZcashFoundation/zebra/pull/9757), [#9747](https://github.com/ZcashFoundation/zebra/pull/9747), [#9754](https://github.com/ZcashFoundation/zebra/pull/9754))
+- NU6.1 Testnet implementation and deployment ([#9762](https://github.com/ZcashFoundation/zebra/pull/9762), [#9759](https://github.com/ZcashFoundation/zebra/pull/9759))
+
+### Fixed
+
+- `validateaddress` RPC bug ([#9734](https://github.com/ZcashFoundation/zebra/pull/9734))
+- Count sigops using generics ([#9670](https://github.com/ZcashFoundation/zebra/pull/9670))
+
+### Contributors
+
+Thank you to everyone who contributed to this release, we couldn't make Zebra without you:
+@Galoretka, @arya2, @conradoplg, @dorianvp, @gustavovalverde, @oxarbitrage, @pacu and @upbqdn
+
+
 ## [Zebra 2.4.2](https://github.com/ZcashFoundation/zebra/releases/tag/v2.4.2) - 2025-07-28
 
 This release fixes a database upgrade bug that was introduced in the 2.4.0
