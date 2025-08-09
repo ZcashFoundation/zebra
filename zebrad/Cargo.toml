@@ -19,7 +19,7 @@ edition = "2021"
 
 # Zebra is only supported on the latest stable Rust version. See the README for details.
 # Any Zebra release can break compatibility with older Rust versions.
-rust-version = "1.85.0"
+rust-version = "1.89.0"
 
 # Settings that impact runtime behaviour
 
