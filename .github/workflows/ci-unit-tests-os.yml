@@ -109,9 +109,18 @@ jobs:
 
       # Setup Rust with ${{ matrix.rust }} toolchain and minimal profile
       - name: Setup Rust
+        shell: bash
+        if: runner.os != 'Windows'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
           source $HOME/.cargo/env
+
+      - name: Setup Rust (Windows)
+        shell: pwsh
+        if: runner.os == 'Windows'
+        run: |
+          curl.exe --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
+          $env:Path = "$env:USERPROFILE\.cargo\bin;$env:Path"
 
       - uses: Swatinem/rust-cache@v2.7.8
         # TODO: change Rust cache target directory on Windows,
