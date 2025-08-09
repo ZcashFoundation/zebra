@@ -68,13 +68,12 @@ where
 
     let listen_addr = tcp_listener.local_addr()?;
     tracing::info!("{OPENED_RPC_ENDPOINT_MSG}{}", listen_addr);
-    let incoming = TcpIncoming::from_listener(tcp_listener, true, None)?;
 
     let server_task: JoinHandle<Result<(), BoxError>> = tokio::spawn(async move {
         Server::builder()
             .add_service(reflection_service)
             .add_service(IndexerServer::new(indexer_service))
-            .serve_with_incoming(incoming)
+            .serve_with_incoming(TcpIncoming::from(tcp_listener))
             .await?;
 
         Ok(())

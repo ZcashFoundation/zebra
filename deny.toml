@@ -93,13 +93,23 @@ skip-tree = [
     # wait for abscissa_core to update synstructure
     { name = "synstructure", version = "=0.12.6" },
 
-    { name = "windows-sys", version = "=0.52.0" },
+    # wait for librustzcash to update tonic
+    { name = "tonic", version = "0.12" },
+    { name = "prost-types", version = "0.13" },
 
-    { name = "linux-raw-sys", version = "0.4.15" },
+    { name = "windows-sys", version = "=0.52.0" },
 
     { name = "quick-xml", version = "0.37.5" },
 
-    { name = "rustix", version = "0.38.44" },
+    { name = "indexmap", version = "1.9" },
+
+    { name = "hashbrown", version = "0.12" },
+
+    { name = "getrandom", version = "0.2" },
+
+    { name = "rand", version = "0.8" },
+    { name = "rand_core", version = "0.6" },
+    { name = "rand_chacha", version = "0.3" },
 ]
 
 # This section is considered when running `cargo deny check sources`.
