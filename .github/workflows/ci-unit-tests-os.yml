@@ -22,20 +22,20 @@ on:
   pull_request:
     paths:
       # code and tests
-      - '**/*.rs'
+      - "**/*.rs"
       # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
+      - "**/*.txt"
       # test data snapshots
-      - '**/*.snap'
+      - "**/*.snap"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/deny.toml'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/deny.toml"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - '.github/workflows/ci-unit-tests-os.yml'
+      - ".github/workflows/ci-unit-tests-os.yml"
 
   # we build Rust caches on main,
   # so they can be shared by all branches:
@@ -45,21 +45,21 @@ on:
       - main
     paths:
       # production code and test code
-      - '**/*.rs'
+      - "**/*.rs"
       # hard-coded checkpoints
       # TODO: skip proptest regressions?
-      - '**/*.txt'
+      - "**/*.txt"
       # test data snapshots
-      - '**/*.snap'
+      - "**/*.snap"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/deny.toml'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - "**/deny.toml"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - '.github/workflows/ci-unit-tests-os.yml'
+      - ".github/workflows/ci-unit-tests-os.yml"
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
@@ -87,10 +87,10 @@ jobs:
         # Other feature combinations are tested in specific workflows
         features: ["default-release-binaries"]
         exclude:
-        # We're excluding macOS beta for the following reasons:
-        # - the concurrent macOS runner limit is much lower than the Linux limit
-        # - macOS is slower than Linux, and shouldn't have a build or test difference with Linux
-        # - macOS is a second-tier Zebra support platform
+          # We're excluding macOS beta for the following reasons:
+          # - the concurrent macOS runner limit is much lower than the Linux limit
+          # - macOS is slower than Linux, and shouldn't have a build or test difference with Linux
+          # - macOS is a second-tier Zebra support platform
           - os: macos-latest
             rust: beta
 
@@ -104,14 +104,14 @@ jobs:
         uses: arduino/setup-protoc@v3.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '23.x'
+          version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with ${{ matrix.rust }} toolchain and minimal profile
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=${{ matrix.rust }} --profile=minimal
-
+          source $HOME/.cargo/env
 
       - uses: Swatinem/rust-cache@v2.7.8
         # TODO: change Rust cache target directory on Windows,
@@ -192,13 +192,14 @@ jobs:
         uses: arduino/setup-protoc@v3.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '23.x'
+          version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+          source $HOME/.cargo/env
 
       - name: Install zebrad
         run: |
@@ -220,13 +221,14 @@ jobs:
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v3.0.0
         with:
-          version: '23.x'
+          version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+          source $HOME/.cargo/env
 
       - uses: Swatinem/rust-cache@v2.7.8
         with:
@@ -247,7 +249,7 @@ jobs:
         # We don't need to check `--no-default-features` here, because (except in very rare cases):
         # - disabling features isn't going to add duplicate dependencies
         # - disabling features isn't going to add more crate sources
-        features: ['', '--features default-release-binaries', '--all-features']
+        features: ["", "--features default-release-binaries", "--all-features"]
       # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
       fail-fast: false
 
@@ -285,6 +287,7 @@ jobs:
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+          source $HOME/.cargo/env
 
       - name: Install cargo-machete
         uses: baptiste0928/cargo-install@v3.3.0
@@ -310,7 +313,14 @@ jobs:
   failure-issue:
     name: Open or update issues for OS integration failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ test,  install-from-lockfile-no-cache, check-cargo-lock, cargo-deny, unused-deps ]
+    needs:
+      [
+        test,
+        install-from-lockfile-no-cache,
+        check-cargo-lock,
+        cargo-deny,
+        unused-deps,
+      ]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() || cancelled()) && github.repository_owner == 'ZcashFoundation' && github.event.pull_request == null

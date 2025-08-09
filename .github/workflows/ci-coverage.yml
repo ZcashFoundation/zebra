@@ -26,32 +26,32 @@ on:
       - main
     paths:
       # code and tests
-      - '**/*.rs'
+      - "**/*.rs"
       # hard-coded checkpoints and proptest regressions
-      - '**/*.txt'
+      - "**/*.txt"
       # test data snapshots
-      - '**/*.snap'
+      - "**/*.snap"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - 'codecov.yml'
-      - '.github/workflows/ci-coverage.yml'
+      - "codecov.yml"
+      - ".github/workflows/ci-coverage.yml"
 
   pull_request:
     paths:
-      - '**/*.rs'
-      - '**/*.txt'
-      - '**/*.snap'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
-      - 'codecov.yml'
-      - '.github/workflows/ci-coverage.yml'
+      - "**/*.rs"
+      - "**/*.txt"
+      - "**/*.snap"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
+      - "codecov.yml"
+      - ".github/workflows/ci-coverage.yml"
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
@@ -77,6 +77,7 @@ jobs:
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal --component=llvm-tools-preview
+          source $HOME/.cargo/env
 
       - name: Install cargo-llvm-cov cargo command
         run: cargo install cargo-llvm-cov

@@ -6,15 +6,15 @@ on:
   pull_request:
     paths-ignore:
       # production code and test code
-      - '**/*.rs'
+      - "**/*.rs"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - '.github/workflows/ci-build-crates.yml'
+      - ".github/workflows/ci-build-crates.yml"
 
 jobs:
   matrix:
@@ -29,6 +29,7 @@ jobs:
       - name: Setup Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+          source $HOME/.cargo/env
 
       # This step is meant to dynamically create a JSON containing the values of each crate
       # available in this repo in the root directory. We use `cargo tree` to accomplish this task.
@@ -56,13 +57,13 @@ jobs:
   check-matrix:
     name: Check crates matrix
     runs-on: ubuntu-latest
-    needs: [ matrix ]
+    needs: [matrix]
     steps:
       - run: 'echo "No job required"'
 
   build:
     name: Build ${{ matrix.crate }} crate
-    needs: [ matrix, check-matrix ]
+    needs: [matrix, check-matrix]
     runs-on: ubuntu-latest
     strategy:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
