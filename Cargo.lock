@@ -1874,9 +1874,9 @@ dependencies = [
 
 [[package]]
 name = "generic-array"
-version = "0.14.7"
+version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a"
+checksum = "4bb6743198531e02858aeaea5398fcc883e71851fcbcb5a2f773e2fb6cb1edf2"
 dependencies = [
  "typenum",
  "version_check",
@@ -2161,11 +2161,11 @@ dependencies = [
 
 [[package]]
 name = "home"
-version = "0.5.11"
+version = "0.5.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "589533453244b0995c858700322199b2becb13b627df2851f64a2775d024abcf"
+checksum = "cc627f471c528ff0c4a49e1d5e60450c8f6461dd6d10ba9dcd3a61d3dff7728d"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6915,13 +6915,13 @@ dependencies = [
  "core2",
  "f4jumble",
  "zcash_encoding",
- "zcash_protocol 0.7.1",
+ "zcash_protocol",
 ]
 
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#21c497f3afdcfb4c92ad9d461381b47172e82ed1"
 dependencies = [
  "core2",
  "nonempty",
@@ -6930,7 +6930,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#58fcb860b2a87489e159e1f35c5a9507abc9545a"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#21c497f3afdcfb4c92ad9d461381b47172e82ed1"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6959,8 +6959,8 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_encoding",
- "zcash_protocol 0.7.1",
- "zcash_transparent 0.6.1",
+ "zcash_protocol",
+ "zcash_transparent",
  "zip32",
 ]
 
@@ -7267,6 +7267,7 @@ dependencies = [
  "howudoin",
  "jubjub",
  "lazy_static",
+ "libzcash_script",
  "metrics",
  "mset",
  "num-integer",
