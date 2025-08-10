@@ -7,20 +7,16 @@ use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
-
 use rand::rngs::OsRng;
 use serde_with::serde_as;
 use zcash_script::script::Asm;
 
 use zcash_keys::address::Address;
-use zcash_primitives::{
-    memo::MemoBytes,
-    transaction::{
-        builder::{BuildConfig, Builder},
-        fees::fixed::FeeRule,
-    },
+use zcash_primitives::transaction::{
+    builder::{BuildConfig, Builder},
+    fees::fixed::FeeRule,
 };
-use zcash_protocol::{consensus::BlockHeight, value::Zatoshis};
+use zcash_protocol::{consensus::BlockHeight, memo::MemoBytes, value::Zatoshis};
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
@@ -165,7 +161,7 @@ impl TransactionTemplate<NegativeOrZero> {
         let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
             trace_err!(
                 builder.add_orchard_output::<String>(
-                    Some(orchard::keys::OutgoingViewingKey::from([0u8; 32])),
+                    Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
                     *addr,
                     miner_reward,
                     memo.clone(),
