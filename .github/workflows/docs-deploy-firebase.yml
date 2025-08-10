@@ -160,7 +160,7 @@ jobs:
         run: |
           rustup toolchain install beta --profile default
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@v2.7.8
 
       - name: Build internal docs
         run: |
