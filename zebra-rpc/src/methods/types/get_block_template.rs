@@ -17,13 +17,13 @@ use derive_getters::Getters;
 use derive_new::new;
 use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
+use rand::{rngs::OsRng, RngCore};
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tower::{Service, ServiceExt};
 use zcash_keys::address::Address;
-use zcash_protocol::{memo::MemoBytes, PoolType};
-use zcash_script::script::Evaluable;
-
+use zcash_protocol::memo::MemoBytes;
 use zcash_transparent::coinbase::MinerData;
+
 use zebra_chain::{
     amount::{self, NegativeOrZero},
     block::{
@@ -478,6 +478,13 @@ impl MinerParams {
     pub fn memo(&self) -> Option<&MemoBytes> {
         self.memo.as_ref()
     }
+
+    /// Randomizes the memo.
+    pub fn randomize_memo(&mut self) {
+        let mut random = [0u8; 512];
+        OsRng.fill_bytes(&mut random);
+        self.memo = Some(MemoBytes::from_bytes(&random).unwrap());
+    }
 }
 
 impl From<Address> for MinerParams {
@@ -530,10 +537,6 @@ where
     mined_block_sender: mpsc::Sender<(block::Hash, block::Height)>,
 }
 
-// A limit on the configured extra coinbase data, regardless of the current block height.
-// This is different from the consensus rule, which limits the total height + data.
-const EXTRA_COINBASE_DATA_LIMIT: usize = MAX_COINBASE_DATA_LEN - MAX_COINBASE_HEIGHT_DATA_LEN;
-
 impl<BlockVerifierRouter, SyncStatus> GetBlockTemplateHandler<BlockVerifierRouter, SyncStatus>
 where
     BlockVerifierRouter: BlockVerifierService,
@@ -578,6 +581,13 @@ where
         height: block::Height,
     ) -> Result<(), TrySendError<(block::Hash, block::Height)>> {
         self.mined_block_sender.try_send((block, height))
+    }
+
+    /// Randomizes the coinbase memo, if miner parameters are set.
+    pub fn randomize_coinbase_data(&mut self) {
+        if let Some(miner_params) = &mut self.miner_params {
+            miner_params.randomize_memo();
+        }
     }
 }
 
