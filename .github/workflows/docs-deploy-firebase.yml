@@ -55,7 +55,6 @@ on:
       - ".github/workflows/docs-deploy-firebase.yml"
 
 env:
-  RUSTUP_TOOLCHAIN: beta
   RUST_LOG: ${{ vars.RUST_LOG }}
   RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
   RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
@@ -131,6 +130,8 @@ jobs:
           target: docs-book
 
   build-docs-internal:
+    env:
+      RUSTUP_TOOLCHAIN: beta
     name: Build and Deploy Zebra Internal Docs
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 45
