@@ -58,6 +58,7 @@ orchard.workspace = true
 
 zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
 zcash_transparent = { workspace = true }
+libzcash_script = { workspace = true }
 zcash_script = { workspace = true }
 zcash_primitives = { workspace = true }
 
