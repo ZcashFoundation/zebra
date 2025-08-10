@@ -55,6 +55,7 @@ on:
       - ".github/workflows/docs-deploy-firebase.yml"
 
 env:
+  RUSTUP_TOOLCHAIN: beta
   RUST_LOG: ${{ vars.RUST_LOG }}
   RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
   RUST_LIB_BACKTRACE: ${{ vars.RUST_LIB_BACKTRACE }}
