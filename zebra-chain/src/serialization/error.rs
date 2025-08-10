@@ -54,7 +54,7 @@ pub enum SerializationError {
 
     /// Invalid coinbase transaction.
     #[error("coinbase error: {0}")]
-    Coinbase(coinbase::Error),
+    Coinbase(#[from] coinbase::Error),
 }
 
 impl From<SerializationError> for io::Error {
@@ -100,11 +100,5 @@ impl From<crate::Error> for SerializationError {
 impl From<io::Error> for SerializationError {
     fn from(value: io::Error) -> Self {
         Arc::new(value).into()
-    }
-}
-
-impl From<coinbase::Error> for SerializationError {
-    fn from(e: zcash_transparent::coinbase::Error) -> Self {
-        Self::Coinbase(e)
     }
 }

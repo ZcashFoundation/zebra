@@ -14,6 +14,8 @@ use zebra_chain::{
     transaction::VerifiedUnminedTx,
 };
 
+use crate::client::TransactionTemplate;
+
 /// The block header roots for the transactions in a block template.
 ///
 /// If the transactions in the block template are modified, these roots must be recalculated

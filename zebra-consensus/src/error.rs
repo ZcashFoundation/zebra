@@ -270,8 +270,8 @@ impl From<BalanceError> for TransactionError {
     }
 }
 
-impl From<zcash_script::Error> for TransactionError {
-    fn from(err: zcash_script::Error) -> Self {
+impl From<libzcash_script::Error> for TransactionError {
+    fn from(err: libzcash_script::Error) -> Self {
         TransactionError::Script(zebra_script::Error::from(err))
     }
 }
