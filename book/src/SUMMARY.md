@@ -33,6 +33,7 @@
   - [Zebra versioning and releases](dev/release-process.md)
   - [Continuous Integration](dev/continuous-integration.md)
   - [Continuous Delivery](dev/continuous-delivery.md)
+  - [GCP Observability Environment](dev/gcp-observability.md)
   - [Generating Zebra Checkpoints](dev/zebra-checkpoints.md)
   - [Doing Mass Renames](dev/mass-renames.md)
   - [Updating the ECC dependencies](dev/ecc-updates.md)
