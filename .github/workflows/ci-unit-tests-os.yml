@@ -74,6 +74,9 @@ jobs:
   ### Build and test Zebra on all OSes ###
   ########################################
   test:
+    env:
+      RUSTUP_TOOLCHAIN: ${{ matrix.rust }}
+
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     # The large timeout is to accommodate:
     # - macOS and Windows builds (typically 50-90 minutes), and
