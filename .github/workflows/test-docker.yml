@@ -105,7 +105,7 @@ jobs:
           - id: custom-conf
             name: Custom config
             env_vars: -e CONFIG_FILE_PATH=/home/zebra/zebrad/tests/common/configs/custom-conf.toml
-            grep_patterns: -e "miner_data:\\sSome\\(\\\"do you even shield\\?\\\"\\)"
+            grep_patterns: -e "miner_data:\\sSome\\(\\\"Do you even shield\\?\\\"\\)"
 
           # RPC configuration tests
           - id: rpc-conf

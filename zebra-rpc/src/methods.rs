@@ -49,7 +49,6 @@ use indexmap::IndexMap;
 use jsonrpsee::core::{async_trait, RpcResult as Result};
 use jsonrpsee_proc_macros::rpc;
 use jsonrpsee_types::{ErrorCode, ErrorObject};
-use rand::{rngs::OsRng, RngCore};
 use tokio::{
     sync::{broadcast, mpsc, watch},
     task::JoinHandle,
@@ -58,9 +57,7 @@ use tower::ServiceExt;
 use tracing::Instrument;
 
 use zcash_address::{unified::Encoding, TryFromAddress};
-use zcash_primitives::consensus::Parameters;
-
-use zcash_protocol::consensus;
+use zcash_protocol::consensus::{self, Parameters};
 use zebra_chain::{
     amount::{self, Amount, NegativeAllowed, NonNegative},
     block::{self, Block, Commitment, Height, SerializedBlock, TryIntoHeight},
@@ -2854,14 +2851,10 @@ where
 
         let mut block_hashes = Vec::new();
         for _ in 0..num_blocks {
-            // Use random coinbase data in order to ensure the coinbase
-            // transaction is unique. This is useful for tests that exercise
-            // forks, since otherwise the coinbase txs of blocks with the same
-            // height across different forks would be identical.
-            let mut extra_coinbase_data = [0u8; 32];
-            OsRng.fill_bytes(&mut extra_coinbase_data);
-            rpc.gbt
-                .set_extra_coinbase_data(extra_coinbase_data.to_vec());
+            // Use random coinbase data in order to ensure the coinbase transaction is unique. This
+            // is useful for tests that exercise forks, since otherwise the coinbase txs of blocks
+            // with the same height across different forks would be identical.
+            rpc.gbt.randomize_coinbase_data();
 
             let block_template = rpc
                 .get_block_template(None)
