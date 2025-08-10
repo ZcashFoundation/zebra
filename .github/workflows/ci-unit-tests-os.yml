@@ -164,7 +164,7 @@ jobs:
       # Run unit and basic acceptance tests, only showing command output if the test fails.
       #
       # If some tests hang, add "-- --nocapture" for just that test, or for all the tests.
-      - name: Run tests${{ matrix.features }}
+      - name: Run tests ${{ matrix.features }}
         run: |
           cargo test --features "${{ matrix.features }}" --release --verbose --workspace
 
