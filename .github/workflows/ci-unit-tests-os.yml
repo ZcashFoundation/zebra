@@ -62,6 +62,7 @@ on:
       - ".github/workflows/ci-unit-tests-os.yml"
 
 env:
+  RUSTUP_TOOLCHAIN: $${{ matrix.rust }}
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
   RUST_LOG: ${{ vars.RUST_LOG }}
   RUST_BACKTRACE: ${{ vars.RUST_BACKTRACE }}
