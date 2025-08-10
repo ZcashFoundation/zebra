@@ -15,7 +15,7 @@ use std::{
 use color_eyre::eyre::Result;
 use tempfile::TempDir;
 
-use zebra_chain::parameters::{Network, NetworkKind};
+use zebra_chain::parameters::Network;
 use zebra_rpc::config::mining::MinerAddressType;
 use zebra_test::{command::TestChild, net::random_known_port};
 use zebrad::{
