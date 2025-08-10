@@ -15,7 +15,6 @@ use std::fmt;
 use byteorder::{BigEndian, ByteOrder};
 use incrementalmerkletree::frontier::Frontier;
 use lazy_static::lazy_static;
-use sha2::digest::generic_array::GenericArray;
 use thiserror::Error;
 
 use super::commitment::NoteCommitment;
@@ -53,7 +52,7 @@ fn merkle_crh_sprout(left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
         0x5be0cd19,
     ];
 
-    sha2::compress256(&mut state, &[GenericArray::clone_from_slice(&other_block)]);
+    sha2::compress256(&mut state, &[other_block.into()]);
 
     // Yes, SHA-256 does big endian here.
     // https://github.com/RustCrypto/hashes/blob/master/sha2/src/sha256.rs#L40
