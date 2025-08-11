@@ -276,7 +276,7 @@ run_tests() {
   elif [[ "${COINBASE}" -eq "1" ]]; then
     # We run the coinbase tests with the `--release` flag to significantly speed
     # them up.
-    run_cargo_test "${FEATURES}" "--release coinbase"
+    run_cargo_test "${FEATURES}" "coinbase"
 
   else
     exec_as_user "$@"
