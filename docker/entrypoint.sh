@@ -273,6 +273,11 @@ run_tests() {
     # port.
     run_cargo_test "${FEATURES}" "rpc_submit_block"
 
+  elif [[ "${COINBASE}" -eq "1" ]]; then
+    # We run the coinbase tests with the `--release` flag to significantly speed
+    # them up.
+    run_cargo_test "${FEATURES}" "coinbase"
+
   else
     exec_as_user "$@"
   fi
