@@ -77,7 +77,7 @@ jobs:
         uses: arduino/setup-protoc@v3.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '23.x'
+          version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Check workflow permissions
@@ -91,7 +91,7 @@ jobs:
       # Setup Rust with stable toolchain and default profile
       - name: Setup Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
+          rustup toolchain install stable --profile default
 
       - uses: Swatinem/rust-cache@v2.7.8
         with:
@@ -128,13 +128,13 @@ jobs:
         uses: arduino/setup-protoc@v3.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '23.x'
+          version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and default profile
       - name: Setup Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=default
+          rustup toolchain install stable --profile default
 
       # We don't cache `fmt` outputs because the job is quick,
       # and we want to use the limited GitHub actions cache space for slower jobs.
@@ -155,7 +155,7 @@ jobs:
         with:
           level: warning
           fail_on_error: false
-      # This is failing with a JSON schema error, see #8028 for details.        
+      # This is failing with a JSON schema error, see #8028 for details.
       #- name: validate-dependabot
       #  # This gives an error when run on PRs from external repositories, so we skip it.
       #  # If this is a PR, check that the PR source is a local branch. Always runs on non-PRs.
@@ -170,4 +170,3 @@ jobs:
       - uses: codespell-project/actions-codespell@v2.1
         with:
           only_warn: 1
-
