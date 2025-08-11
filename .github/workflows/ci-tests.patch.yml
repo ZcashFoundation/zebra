@@ -64,7 +64,73 @@ jobs:
       - run: 'echo "No build required"'
 
   test-lightwalletd-integration:
-    name: Unit tests / Test integration with lightwalletd
+    name: Unit tests / Lightwalletd integration
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  ####
+  ## The following jobs are related to sub-test-zebra-config.yml
+  ###
+  test-docker-configurations-default:
+    name: Unit tests / Test Zebra Docker configurations / Test Default config
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-custom:
+    name: Unit tests / Test Zebra Docker configurations / Test Custom cache and cookie directories
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-custom-config:
+    name: Unit tests / Test Zebra Docker configurations / Test Custom config
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-mining:
+    name: Unit tests / Test Zebra Docker configurations / Test Mining configuration
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-prometheus:
+    name: Unit tests / Test Zebra Docker configurations / Test Prometheus metrics
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-rpc:
+    name: Unit tests / Test Zebra Docker configurations / Test RPC config
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-rpc-custom-cookie:
+    name: Unit tests / Test Zebra Docker configurations / Test RPC with custom cookie dir
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-rpc-custom-port:
+    name: Unit tests / Test Zebra Docker configurations / Test RPC with custom port
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+    steps:
+      - run: 'echo "No build required"'
+
+  test-docker-configurations-testnet:
+    name: Unit tests / Test Zebra Docker configurations / Test Testnet config
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     steps:
