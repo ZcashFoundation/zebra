@@ -43,7 +43,7 @@ mod tests;
 #[cfg(test)]
 mod vectors;
 
-pub use params::{Groth16Parameters, GROTH16_PARAMETERS};
+pub use params::{Groth16Parameters, GROTH16_PARAMETERS, PROVER_PARAMS};
 
 use crate::error::TransactionError;
 
