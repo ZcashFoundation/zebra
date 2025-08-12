@@ -27,6 +27,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -67,6 +69,14 @@ jobs:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           IMAGE_TAG_LATEST: latest
         run: |
+          # Get Git information for build args
+          GIT_COMMIT=$(git rev-parse HEAD)
+          GIT_TAG_BUILD=$(git describe --exact-match --tags 2>/dev/null || echo "none")
+          
+          echo "Git information for build:"
+          echo "  Commit: $GIT_COMMIT"
+          echo "  Tag: $GIT_TAG_BUILD"
+          
           # Build docker container with multiple tags
           DOCKER_BUILD_ARGS=()
           DOCKER_BUILD_ARGS+=("-t" "$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_LATEST")
@@ -90,9 +100,12 @@ jobs:
           done
           echo ""
           
-          # Build with all tags
+          # Build with all tags and Git build args
           echo "Building Docker image..."
-          docker build "${DOCKER_BUILD_ARGS[@]}" -f $DOCKERFILE_PATH .
+          docker build "${DOCKER_BUILD_ARGS[@]}" \
+            --build-arg GIT_COMMIT="$GIT_COMMIT" \
+            --build-arg GIT_TAG="$GIT_TAG_BUILD" \
+            -f $DOCKERFILE_PATH .
           
           # Push all tags with error handling
           for tag in "$IMAGE_TAG_LATEST" "$IMAGE_TAG_VERSION" "$GIT_TAG"; do
