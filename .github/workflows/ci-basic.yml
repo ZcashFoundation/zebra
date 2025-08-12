@@ -22,6 +22,8 @@ jobs:
       - name: Install dependencies on Ubuntu
         #run: sudo apt-get update && sudo apt-get install -y protobuf-compiler build-essential librocksdb-dev
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler librocksdb-dev
+      - name: Install formatting & linting tools
+        run: rustup component add rustfmt clippy
       - name: Run tests
         run: cargo test --verbose
       - name: Verify working directory is clean
