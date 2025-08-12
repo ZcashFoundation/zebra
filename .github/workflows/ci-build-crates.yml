@@ -60,7 +60,7 @@ jobs:
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
       - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       # Setup Rust with stable toolchain and minimal profile
@@ -122,7 +122,7 @@ jobs:
       matrix: ${{ fromJson(needs.matrix.outputs.matrix) }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0

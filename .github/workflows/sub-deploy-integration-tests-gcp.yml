@@ -139,7 +139,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -390,7 +390,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'
@@ -721,7 +721,7 @@ jobs:
       contents: 'read'
       id-token: 'write'
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
           fetch-depth: '2'

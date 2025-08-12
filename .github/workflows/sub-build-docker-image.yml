@@ -68,7 +68,7 @@ jobs:
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0

@@ -37,7 +37,7 @@ jobs:
       rust: ${{ steps.changed-files-rust.outputs.any_changed == 'true' }}
       workflows: ${{ steps.changed-files-workflows.outputs.any_changed == 'true' }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -69,7 +69,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
 
@@ -119,7 +119,7 @@ jobs:
     if: ${{ needs.changed-files.outputs.rust == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -149,7 +149,7 @@ jobs:
     needs: changed-files
     if: ${{ needs.changed-files.outputs.workflows == 'true' }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
       - name: actionlint
         uses: reviewdog/action-actionlint@v1.48.0
         with:
@@ -166,7 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: changed-files
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
       - uses: codespell-project/actions-codespell@v2.1
         with:
           only_warn: 1

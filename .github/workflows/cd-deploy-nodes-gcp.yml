@@ -235,7 +235,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.2.2
         with:
           persist-credentials: false
 
