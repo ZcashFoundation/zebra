@@ -13,7 +13,7 @@ use rand::thread_rng;
 
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl, ItemSize};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
 use zebra_chain::primitives::reddsa::{batch, orchard, Error, Signature, VerificationKeyBytes};
@@ -39,7 +39,7 @@ type Sender = watch::Sender<Option<VerifyResult>>;
 #[derive(Clone, Debug)]
 pub struct Item(batch::Item<orchard::SpendAuth, orchard::Binding>);
 
-impl ItemSize for Item {}
+impl RequestWeight for Item {}
 
 impl From<Item> for batch::Item<orchard::SpendAuth, orchard::Binding> {
     fn from(Item(item): Item) -> Self {

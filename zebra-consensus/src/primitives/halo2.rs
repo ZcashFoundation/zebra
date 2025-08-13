@@ -23,7 +23,7 @@ use crate::BoxError;
 use thiserror::Error;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
-use tower_batch_control::{Batch, BatchControl, ItemSize};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
 use super::spawn_fifo;
@@ -65,8 +65,8 @@ pub struct Item {
     sighash: SigHash,
 }
 
-impl ItemSize for Item {
-    fn item_size(&self) -> usize {
+impl RequestWeight for Item {
+    fn request_weight(&self) -> usize {
         self.bundle.actions().len()
     }
 }

@@ -5,7 +5,7 @@ use std::{fmt, marker::PhantomData};
 use tower::layer::Layer;
 use tower::Service;
 
-use crate::ItemSize;
+use crate::RequestWeight;
 
 use super::{service::Batch, BatchControl};
 
@@ -45,7 +45,7 @@ impl<Request> BatchLayer<Request> {
     }
 }
 
-impl<S, Request: ItemSize> Layer<S> for BatchLayer<Request>
+impl<S, Request: RequestWeight> Layer<S> for BatchLayer<Request>
 where
     S: Service<BatchControl<Request>> + Send + 'static,
     S::Future: Send,

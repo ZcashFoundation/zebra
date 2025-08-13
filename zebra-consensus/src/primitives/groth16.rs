@@ -21,7 +21,7 @@ use rand::thread_rng;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 
-use tower_batch_control::{Batch, BatchControl, ItemSize};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::{BoxedError, Fallback};
 
 use zebra_chain::{
@@ -61,7 +61,7 @@ type Sender = watch::Sender<Option<VerifyResult>>;
 #[derive(Clone, Debug)]
 pub struct Item(batch::Item<Bls12>);
 
-impl ItemSize for Item {}
+impl RequestWeight for Item {}
 
 impl<T: Into<batch::Item<Bls12>>> From<T> for Item {
     fn from(value: T) -> Self {

@@ -105,14 +105,14 @@ type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// Signaling mechanism for batchable services that allows explicit flushing.
 ///
 /// This request type is a generic wrapper for the inner `Req` type.
-pub enum BatchControl<Req: ItemSize> {
+pub enum BatchControl<Req: RequestWeight> {
     /// A new batch item.
     Item(Req),
     /// The current batch should be flushed.
     Flush,
 }
 
-impl<Req: ItemSize> From<Req> for BatchControl<Req> {
+impl<Req: RequestWeight> From<Req> for BatchControl<Req> {
     fn from(req: Req) -> BatchControl<Req> {
         BatchControl::Item(req)
     }
@@ -121,15 +121,15 @@ impl<Req: ItemSize> From<Req> for BatchControl<Req> {
 pub use self::layer::BatchLayer;
 pub use self::service::Batch;
 
-/// A trait for reading the size of a request to [`BatchControl`] services.
-pub trait ItemSize {
-    /// Returns the size of this item relative to the maximum threshold for flushing
+/// A trait for reading the weight of a request to [`BatchControl`] services.
+pub trait RequestWeight {
+    /// Returns the weight of a request relative to the maximum threshold for flushing
     /// requests to the underlying service.
-    fn item_size(&self) -> usize {
+    fn request_weight(&self) -> usize {
         1
     }
 }
 
-// [`ItemSize`] impls for test `Item` types
-impl ItemSize for () {}
-impl ItemSize for &'static str {}
+// [`RequestWeight`] impls for test `Item` types
+impl RequestWeight for () {}
+impl RequestWeight for &'static str {}

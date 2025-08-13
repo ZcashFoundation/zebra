@@ -15,7 +15,7 @@ use futures_core::Future;
 use rand::thread_rng;
 use tokio::sync::{oneshot::error::RecvError, watch};
 use tower::{Service, ServiceExt};
-use tower_batch_control::{Batch, BatchControl, ItemSize};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
 // ============ service impl ============
@@ -37,7 +37,7 @@ type Sender = watch::Sender<Option<VerifyResult>>;
 #[derive(Clone, Debug)]
 struct Item(batch::Item);
 
-impl ItemSize for Item {}
+impl RequestWeight for Item {}
 
 impl<'msg, M: AsRef<[u8]> + ?Sized> From<(VerificationKeyBytes, Signature, &'msg M)> for Item {
     fn from(tup: (VerificationKeyBytes, Signature, &'msg M)) -> Self {
