@@ -23,9 +23,11 @@ use tower::{
 };
 use tracing::Instrument;
 
+use zcash_protocol::value::ZatBalance;
+
 use zebra_chain::{
     amount::{Amount, NonNegative},
-    block, orchard,
+    block,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
     sapling,
@@ -512,7 +514,6 @@ where
                 )?,
                 Transaction::V5 {
                     sapling_shielded_data,
-                    orchard_shielded_data,
                     ..
                 } => Self::verify_v5_transaction(
                     &req,
@@ -520,12 +521,10 @@ where
                     script_verifier,
                     cached_ffi_transaction.clone(),
                     sapling_shielded_data,
-                    orchard_shielded_data,
                 )?,
                 #[cfg(feature="tx_v6")]
                 Transaction::V6 {
                     sapling_shielded_data,
-                    orchard_shielded_data,
                     ..
                 } => Self::verify_v6_transaction(
                     &req,
@@ -533,7 +532,6 @@ where
                     script_verifier,
                     cached_ffi_transaction.clone(),
                     sapling_shielded_data,
-                    orchard_shielded_data,
                 )?,
             };
 
@@ -973,13 +971,13 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let nu = request.upgrade(network);
 
         Self::verify_v5_transaction_network_upgrade(&transaction, nu)?;
 
+        let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
         let shielded_sighash = cached_ffi_transaction
             .sighasher()
             .sighash(HashType::ALL, None);
@@ -994,7 +992,7 @@ where
             &shielded_sighash,
         )?)
         .and(Self::verify_orchard_shielded_data(
-            orchard_shielded_data,
+            orchard_bundle,
             &shielded_sighash,
         )?))
     }
@@ -1044,7 +1042,6 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
     ) -> Result<AsyncChecks, TransactionError> {
         Self::verify_v5_transaction(
             request,
@@ -1052,7 +1049,6 @@ where
             script_verifier,
             cached_ffi_transaction,
             sapling_shielded_data,
-            orchard_shielded_data,
         )
     }
 
@@ -1283,12 +1279,14 @@ where
 
     /// Verifies a transaction's Orchard shielded data.
     fn verify_orchard_shielded_data(
-        orchard_shielded_data: &Option<orchard::ShieldedData>,
+        orchard_bundle: Option<
+            ::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>,
+        >,
         shielded_sighash: &SigHash,
     ) -> Result<AsyncChecks, TransactionError> {
         let mut async_checks = AsyncChecks::new();
 
-        if let Some(orchard_shielded_data) = orchard_shielded_data {
+        if let Some(orchard_bundle) = orchard_bundle {
             // # Consensus
             //
             // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
@@ -1301,7 +1299,7 @@ where
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
             async_checks.push(primitives::halo2::VERIFIER.clone().oneshot(
-                primitives::halo2::Item::from((orchard_shielded_data, *shielded_sighash)),
+                primitives::halo2::Item::new(orchard_bundle, *shielded_sighash),
             ));
         }
 

@@ -10,19 +10,6 @@ use crate::serialization::{serde_helpers, SerializationError};
 #[derive(Clone, Copy, Debug, Eq, Serialize, Deserialize)]
 pub struct Nullifier(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 
-impl From<Nullifier> for orchard::note::Nullifier {
-    fn from(value: Nullifier) -> Self {
-        // TODO: impl From<pallas::Base> for orchard::note::Nullifier in the orchard repo
-        Self::from_bytes(&value.into()).expect("should be valid")
-    }
-}
-
-impl From<&Nullifier> for orchard::note::Nullifier {
-    fn from(&value: &Nullifier) -> Self {
-        Self::from(value)
-    }
-}
-
 impl Hash for Nullifier {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.0.to_repr().hash(state);

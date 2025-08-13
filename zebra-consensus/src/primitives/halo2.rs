@@ -9,15 +9,11 @@ use std::{
 };
 
 use futures::{future::BoxFuture, FutureExt};
-use nonempty::NonEmpty;
 use once_cell::sync::Lazy;
-use orchard::{
-    bundle::BatchValidator,
-    circuit::VerifyingKey,
-    note::{ExtractedNoteCommitment, TransmittedNoteCiphertext},
-};
+use orchard::{bundle::BatchValidator, circuit::VerifyingKey};
 use rand::thread_rng;
-use zebra_chain::{amount::Amount, transaction::SigHash};
+use zcash_protocol::value::ZatBalance;
+use zebra_chain::transaction::SigHash;
 
 use crate::BoxError;
 use thiserror::Error;
@@ -61,7 +57,7 @@ lazy_static::lazy_static! {
 /// A Halo2 verification item, used as the request type of the service.
 #[derive(Clone, Debug)]
 pub struct Item {
-    bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, Amount>,
+    bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
     sighash: SigHash,
 }
 
@@ -72,7 +68,15 @@ impl RequestWeight for Item {
 }
 
 impl Item {
-    /// Perform non-batched verification of this `Item`.
+    /// Creates a new [`Item`] from a bundle and sighash.
+    pub fn new(
+        bundle: orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>,
+        sighash: SigHash,
+    ) -> Self {
+        Self { bundle, sighash }
+    }
+
+    /// Perform non-batched verification of this [`Item`].
     ///
     /// This is useful (in combination with `Item::clone`) for implementing
     /// fallback logic when batch verification fails.
@@ -90,70 +94,6 @@ trait QueueBatchVerify {
 impl QueueBatchVerify for BatchValidator {
     fn queue(&mut self, Item { bundle, sighash }: Item) {
         self.add_bundle(&bundle, sighash.0);
-    }
-}
-
-impl From<(&zebra_chain::orchard::ShieldedData, SigHash)> for Item {
-    fn from((shielded_data, sighash): (&zebra_chain::orchard::ShieldedData, SigHash)) -> Item {
-        let anchor = orchard::tree::Anchor::from_bytes(shielded_data.shared_anchor.into()).unwrap();
-        let authorization = orchard::bundle::Authorized::from_parts(
-            orchard::Proof::new(shielded_data.proof.0.clone()),
-            <[u8; 64]>::from(shielded_data.binding_sig).into(),
-        );
-
-        let bundle = orchard::bundle::Bundle::from_parts(
-            NonEmpty::from_vec(
-                shielded_data
-                    .actions
-                    .iter()
-                    .map(
-                        |zebra_chain::orchard::AuthorizedAction {
-                             action:
-                                 zebra_chain::orchard::Action {
-                                     cv,
-                                     nullifier,
-                                     rk,
-                                     cm_x,
-                                     ephemeral_key,
-                                     enc_ciphertext,
-                                     out_ciphertext,
-                                 },
-                             spend_auth_sig,
-                         }: &zebra_chain::orchard::AuthorizedAction| {
-                            let rk = <[u8; 32]>::from(*rk).try_into().expect("should be valid");
-                            let cmx = ExtractedNoteCommitment::from_bytes(&<[u8; 32]>::from(*cm_x))
-                                .expect("should be valid");
-                            let encrypted_note = TransmittedNoteCiphertext {
-                                epk_bytes: ephemeral_key.into(),
-                                enc_ciphertext: enc_ciphertext.into(),
-                                out_ciphertext: out_ciphertext.into(),
-                            };
-                            let cv_net =
-                                orchard::value::ValueCommitment::from_bytes(&<[u8; 32]>::from(*cv))
-                                    .expect("should be valid");
-
-                            let spend_auth_sig = <[u8; 64]>::from(*spend_auth_sig).into();
-
-                            orchard::Action::from_parts(
-                                nullifier.into(),
-                                rk,
-                                cmx,
-                                encrypted_note,
-                                cv_net,
-                                spend_auth_sig,
-                            )
-                        },
-                    )
-                    .collect::<Vec<_>>(),
-            )
-            .expect("should be valid tx format"),
-            orchard::bundle::Flags::from_byte(shielded_data.flags.bits()).expect("should be valid"),
-            shielded_data.value_balance,
-            anchor,
-            authorization,
-        );
-
-        Self { bundle, sighash }
     }
 }
 
