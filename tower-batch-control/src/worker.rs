@@ -83,7 +83,7 @@ where
     /// The maximum number of batches that are allowed to run concurrently.
     max_concurrent_batches: usize,
 
-    /// The maximum delay before processing a batch with fewer than `max_items_in_batch`.
+    /// The maximum delay before processing a batch with less than `max_items_weight_in_batch`.
     max_latency: std::time::Duration,
 }
 
