@@ -182,6 +182,10 @@ where
         // We choose a bound that allows callers to check readiness for one batch per rayon CPU thread.
         // This helps keep all CPUs filled with work: there is one batch executing, and another ready to go.
         // Often there is only one verifier running, when that happens we want it to take all the cores.
+        //
+        // Request types that make have a request weight greater than 1 may not exhaust the number of
+        // available permits, but the maximum number of concurrent requests being handled will still be bounded
+        // to the maximum number of possible requests.
         let semaphore = Semaphore::new(max_items_weight_in_batch * max_batches_in_queue);
         let semaphore = PollSemaphore::new(Arc::new(semaphore));
 
