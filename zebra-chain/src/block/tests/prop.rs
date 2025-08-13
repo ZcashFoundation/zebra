@@ -161,7 +161,7 @@ fn block_genesis_strategy() -> Result<()> {
     let _init_guard = zebra_test::init();
 
     let strategy =
-        LedgerState::genesis_strategy(None, None, false).prop_flat_map(Block::arbitrary_with);
+        LedgerState::genesis_strategy(None, None, None, false).prop_flat_map(Block::arbitrary_with);
 
     proptest!(|(block in strategy)| {
         prop_assert_eq!(block.coinbase_height(), Some(Height(0)));
@@ -179,7 +179,7 @@ fn block_genesis_strategy() -> Result<()> {
 fn genesis_partial_chain_strategy() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let strategy = LedgerState::genesis_strategy(None, None, false).prop_flat_map(|init| {
+    let strategy = LedgerState::genesis_strategy(None, None, None, false).prop_flat_map(|init| {
         Block::partial_chain_strategy(
             init,
             PREVOUTS_CHAIN_HEIGHT,
