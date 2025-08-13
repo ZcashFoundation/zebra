@@ -98,7 +98,7 @@ jobs:
             rust: beta
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -115,7 +115,7 @@ jobs:
         run: |
           rustup toolchain install ${{ matrix.rust }} --profile minimal
 
-      - uses: Swatinem/rust-cache@v2.7.8
+      - uses: Swatinem/rust-cache@v2.8.0
         # TODO: change Rust cache target directory on Windows,
         #       or remove this workaround once the build is more efficient (#3005).
         #with:
@@ -185,7 +185,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -214,7 +214,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -230,7 +230,7 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal
 
-      - uses: Swatinem/rust-cache@v2.7.8
+      - uses: Swatinem/rust-cache@v2.8.0
         with:
           shared-key: "clippy-cargo-lock"
 
@@ -257,7 +257,7 @@ jobs:
     continue-on-error: ${{ matrix.checks == 'advisories' }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -278,7 +278,7 @@ jobs:
 
     steps:
       - name: Checkout git repository
-        uses: actions/checkout@v4.2.2
+        uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
       - uses: r7kamura/rust-problem-matchers@v1.5.0
@@ -289,7 +289,7 @@ jobs:
           rustup toolchain install stable --profile minimal
 
       - name: Install cargo-machete
-        uses: baptiste0928/cargo-install@v3.3.0
+        uses: baptiste0928/cargo-install@v3.3.1
         with:
           crate: cargo-machete
 

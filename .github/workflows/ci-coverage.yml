@@ -69,7 +69,7 @@ jobs:
     runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-xl' || 'ubuntu-latest' }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
 
