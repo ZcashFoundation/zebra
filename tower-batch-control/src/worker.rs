@@ -77,13 +77,15 @@ where
 
     // Config
     //
-    /// The maximum number of items allowed in a batch.
+    /// The maximum weight of pending items in a batch before it should be flushed and
+    /// pending items should be added to a new batch.
     max_items_weight_in_batch: usize,
 
     /// The maximum number of batches that are allowed to run concurrently.
     max_concurrent_batches: usize,
 
-    /// The maximum delay before processing a batch with less than `max_items_weight_in_batch`.
+    /// The maximum delay before processing a batch with items that have a total weight
+    /// that is less than `max_items_weight_in_batch`.
     max_latency: std::time::Duration,
 }
 
@@ -240,8 +242,6 @@ where
                         );
 
                         let span = msg.span;
-
-                        // Check if the pending items weight is zero before processing the request when setting the timer.
                         let is_new_batch = self.pending_items_weight == 0;
 
                         self.process_req(msg.request, msg.tx)
