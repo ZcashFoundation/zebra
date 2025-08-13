@@ -134,7 +134,7 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
     fn from(activation_heights: &BTreeMap<Height, NetworkUpgrade>) -> Self {
         let mut configured_activation_heights = ConfiguredActivationHeights::default();
 
-        for (height, network_upgrade) in activation_heights.iter() {
+        for (height, network_upgrade) in activation_heights {
             let field = match network_upgrade {
                 NetworkUpgrade::BeforeOverwinter => {
                     &mut configured_activation_heights.before_overwinter
@@ -406,12 +406,8 @@ impl Default for ParametersBuilder {
             // Testnet PoWLimit is defined as `2^251 - 1` on page 73 of the protocol specification:
             // <https://zips.z.cash/protocol/protocol.pdf>
             //
-            // `zcashd` converts the PoWLimit into a compact representation before
-            // using it to perform difficulty filter checks.
-            //
-            // The Zcash specification converts to compact for the default difficulty
-            // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
-            // ZIP 208 don't specify this conversion either.) See #1277 for details.
+            // The PoWLimit must be converted into a compact representation before using it
+            // to perform difficulty filter checks (see https://github.com/zcash/zips/pull/417).
             target_difficulty_limit: ExpandedDifficulty::from((U256::one() << 251) - 1)
                 .to_compact()
                 .to_expanded()
@@ -678,7 +674,7 @@ impl ParametersBuilder {
         let network = self.to_network_unchecked();
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
-        for fs in self.funding_streams.iter() {
+        for fs in &self.funding_streams {
             // Check that the funding streams are valid for the configured Testnet parameters.
             check_funding_stream_address_period(fs, &network);
         }

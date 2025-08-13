@@ -69,7 +69,7 @@ Possible options, which apply to each individual test run:
 If you set the environment variable `PYTHON_DEBUG=1` you will get some debug
 output (example: `PYTHON_DEBUG=1 qa/pull-tester/rpc-tests.py wallet`).
 
-To get real time output during a test you can run it using the
+To get real-time output during a test you can run it using the
 `python3` binary such as:
 
 ```
