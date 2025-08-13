@@ -222,7 +222,7 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn batch_flushes_on_max_items() -> Result<(), Report> {
+async fn batch_flushes_on_max_items_weight() -> Result<(), Report> {
     use tokio::time::timeout;
     let _init_guard = zebra_test::init();
 

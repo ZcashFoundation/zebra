@@ -130,6 +130,6 @@ pub trait RequestWeight {
     }
 }
 
-// [`RequestWeight`] impls for test `Item` types
+// `RequestWeight` impls for test `Item` types
 impl RequestWeight for () {}
 impl RequestWeight for &'static str {}

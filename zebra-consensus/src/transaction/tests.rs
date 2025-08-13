@@ -11,6 +11,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use color_eyre::eyre::Report;
 use futures::{FutureExt, TryFutureExt};
 use halo2::pasta::{group::ff::PrimeField, pallas};
+use tokio::time::timeout;
 use tower::{buffer::Buffer, service_fn, ServiceExt};
 
 use zebra_chain::{
@@ -2585,16 +2586,19 @@ fn v4_with_sapling_spends() {
         let verifier = Verifier::new_for_tests(&network, state_service);
 
         // Test the transaction verifier
-        let result = verifier
-            .oneshot(Request::Block {
+        let result = timeout(
+            std::time::Duration::from_secs(3),
+            verifier.oneshot(Request::Block {
                 transaction_hash: transaction.hash(),
                 transaction,
                 known_utxos: Arc::new(HashMap::new()),
                 known_outpoint_hashes: Arc::new(HashSet::new()),
                 height,
                 time: DateTime::<Utc>::MAX_UTC,
-            })
-            .await;
+            }),
+        )
+        .await
+        .expect("timeout expired");
 
         assert_eq!(
             result.expect("unexpected error response").tx_id(),
@@ -2717,8 +2721,9 @@ async fn v5_with_sapling_spends() {
         );
 
         assert_eq!(
-            verifier
-                .oneshot(Request::Block {
+            timeout(
+                std::time::Duration::from_secs(3),
+                verifier.oneshot(Request::Block {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
                     known_utxos: Arc::new(HashMap::new()),
@@ -2726,9 +2731,11 @@ async fn v5_with_sapling_spends() {
                     height,
                     time: DateTime::<Utc>::MAX_UTC,
                 })
-                .await
-                .expect("unexpected error response")
-                .tx_id(),
+            )
+            .await
+            .expect("timeout expired")
+            .expect("unexpected error response")
+            .tx_id(),
             expected_hash
         );
     }

@@ -241,6 +241,9 @@ where
 
                         let span = msg.span;
 
+                        // Check if the pending items weight is zero before processing the request when setting the timer.
+                        let is_new_batch = self.pending_items_weight == 0;
+
                         self.process_req(msg.request, msg.tx)
                             // Apply the provided span to request processing.
                             .instrument(span)
@@ -257,7 +260,7 @@ where
 
                             // TODO: use a batch-specific span to instrument this future.
                             self.flush_service().await;
-                        } else if self.pending_items_weight == 1 {
+                        } else if is_new_batch {
                             tracing::trace!(
                                 pending_items_weight = self.pending_items_weight,
                                 batch_deadline = ?self.pending_batch_timer.as_ref().map(|sleep| sleep.deadline()),
