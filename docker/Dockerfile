@@ -13,7 +13,7 @@
 # We first set default values for build arguments used across the stages.
 # Each stage must define the build arguments (ARGs) it uses.
 
-ARG RUST_VERSION=1.88.0
+ARG RUST_VERSION=1.89.0
 
 # Keep in sync with vars.RUST_PROD_FEATURES in GitHub
 # https://github.com/ZcashFoundation/zebra/settings/variables/actions
