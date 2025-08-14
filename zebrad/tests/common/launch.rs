@@ -210,8 +210,8 @@ where
 /// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
 ///
 /// If `use_internet_connection` is `false` then spawn, but without any peers.
-/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHE_DIR`
-/// environmental variable to provide an initial state to the zebrad instance.
+/// This prevents it from downloading blocks. Instead, set `ZEBRA_STATE__CACHE_DIR`
+/// to provide an initial state to the zebrad instance.
 ///
 /// Returns:
 /// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
@@ -261,8 +261,8 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
 /// Otherwise, just create an empty state in this test's new temporary directory.
 ///
 /// If `use_internet_connection` is `false` then spawn, but without any peers.
-/// This prevents it from downloading blocks. Instead, use the `ZEBRA_CACHE_DIR`
-/// environmental variable to provide an initial state to the zebrad instance.
+/// This prevents it from downloading blocks. Instead, set `ZEBRA_STATE__CACHE_DIR`
+/// to provide an initial state to the zebrad instance.
 ///
 /// Returns:
 /// - `Ok(Some(zebrad))` on success,

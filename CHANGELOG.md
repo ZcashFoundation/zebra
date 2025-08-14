@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org).
 
 ## Unreleased
 
+### Breaking Changes
+
+- Migrate `zebrad` to a layered configuration using config-rs. Environment variables must use the
+  `ZEBRA_SECTION__KEY` format (double underscore for nesting), for example:
+  `ZEBRA_NETWORK__NETWORK`, `ZEBRA_RPC__LISTEN_ADDR`, `ZEBRA_RPC__ENABLE_COOKIE_AUTH`,
+  `ZEBRA_RPC__COOKIE_DIR`, `ZEBRA_TRACING__FILTER`, `ZEBRA_STATE__CACHE_DIR`,
+  `ZEBRA_MINING__MINER_ADDRESS`. Legacy `ZEBRA_*` test/path variables and `ZEBRA_RUST_LOG` are no
+  longer honored. Update any scripts, Docker configs, or systemd units that relied on the old names
+  ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
+
+- Docker entrypoint simplified: it no longer generates a `zebrad.toml` or translates legacy Docker
+  environment variables. To use a file, set `CONFIG_FILE_PATH` (the entrypoint forwards it via
+  `--config`). Otherwise, configure via `ZEBRA_*` variables. `ZEBRA_CONF_PATH` has been removed in
+  favor of `CONFIG_FILE_PATH`. Docker setups that used variables like `ZEBRA_RPC_PORT`,
+  `ZEBRA_COOKIE_DIR`, `NETWORK`, `ENABLE_COOKIE_AUTH`, or `MINER_ADDRESS` must switch to the
+  config-rs equivalents shown above ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
+
+### Changed
+
+- `zebrad` now loads configuration from defaults, an optional TOML file, and environment variables,
+  with precedence: Env > TOML > Defaults ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
+- Docker and book documentation updated to describe `CONFIG_FILE_PATH` and `ZEBRA_*` environment
+  variable usage; removed references to `ZEBRA_CONF_PATH` and legacy Docker variables
+  ([#9768](https://github.com/ZcashFoundation/zebra/pull/9768)).
 
 ## [Zebra 2.5.0](https://github.com/ZcashFoundation/zebra/releases/tag/v2.5.0) - 2025-08-07
 
@@ -1804,7 +1828,7 @@ The sync performance of `lightwalletd` is also improved.
 - Update timeout for Zebra sync tests (#4918)
 - Improve test reliability and performance (#4869)
 - Use `FuturesOrdered` in `fallback_verification` test (#4867)
-- Skip some RPC tests when `ZEBRA_SKIP_NETWORK_TESTS` is set (#4849)
+- Skip some RPC tests when `SKIP_NETWORK_TESTS` is set (#4849)
 - Truncate the number of transactions in send transaction test (#4848)
 
 ## [Zebra 1.0.0-beta.13](https://github.com/ZcashFoundation/zebra/releases/tag/v1.0.0-beta.13) - 2022-07-29
@@ -3238,7 +3262,7 @@ Zebra's latest alpha continues our work on NU5, including Orchard and Transactio
 - Failed tests in the cached state CI workflow are no longer ignored (#2403)
 - Stop skipping the cached sync tests in CI (#2402)
 - Fix intermittent errors in the groth16 verifier tests (#2412)
-- Skip IPv6 tests when ZEBRA_SKIP_IPV6_TESTS environmental variable is set (#2405)
+- Skip IPv6 tests when SKIP_IPV6_TESTS environmental variable is set (#2405)
 - Stop failing after the mandatory Canopy checkpoint due to incorrect coinbase script verification (#2404)
 - Improved docs and panic messages for zebra_test::command (#2406)
 - Gossip dynamic local listener ports to peers (#2277)
@@ -3670,7 +3694,7 @@ Some notable changes include:
 #### Testing
 - Bump CI build and test timeouts to 60 minutes (#1757)
 - Run CI workflow on push to main & manual request (#1748)
-- Set ZEBRA_SKIP_NETWORK_TESTS using Windows syntax (#1782)
+- Set SKIP_NETWORK_TESTS using Windows syntax (#1782)
 - Fix Windows build failures due to disk space (#1726)
 - Fix acceptance test timeouts, cleanup, and diagnostics (#1736, #1766, #1770, #1777)
 

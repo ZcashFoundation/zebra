@@ -45,7 +45,6 @@ use zebra_state as old_zs;
 use zebra_state as new_zs;
 
 use crate::{
-    application::ZebradApp,
     components::tokio::{RuntimeRun, TokioComponent},
     config::ZebradConfig,
     prelude::*,
@@ -86,11 +85,11 @@ impl CopyStateCmd {
         let base_config = APPLICATION.config();
         let source_config = base_config.state.clone();
 
-        // The default load_config impl doesn't actually modify the app config.
+        // Load the target config using the new config-rs method
         let target_config = self
             .target_config_path
             .as_ref()
-            .map(|path| ZebradApp::default().load_config(path))
+            .map(|path| crate::config::ZebradConfig::load(Some(path.clone())))
             .transpose()?
             .map(|app_config| app_config.state)
             .unwrap_or_else(new_zs::Config::ephemeral);
