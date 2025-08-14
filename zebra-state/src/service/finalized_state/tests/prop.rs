@@ -2,7 +2,14 @@
 
 use std::env;
 
-use zebra_chain::{block::Height, parameters::NetworkUpgrade};
+use zebra_chain::{
+    block::Height,
+    parameters::{
+        testnet::{ConfiguredActivationHeights, ParametersBuilder},
+        NetworkUpgrade,
+    },
+    LedgerState,
+};
 use zebra_test::prelude::*;
 
 use crate::{
@@ -46,24 +53,38 @@ fn blocks_with_v5_transactions() -> Result<()> {
 /// Test if committing blocks from all upgrades work correctly, to make
 /// sure the contextual validation done by the finalized state works.
 /// Also test if a block with the wrong commitment is correctly rejected.
-///
-/// This test requires setting the TEST_FAKE_ACTIVATION_HEIGHTS.
 #[test]
 #[allow(clippy::print_stderr)]
 fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    if std::env::var_os("TEST_FAKE_ACTIVATION_HEIGHTS").is_none() {
-        eprintln!("Skipping all_upgrades_and_wrong_commitments_with_fake_activation_heights() since $TEST_FAKE_ACTIVATION_HEIGHTS is NOT set");
-        return Ok(());
-    }
+    let network = ParametersBuilder::default()
+        .with_activation_heights(ConfiguredActivationHeights {
+            // These are dummy values. The particular values don't matter much,
+            // as long as the nu5 one is smaller than the chains being generated
+            // (MAX_PARTIAL_CHAIN_BLOCKS) to make sure that upgrade is exercised
+            // in the test below. (The test will fail if that does not happen.)
+            before_overwinter: Some(1),
+            overwinter: Some(10),
+            sapling: Some(15),
+            blossom: Some(20),
+            heartwood: Some(25),
+            canopy: Some(30),
+            nu5: Some(35),
+            nu6: Some(40),
+            nu6_1: Some(45),
+            nu7: Some(50),
+        })
+        .to_network();
+    let ledger_strategy =
+        LedgerState::genesis_strategy(Some(network), NetworkUpgrade::Nu5, None, false);
 
     // Use no_shrink() because we're ignoring _count and there is nothing to actually shrink.
     proptest!(ProptestConfig::with_cases(env::var("PROPTEST_CASES")
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_PARTIAL_CHAIN_PROPTEST_CASES)),
-        |((chain, _count, network, _history_tree) in PreparedChain::default().with_valid_commitments().no_shrink())| {
+        |((chain, _count, network, _history_tree) in PreparedChain::default().with_ledger_strategy(ledger_strategy).with_valid_commitments().no_shrink())| {
 
             let mut state = FinalizedState::new(&Config::ephemeral(), &network, #[cfg(feature = "elasticsearch")] false);
             let mut height = Height(0);

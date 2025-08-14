@@ -743,10 +743,6 @@ pub struct Parameters {
     /// The genesis block hash
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network.
-    ///
-    /// Note: This value is ignored by `Network::activation_list()` when `zebra-chain` is
-    ///       compiled with the `zebra-test` feature flag AND the `TEST_FAKE_ACTIVATION_HEIGHTS`
-    ///       environment variable is set.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Slow start interval for this network
     slow_start_interval: Height,
