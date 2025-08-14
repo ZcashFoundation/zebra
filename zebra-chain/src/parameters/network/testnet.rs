@@ -289,7 +289,7 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
 }
 
 /// Configurable activation heights for Regtest and configured Testnets.
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(rename_all = "PascalCase", deny_unknown_fields)]
 pub struct ConfiguredActivationHeights {
     /// Activation height for `BeforeOverwinter` network upgrade.
@@ -716,7 +716,7 @@ impl ParametersBuilder {
 }
 
 /// A struct of parameters for configuring Regtest in Zebra.
-#[derive(Default, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct RegtestParameters {
     /// The configured network upgrade activation heights to use on Regtest
     pub activation_heights: ConfiguredActivationHeights,
@@ -835,7 +835,7 @@ impl Parameters {
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
-            funding_streams,
+            funding_streams: _,
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
@@ -848,7 +848,6 @@ impl Parameters {
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
-            && self.funding_streams == funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends
