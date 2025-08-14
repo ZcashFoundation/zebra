@@ -1219,10 +1219,6 @@ where
     //
     // `lightwalletd` calls this RPC with verosity 1 for its initial sync of 2 million blocks, the
     // performance of this RPC with verbosity 1 significantly affects `lightwalletd`s sync time.
-    //
-    // TODO:
-    // - use `height_from_signed_int()` to handle negative heights
-    //   (this might be better in the state request, because it needs the state height)
     async fn get_block(
         &self,
         hash_or_height: String,
@@ -1793,9 +1789,6 @@ where
         }
     }
 
-    // TODO:
-    // - use `height_from_signed_int()` to handle negative heights
-    //   (this might be better in the state request, because it needs the state height)
     async fn z_get_treestate(&self, hash_or_height: String) -> Result<GetTreestateResponse> {
         let mut read_state = self.read_state.clone();
         let network = self.network.clone();
@@ -1841,6 +1834,23 @@ where
         let time = u32::try_from(block.header.time.timestamp())
             .expect("Timestamps of valid blocks always fit into u32.");
 
+        let sprout = match read_state
+            .ready()
+            .and_then(|service| service.call(zebra_state::ReadRequest::SproutTree(hash.into())))
+            .await
+            .map_misc_error()?
+        {
+            zebra_state::ReadResponse::SproutTree(tree) => tree.map(|t| {
+                (
+                    t.to_rpc_bytes(),
+                    std::convert::Into::<[u8; 32]>::into(t.root()).to_vec(),
+                )
+            }),
+            _ => unreachable!("unmatched response to a Sprout tree request"),
+        };
+        let (sprout_tree, sprout_root) =
+            sprout.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
+
         let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
         let sapling = if network.is_nu_active(sapling_nu, height.into()) {
             match read_state
@@ -1851,12 +1861,19 @@ where
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| t.to_rpc_bytes()),
+                zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| {
+                    (
+                        t.to_rpc_bytes(),
+                        std::convert::Into::<[u8; 32]>::into(t.root()).to_vec(),
+                    )
+                }),
                 _ => unreachable!("unmatched response to a Sapling tree request"),
             }
         } else {
             None
         };
+        let (sapling_tree, sapling_root) =
+            sapling.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
         let orchard_nu = zcash_primitives::consensus::NetworkUpgrade::Nu5;
         let orchard = if network.is_nu_active(orchard_nu, height.into()) {
@@ -1868,15 +1885,30 @@ where
                 .await
                 .map_misc_error()?
             {
-                zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| t.to_rpc_bytes()),
+                zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| {
+                    (
+                        t.to_rpc_bytes(),
+                        std::convert::Into::<[u8; 32]>::into(t.root()).to_vec(),
+                    )
+                }),
                 _ => unreachable!("unmatched response to an Orchard tree request"),
             }
         } else {
             None
         };
+        let (orchard_tree, orchard_root) =
+            orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
         Ok(GetTreestateResponse::from_parts(
-            hash, height, time, sapling, orchard,
+            hash,
+            height,
+            time,
+            sprout_tree,
+            sprout_root,
+            sapling_tree,
+            sapling_root,
+            orchard_tree,
+            orchard_root,
         ))
     }
 

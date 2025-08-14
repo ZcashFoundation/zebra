@@ -1679,6 +1679,30 @@ impl Service<ReadRequest> for ReadStateService {
                 .wait_for_panics()
             }
 
+            ReadRequest::SproutTree(hash_or_height) => {
+                let state = self.clone();
+
+                tokio::task::spawn_blocking(move || {
+                    span.in_scope(move || {
+                        let sprout_tree = state.non_finalized_state_receiver.with_watch_data(
+                            |non_finalized_state| {
+                                read::sprout_tree(
+                                    non_finalized_state.best_chain(),
+                                    &state.db,
+                                    hash_or_height,
+                                )
+                            },
+                        );
+
+                        // The work is done in the future.
+                        timer.finish(module_path!(), line!(), "ReadRequest::SproutTree");
+
+                        Ok(ReadResponse::SproutTree(sprout_tree))
+                    })
+                })
+                .wait_for_panics()
+            }
+
             ReadRequest::SaplingTree(hash_or_height) => {
                 let state = self.clone();
 
