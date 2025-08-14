@@ -84,7 +84,7 @@ impl ZebraDb {
     /// Returns a typed handle to the transaction location by spent output location column family.
     pub(crate) fn tx_loc_by_spent_output_loc_cf(
         &self,
-    ) -> TransactionLocationBySpentOutputLocationCf {
+    ) -> TransactionLocationBySpentOutputLocationCf<'_> {
         TransactionLocationBySpentOutputLocationCf::new(&self.db, TX_LOC_BY_SPENT_OUT_LOC)
             .expect("column family was created when database was created")
     }

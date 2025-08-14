@@ -82,9 +82,9 @@ impl GetBlockchainInfoBalance {
         Self::new_internal("orchard", amount, delta)
     }
 
-    /// Creates a [`GetBlockchainInfoBalance`] for the Deferred pool.
+    /// Creates a [`GetBlockchainInfoBalance`] for the Lockbox pool.
     pub fn deferred(amount: Amount<NonNegative>, delta: Option<Amount<NegativeAllowed>>) -> Self {
-        Self::new_internal("deferred", amount, delta)
+        Self::new_internal("lockbox", amount, delta)
     }
 
     /// Converts a [`ValueBalance`] to a list of [`GetBlockchainInfoBalance`]s.

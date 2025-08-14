@@ -22,37 +22,37 @@ on:
       - main
     paths:
       # doc source files
-      - 'book/**'
-      - '**/firebase.json'
-      - '**/.firebaserc'
-      - 'katex-header.html'
+      - "book/**"
+      - "**/firebase.json"
+      - "**/.firebaserc"
+      - "katex-header.html"
       # rustdoc source files
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - '.github/workflows/docs-deploy-firebase.yml'
+      - ".github/workflows/docs-deploy-firebase.yml"
 
   pull_request:
     # Skip PRs where docs, Rust code, and dependencies aren't modified.
     paths:
       # doc source files
-      - 'book/**'
-      - '**/firebase.json'
-      - '**/.firebaserc'
-      - 'katex-header.html'
+      - "book/**"
+      - "**/firebase.json"
+      - "**/.firebaserc"
+      - "katex-header.html"
       # rustdoc source files
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - '.github/workflows/docs-deploy-firebase.yml'
+      - ".github/workflows/docs-deploy-firebase.yml"
 
 env:
   RUST_LOG: ${{ vars.RUST_LOG }}
@@ -80,8 +80,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       checks: write
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
       pull-requests: write
     steps:
       - name: Checkout the source code
@@ -95,7 +95,7 @@ jobs:
         uses: jontze/action-mdbook@v4.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          mdbook-version: '~0.4'
+          mdbook-version: "~0.4"
           use-linkcheck: true
           use-mermaid: true
 
@@ -109,8 +109,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.10
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_FIREBASE_SA }}"
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
 
@@ -130,14 +130,16 @@ jobs:
           target: docs-book
 
   build-docs-internal:
+    env:
+      RUSTUP_TOOLCHAIN: beta
     name: Build and Deploy Zebra Internal Docs
     if: ${{ !startsWith(github.event_name, 'pull') || !github.event.pull_request.head.repo.fork }}
     timeout-minutes: 45
     runs-on: ubuntu-latest
     permissions:
       checks: write
-      contents: 'read'
-      id-token: 'write'
+      contents: "read"
+      id-token: "write"
       pull-requests: write
     steps:
       - name: Checkout the source code
@@ -150,13 +152,13 @@ jobs:
       - name: Install last version of Protoc
         uses: arduino/setup-protoc@v3.0.0
         with:
-          version: '23.x'
+          version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with beta toolchain and default profile (to include rust-docs)
       - name: Setup Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=beta --profile=default
+          rustup toolchain install beta --profile default
 
       - uses: Swatinem/rust-cache@v2.7.8
 
@@ -170,8 +172,8 @@ jobs:
         id: auth
         uses: google-github-actions/auth@v2.1.10
         with:
-          workload_identity_provider: '${{ vars.GCP_WIF }}'
-          service_account: '${{ vars.GCP_FIREBASE_SA }}'
+          workload_identity_provider: "${{ vars.GCP_WIF }}"
+          service_account: "${{ vars.GCP_FIREBASE_SA }}"
 
       # TODO: remove this step after issue https://github.com/FirebaseExtended/action-hosting-deploy/issues/174 is fixed
       - name: Add $GCP_FIREBASE_SA_PATH to env

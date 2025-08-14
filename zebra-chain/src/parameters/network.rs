@@ -306,9 +306,9 @@ impl Network {
         };
 
         let expected_lockbox_disbursements = match self {
-            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET,
+            Self::Mainnet => subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET.to_vec(),
             Self::Testnet(params) if params.is_default_testnet() => {
-                subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET
+                subsidy::NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET.to_vec()
             }
             Self::Testnet(params) => return params.lockbox_disbursements(),
         };

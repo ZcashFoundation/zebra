@@ -24,27 +24,27 @@ on:
       - main
     paths:
       # production code and test code
-      - '**/*.rs'
+      - "**/*.rs"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - '.github/workflows/ci-build-crates.yml'
+      - ".github/workflows/ci-build-crates.yml"
   pull_request:
     paths:
       # production code and test code
-      - '**/*.rs'
+      - "**/*.rs"
       # dependencies
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
       # configuration files
-      - '.cargo/config.toml'
-      - '**/clippy.toml'
+      - ".cargo/config.toml"
+      - "**/clippy.toml"
       # workflow definitions
-      - '.github/workflows/ci-build-crates.yml'
+      - ".github/workflows/ci-build-crates.yml"
 
 env:
   CARGO_INCREMENTAL: ${{ vars.CARGO_INCREMENTAL }}
@@ -66,7 +66,7 @@ jobs:
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+          rustup toolchain install stable --profile minimal
 
       # This step is meant to dynamically create a JSON containing the values of each crate
       # available in this repo in the root directory. We use `cargo tree` to accomplish this task.
@@ -95,7 +95,7 @@ jobs:
   check-matrix:
     name: Check crates matrix
     runs-on: ubuntu-latest
-    needs: [ matrix ]
+    needs: [matrix]
     steps:
       - name: Install json2yaml
         run: |
@@ -111,7 +111,7 @@ jobs:
   build:
     name: Build ${{ matrix.crate }} crate
     timeout-minutes: 90
-    needs: [ matrix, check-matrix ]
+    needs: [matrix, check-matrix]
     # Some of these builds take more than 14GB disk space
     runs-on: ${{ github.repository_owner == 'ZcashFoundation' && 'ubuntu-latest-m' || 'ubuntu-latest' }}
     strategy:
@@ -131,13 +131,13 @@ jobs:
         uses: arduino/setup-protoc@v3.0.0
         with:
           # TODO: increase to latest version after https://github.com/arduino/setup-protoc/issues/33 is fixed
-          version: '23.x'
+          version: "23.x"
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       # Setup Rust with stable toolchain and minimal profile
       - name: Setup Rust
         run: |
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain=stable --profile=minimal
+          rustup toolchain install stable --profile minimal
 
       # We could use `features: ['', '--all-features', '--no-default-features']` as a matrix argument,
       # but it's faster to run these commands sequentially, so they can re-use the local cargo cache.
@@ -167,7 +167,7 @@ jobs:
   failure-issue:
     name: Open or update issues for building crates individually failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ matrix, build ]
+    needs: [matrix, build]
     # Only open tickets for failed or cancelled jobs that are not coming from PRs.
     # (PR statuses are already reported in the PR jobs list, and checked by GitHub's Merge Queue.)
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)

@@ -1,0 +1,109 @@
+# Nextest configuration for Zebra
+# This file centralizes all test execution configuration.
+
+[profile.default]
+fail-fast = true
+status-level = "pass"
+
+# --- All Tests profile ---
+# Runs all tests except 'check_no_git_dependencies'
+[profile.all-tests]
+default-filter = 'not test(check_no_git_dependencies)'
+
+# --- Individual Test Profiles ---
+
+[profile.check-no-git-dependencies]
+default-filter = 'test(check_no_git_dependencies)'
+
+[profile.state-fake-activation-heights]
+slow-timeout = { period = "10m", terminate-after = 1 }
+default-filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
+
+[profile.sync-large-checkpoints-empty]
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'
+
+[profile.sync-full-mainnet]
+slow-timeout = { period = "30000m", terminate-after = 1 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=sync_full_mainnet)'
+
+[profile.sync-full-testnet]
+slow-timeout = { period = "1500m", terminate-after = 1 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=sync_full_testnet)'
+
+[profile.sync-to-mandatory-checkpoint]
+slow-timeout = { period = "1500m", terminate-after = 1 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
+
+[profile.sync-update-mainnet]
+slow-timeout = { period = "30m", terminate-after = 2 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=sync_update_mainnet)'
+
+[profile.sync-past-mandatory-checkpoint-mainnet]
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=sync_past_mandatory_checkpoint_mainnet)'
+
+[profile.sync-past-mandatory-checkpoint-testnet]
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=sync_past_mandatory_checkpoint_testnet)'
+
+[profile.generate-checkpoints-mainnet]
+slow-timeout = { period = "90m", terminate-after = 1 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=generate_checkpoints_mainnet)'
+
+[profile.generate-checkpoints-testnet]
+slow-timeout = { period = "90m", terminate-after = 1 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=generate_checkpoints_testnet)'
+
+[profile.lwd-rpc-test]
+test-threads = 1
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=lwd_rpc_test)'
+
+[profile.lwd-integration]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=lwd_integration)'
+
+[profile.lwd-sync-full]
+slow-timeout = { period = "30000m", terminate-after = 1 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=lwd_sync_full)'
+
+[profile.lwd-sync-update]
+slow-timeout = { period = "30m", terminate-after = 2 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=lwd_sync_update)'
+
+[profile.lwd-grpc-wallet]
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=lwd_grpc_wallet)'
+
+[profile.lwd-rpc-send-tx]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=lwd_rpc_send_tx)'
+
+[profile.rpc-get-block-template]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=rpc_get_block_template)'
+
+[profile.rpc-submit-block]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=rpc_submit_block)'
+
+[profile.indexer-has-spending-transaction-ids]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=has_spending_transaction_ids)'
+
+[profile.lightwalletd-test-suite]
+slow-timeout = { period = "60m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=lightwalletd_test_suite)'
+
+[profile.rpc-z-getsubtreesbyindex-snapshot]
+slow-timeout = { period = "30m", terminate-after = 2 }
+default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test)'

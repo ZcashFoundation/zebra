@@ -277,7 +277,7 @@ impl InventoryRegistry {
 
     /// Returns a future that waits for new registry updates.
     #[allow(dead_code)]
-    pub fn update(&mut self) -> Update {
+    pub fn update(&mut self) -> Update<'_> {
         Update::new(self)
     }
 

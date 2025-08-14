@@ -6,7 +6,7 @@ expression: info
   "version": 100,
   "build": "v0.0.1",
   "subversion": "[SubVersion]",
-  "protocolversion": 170120,
+  "protocolversion": 170130,
   "blocks": 10,
   "connections": 0,
   "difficulty": 1.0,
