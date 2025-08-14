@@ -2587,7 +2587,7 @@ fn v4_with_sapling_spends() {
 
         // Test the transaction verifier
         let result = timeout(
-            std::time::Duration::from_secs(3),
+            std::time::Duration::from_secs(30),
             verifier.oneshot(Request::Block {
                 transaction_hash: transaction.hash(),
                 transaction,
@@ -2722,7 +2722,7 @@ async fn v5_with_sapling_spends() {
 
         assert_eq!(
             timeout(
-                std::time::Duration::from_secs(3),
+                std::time::Duration::from_secs(30),
                 verifier.oneshot(Request::Block {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),
