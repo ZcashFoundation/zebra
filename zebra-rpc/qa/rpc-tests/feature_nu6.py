@@ -40,7 +40,7 @@ class PoolsTest(BitcoinTestFramework):
                     pools_by_id['sprout'],
                     pools_by_id['sapling'],
                     pools_by_id['orchard'],
-                    pools_by_id['deferred'])
+                    pools_by_id['lockbox'])
 
         def get_network_upgrades(getblockchaininfo):
             upgrades_by_name = {
