@@ -49,13 +49,6 @@ jobs:
     steps:
       - run: 'echo "No build required"'
 
-  state-fake-activation-heights:
-    name: Unit tests / Test with fake activation heights
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
-    steps:
-      - run: 'echo "No build required"'
-
   sync-large-checkpoints-empty:
     name: Unit tests / Test checkpoint sync from empty state
     runs-on: ubuntu-latest

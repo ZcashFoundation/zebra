@@ -117,6 +117,16 @@ impl PreparedChain {
         self.generate_valid_commitments = true;
         self
     }
+
+    /// Set the ledger strategy for the prepared chain.
+    #[allow(dead_code)]
+    pub(crate) fn with_ledger_strategy(
+        mut self,
+        ledger_strategy: BoxedStrategy<LedgerState>,
+    ) -> Self {
+        self.ledger_strategy = Some(ledger_strategy);
+        self
+    }
 }
 
 impl Strategy for PreparedChain {
@@ -129,7 +139,7 @@ impl Strategy for PreparedChain {
         if chain.is_none() {
             // TODO: use the latest network upgrade (#1974)
             let default_ledger_strategy =
-                LedgerState::genesis_strategy(NetworkUpgrade::Nu5, None, false);
+                LedgerState::genesis_strategy(None, NetworkUpgrade::Nu5, None, false);
             let ledger_strategy = self
                 .ledger_strategy
                 .as_ref()

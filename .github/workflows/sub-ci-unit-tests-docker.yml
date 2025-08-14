@@ -5,10 +5,9 @@
 # Jobs:
 # 1. Builds a Docker image for tests, adaptable to the specified network (Mainnet or Testnet).
 # 2. 'test-all': Executes all Zebra tests, including normally ignored ones, in a Docker environment.
-# 3. 'state-fake-activation-heights': Runs state tests with fake activation heights, isolating its build products.
-# 4. 'sync-large-checkpoints-empty': Tests Zebra's ability to sync and checkpoint from an empty state.
-# 5. 'test-lightwalletd-integration': Validates integration with 'lightwalletd' starting from an empty state.
-# 6. 'test-docker-configurations': Runs a matrix of configuration tests to validate various Docker configurations.
+# 3. 'sync-large-checkpoints-empty': Tests Zebra's ability to sync and checkpoint from an empty state.
+# 4. 'test-lightwalletd-integration': Validates integration with 'lightwalletd' starting from an empty state.
+# 5. 'test-docker-configurations': Runs a matrix of configuration tests to validate various Docker configurations.
 name: Docker Unit Tests
 
 on:
@@ -53,43 +52,6 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=all-tests \
-          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
-          -e RUST_LOG=${{ env.RUST_LOG }} \
-          -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
-          -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
-          -e COLORBT_SHOW_HIDDEN=${{ env.COLORBT_SHOW_HIDDEN }} \
-          -e CARGO_INCREMENTAL=${{ env.CARGO_INCREMENTAL }} \
-          ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-
-  # Run state tests with fake activation heights.
-  #
-  # This test changes zebra-chain's activation heights,
-  # which can recompile all the Zebra crates,
-  # so we want its build products to be cached separately.
-  #
-  # Also, we don't want to accidentally use the fake heights in other tests.
-  #
-  # (We activate the test features to avoid recompiling dependencies, but we don't actually run any gRPC tests.)
-  state-fake-activation-heights:
-    name: Test with fake activation heights
-    timeout-minutes: 60
-    runs-on: ubuntu-latest
-    steps:
-      - uses: r7kamura/rust-problem-matchers@v1.5.0
-
-      - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v5
-        with:
-          short-length: 7
-
-      - name: Run tests with fake activation heights
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
-        run: |
-          docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
-          docker run --tty \
-          -e NEXTEST_PROFILE=state-fake-activation-heights \
-          -e TEST_FAKE_ACTIVATION_HEIGHTS=1 \
           -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
@@ -172,7 +134,6 @@ jobs:
     needs:
       [
         test-all,
-        state-fake-activation-heights,
         sync-large-checkpoints-empty,
         test-lightwalletd-integration,
         test-docker-configurations,
