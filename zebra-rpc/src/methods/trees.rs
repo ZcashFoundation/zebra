@@ -77,6 +77,9 @@ pub struct GetTreestateResponse {
     /// UTC seconds since the Unix 1970-01-01 epoch.
     time: u32,
 
+    /// A treestate containing a Sprout note commitment tree, hex-encoded.
+    sprout: Treestate,
+
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
     sapling: Treestate,
 
@@ -86,21 +89,34 @@ pub struct GetTreestateResponse {
 
 impl GetTreestateResponse {
     /// Constructs [`Treestate`] from its constituent parts.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         hash: Hash,
         height: Height,
         time: u32,
-        sapling: Option<Vec<u8>>,
-        orchard: Option<Vec<u8>>,
+        sprout_tree: Option<Vec<u8>>,
+        sprout_root: Option<Vec<u8>>,
+        sapling_tree: Option<Vec<u8>>,
+        sapling_root: Option<Vec<u8>>,
+        orchard_tree: Option<Vec<u8>>,
+        orchard_root: Option<Vec<u8>>,
     ) -> Self {
+        let sprout = Treestate {
+            commitments: Commitments {
+                final_root: sprout_root,
+                final_state: sprout_tree,
+            },
+        };
         let sapling = Treestate {
             commitments: Commitments {
-                final_state: sapling,
+                final_root: sapling_root,
+                final_state: sapling_tree,
             },
         };
         let orchard = Treestate {
             commitments: Commitments {
-                final_state: orchard,
+                final_root: orchard_root,
+                final_state: orchard_tree,
             },
         };
 
@@ -108,6 +124,7 @@ impl GetTreestateResponse {
             hash,
             height,
             time,
+            sprout,
             sapling,
             orchard,
         }
@@ -131,6 +148,7 @@ impl Default for GetTreestateResponse {
             hash: Hash([0; 32]),
             height: Height::MIN,
             time: Default::default(),
+            sprout: Default::default(),
             sapling: Default::default(),
             orchard: Default::default(),
         }
@@ -158,7 +176,10 @@ impl Treestate {
 impl Default for Treestate {
     fn default() -> Self {
         Self {
-            commitments: Commitments { final_state: None },
+            commitments: Commitments {
+                final_root: None,
+                final_state: None,
+            },
         }
     }
 }
@@ -172,6 +193,11 @@ impl Default for Treestate {
 #[serde_with::serde_as]
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Commitments {
+    /// Orchard or Sapling serialized note commitment tree root, hex-encoded.
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "finalRoot")]
+    final_root: Option<Vec<u8>>,
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.
     #[serde_as(as = "Option<serde_with::hex::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -10,13 +10,14 @@
 //!
 //! A root of a note commitment tree is associated with each treestate.
 
-use std::fmt;
+use std::{fmt, io};
 
 use byteorder::{BigEndian, ByteOrder};
 use incrementalmerkletree::frontier::Frontier;
 use lazy_static::lazy_static;
 use sha2::digest::generic_array::GenericArray;
 use thiserror::Error;
+use zcash_primitives::merkle_tree::HashSer;
 
 use super::commitment::NoteCommitment;
 
@@ -180,6 +181,26 @@ impl<'de> serde::Deserialize<'de> for Node {
         let node = Node::from(cm);
 
         Ok(node)
+    }
+}
+
+/// Required to serialize [`NoteCommitmentTree`]s in a format matching `zcashd`.
+///
+/// Zebra stores Sapling note commitment trees as [`Frontier`]s while the
+/// [`z_gettreestate`][1] RPC requires [`CommitmentTree`][2]s. Implementing
+/// [`incrementalmerkletree::Hashable`] for [`Node`]s allows the conversion.
+///
+/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
+/// [2]: incrementalmerkletree::frontier::CommitmentTree
+impl HashSer for Node {
+    fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
+        let mut node = [0u8; 32];
+        reader.read_exact(&mut node)?;
+        Ok(Self(node))
+    }
+
+    fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
+        writer.write_all(self.0.as_ref())
     }
 }
 
@@ -347,6 +368,20 @@ impl NoteCommitmentTree {
 
         // Check the data in the internal data structure
         assert_eq!(self.inner, other.inner);
+    }
+
+    /// Serializes [`Self`] to a format matching `zcashd`'s RPCs.
+    pub fn to_rpc_bytes(&self) -> Vec<u8> {
+        // Convert the tree from [`Frontier`](incrementalmerkletree::frontier::Frontier) to
+        // [`CommitmentTree`](merkle_tree::CommitmentTree).
+        let tree = incrementalmerkletree::frontier::CommitmentTree::from_frontier(&self.inner);
+
+        let mut rpc_bytes = vec![];
+
+        zcash_primitives::merkle_tree::write_commitment_tree(&tree, &mut rpc_bytes)
+            .expect("serializable tree");
+
+        rpc_bytes
     }
 }
 

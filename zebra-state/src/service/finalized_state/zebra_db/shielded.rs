@@ -118,6 +118,34 @@ impl ZebraDb {
 
     // # Sprout trees
 
+    /// Returns the Sapling note commitment tree matching the given block height, or `None` if the
+    /// height is above the finalized tip.
+    #[allow(clippy::unwrap_in_result)]
+    pub fn sprout_tree_by_height(
+        &self,
+        height: &Height,
+    ) -> Option<Arc<sprout::tree::NoteCommitmentTree>> {
+        let tip_height = self.finalized_tip_height()?;
+
+        // If we're above the tip, searching backwards would always return the tip tree.
+        // But the correct answer is "we don't know that tree yet".
+        if *height > tip_height {
+            return None;
+        }
+
+        let sprout_trees = self.db.cf_handle("sprout_note_commitment_tree").unwrap();
+
+        // If we know there must be a tree, search backwards for it.
+        let (_first_duplicate_height, tree) = self
+            .db
+            .zs_prev_key_value_back_from(&sprout_trees, height)
+            .expect(
+                "Sprout note commitment trees must exist for all heights below the finalized tip",
+            );
+
+        Some(Arc::new(tree))
+    }
+
     /// Returns the Sprout note commitment tree of the finalized tip
     /// or the empty tree if the state is empty.
     pub fn sprout_tree_for_tip(&self) -> Arc<sprout::tree::NoteCommitmentTree> {
