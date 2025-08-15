@@ -568,10 +568,10 @@ fn test_z_get_treestate() -> Result<(), Box<dyn std::error::Error>> {
     let hash = obj.hash();
     let height = obj.height();
     let time = obj.time();
-    let sprout_final_state = obj.sprout().commitments().final_state().clone();
+    let sprout_final_state = obj.sprout().unwrap().commitments().final_state().clone();
     let sapling_final_state = obj.sapling().commitments().final_state().clone();
     let orchard_final_state = obj.orchard().commitments().final_state().clone();
-    let sprout_final_root = obj.sprout().commitments().final_root().clone();
+    let sprout_final_root = obj.sprout().unwrap().commitments().final_root().clone();
     let sapling_final_root = obj.sapling().commitments().final_root().clone();
     let orchard_final_root = obj.orchard().commitments().final_root().clone();
 

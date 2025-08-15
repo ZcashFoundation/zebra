@@ -1834,21 +1834,24 @@ where
         let time = u32::try_from(block.header.time.timestamp())
             .expect("Timestamps of valid blocks always fit into u32.");
 
-        let sprout = match read_state
-            .ready()
-            .and_then(|service| service.call(zebra_state::ReadRequest::SproutTree(hash.into())))
-            .await
-            .map_misc_error()?
-        {
-            zebra_state::ReadResponse::SproutTree(tree) => tree.map(|t| {
-                let mut root = Into::<[u8; 32]>::into(t.root()).to_vec();
-                root.reverse();
-                (t.to_rpc_bytes(), root)
-            }),
-            _ => unreachable!("unmatched response to a Sprout tree request"),
-        };
-        let (sprout_tree, sprout_root) =
-            sprout.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
+        // We can't currently return Sprout data because we don't store it for
+        // old heights.
+
+        // let sprout = match read_state
+        //     .ready()
+        //     .and_then(|service| service.call(zebra_state::ReadRequest::SproutTree(hash.into())))
+        //     .await
+        //     .map_misc_error()?
+        // {
+        //     zebra_state::ReadResponse::SproutTree(tree) => tree.map(|t| {
+        //         let mut root = Into::<[u8; 32]>::into(t.root()).to_vec();
+        //         root.reverse();
+        //         (t.to_rpc_bytes(), root)
+        //     }),
+        //     _ => unreachable!("unmatched response to a Sprout tree request"),
+        // };
+        // let (sprout_tree, sprout_root) =
+        //     sprout.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
         let sapling_nu = zcash_primitives::consensus::NetworkUpgrade::Sapling;
         let sapling = if network.is_nu_active(sapling_nu, height.into()) {
@@ -1902,8 +1905,11 @@ where
             hash,
             height,
             time,
-            sprout_tree,
-            sprout_root,
+            // See comment above
+            // sprout_tree,
+            // sprout_root,
+            None,
+            None,
             sapling_tree,
             sapling_root,
             orchard_tree,
