@@ -88,3 +88,6 @@ rustdocflags = [
     # Links in public docs can point to private items.
     "-Arustdoc::private_intra_doc_links",
 ]
+
+[env]
+RUST_BACKTRACE="1"
