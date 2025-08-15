@@ -88,6 +88,7 @@ use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};
 
 use crate::{
+    client::Treestate,
     config,
     methods::types::validate_address::validate_address,
     queue::Queue,
@@ -1901,19 +1902,14 @@ where
         let (orchard_tree, orchard_root) =
             orchard.map_or((None, None), |(tree, root)| (Some(tree), Some(root)));
 
-        Ok(GetTreestateResponse::from_parts(
+        Ok(GetTreestateResponse::new(
             hash,
             height,
             time,
             // See comment above
-            // sprout_tree,
-            // sprout_root,
             None,
-            None,
-            sapling_tree,
-            sapling_root,
-            orchard_tree,
-            orchard_root,
+            Treestate::new(trees::Commitments::new(sapling_root, sapling_tree)),
+            Treestate::new(trees::Commitments::new(orchard_root, orchard_tree)),
         ))
     }
 

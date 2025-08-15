@@ -79,7 +79,7 @@ pub struct GetTreestateResponse {
 
     /// A treestate containing a Sprout note commitment tree, hex-encoded. Zebra
     /// does not support returning it; but the field is here to enable parsing
-    /// responses from other implementations
+    /// responses from other implementations.
     #[serde(skip_serializing_if = "Option::is_none")]
     sprout: Option<Treestate>,
 
@@ -92,34 +92,24 @@ pub struct GetTreestateResponse {
 
 impl GetTreestateResponse {
     /// Constructs [`Treestate`] from its constituent parts.
-    #[allow(clippy::too_many_arguments)]
+    #[deprecated(note = "Use `new` instead.")]
     pub fn from_parts(
         hash: Hash,
         height: Height,
         time: u32,
-        sprout_tree: Option<Vec<u8>>,
-        sprout_root: Option<Vec<u8>>,
-        sapling_tree: Option<Vec<u8>>,
-        sapling_root: Option<Vec<u8>>,
-        orchard_tree: Option<Vec<u8>>,
-        orchard_root: Option<Vec<u8>>,
+        sapling: Option<Vec<u8>>,
+        orchard: Option<Vec<u8>>,
     ) -> Self {
-        let sprout = Treestate {
-            commitments: Commitments {
-                final_root: sprout_root,
-                final_state: sprout_tree,
-            },
-        };
         let sapling = Treestate {
             commitments: Commitments {
-                final_root: sapling_root,
-                final_state: sapling_tree,
+                final_state: sapling,
+                final_root: None,
             },
         };
         let orchard = Treestate {
             commitments: Commitments {
-                final_root: orchard_root,
-                final_state: orchard_tree,
+                final_state: orchard,
+                final_root: None,
             },
         };
 
@@ -127,19 +117,14 @@ impl GetTreestateResponse {
             hash,
             height,
             time,
-            sprout: if sprout.commitments().final_root().is_some()
-                || sprout.commitments().final_state().is_some()
-            {
-                Some(sprout)
-            } else {
-                None
-            },
+            sprout: None,
             sapling,
             orchard,
         }
     }
 
     /// Returns the contents of ['GetTreeState'].
+    #[deprecated(note = "Use getters instead.")]
     pub fn into_parts(self) -> (Hash, Height, u32, Option<Vec<u8>>, Option<Vec<u8>>) {
         (
             self.hash,
