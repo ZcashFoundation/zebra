@@ -100,6 +100,11 @@ impl FundingStreamReceiver {
             )
         }
     }
+
+    /// Returns true if this [`FundingStreamReceiver`] is [`FundingStreamReceiver::Deferred`].
+    pub fn is_deferred(&self) -> bool {
+        matches!(self, Self::Deferred)
+    }
 }
 
 /// Denominator as described in [protocol specification §7.10.1][7.10.1].
@@ -160,6 +165,22 @@ impl FundingStreams {
     pub fn recipient(&self, receiver: FundingStreamReceiver) -> Option<&FundingStreamRecipient> {
         self.recipients.get(&receiver)
     }
+
+    /// Accepts a target number of addresses that all recipients of this funding stream
+    /// except the [`FundingStreamReceiver::Deferred`] receiver should have.
+    ///
+    /// Extends the addresses for all funding stream recipients by repeating their
+    /// existing addresses until reaching the provided target number of addresses.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn extend_recipient_addresses(&mut self, target_len: usize) {
+        for (receiver, recipient) in &mut self.recipients {
+            if receiver.is_deferred() {
+                continue;
+            }
+
+            recipient.extend_addresses(target_len);
+        }
+    }
 }
 
 /// A funding stream recipient as specified in [protocol specification §7.10.1][7.10.1]
@@ -204,6 +225,30 @@ impl FundingStreamRecipient {
     /// Returns the receiver of this funding stream.
     pub fn addresses(&self) -> &[transparent::Address] {
         &self.addresses
+    }
+
+    /// Accepts a target number of addresses that this recipient should have.
+    ///
+    /// Extends the addresses for this funding stream recipient by repeating
+    /// existing addresses until reaching the provided target number of addresses.
+    ///
+    /// # Panics
+    ///
+    /// If there are no recipient addresses.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn extend_addresses(&mut self, target_len: usize) {
+        assert!(
+            !self.addresses.is_empty(),
+            "cannot extend addresses for empty recipient"
+        );
+
+        self.addresses = self
+            .addresses
+            .iter()
+            .cycle()
+            .take(target_len)
+            .cloned()
+            .collect();
     }
 }
 

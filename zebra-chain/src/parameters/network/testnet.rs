@@ -250,21 +250,30 @@ impl ConfiguredFundingStreams {
     }
 }
 
+/// Returns the number of funding stream address periods there are for the provided network and height range.
+fn num_funding_stream_addresses_required_for_height_range(
+    height_range: &std::ops::Range<Height>,
+    network: &Network,
+) -> usize {
+    1u32.checked_add(funding_stream_address_period(
+        height_range
+            .end
+            .previous()
+            .expect("end height must be above start height and genesis height"),
+        network,
+    ))
+    .expect("no overflow should happen in this sum")
+    .checked_sub(funding_stream_address_period(height_range.start, network))
+    .expect("no overflow should happen in this sub") as usize
+}
+
 /// Checks that the provided [`FundingStreams`] has sufficient recipient addresses for the
 /// funding stream address period of the provided [`Network`].
 fn check_funding_stream_address_period(funding_streams: &FundingStreams, network: &Network) {
-    let height_range = funding_streams.height_range();
-    let expected_min_num_addresses =
-        1u32.checked_add(funding_stream_address_period(
-            height_range
-                .end
-                .previous()
-                .expect("end height must be above start height and genesis height"),
-            network,
-        ))
-        .expect("no overflow should happen in this sum")
-        .checked_sub(funding_stream_address_period(height_range.start, network))
-        .expect("no overflow should happen in this sub") as usize;
+    let expected_min_num_addresses = num_funding_stream_addresses_required_for_height_range(
+        funding_streams.height_range(),
+        network,
+    );
 
     for (&receiver, recipient) in funding_streams.recipients() {
         if receiver == FundingStreamReceiver::Deferred {
@@ -272,10 +281,12 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
             continue;
         }
 
+        let num_addresses = recipient.addresses().len();
         assert!(
-            recipient.addresses().len() >= expected_min_num_addresses,
+            num_addresses >= expected_min_num_addresses,
             "recipients must have a sufficient number of addresses for height range, \
-         minimum num addresses required: {expected_min_num_addresses}, receiver: {receiver:?}, recipient: {recipient:?}"
+             minimum num addresses required: {expected_min_num_addresses}, only {num_addresses} were provided.\
+             receiver: {receiver:?}, recipient: {recipient:?}"
         );
 
         for address in recipient.addresses() {
@@ -574,6 +585,28 @@ impl ParametersBuilder {
     /// Clears funding streams from the [`Parameters`] being built.
     pub fn clear_funding_streams(mut self) -> Self {
         self.funding_streams = vec![];
+        self
+    }
+
+    /// Extends the configured funding streams to have as many recipients as are required for their
+    /// height ranges by repeating the recipients that have been configured.
+    ///
+    /// This should be called after configuring the desired network upgrade activation heights.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn extend_funding_streams(mut self) -> Self {
+        // self.funding_streams.extend(FUNDING_STREAMS_TESTNET);
+
+        let network = self.to_network_unchecked();
+
+        for funding_streams in &mut self.funding_streams {
+            funding_streams.extend_recipient_addresses(
+                num_funding_stream_addresses_required_for_height_range(
+                    funding_streams.height_range(),
+                    &network,
+                ),
+            );
+        }
+
         self
     }
 
