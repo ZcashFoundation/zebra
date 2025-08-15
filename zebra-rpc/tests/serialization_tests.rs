@@ -21,7 +21,7 @@ use zebra_rpc::client::{
         transparent::{OutputIndex, Script},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty},
     },
-    GetBlockchainInfoBalance,
+    GetBlockchainInfoBalance, JoinSplit,
 };
 use zebra_rpc::client::{
     BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
@@ -677,6 +677,38 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             )
         })
         .collect::<Vec<_>>();
+    let joinsplits = tx
+        .joinsplits()
+        .iter()
+        .map(|joinsplit| {
+            let old_public_value = joinsplit.old_public_value();
+            let old_public_value_zat = joinsplit.old_public_value_zat();
+            let new_public_value = joinsplit.new_public_value();
+            let new_public_value_zat = joinsplit.new_public_value_zat();
+            let anchor = joinsplit.anchor();
+            let nullifiers = joinsplit.nullifiers().clone();
+            let commitments = joinsplit.commitments().clone();
+            let one_time_pubkey = joinsplit.one_time_pubkey();
+            let random_seed = joinsplit.random_seed();
+            let macs = joinsplit.macs().clone();
+            let proof = joinsplit.proof().clone();
+            let ciphertexts = joinsplit.ciphertexts().clone();
+            JoinSplit::new(
+                old_public_value,
+                old_public_value_zat,
+                new_public_value,
+                new_public_value_zat,
+                anchor,
+                nullifiers,
+                commitments,
+                one_time_pubkey,
+                random_seed,
+                macs,
+                proof,
+                ciphertexts,
+            )
+        })
+        .collect::<Vec<_>>();
     let shielded_spends = tx
         .shielded_spends()
         .iter()
@@ -776,6 +808,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
         outputs,
         shielded_spends,
         shielded_outputs,
+        joinsplits,
         binding_sig,
         joinsplit_pub_key,
         joinsplit_sig,
