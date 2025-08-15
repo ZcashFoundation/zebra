@@ -12,7 +12,6 @@ use zebra_chain::{
     parameters::Network,
     sapling,
     serialization::DateTime32,
-    sprout,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction::{self, Transaction},
     transparent,
@@ -340,9 +339,6 @@ pub enum ReadResponse {
     /// the UTXO remains unspent in the best chain.
     AnyChainUtxo(Option<transparent::Utxo>),
 
-    /// Response to [`ReadRequest::SproutTree`] with the specified Sprout note commitment tree.
-    SproutTree(Option<Arc<sprout::tree::NoteCommitmentTree>>),
-
     /// Response to [`ReadRequest::SaplingTree`] with the specified Sapling note commitment tree.
     SaplingTree(Option<Arc<sapling::tree::NoteCommitmentTree>>),
 
@@ -488,7 +484,6 @@ impl TryFrom<ReadResponse> for Response {
             | ReadResponse::TipPoolValues { .. }
             | ReadResponse::BlockInfo(_)
             | ReadResponse::TransactionIdsForBlock(_)
-            | ReadResponse::SproutTree(_)
             | ReadResponse::SaplingTree(_)
             | ReadResponse::OrchardTree(_)
             | ReadResponse::SaplingSubtrees(_)

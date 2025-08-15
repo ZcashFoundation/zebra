@@ -14,7 +14,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use zebra_chain::{
-    orchard, sapling, sprout,
+    orchard, sapling,
     subtree::{NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
 };
 
@@ -26,27 +26,6 @@ use crate::{
 // Doc-only items
 #[allow(unused_imports)]
 use zebra_chain::subtree::NoteCommitmentSubtree;
-
-/// Returns the Sprout
-/// [`NoteCommitmentTree`](sprout::tree::NoteCommitmentTree) specified by a
-/// hash or height, if it exists in the non-finalized `chain` or finalized `db`.
-pub fn sprout_tree<C>(
-    chain: Option<C>,
-    db: &ZebraDb,
-    hash_or_height: HashOrHeight,
-) -> Option<Arc<sprout::tree::NoteCommitmentTree>>
-where
-    C: AsRef<Chain>,
-{
-    // # Correctness
-    //
-    // Since sapling treestates are the same in the finalized and non-finalized
-    // state, we check the most efficient alternative first. (`chain` is always
-    // in memory, but `db` stores blocks on disk, with a memory cache.)
-    chain
-        .and_then(|chain| chain.as_ref().sprout_tree(hash_or_height))
-        .or_else(|| db.sprout_tree_by_hash_or_height(hash_or_height))
-}
 
 /// Returns the Sapling
 /// [`NoteCommitmentTree`](sapling::tree::NoteCommitmentTree) specified by a

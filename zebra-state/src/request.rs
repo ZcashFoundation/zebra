@@ -1064,15 +1064,6 @@ pub enum ReadRequest {
         stop: Option<block::Hash>,
     },
 
-    /// Looks up a Sprout note commitment tree either by a hash or height.
-    ///
-    /// Returns
-    ///
-    /// * [`ReadResponse::SproutTree(Some(Arc<NoteCommitmentTree>))`](crate::ReadResponse::SproutTree)
-    ///   if the corresponding block contains a Sprout note commitment tree.
-    /// * [`ReadResponse::SproutTree(None)`](crate::ReadResponse::SproutTree) otherwise.
-    SproutTree(HashOrHeight),
-
     /// Looks up a Sapling note commitment tree either by a hash or height.
     ///
     /// Returns
@@ -1228,7 +1219,6 @@ impl ReadRequest {
             ReadRequest::BlockLocator => "block_locator",
             ReadRequest::FindBlockHashes { .. } => "find_block_hashes",
             ReadRequest::FindBlockHeaders { .. } => "find_block_headers",
-            ReadRequest::SproutTree { .. } => "sprout_tree",
             ReadRequest::SaplingTree { .. } => "sapling_tree",
             ReadRequest::OrchardTree { .. } => "orchard_tree",
             ReadRequest::SaplingSubtrees { .. } => "sapling_subtrees",

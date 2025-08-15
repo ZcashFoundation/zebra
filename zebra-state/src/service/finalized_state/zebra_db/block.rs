@@ -26,7 +26,6 @@ use zebra_chain::{
     parameters::{Network, GENESIS_PREVIOUS_BLOCK_HASH},
     sapling,
     serialization::{CompactSizeMessage, TrustedPreallocate, ZcashSerialize as _},
-    sprout,
     transaction::{self, Transaction},
     transparent,
     value_balance::ValueBalance,
@@ -228,18 +227,6 @@ impl ZebraDb {
             .collect();
 
         Some((header, transactions))
-    }
-
-    /// Returns the Sprout [`note commitment tree`](sprout::tree::NoteCommitmentTree) specified by
-    /// a hash or height, if it exists in the finalized state.
-    #[allow(clippy::unwrap_in_result)]
-    pub fn sprout_tree_by_hash_or_height(
-        &self,
-        hash_or_height: HashOrHeight,
-    ) -> Option<Arc<sprout::tree::NoteCommitmentTree>> {
-        let height = hash_or_height.height_or_else(|hash| self.height(hash))?;
-
-        self.sprout_tree_by_height(&height)
     }
 
     /// Returns the Sapling [`note commitment tree`](sapling::tree::NoteCommitmentTree) specified by
