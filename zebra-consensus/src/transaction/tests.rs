@@ -999,10 +999,15 @@ async fn mempool_request_with_immature_spend_is_rejected() {
 async fn mempool_request_with_transparent_coinbase_spend_is_accepted_on_regtest() {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(ConfiguredActivationHeights {
-        nu6: Some(1_000),
-        ..Default::default()
-    });
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            canopy: Some(1),
+            nu5: Some(100),
+            nu6: Some(1_000),
+            ..Default::default()
+        }
+        .into(),
+    );
     let mut state: MockService<_, _, _, _> = MockService::build().for_unit_tests();
     let verifier = Verifier::new_for_tests(&network, state.clone());
 

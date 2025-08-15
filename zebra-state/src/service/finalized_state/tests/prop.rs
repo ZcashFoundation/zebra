@@ -75,6 +75,7 @@ fn all_upgrades_and_wrong_commitments_with_fake_activation_heights() -> Result<(
             nu6_1: Some(45),
             nu7: Some(50),
         })
+        .extend_funding_streams()
         .to_network();
     let ledger_strategy =
         LedgerState::genesis_strategy(Some(network), NetworkUpgrade::Nu5, None, false);
