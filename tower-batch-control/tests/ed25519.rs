@@ -8,14 +8,14 @@ use std::{
 };
 
 use color_eyre::{eyre::eyre, Report};
-use ed25519_zebra::{batch, Error, SigningKey, VerificationKeyBytes};
+use ed25519_zebra::{batch, Error, Signature, SigningKey, VerificationKeyBytes};
 use futures::stream::{FuturesOrdered, StreamExt};
 use futures::FutureExt;
 use futures_core::Future;
 use rand::thread_rng;
 use tokio::sync::{oneshot::error::RecvError, watch};
 use tower::{Service, ServiceExt};
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::Fallback;
 
 // ============ service impl ============
@@ -33,8 +33,23 @@ type VerifyResult = Result<(), Error>;
 type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
-/// This is an `Ed25519Item`.
-type Item = batch::Item;
+/// A newtype around an `Ed25519Item` which implements [`RequestWeight`].
+#[derive(Clone, Debug)]
+struct Item(batch::Item);
+
+impl RequestWeight for Item {}
+
+impl<'msg, M: AsRef<[u8]> + ?Sized> From<(VerificationKeyBytes, Signature, &'msg M)> for Item {
+    fn from(tup: (VerificationKeyBytes, Signature, &'msg M)) -> Self {
+        Self(batch::Item::from(tup))
+    }
+}
+
+impl Item {
+    fn verify_single(self) -> VerifyResult {
+        self.0.verify_single()
+    }
+}
 
 /// Ed25519 signature verifier service
 struct Verifier {
@@ -106,7 +121,7 @@ impl Service<BatchControl<Item>> for Verifier {
 
     fn call(&mut self, req: BatchControl<Item>) -> Self::Future {
         match req {
-            BatchControl::Item(item) => {
+            BatchControl::Item(Item(item)) => {
                 tracing::trace!("got ed25519 item");
                 self.batch.queue(item);
                 let mut rx = self.tx.subscribe();
@@ -207,7 +222,7 @@ where
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn batch_flushes_on_max_items() -> Result<(), Report> {
+async fn batch_flushes_on_max_items_weight() -> Result<(), Report> {
     use tokio::time::timeout;
     let _init_guard = zebra_test::init();
 

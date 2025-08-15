@@ -21,7 +21,7 @@ use rand::thread_rng;
 use tokio::sync::watch;
 use tower::{util::ServiceFn, Service};
 
-use tower_batch_control::{Batch, BatchControl};
+use tower_batch_control::{Batch, BatchControl, RequestWeight};
 use tower_fallback::{BoxedError, Fallback};
 
 use zebra_chain::{
@@ -57,8 +57,24 @@ type VerifyResult = Result<(), VerificationError>;
 type Sender = watch::Sender<Option<VerifyResult>>;
 
 /// The type of the batch item.
-/// This is a Groth16 verification item.
-pub type Item = batch::Item<Bls12>;
+/// This is a newtype around a Groth16 verification item.
+#[derive(Clone, Debug)]
+pub struct Item(batch::Item<Bls12>);
+
+impl RequestWeight for Item {}
+
+impl<T: Into<batch::Item<Bls12>>> From<T> for Item {
+    fn from(value: T) -> Self {
+        Self(value.into())
+    }
+}
+
+impl Item {
+    /// Convenience method to call a method on the inner value to perform non-batched verification.
+    pub fn verify_single(self, pvk: &PreparedVerifyingKey<Bls12>) -> VerifyResult {
+        self.0.verify_single(pvk)
+    }
+}
 
 /// The type of a raw verifying key.
 /// This is the key used to verify batches.
@@ -469,7 +485,7 @@ impl Service<BatchControl<Item>> for Verifier {
         match req {
             BatchControl::Item(item) => {
                 tracing::trace!("got item");
-                self.batch.queue(item);
+                self.batch.queue(item.0);
                 let mut rx = self.tx.subscribe();
 
                 Box::pin(async move {
