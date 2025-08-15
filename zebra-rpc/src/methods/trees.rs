@@ -77,8 +77,11 @@ pub struct GetTreestateResponse {
     /// UTC seconds since the Unix 1970-01-01 epoch.
     time: u32,
 
-    /// A treestate containing a Sprout note commitment tree, hex-encoded.
-    sprout: Treestate,
+    /// A treestate containing a Sprout note commitment tree, hex-encoded. Zebra
+    /// does not support returning it; but the field is here to enable parsing
+    /// responses from other implementations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sprout: Option<Treestate>,
 
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
     sapling: Treestate,
@@ -124,7 +127,13 @@ impl GetTreestateResponse {
             hash,
             height,
             time,
-            sprout,
+            sprout: if sprout.commitments().final_root().is_some()
+                || sprout.commitments().final_state().is_some()
+            {
+                Some(sprout)
+            } else {
+                None
+            },
             sapling,
             orchard,
         }
