@@ -77,6 +77,12 @@ pub struct GetTreestateResponse {
     /// UTC seconds since the Unix 1970-01-01 epoch.
     time: u32,
 
+    /// A treestate containing a Sprout note commitment tree, hex-encoded. Zebra
+    /// does not support returning it; but the field is here to enable parsing
+    /// responses from other implementations.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sprout: Option<Treestate>,
+
     /// A treestate containing a Sapling note commitment tree, hex-encoded.
     sapling: Treestate,
 
@@ -86,6 +92,7 @@ pub struct GetTreestateResponse {
 
 impl GetTreestateResponse {
     /// Constructs [`Treestate`] from its constituent parts.
+    #[deprecated(note = "Use `new` instead.")]
     pub fn from_parts(
         hash: Hash,
         height: Height,
@@ -96,11 +103,13 @@ impl GetTreestateResponse {
         let sapling = Treestate {
             commitments: Commitments {
                 final_state: sapling,
+                final_root: None,
             },
         };
         let orchard = Treestate {
             commitments: Commitments {
                 final_state: orchard,
+                final_root: None,
             },
         };
 
@@ -108,12 +117,14 @@ impl GetTreestateResponse {
             hash,
             height,
             time,
+            sprout: None,
             sapling,
             orchard,
         }
     }
 
     /// Returns the contents of ['GetTreeState'].
+    #[deprecated(note = "Use getters instead.")]
     pub fn into_parts(self) -> (Hash, Height, u32, Option<Vec<u8>>, Option<Vec<u8>>) {
         (
             self.hash,
@@ -131,6 +142,7 @@ impl Default for GetTreestateResponse {
             hash: Hash([0; 32]),
             height: Height::MIN,
             time: Default::default(),
+            sprout: Default::default(),
             sapling: Default::default(),
             orchard: Default::default(),
         }
@@ -158,7 +170,10 @@ impl Treestate {
 impl Default for Treestate {
     fn default() -> Self {
         Self {
-            commitments: Commitments { final_state: None },
+            commitments: Commitments {
+                final_root: None,
+                final_state: None,
+            },
         }
     }
 }
@@ -172,6 +187,11 @@ impl Default for Treestate {
 #[serde_with::serde_as]
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Commitments {
+    /// Orchard or Sapling serialized note commitment tree root, hex-encoded.
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "finalRoot")]
+    final_root: Option<Vec<u8>>,
     /// Orchard or Sapling serialized note commitment tree, hex-encoded.
     #[serde_as(as = "Option<serde_with::hex::Hex>")]
     #[serde(skip_serializing_if = "Option::is_none")]
