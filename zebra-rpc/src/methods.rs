@@ -1841,10 +1841,9 @@ where
             .map_misc_error()?
         {
             zebra_state::ReadResponse::SproutTree(tree) => tree.map(|t| {
-                (
-                    t.to_rpc_bytes(),
-                    std::convert::Into::<[u8; 32]>::into(t.root()).to_vec(),
-                )
+                let mut root = Into::<[u8; 32]>::into(t.root()).to_vec();
+                root.reverse();
+                (t.to_rpc_bytes(), root)
             }),
             _ => unreachable!("unmatched response to a Sprout tree request"),
         };
@@ -1862,10 +1861,9 @@ where
                 .map_misc_error()?
             {
                 zebra_state::ReadResponse::SaplingTree(tree) => tree.map(|t| {
-                    (
-                        t.to_rpc_bytes(),
-                        std::convert::Into::<[u8; 32]>::into(t.root()).to_vec(),
-                    )
+                    let mut root = Into::<[u8; 32]>::into(t.root()).to_vec();
+                    root.reverse();
+                    (t.to_rpc_bytes(), root)
                 }),
                 _ => unreachable!("unmatched response to a Sapling tree request"),
             }
@@ -1888,6 +1886,7 @@ where
                 zebra_state::ReadResponse::OrchardTree(tree) => tree.map(|t| {
                     (
                         t.to_rpc_bytes(),
+                        // Note: no need to reverse bytes for Orchard
                         std::convert::Into::<[u8; 32]>::into(t.root()).to_vec(),
                     )
                 }),
