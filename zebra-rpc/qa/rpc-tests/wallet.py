@@ -8,62 +8,86 @@ from decimal import Decimal
 import time
 
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal, start_nodes, start_wallets, connect_nodes_bi
+from test_framework.util import assert_equal, start_nodes, start_wallets
 
+# Test that we can create a wallet and use an address from it to mine blocks.
 class WalletTest (BitcoinTestFramework):
 
     def __init__(self):
         super().__init__()
         self.cache_behavior = 'clean'
-        self.num_nodes = 4
+        self.num_nodes = 1
 
     def setup_network(self, split=False):
-        self.nodes = start_nodes(3, self.options.tmpdir)
+        args = [[False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
+        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
 
-        connect_nodes_bi(self.nodes,0,1)
-        connect_nodes_bi(self.nodes,1,2)
-        connect_nodes_bi(self.nodes,0,2)
-        self.is_network_split=False
-        self.sync_all()
-
-        # If nodes were connected, only one of them would generate a block
+        # Zallet needs a block to start
         self.nodes[0].generate(1)
-        self.sync_all()
 
-        # TODO: Wallets can be started but we need to add miner address at least one of them:
-        # https://github.com/ZcashFoundation/zebra/issues/9557
-        self.wallets = start_wallets(3, self.options.tmpdir)
+        self.wallets = start_wallets(self.num_nodes, self.options.tmpdir)
 
     def run_test(self):
-        print("checking connections...")
+        # Generate a new account
+        account = self.wallets[0].z_getnewaccount("test_account")
 
-        # As we connected the nodes to each other, they should have,
-        # at least 4 peers. Poll for that.
-        # TODO: Move this check to its own function.
-        timeout_for_connetions = 180
-        wait_time = 1
-        while timeout_for_connetions > 0:
-            if (len(self.nodes[0].getpeerinfo()) < 4 or
-                len(self.nodes[1].getpeerinfo()) < 4 or
-                len(self.nodes[2].getpeerinfo()) < 4):
-                timeout_for_connetions -= wait_time
-                time.sleep(wait_time)
-            else:
-                break
-        assert timeout_for_connetions > 0, "Timeout waiting for connections"
+        # Get an address for the account
+        address = self.wallets[0].z_getaddressforaccount(account['account_uuid'])
 
-        print("Mining blocks...")
+        # Get the receivers from the generated unified address
+        receivers = self.wallets[0].z_listunifiedreceivers(address['address'])
 
-        self.nodes[0].generate(1)
-        self.sync_all()
+        # Get the transparent address from the receivers
+        transparent_address = receivers['p2pkh']
 
-        walletinfo = self.wallets[0].getwalletinfo()
-        # TODO: getwalletinfo data is not implemented:
+        # Stop the wallet
+        try:
+            self.wallets[0].stop()
+        except Exception as e:
+            print("Ignoring stopping wallet error: ", e)
+        time.sleep(1)
+
+        # Hack for https://github.com/ZcashFoundation/zebra/issues/9708
+        # We Stop the wallet which has 1 block, generate 100 blocks in zebra,
+        # so when restarting Zebra it will have 1 block, just as the wallet.
+        self.nodes[0].generate(100)
+
+        # Stop the node
+        self.nodes[0].stop()
+        time.sleep(1)
+
+        # Restart the node with the generated address as the miner address
+        args = [[False, transparent_address]]
+        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
+
+        # Restart the wallet
+        self.wallets = start_wallets(self.num_nodes, self.options.tmpdir)
+
+        # TODO: Use getwalletinfo when implemented
         # https://github.com/zcash/wallet/issues/55
-        # TODO: Miner address is not in the wallet:
-        # https://github.com/ZcashFoundation/zebra/issues/9557
-        #assert_equal(Decimal(walletinfo['immature_balance']), Decimal('40'))
-        assert_equal(Decimal(walletinfo['balance']), Decimal('0'))
+
+        # No balance for the address in the node yet
+        node_balance = self.nodes[0].getaddressbalance(transparent_address)
+        assert_equal(node_balance['balance'], 0)
+
+        # No balance for the address in the wallet either
+        wallet_balance = self.wallets[0].z_gettotalbalance(1, True)
+        # TODO: Result is a string (https://github.com/zcash/wallet/issues/15)
+        assert_equal(wallet_balance['transparent'], '0.00000000')
+
+        # Mine a block
+        self.nodes[0].generate(1)
+
+        # Wait for the wallet to sync
+        time.sleep(1)
+
+        # Balance for the address increases in the node
+        node_balance = self.nodes[0].getaddressbalance(transparent_address)
+        assert_equal(node_balance['balance'], 625000000)
+
+        # Balance for the address increases in the wallet
+        wallet_balance = self.wallets[0].z_gettotalbalance(1, True)
+        assert_equal(wallet_balance['transparent'], '6.25000000')
 
 if __name__ == '__main__':
     WalletTest ().main ()
