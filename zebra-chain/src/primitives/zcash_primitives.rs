@@ -4,7 +4,7 @@
 use std::{io, ops::Deref, sync::Arc};
 
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
-use zcash_protocol::value::BalanceError;
+use zcash_protocol::value::{BalanceError, ZatBalance};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -259,6 +259,13 @@ impl PrecomputedTxData {
             txid_parts,
             all_previous_outputs,
         })
+    }
+
+    /// Returns the Orchard bundle in `tx_data`.
+    pub fn orchard_bundle(
+        &self,
+    ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
+        self.tx_data.orchard_bundle().cloned()
     }
 }
 
