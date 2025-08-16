@@ -291,3 +291,51 @@ fn zebra_mining_miner_address_from_toml() {
         miner_address
     );
 }
+
+// --- Sensitive env deny-list behaviour ---
+
+#[test]
+fn config_env_unknown_non_sensitive_key_errors() {
+    let env = EnvGuard::new();
+
+    // Unknown field without sensitive suffix should cause an error
+    env.set_var("ZEBRA_MINING__FOO", "bar");
+
+    let result = ZebradConfig::load(None);
+    assert!(
+        result.is_err(),
+        "Unknown non-sensitive env key should error (deny_unknown_fields)"
+    );
+}
+
+#[test]
+fn config_env_unknown_sensitive_key_is_ignored() {
+    let env = EnvGuard::new();
+
+    // Unknown field with sensitive suffix should be filtered out and ignored
+    env.set_var("ZEBRA_MINING__TOKEN", "secret-token");
+
+    let result = ZebradConfig::load(None);
+    assert!(
+        result.is_ok(),
+        "Unknown sensitive-suffix env key should be ignored (no error)"
+    );
+}
+
+#[test]
+fn config_env_elasticsearch_password_is_ignored() {
+    let env = EnvGuard::new();
+
+    // This key may or may not exist depending on features. It should be filtered regardless.
+    env.set_var("ZEBRA_STATE__ELASTICSEARCH_PASSWORD", "topsecret");
+
+    let _config = ZebradConfig::load(None).expect(
+        "Setting elasticsearch password via env should not cause errors (filtered)",
+    );
+
+    #[cfg(feature = "elasticsearch")]
+    {
+        // When the feature is enabled, ensure env override didn't apply and default remains.
+        assert_eq!(_config.state.elasticsearch_password, "");
+    }
+}

@@ -8,6 +8,21 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Returns true if a leaf key name should be considered sensitive and blocked
+/// from environment variable overrides.
+fn is_sensitive_leaf_key(leaf_key: &str) -> bool {
+    let lower = leaf_key.to_ascii_lowercase();
+    // Centralized, case-insensitive suffix-based deny-list
+    lower.ends_with("password")
+        || lower.ends_with("secret")
+        || lower.ends_with("token")
+        // Block raw cookies only if a field is literally named "cookie".
+        // (Paths like cookie_dir are not affected.)
+        || lower.ends_with("cookie")
+        // Only raw private keys; paths like *_private_key_path are not affected.
+        || lower.ends_with("private_key")
+}
+
 /// Configuration for `zebrad`.
 ///
 /// The `zebrad` config is a TOML-encoded version of this structure. The meaning
@@ -84,13 +99,36 @@ impl ZebradConfig {
             builder = builder.add_source(config::File::from(path).required(true));
         }
 
-        // 3. Load from standard ZEBRA_ environment variables, which will override legacy vars
+        // 3. Load from standard ZEBRA_ environment variables with a sensitive-leaf deny-list
         // Use ZEBRA_ prefix and __ as separator for nested keys
+        // We filter the raw environment first, then let config-rs parse types via try_parsing(true).
+        let mut filtered_env: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for (key, value) in std::env::vars() {
+            if !key.starts_with("ZEBRA_") {
+                continue;
+            }
+
+            // Strip the prefix and split nested keys on "__" to find the leaf key name.
+            if let Some(without_prefix) = key.strip_prefix("ZEBRA_") {
+                let parts: Vec<&str> = without_prefix.split("__").collect();
+                if let Some(leaf) = parts.last() {
+                    if is_sensitive_leaf_key(leaf) {
+                        // Skip sensitive leaf keys from env overrides
+                        continue;
+                    }
+                }
+            }
+
+            filtered_env.insert(key, value);
+        }
+
         builder = builder.add_source(
             config::Environment::with_prefix("ZEBRA")
                 .prefix_separator("_")
                 .separator("__")
-                .try_parsing(true),
+                .try_parsing(true)
+                .source(Some(filtered_env)),
         );
 
         // Build the configuration
