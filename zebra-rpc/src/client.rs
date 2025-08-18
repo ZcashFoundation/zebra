@@ -28,8 +28,8 @@ pub use crate::methods::{
         submit_block::{SubmitBlockErrorResponse, SubmitBlockResponse},
         subsidy::{BlockSubsidy, FundingStream, GetBlockSubsidyResponse},
         transaction::{
-            Input, JoinSplit, Orchard, OrchardAction, Output, ScriptPubKey, ScriptSig,
-            ShieldedOutput, ShieldedSpend, TransactionObject, TransactionTemplate,
+            Input, JoinSplit, Orchard, OrchardAction, OrchardFlags, Output, ScriptPubKey,
+            ScriptSig, ShieldedOutput, ShieldedSpend, TransactionObject, TransactionTemplate,
         },
         unified_address::ZListUnifiedReceiversResponse,
         validate_address::ValidateAddressResponse,
