@@ -41,7 +41,7 @@ pub fn test_transaction_serialization() {
 
     assert_eq!(
         serde_json::to_string(&tx).unwrap(),
-        r#"{"hex":"42","height":1,"confirmations":0,"vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":2,"locktime":0}"#
+        r#"{"hex":"42","height":1,"confirmations":0,"vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"vjoinsplit":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":2,"locktime":0}"#
     );
 
     let tx = GetRawTransactionResponse::Object(Box::new(TransactionObject {
@@ -75,7 +75,7 @@ pub fn test_transaction_serialization() {
 
     assert_eq!(
         serde_json::to_string(&tx).unwrap(),
-        r#"{"hex":"42","vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":4,"locktime":0}"#
+        r#"{"hex":"42","vin":[],"vout":[],"vShieldedSpend":[],"vShieldedOutput":[],"vjoinsplit":[],"txid":"0000000000000000000000000000000000000000000000000000000000000000","overwintered":false,"version":4,"locktime":0}"#
     );
 }
 

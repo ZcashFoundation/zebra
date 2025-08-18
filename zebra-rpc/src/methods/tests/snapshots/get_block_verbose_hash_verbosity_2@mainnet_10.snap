@@ -51,6 +51,7 @@ expression: block
       ],
       "vShieldedSpend": [],
       "vShieldedOutput": [],
+      "vjoinsplit": [],
       "valueBalance": 0.0,
       "valueBalanceZat": 0,
       "size": 129,
