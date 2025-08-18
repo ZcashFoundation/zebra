@@ -360,6 +360,13 @@ impl PrecomputedTxData {
     ) -> Option<orchard::bundle::Bundle<orchard::bundle::Authorized, ZatBalance>> {
         self.tx_data.orchard_bundle().cloned()
     }
+
+    /// Returns the Sapling bundle in `tx_data`.
+    pub fn sapling_bundle(
+        &self,
+    ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
+        self.tx_data.sapling_bundle().cloned()
+    }
 }
 
 /// Compute a signature hash using librustzcash.
