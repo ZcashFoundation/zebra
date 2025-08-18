@@ -3,19 +3,12 @@
 
 use std::{io, ops::Deref, sync::Arc};
 
-use sapling_crypto::{
-    bundle::{Authorized, GrothProofBytes, OutputDescription, SpendDescription},
-    note::ExtractedNoteCommitment,
-    value::ValueCommitment,
-};
-use zcash_note_encryption::EphemeralKeyBytes;
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
 use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
 use crate::{
     amount::{Amount, NonNegative},
     parameters::NetworkUpgrade,
-    sapling::{self, AnchorVariant, PerSpendAnchor},
     serialization::ZcashSerialize,
     transaction::{AuthDigest, HashType, SigHash, Transaction},
     transparent::{self, Script},
@@ -189,84 +182,6 @@ impl TryFrom<Amount> for ZatBalance {
 
     fn try_from(amount: Amount) -> Result<Self, Self::Error> {
         ZatBalance::from_i64(amount.into())
-    }
-}
-
-impl<A: AnchorVariant + Clone> TryFrom<&sapling::ShieldedData<A>>
-    for sapling_crypto::Bundle<Authorized, ZatBalance>
-where
-    sapling::Spend<PerSpendAnchor>: From<(sapling::Spend<A>, A::Shared)>,
-{
-    type Error = Error;
-
-    fn try_from(data: &sapling::ShieldedData<A>) -> Result<Self, Self::Error> {
-        let spends: Vec<SpendDescription<Authorized>> = data
-            .spends_per_anchor()
-            .map(TryFrom::try_from)
-            .collect::<Result<_, _>>()?;
-
-        let outputs: Vec<OutputDescription<GrothProofBytes>> = data
-            .outputs()
-            .map(TryFrom::try_from)
-            .collect::<Result<_, _>>()?;
-
-        let vb = ZatBalance::try_from(*data.value_balance())?;
-
-        let auth = Authorized {
-            binding_sig: *data.binding_sig(),
-        };
-
-        sapling_crypto::Bundle::from_parts(spends, outputs, vb, auth).ok_or(Error::Conversion(
-            "failed to convert sapling::ShieldedData to sapling_crypto::Bundle".into(),
-        ))
-    }
-}
-
-impl TryFrom<sapling::Spend<PerSpendAnchor>> for SpendDescription<Authorized> {
-    type Error = Error;
-
-    fn try_from(spend: sapling::Spend<PerSpendAnchor>) -> Result<Self, Self::Error> {
-        let cv = ValueCommitment::from_bytes_not_small_order(&spend.cv().into())
-            .into_option()
-            .ok_or(Error::Conversion(
-                "failed to convert cv to ValueCommitment".into(),
-            ))?;
-
-        Ok(Self::from_parts(
-            cv,
-            spend.per_spend_anchor().0,
-            sapling_crypto::Nullifier(*spend.nullifier().0),
-            spend.rk().clone().into(),
-            spend.zkproof().0,
-            *spend.spend_auth_sig(),
-        ))
-    }
-}
-
-impl TryFrom<&sapling::Output> for sapling_crypto::bundle::OutputDescription<GrothProofBytes> {
-    type Error = Error;
-
-    fn try_from(output: &sapling::Output) -> Result<Self, Self::Error> {
-        let cv = ValueCommitment::from_bytes_not_small_order(&output.cv().into())
-            .into_option()
-            .ok_or(Error::Conversion(
-                "failed to convert cv to ValueCommitment".into(),
-            ))?;
-
-        let cmu = ExtractedNoteCommitment::from_bytes(&output.cm_u().into())
-            .into_option()
-            .ok_or(Error::Conversion(
-                "failed to convert cmu to ExtractedNoteCommitment".into(),
-            ))?;
-
-        Ok(Self::from_parts(
-            cv,
-            cmu,
-            EphemeralKeyBytes(output.ephemeral_key().into()),
-            output.enc_ciphertext().0,
-            output.out_ciphertext().0,
-            output.zkproof().0,
-        ))
     }
 }
 
