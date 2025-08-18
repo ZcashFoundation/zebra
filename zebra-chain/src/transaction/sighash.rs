@@ -130,4 +130,11 @@ impl SigHasher {
     ) -> Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>> {
         self.precomputed_tx_data.orchard_bundle()
     }
+
+    /// Returns the Sapling bundle in the precomputed transaction data.
+    pub fn sapling_bundle(
+        &self,
+    ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
+        self.precomputed_tx_data.sapling_bundle()
+    }
 }

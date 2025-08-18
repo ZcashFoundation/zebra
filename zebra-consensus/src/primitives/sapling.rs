@@ -18,10 +18,7 @@ use tower_fallback::Fallback;
 
 use sapling_crypto::{bundle::Authorized, BatchValidator, Bundle};
 use zcash_protocol::value::ZatBalance;
-use zebra_chain::{
-    sapling::{AnchorVariant, PerSpendAnchor, ShieldedData, Spend},
-    transaction::SigHash,
-};
+use zebra_chain::transaction::SigHash;
 
 use crate::groth16::SAPLING;
 
@@ -34,18 +31,9 @@ pub struct Item {
 }
 
 impl Item {
-    /// Creates a new [`Item`] from Sapling shielded data and a sighash.
-    pub fn new<A: AnchorVariant + Clone>(data: &ShieldedData<A>, sighash: &SigHash) -> Self
-    where
-        Spend<PerSpendAnchor>: From<(Spend<A>, A::Shared)>,
-    {
-        let bundle = sapling_crypto::Bundle::try_from(data)
-            .expect("Sapling shielded data should be convertible to sapling_crypto::Bundle");
-
-        Item {
-            bundle,
-            sighash: *sighash,
-        }
+    /// Creates a new [`Item`] from a Sapling bundle and sighash.
+    pub fn new(bundle: Bundle<Authorized, ZatBalance>, sighash: SigHash) -> Self {
+        Self { bundle, sighash }
     }
 }
 

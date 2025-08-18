@@ -30,7 +30,6 @@ use zebra_chain::{
     block,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
-    sapling,
     serialization::DateTime32,
     transaction::{
         self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
@@ -502,7 +501,6 @@ where
                 }
                 Transaction::V4 {
                     joinsplit_data,
-                    sapling_shielded_data,
                     ..
                 } => Self::verify_v4_transaction(
                     &req,
@@ -510,28 +508,23 @@ where
                     script_verifier,
                     cached_ffi_transaction.clone(),
                     joinsplit_data,
-                    sapling_shielded_data,
                 )?,
                 Transaction::V5 {
-                    sapling_shielded_data,
                     ..
                 } => Self::verify_v5_transaction(
                     &req,
                     &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    sapling_shielded_data,
                 )?,
                 #[cfg(feature="tx_v6")]
                 Transaction::V6 {
-                    sapling_shielded_data,
                     ..
                 } => Self::verify_v6_transaction(
                     &req,
                     &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    sapling_shielded_data,
                 )?,
             };
 
@@ -877,14 +870,15 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
         let nu = request.upgrade(network);
 
         Self::verify_v4_transaction_network_upgrade(&tx, nu)?;
 
-        let shielded_sighash = cached_ffi_transaction
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+
+        let sighash = cached_ffi_transaction
             .sighasher()
             .sighash(HashType::ALL, None);
 
@@ -893,14 +887,8 @@ where
             script_verifier,
             cached_ffi_transaction,
         )?
-        .and(Self::verify_sprout_shielded_data(
-            joinsplit_data,
-            &shielded_sighash,
-        )?)
-        .and(Self::verify_sapling_shielded_data(
-            sapling_shielded_data,
-            &shielded_sighash,
-        )))
+        .and(Self::verify_sprout_shielded_data(joinsplit_data, &sighash)?)
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash)))
     }
 
     /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
@@ -968,15 +956,16 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let nu = request.upgrade(network);
 
         Self::verify_v5_transaction_network_upgrade(&transaction, nu)?;
 
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
         let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
-        let shielded_sighash = cached_ffi_transaction
+
+        let sighash = cached_ffi_transaction
             .sighasher()
             .sighash(HashType::ALL, None);
 
@@ -985,14 +974,8 @@ where
             script_verifier,
             cached_ffi_transaction,
         )?
-        .and(Self::verify_sapling_shielded_data(
-            sapling_shielded_data,
-            &shielded_sighash,
-        ))
-        .and(Self::verify_orchard_shielded_data(
-            orchard_bundle,
-            &shielded_sighash,
-        )?))
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash)))
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
@@ -1039,15 +1022,8 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(
-            request,
-            network,
-            script_verifier,
-            cached_ffi_transaction,
-            sapling_shielded_data,
-        )
+        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1151,14 +1127,10 @@ where
     }
 
     /// Verifies a transaction's Sapling shielded data.
-    fn verify_sapling_shielded_data<A>(
-        sapling_shielded_data: &Option<sapling::ShieldedData<A>>,
-        shielded_sighash: &SigHash,
-    ) -> AsyncChecks
-    where
-        A: sapling::AnchorVariant + Clone,
-        sapling::Spend<sapling::PerSpendAnchor>: From<(sapling::Spend<A>, A::Shared)>,
-    {
+    fn verify_sapling_bundle(
+        bundle: Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>>,
+        sighash: &SigHash,
+    ) -> AsyncChecks {
         let mut async_checks = AsyncChecks::new();
 
         // The Sapling batch verifier checks the following consensus rules:
@@ -1208,25 +1180,25 @@ where
         // > signature changes to prohibit non-canonical encodings.
         //
         // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-        if let Some(sapling_shielded_data) = sapling_shielded_data {
-            async_checks.push(primitives::sapling::VERIFIER.clone().oneshot(
-                primitives::sapling::Item::new(sapling_shielded_data, shielded_sighash),
-            ));
+        if let Some(bundle) = bundle {
+            async_checks.push(
+                primitives::sapling::VERIFIER
+                    .clone()
+                    .oneshot(primitives::sapling::Item::new(bundle, *sighash)),
+            );
         }
 
         async_checks
     }
 
     /// Verifies a transaction's Orchard shielded data.
-    fn verify_orchard_shielded_data(
-        orchard_bundle: Option<
-            ::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>,
-        >,
-        shielded_sighash: &SigHash,
-    ) -> Result<AsyncChecks, TransactionError> {
+    fn verify_orchard_bundle(
+        bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+        sighash: &SigHash,
+    ) -> AsyncChecks {
         let mut async_checks = AsyncChecks::new();
 
-        if let Some(orchard_bundle) = orchard_bundle {
+        if let Some(bundle) = bundle {
             // # Consensus
             //
             // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
@@ -1238,12 +1210,14 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            async_checks.push(primitives::halo2::VERIFIER.clone().oneshot(
-                primitives::halo2::Item::new(orchard_bundle, *shielded_sighash),
-            ));
+            async_checks.push(
+                primitives::halo2::VERIFIER
+                    .clone()
+                    .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
+            );
         }
 
-        Ok(async_checks)
+        async_checks
     }
 }
 
