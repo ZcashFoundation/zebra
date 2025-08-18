@@ -329,9 +329,8 @@ fn config_env_elasticsearch_password_is_ignored() {
     // This key may or may not exist depending on features. It should be filtered regardless.
     env.set_var("ZEBRA_STATE__ELASTICSEARCH_PASSWORD", "topsecret");
 
-    let _config = ZebradConfig::load(None).expect(
-        "Setting elasticsearch password via env should not cause errors (filtered)",
-    );
+    let _config = ZebradConfig::load(None)
+        .expect("Setting elasticsearch password via env should not cause errors (filtered)");
 
     #[cfg(feature = "elasticsearch")]
     {
