@@ -10,7 +10,7 @@ use tower::BoxError;
 
 use zebra_chain::{
     block::{Block, Height},
-    parameters::Network,
+    parameters::{testnet::ConfiguredActivationHeights, Network},
     primitives::byte_array::increment_big_endian,
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
@@ -33,7 +33,13 @@ const NUM_BLOCKS_TO_SUBMIT: usize = 200;
 pub(crate) async fn submit_blocks_test() -> Result<()> {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Default::default());
+    let network = Network::new_regtest(
+        ConfiguredActivationHeights {
+            nu5: Some(100),
+            ..Default::default()
+        }
+        .into(),
+    );
     let mut config = os_assigned_rpc_port_config(false, &network)?;
     config.mempool.debug_enable_at_height = Some(0);
 

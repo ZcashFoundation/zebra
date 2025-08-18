@@ -100,6 +100,11 @@ impl FundingStreamReceiver {
             )
         }
     }
+
+    /// Returns true if this [`FundingStreamReceiver`] is [`FundingStreamReceiver::Deferred`].
+    pub fn is_deferred(&self) -> bool {
+        matches!(self, Self::Deferred)
+    }
 }
 
 /// Denominator as described in [protocol specification §7.10.1][7.10.1].
@@ -141,6 +146,11 @@ impl FundingStreams {
         }
     }
 
+    /// Creates a new empty [`FundingStreams`] representing no funding streams.
+    pub fn empty() -> Self {
+        Self::new(Height::MAX..Height::MAX, HashMap::new())
+    }
+
     /// Returns height range where these [`FundingStreams`] should apply.
     pub fn height_range(&self) -> &std::ops::Range<Height> {
         &self.height_range
@@ -154,6 +164,22 @@ impl FundingStreams {
     /// Returns a recipient with the provided receiver.
     pub fn recipient(&self, receiver: FundingStreamReceiver) -> Option<&FundingStreamRecipient> {
         self.recipients.get(&receiver)
+    }
+
+    /// Accepts a target number of addresses that all recipients of this funding stream
+    /// except the [`FundingStreamReceiver::Deferred`] receiver should have.
+    ///
+    /// Extends the addresses for all funding stream recipients by repeating their
+    /// existing addresses until reaching the provided target number of addresses.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn extend_recipient_addresses(&mut self, target_len: usize) {
+        for (receiver, recipient) in &mut self.recipients {
+            if receiver.is_deferred() {
+                continue;
+            }
+
+            recipient.extend_addresses(target_len);
+        }
     }
 }
 
@@ -199,6 +225,30 @@ impl FundingStreamRecipient {
     /// Returns the receiver of this funding stream.
     pub fn addresses(&self) -> &[transparent::Address] {
         &self.addresses
+    }
+
+    /// Accepts a target number of addresses that this recipient should have.
+    ///
+    /// Extends the addresses for this funding stream recipient by repeating
+    /// existing addresses until reaching the provided target number of addresses.
+    ///
+    /// # Panics
+    ///
+    /// If there are no recipient addresses.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn extend_addresses(&mut self, target_len: usize) {
+        assert!(
+            !self.addresses.is_empty(),
+            "cannot extend addresses for empty recipient"
+        );
+
+        self.addresses = self
+            .addresses
+            .iter()
+            .cycle()
+            .take(target_len)
+            .cloned()
+            .collect();
     }
 }
 
@@ -585,7 +635,7 @@ pub const POST_NU6_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 13;
 /// however we know this value beforehand so we prefer to make it a constant instead.
 ///
 /// [7.10]: https://zips.z.cash/protocol/protocol.pdf#fundingstreams
-pub const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 37;
+pub const POST_NU6_1_FUNDING_STREAMS_NUM_ADDRESSES_TESTNET: usize = 27;
 
 /// List of addresses for the Major Grants post-NU6 funding stream on Testnet administered by the Financial Privacy Fund (FPF).
 pub const POST_NU6_FUNDING_STREAM_FPF_ADDRESSES_TESTNET: [&str;

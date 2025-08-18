@@ -134,7 +134,7 @@ impl From<&BTreeMap<Height, NetworkUpgrade>> for ConfiguredActivationHeights {
     fn from(activation_heights: &BTreeMap<Height, NetworkUpgrade>) -> Self {
         let mut configured_activation_heights = ConfiguredActivationHeights::default();
 
-        for (height, network_upgrade) in activation_heights.iter() {
+        for (height, network_upgrade) in activation_heights {
             let field = match network_upgrade {
                 NetworkUpgrade::BeforeOverwinter => {
                     &mut configured_activation_heights.before_overwinter
@@ -204,7 +204,7 @@ impl ConfiguredFundingStreams {
             });
 
         assert!(
-            height_range.start < height_range.end,
+            height_range.start <= height_range.end,
             "funding stream end height must be above start height"
         );
 
@@ -228,23 +228,52 @@ impl ConfiguredFundingStreams {
 
         funding_streams
     }
+
+    /// Converts the [`ConfiguredFundingStreams`] to a [`FundingStreams`].
+    ///
+    /// # Panics
+    ///
+    /// If `height_range` is None.
+    pub fn into_funding_streams_unchecked(self) -> FundingStreams {
+        let height_range = self.height_range.expect("must have height range");
+        let recipients = self
+            .recipients
+            .into_iter()
+            .flat_map(|recipients| {
+                recipients
+                    .into_iter()
+                    .map(ConfiguredFundingStreamRecipient::into_recipient)
+            })
+            .collect();
+
+        FundingStreams::new(height_range, recipients)
+    }
+}
+
+/// Returns the number of funding stream address periods there are for the provided network and height range.
+fn num_funding_stream_addresses_required_for_height_range(
+    height_range: &std::ops::Range<Height>,
+    network: &Network,
+) -> usize {
+    1u32.checked_add(funding_stream_address_period(
+        height_range
+            .end
+            .previous()
+            .expect("end height must be above start height and genesis height"),
+        network,
+    ))
+    .expect("no overflow should happen in this sum")
+    .checked_sub(funding_stream_address_period(height_range.start, network))
+    .expect("no overflow should happen in this sub") as usize
 }
 
 /// Checks that the provided [`FundingStreams`] has sufficient recipient addresses for the
 /// funding stream address period of the provided [`Network`].
 fn check_funding_stream_address_period(funding_streams: &FundingStreams, network: &Network) {
-    let height_range = funding_streams.height_range();
-    let expected_min_num_addresses =
-        1u32.checked_add(funding_stream_address_period(
-            height_range
-                .end
-                .previous()
-                .expect("end height must be above start height and genesis height"),
-            network,
-        ))
-        .expect("no overflow should happen in this sum")
-        .checked_sub(funding_stream_address_period(height_range.start, network))
-        .expect("no overflow should happen in this sub") as usize;
+    let expected_min_num_addresses = num_funding_stream_addresses_required_for_height_range(
+        funding_streams.height_range(),
+        network,
+    );
 
     for (&receiver, recipient) in funding_streams.recipients() {
         if receiver == FundingStreamReceiver::Deferred {
@@ -252,11 +281,12 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
             continue;
         }
 
+        let num_addresses = recipient.addresses().len();
         assert!(
-            recipient.addresses().len() >= expected_min_num_addresses,
+            num_addresses >= expected_min_num_addresses,
             "recipients must have a sufficient number of addresses for height range, \
-         minimum num addresses required: {expected_min_num_addresses}, given: {}",
-            recipient.addresses().len()
+             minimum num addresses required: {expected_min_num_addresses}, only {num_addresses} were provided.\
+             receiver: {receiver:?}, recipient: {recipient:?}"
         );
 
         for address in recipient.addresses() {
@@ -270,7 +300,7 @@ fn check_funding_stream_address_period(funding_streams: &FundingStreams, network
 }
 
 /// Configurable activation heights for Regtest and configured Testnets.
-#[derive(Serialize, Deserialize, Default, Clone)]
+#[derive(Serialize, Deserialize, Default, Debug, Clone)]
 #[serde(rename_all = "PascalCase", deny_unknown_fields)]
 pub struct ConfiguredActivationHeights {
     /// Activation height for `BeforeOverwinter` network upgrade.
@@ -297,6 +327,44 @@ pub struct ConfiguredActivationHeights {
     /// Activation height for `NU7` network upgrade.
     #[serde(rename = "NU7")]
     pub nu7: Option<u32>,
+}
+
+impl ConfiguredActivationHeights {
+    /// Converts a [`ConfiguredActivationHeights`] to one that uses the default values for Regtest where
+    /// no activation heights are specified.
+    fn for_regtest(self) -> Self {
+        let Self {
+            before_overwinter,
+            overwinter,
+            sapling,
+            blossom,
+            heartwood,
+            canopy,
+            nu5,
+            nu6,
+            nu6_1,
+            nu7,
+        } = self;
+
+        let overwinter = overwinter.or(before_overwinter).or(Some(1));
+        let sapling = sapling.or(overwinter);
+        let blossom = blossom.or(sapling);
+        let heartwood = heartwood.or(blossom);
+        let canopy = canopy.or(heartwood);
+
+        Self {
+            before_overwinter,
+            overwinter,
+            sapling,
+            blossom,
+            heartwood,
+            canopy,
+            nu5,
+            nu6,
+            nu6_1,
+            nu7,
+        }
+    }
 }
 
 /// Builder for the [`Parameters`] struct.
@@ -349,12 +417,8 @@ impl Default for ParametersBuilder {
             // Testnet PoWLimit is defined as `2^251 - 1` on page 73 of the protocol specification:
             // <https://zips.z.cash/protocol/protocol.pdf>
             //
-            // `zcashd` converts the PoWLimit into a compact representation before
-            // using it to perform difficulty filter checks.
-            //
-            // The Zcash specification converts to compact for the default difficulty
-            // filter, but not for testnet minimum difficulty blocks. (ZIP 205 and
-            // ZIP 208 don't specify this conversion either.) See #1277 for details.
+            // The PoWLimit must be converted into a compact representation before using it
+            // to perform difficulty filter checks (see https://github.com/zcash/zips/pull/417).
             target_difficulty_limit: ExpandedDifficulty::from((U256::one() << 251) - 1)
                 .to_compact()
                 .to_expanded()
@@ -518,6 +582,34 @@ impl ParametersBuilder {
         self
     }
 
+    /// Clears funding streams from the [`Parameters`] being built.
+    pub fn clear_funding_streams(mut self) -> Self {
+        self.funding_streams = vec![];
+        self
+    }
+
+    /// Extends the configured funding streams to have as many recipients as are required for their
+    /// height ranges by repeating the recipients that have been configured.
+    ///
+    /// This should be called after configuring the desired network upgrade activation heights.
+    #[cfg(any(test, feature = "proptest-impl"))]
+    pub fn extend_funding_streams(mut self) -> Self {
+        // self.funding_streams.extend(FUNDING_STREAMS_TESTNET);
+
+        let network = self.to_network_unchecked();
+
+        for funding_streams in &mut self.funding_streams {
+            funding_streams.extend_recipient_addresses(
+                num_funding_stream_addresses_required_for_height_range(
+                    funding_streams.height_range(),
+                    &network,
+                ),
+            );
+        }
+
+        self
+    }
+
     /// Sets the target difficulty limit to be used in the [`Parameters`] being built.
     // TODO: Accept a hex-encoded String instead?
     pub fn with_target_difficulty_limit(
@@ -615,13 +707,9 @@ impl ParametersBuilder {
         let network = self.to_network_unchecked();
 
         // Final check that the configured funding streams will be valid for these Testnet parameters.
-        // TODO: Always check funding stream address period once the testnet parameters are being serialized (#8920).
-        #[cfg(not(any(test, feature = "proptest-impl")))]
-        {
-            for fs in self.funding_streams.iter() {
-                // Check that the funding streams are valid for the configured Testnet parameters.
-                check_funding_stream_address_period(fs, &network);
-            }
+        for fs in &self.funding_streams {
+            // Check that the funding streams are valid for the configured Testnet parameters.
+            check_funding_stream_address_period(fs, &network);
         }
 
         network
@@ -660,6 +748,24 @@ impl ParametersBuilder {
     }
 }
 
+/// A struct of parameters for configuring Regtest in Zebra.
+#[derive(Debug, Default, Clone)]
+pub struct RegtestParameters {
+    /// The configured network upgrade activation heights to use on Regtest
+    pub activation_heights: ConfiguredActivationHeights,
+    /// Configured funding streams
+    pub funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+}
+
+impl From<ConfiguredActivationHeights> for RegtestParameters {
+    fn from(value: ConfiguredActivationHeights) -> Self {
+        Self {
+            activation_heights: value,
+            ..Default::default()
+        }
+    }
+}
+
 /// Network consensus parameters for test networks such as Regtest and the default Testnet.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Parameters {
@@ -670,10 +776,6 @@ pub struct Parameters {
     /// The genesis block hash
     genesis_hash: block::Hash,
     /// The network upgrade activation heights for this network.
-    ///
-    /// Note: This value is ignored by `Network::activation_list()` when `zebra-chain` is
-    ///       compiled with the `zebra-test` feature flag AND the `TEST_FAKE_ACTIVATION_HEIGHTS`
-    ///       environment variable is set.
     activation_heights: BTreeMap<Height, NetworkUpgrade>,
     /// Slow start interval for this network
     slow_start_interval: Height,
@@ -716,11 +818,11 @@ impl Parameters {
     ///
     /// Creates an instance of [`Parameters`] with `Regtest` values.
     pub fn new_regtest(
-        ConfiguredActivationHeights { nu5, nu6, nu7, .. }: ConfiguredActivationHeights,
+        RegtestParameters {
+            activation_heights,
+            funding_streams,
+        }: RegtestParameters,
     ) -> Self {
-        #[cfg(any(test, feature = "proptest-impl"))]
-        let nu5 = nu5.or(Some(100));
-
         let parameters = Self::build()
             .with_genesis_hash(REGTEST_GENESIS_HASH)
             // This value is chosen to match zcashd, see: <https://github.com/zcash/zcash/blob/master/src/chainparams.cpp#L654>
@@ -730,19 +832,10 @@ impl Parameters {
             .with_slow_start_interval(Height::MIN)
             // Removes default Testnet activation heights if not configured,
             // most network upgrades are disabled by default for Regtest in zcashd
-            .with_activation_heights(ConfiguredActivationHeights {
-                canopy: Some(1),
-                nu5,
-                nu6,
-                nu7,
-                ..Default::default()
-            })
+            .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
+            .with_funding_streams(funding_streams.unwrap_or_default())
             .with_lockbox_disbursements(Vec::new());
-
-        // TODO: Always clear funding streams on Regtest once the testnet parameters are being serialized (#8920).
-        // #[cfg(not(any(test, feature = "proptest-impl")))]
-        let parameters = parameters.with_funding_streams(Default::default());
 
         Self {
             network_name: "Regtest".to_string(),
@@ -771,7 +864,7 @@ impl Parameters {
             activation_heights: _,
             slow_start_interval,
             slow_start_shift,
-            funding_streams,
+            funding_streams: _,
             target_difficulty_limit,
             disable_pow,
             should_allow_unshielded_coinbase_spends,
@@ -784,7 +877,6 @@ impl Parameters {
             && self.genesis_hash == genesis_hash
             && self.slow_start_interval == slow_start_interval
             && self.slow_start_shift == slow_start_shift
-            && self.funding_streams == funding_streams
             && self.target_difficulty_limit == target_difficulty_limit
             && self.disable_pow == disable_pow
             && self.should_allow_unshielded_coinbase_spends

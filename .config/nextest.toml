@@ -16,10 +16,6 @@ default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced
 [profile.check-no-git-dependencies]
 default-filter = 'test(check_no_git_dependencies)'
 
-[profile.state-fake-activation-heights]
-slow-timeout = { period = "10m", terminate-after = 1 }
-default-filter = 'package(zebra-state) and test(~with_fake_activation_heights)'
-
 [profile.sync-large-checkpoints-empty]
 slow-timeout = { period = "60m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=sync_large_checkpoints_empty)'

@@ -130,7 +130,7 @@ zebra-checkpoints = [
 ]
 
 # The gRPC tests also need an installed lightwalletd binary
-lightwalletd-grpc-tests = ["tonic-build"]
+lightwalletd-grpc-tests = ["tonic-prost-build"]
 
 # tokio-console support
 #
@@ -250,7 +250,7 @@ console-subscriber = { workspace = true, optional = true }
 vergen-git2 = { workspace = true, features = ["cargo", "rustc"] }
 
 # test feature lightwalletd-grpc-tests
-tonic-build = { workspace = true, optional = true }
+tonic-prost-build = { workspace = true, optional = true }
 
 [dev-dependencies]
 abscissa_core = { workspace = true, features = ["testing"] }
@@ -279,6 +279,7 @@ zcash_keys = { workspace = true }
 # test feature lightwalletd-grpc-tests
 prost = { workspace = true }
 tonic = { workspace = true }
+tonic-prost = { workspace = true }
 
 proptest = { workspace = true }
 proptest-derive = { workspace = true }

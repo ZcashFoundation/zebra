@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use zcash_protocol::value::ZatBalance;
 use zcash_transparent::sighash::SighashType;
 
 use super::Transaction;
@@ -115,5 +116,12 @@ impl SigHasher {
             hash_type,
             input_index_script_code,
         )
+    }
+
+    /// Returns the Orchard bundle in the precomputed transaction data.
+    pub fn orchard_bundle(
+        &self,
+    ) -> Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>> {
+        self.precomputed_tx_data.orchard_bundle()
     }
 }
