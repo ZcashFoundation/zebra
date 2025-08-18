@@ -12,6 +12,7 @@ use serde_with::serde_as;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
+    orchard,
     parameters::Network,
     primitives::ed25519,
     sapling::NotSmallOrderValueCommitment,
@@ -484,6 +485,7 @@ pub struct ShieldedOutput {
 }
 
 /// Object with Orchard-specific information.
+#[serde_with::serde_as]
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct Orchard {
     /// Array of Orchard actions.
@@ -494,6 +496,35 @@ pub struct Orchard {
     /// The net value of Orchard Actions in zatoshis.
     #[serde(rename = "valueBalanceZat")]
     value_balance_zat: i64,
+    /// The flags.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    flags: Option<OrchardFlags>,
+    /// A root of the Orchard note commitment tree at some block height in the past
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[getter(copy)]
+    anchor: Option<[u8; 32]>,
+    /// Encoding of aggregated zk-SNARK proofs for Orchard Actions
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proof: Option<Vec<u8>>,
+    /// An Orchard binding signature on the SIGHASH transaction hash
+    #[serde(rename = "bindingSig")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde_as(as = "Option<serde_with::hex::Hex>")]
+    #[getter(copy)]
+    binding_sig: Option<[u8; 64]>,
+}
+
+/// Object with Orchard-specific information.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct OrchardFlags {
+    /// Whether Orchard outputs are enabled.
+    #[serde(rename = "enableOutputs")]
+    enable_outputs: bool,
+    /// Whether Orchard spends are enabled.
+    #[serde(rename = "enableSpends")]
+    enable_spends: bool,
 }
 
 /// The Orchard action of a transaction.
@@ -720,55 +751,63 @@ impl TransactionObject {
                 .collect(),
             value_balance: Some(Zec::from(tx.sapling_value_balance().sapling_amount()).lossy_zec()),
             value_balance_zat: Some(tx.sapling_value_balance().sapling_amount().zatoshis()),
-            orchard: if !tx.has_orchard_shielded_data() {
-                None
-            } else {
-                Some(Orchard {
-                    actions: tx
-                        .orchard_actions()
-                        .collect::<Vec<_>>()
-                        .iter()
-                        .map(|action| {
-                            let spend_auth_sig: [u8; 64] = tx
-                                .orchard_shielded_data()
-                                .and_then(|shielded_data| {
-                                    shielded_data
-                                        .actions
-                                        .iter()
-                                        .find(|authorized_action| {
-                                            authorized_action.action == **action
-                                        })
-                                        .map(|authorized_action| {
-                                            authorized_action.spend_auth_sig.into()
-                                        })
-                                })
-                                .unwrap_or([0; 64]);
+            orchard: Some(Orchard {
+                actions: tx
+                    .orchard_actions()
+                    .collect::<Vec<_>>()
+                    .iter()
+                    .map(|action| {
+                        let spend_auth_sig: [u8; 64] = tx
+                            .orchard_shielded_data()
+                            .and_then(|shielded_data| {
+                                shielded_data
+                                    .actions
+                                    .iter()
+                                    .find(|authorized_action| authorized_action.action == **action)
+                                    .map(|authorized_action| {
+                                        authorized_action.spend_auth_sig.into()
+                                    })
+                            })
+                            .unwrap_or([0; 64]);
 
-                            let cv: [u8; 32] = action.cv.into();
-                            let nullifier: [u8; 32] = action.nullifier.into();
-                            let rk: [u8; 32] = action.rk.into();
-                            let cm_x: [u8; 32] = action.cm_x.into();
-                            let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
-                            let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
-                            let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
+                        let cv: [u8; 32] = action.cv.into();
+                        let nullifier: [u8; 32] = action.nullifier.into();
+                        let rk: [u8; 32] = action.rk.into();
+                        let cm_x: [u8; 32] = action.cm_x.into();
+                        let ephemeral_key: [u8; 32] = action.ephemeral_key.into();
+                        let enc_ciphertext: [u8; 580] = action.enc_ciphertext.into();
+                        let out_ciphertext: [u8; 80] = action.out_ciphertext.into();
 
-                            OrchardAction {
-                                cv,
-                                nullifier,
-                                rk,
-                                cm_x,
-                                ephemeral_key,
-                                enc_ciphertext,
-                                spend_auth_sig,
-                                out_ciphertext,
-                            }
-                        })
-                        .collect(),
-                    value_balance: Zec::from(tx.orchard_value_balance().orchard_amount())
-                        .lossy_zec(),
-                    value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
-                })
-            },
+                        OrchardAction {
+                            cv,
+                            nullifier,
+                            rk,
+                            cm_x,
+                            ephemeral_key,
+                            enc_ciphertext,
+                            spend_auth_sig,
+                            out_ciphertext,
+                        }
+                    })
+                    .collect(),
+                value_balance: Zec::from(tx.orchard_value_balance().orchard_amount()).lossy_zec(),
+                value_balance_zat: tx.orchard_value_balance().orchard_amount().zatoshis(),
+                flags: tx.orchard_shielded_data().map(|data| {
+                    OrchardFlags::new(
+                        data.flags.contains(orchard::Flags::ENABLE_OUTPUTS),
+                        data.flags.contains(orchard::Flags::ENABLE_SPENDS),
+                    )
+                }),
+                anchor: tx
+                    .orchard_shielded_data()
+                    .map(|data| data.shared_anchor.bytes_in_display_order()),
+                proof: tx
+                    .orchard_shielded_data()
+                    .map(|data| data.proof.bytes_in_display_order()),
+                binding_sig: tx
+                    .orchard_shielded_data()
+                    .map(|data| data.binding_sig.into()),
+            }),
             binding_sig: tx.sapling_binding_sig().map(|raw_sig| raw_sig.into()),
             joinsplit_pub_key: tx.joinsplit_pub_key().map(|raw_key| {
                 // Display order is reversed in the RPC output.

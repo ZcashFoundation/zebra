@@ -106,6 +106,13 @@ lazy_static! {
 #[derive(Clone, Copy, Default, Eq, Serialize, Deserialize)]
 pub struct Root(#[serde(with = "serde_helpers::Base")] pub(crate) pallas::Base);
 
+impl Root {
+    /// Encode as bytes for RPC usage.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        self.into()
+    }
+}
+
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root")
