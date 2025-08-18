@@ -43,7 +43,6 @@ chrono = { workspace = true, features = ["clock", "std"] }
 lazy_static = { workspace = true }
 once_cell = { workspace = true }
 serde = { workspace = true, features = ["serde_derive"] }
-
 futures = { workspace = true }
 futures-util = { workspace = true }
 metrics = { workspace = true }
@@ -52,8 +51,9 @@ tokio = { workspace = true, features = ["time", "sync", "tracing", "rt-multi-thr
 tower = { workspace = true, features = ["timeout", "util", "buffer"] }
 tracing = { workspace = true }
 tracing-futures = { workspace = true }
+derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 
-sapling-crypto.workspace = true
+sapling-crypto = { workspace = true, features = ["multicore"]}
 orchard.workspace = true
 
 zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }

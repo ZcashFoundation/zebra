@@ -67,6 +67,12 @@ impl AsRef<[u8]> for SigHash {
     }
 }
 
+impl From<SigHash> for [u8; 32] {
+    fn from(sighash: SigHash) -> Self {
+        sighash.0
+    }
+}
+
 /// A SigHasher context which stores precomputed data that is reused
 /// between sighash computations for the same transaction.
 #[derive(Debug)]
@@ -123,5 +129,12 @@ impl SigHasher {
         &self,
     ) -> Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>> {
         self.precomputed_tx_data.orchard_bundle()
+    }
+
+    /// Returns the Sapling bundle in the precomputed transaction data.
+    pub fn sapling_bundle(
+        &self,
+    ) -> Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>> {
+        self.precomputed_tx_data.sapling_bundle()
     }
 }
