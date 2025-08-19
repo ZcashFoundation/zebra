@@ -1,6 +1,5 @@
 use std::{collections::BTreeMap, fs::DirEntry, path::PathBuf, sync::Arc};
 
-use tracing::Span;
 use zebra_chain::{
     block::{self, Block, Height},
     serialization::ZcashDeserializeInto,
@@ -59,28 +58,28 @@ pub(super) fn spawn_backup_task(
     backup_dir_path: PathBuf,
     finalized_state: &ZebraDb,
 ) {
-    let non_finalized_state_receiver = non_finalized_state_receiver.clone();
-    let finalized_state = finalized_state.clone();
-    let span = Span::current();
-    std::thread::spawn(move || {
-        span.in_scope(|| {
-            backup_task(
-                non_finalized_state_receiver,
-                backup_dir_path,
-                finalized_state,
-            )
-        })
-    });
+    tokio::spawn(run_backup_task(
+        non_finalized_state_receiver.clone(),
+        backup_dir_path,
+        finalized_state.clone(),
+    ));
 }
 
-fn backup_task(
-    non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+async fn run_backup_task(
+    mut non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
     _backup_dir_path: PathBuf,
     _finalized_state: ZebraDb,
 ) {
-    loop {
-        // non_finalized_state_receiver.changed()
-    }
+    let err = loop {
+        if let Err(err) = non_finalized_state_receiver.changed().await {
+            break err;
+        };
+    };
+
+    tracing::warn!(
+        ?err,
+        "got recv error waiting on non-finalized state change, is Zebra shutting down?"
+    )
 }
 
 fn read_non_finalized_blocks_from_backup<'a>(

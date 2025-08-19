@@ -296,37 +296,48 @@ impl StateService {
     ///
     /// Returns the read-write and read-only state services,
     /// and read-only watch channels for its best chain tip.
-    // TODO: Use `spawn_blocking` wherever there are I/O ops or expensive computations.
     pub async fn new(
         config: Config,
         network: &Network,
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
-        let timer = CodeTimer::start();
-        let finalized_state = FinalizedState::new(
-            &config,
-            network,
-            #[cfg(feature = "elasticsearch")]
-            true,
-        );
-        timer.finish(module_path!(), line!(), "opening finalized state database");
+        let (finalized_state, initial_tip, timer) = {
+            let config = config.clone();
+            let network = network.clone();
+            tokio::task::spawn_blocking(move || {
+                let timer = CodeTimer::start();
+                let finalized_state = FinalizedState::new(
+                    &config,
+                    &network,
+                    #[cfg(feature = "elasticsearch")]
+                    true,
+                );
+                timer.finish(module_path!(), line!(), "opening finalized state database");
 
-        let timer = CodeTimer::start();
-        let initial_tip = finalized_state
-            .db
-            .tip_block()
-            .map(CheckpointVerifiedBlock::from)
-            .map(ChainTipBlock::from);
+                let timer = CodeTimer::start();
+                let initial_tip = finalized_state
+                    .db
+                    .tip_block()
+                    .map(CheckpointVerifiedBlock::from)
+                    .map(ChainTipBlock::from);
+
+                (finalized_state, initial_tip, timer)
+            })
+            .await
+            .expect("failed to join blocking task")
+        };
 
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
         let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
-            NonFinalizedState::new(network).with_backup(
-                config.non_finalized_state_backup_dir(network),
-                &finalized_state.db,
-            );
+            NonFinalizedState::new(network)
+                .with_backup(
+                    config.non_finalized_state_backup_dir(network),
+                    &finalized_state.db,
+                )
+                .await;
 
         let finalized_state_for_writing = finalized_state.clone();
         let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
@@ -351,7 +362,10 @@ impl StateService {
         let non_finalized_state_queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
-        let finalized_block_write_last_sent_hash = finalized_state.db.finalized_tip_hash();
+        let finalized_block_write_last_sent_hash =
+            tokio::task::spawn_blocking(move || finalized_state.db.finalized_tip_hash())
+                .await
+                .expect("failed to join blocking task");
 
         let state = Self {
             network: network.clone(),
