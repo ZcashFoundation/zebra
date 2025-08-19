@@ -82,6 +82,13 @@ pub struct Config {
     /// [`cache_dir`]: struct.Config.html#structfield.cache_dir
     pub ephemeral: bool,
 
+    /// Whether to cache non-finalized blocks on disk to be restored when Zebra restarts.
+    ///
+    /// Set to `true` by default. If this is set to `false`, Zebra will irrecoverably drop
+    /// non-finalized blocks when the process exits and will have to re-download them from
+    /// the network when it restarts, if those blocks are still available in the network.
+    pub should_backup_non_finalized_state: bool,
+
     /// Whether to delete the old database directories when present.
     ///
     /// Set to `true` by default. If this is set to `false`,
@@ -152,9 +159,7 @@ impl Config {
     /// Non-finalized state backup files are encoded in the network protocol format and remain
     /// valid across db format upgrades.
     pub fn non_finalized_state_backup_dir(&self, network: &Network) -> Option<PathBuf> {
-        // TODO: Add a config field for disabling the non-finalized state backup?
-        //       It's often useful to have an ephemeral state only near the chain tip.
-        if self.ephemeral {
+        if self.ephemeral || !self.should_backup_non_finalized_state {
             // Ephemeral databases are intended to be irrecoverable across restarts and don't
             // require a backup for the non-finalized state.
             return None;
@@ -193,6 +198,7 @@ impl Default for Config {
         Self {
             cache_dir: default_cache_dir(),
             ephemeral: false,
+            should_backup_non_finalized_state: true,
             delete_old_database: true,
             debug_stop_at_height: None,
             debug_validity_check_interval: None,
