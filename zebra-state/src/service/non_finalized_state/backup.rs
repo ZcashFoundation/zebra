@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, fs::DirEntry, path::PathBuf, sync::Arc};
 
+use tracing::Span;
 use zebra_chain::{
     block::{self, Block, Height},
     serialization::ZcashDeserializeInto,
@@ -15,7 +16,7 @@ use crate::{
 /// attempts to commit them to the non-finalized state.
 ///
 /// Returns the resulting non-finalized state.
-pub fn restore_backup(
+pub(super) fn restore_backup(
     mut non_finalized_state: NonFinalizedState,
     backup_dir_path: &PathBuf,
     finalized_state: &ZebraDb,
@@ -53,11 +54,33 @@ pub fn restore_backup(
 
 // TODO: Spawn a task that deletes any files that aren't in the non-finalized state and writes files for
 //       any blocks in the non-finalized state that are missing in the filesystem.
-pub fn spawn_backup_task(
-    _non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
-    _backup_dir_path: PathBuf,
-    _finalized_state: &ZebraDb,
+pub(super) fn spawn_backup_task(
+    non_finalized_state_receiver: &WatchReceiver<NonFinalizedState>,
+    backup_dir_path: PathBuf,
+    finalized_state: &ZebraDb,
 ) {
+    let non_finalized_state_receiver = non_finalized_state_receiver.clone();
+    let finalized_state = finalized_state.clone();
+    let span = Span::current();
+    std::thread::spawn(move || {
+        span.in_scope(|| {
+            backup_task(
+                non_finalized_state_receiver,
+                backup_dir_path,
+                finalized_state,
+            )
+        })
+    });
+}
+
+fn backup_task(
+    non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
+    _backup_dir_path: PathBuf,
+    _finalized_state: ZebraDb,
+) {
+    loop {
+        // non_finalized_state_receiver.changed()
+    }
 }
 
 fn read_non_finalized_blocks_from_backup<'a>(
