@@ -302,7 +302,7 @@ impl StateService {
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
-        let (finalized_state, initial_tip, timer) = {
+        let (finalized_state, finalized_tip, timer) = {
             let config = config.clone();
             let network = network.clone();
             tokio::task::spawn_blocking(move || {
@@ -316,9 +316,9 @@ impl StateService {
                 timer.finish(module_path!(), line!(), "opening finalized state database");
 
                 let timer = CodeTimer::start();
-                let initial_tip = finalized_state.db.tip_block();
+                let finalized_tip = finalized_state.db.tip_block();
 
-                (finalized_state, initial_tip, timer)
+                (finalized_state, finalized_tip, timer)
             })
             .await
             .expect("failed to join blocking task")
@@ -335,7 +335,7 @@ impl StateService {
         let initial_tip = non_finalized_state
             .best_tip_block()
             .map(|cv_block| cv_block.block.clone())
-            .or(initial_tip)
+            .or(finalized_tip)
             .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
 

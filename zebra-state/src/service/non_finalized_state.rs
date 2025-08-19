@@ -128,7 +128,7 @@ impl NonFinalizedState {
 
     /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
     ///
-    /// If a path is backup directory path is provided:
+    /// If a backup directory path is provided:
     /// - Creates a new backup directory at the provided path if none exists,
     /// - Restores non-finalized blocks from the backup directory, if any, and
     /// - Spawns a task that updates the non-finalized backup cache with
