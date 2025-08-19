@@ -145,19 +145,18 @@ impl NonFinalizedState {
         WatchReceiver<NonFinalizedState>,
     ) {
         let with_watch_channel = |non_finalized_state: NonFinalizedState| {
-            let (non_finalized_state_sender, non_finalized_state_receiver) =
-                watch::channel(non_finalized_state.clone());
-
-            (
-                non_finalized_state,
-                non_finalized_state_sender,
-                WatchReceiver::new(non_finalized_state_receiver),
-            )
+            let (sender, receiver) = watch::channel(non_finalized_state.clone());
+            (non_finalized_state, sender, WatchReceiver::new(receiver))
         };
 
         let Some(backup_dir_path) = backup_dir_path else {
             return with_watch_channel(self);
         };
+
+        tracing::info!(
+            ?backup_dir_path,
+            "restoring non-finalized blocks from backup and spawning backup task"
+        );
 
         // Create a new backup directory if none exists
         std::fs::create_dir_all(&backup_dir_path)
@@ -169,7 +168,7 @@ impl NonFinalizedState {
         let (non_finalized_state, sender, receiver) =
             with_watch_channel(restored_non_finalized_state);
 
-        backup::spawn_backup_task(receiver.clone(), backup_dir_path, finalized_state);
+        backup::spawn_backup_task(&receiver, backup_dir_path, finalized_state);
 
         (non_finalized_state, sender, receiver)
     }
