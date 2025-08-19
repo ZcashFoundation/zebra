@@ -316,20 +316,13 @@ impl StateService {
                 timer.finish(module_path!(), line!(), "opening finalized state database");
 
                 let timer = CodeTimer::start();
-                let initial_tip = finalized_state
-                    .db
-                    .tip_block()
-                    .map(CheckpointVerifiedBlock::from)
-                    .map(ChainTipBlock::from);
+                let initial_tip = finalized_state.db.tip_block();
 
                 (finalized_state, initial_tip, timer)
             })
             .await
             .expect("failed to join blocking task")
         };
-
-        let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
-            ChainTipSender::new(initial_tip, network);
 
         let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
             NonFinalizedState::new(network)
@@ -338,6 +331,16 @@ impl StateService {
                     &finalized_state.db,
                 )
                 .await;
+
+        let initial_tip = non_finalized_state
+            .best_tip_block()
+            .map(|cv_block| cv_block.block.clone())
+            .or(initial_tip)
+            .map(CheckpointVerifiedBlock::from)
+            .map(ChainTipBlock::from);
+
+        let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
+            ChainTipSender::new(initial_tip, network);
 
         let finalized_state_for_writing = finalized_state.clone();
         let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
