@@ -48,7 +48,7 @@ pub fn humantime_milliseconds(duration: impl Into<Duration>) -> String {
     format!("{duration}")
 }
 
-/// Returns a human-friendly formatted string for the whole number of milliseconds in `duration`.
+/// Returns a human-friendly formatted string for the whole number of microseconds in `duration`.
 pub fn humantime_microseconds(duration: impl Into<Duration>) -> String {
     let duration = duration.into();
 

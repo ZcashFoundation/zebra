@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fs::DirEntry,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -40,11 +40,9 @@ pub(super) fn restore_backup(
     for (height, blocks) in store {
         for block in blocks {
             // Re-computes the block hash in case the hash from the filename is wrong.
-            if let Err(commit_error) = validate_and_commit_non_finalized(
-                finalized_state,
-                &mut non_finalized_state,
-                block.into(),
-            ) {
+            if let Err(commit_error) =
+                validate_and_commit_non_finalized(finalized_state, &mut non_finalized_state, block)
+            {
                 tracing::warn!(
                     ?commit_error,
                     ?height,
@@ -111,7 +109,7 @@ pub(super) async fn run_backup_task(
 }
 
 /// Writes a block to a file in the provided non-finalized state backup cache directory path.
-fn write_backup_block(backup_dir_path: &PathBuf, block: &ContextuallyVerifiedBlock) {
+fn write_backup_block(backup_dir_path: &Path, block: &ContextuallyVerifiedBlock) {
     let backup_block_file_name: String = block.hash.encode_hex();
     let backup_block_file_path = backup_dir_path.join(backup_block_file_name);
     if let Err(err) = std::fs::write(
@@ -133,7 +131,6 @@ fn read_non_finalized_blocks_from_backup<'a>(
     finalized_state: &'a ZebraDb,
 ) -> impl Iterator<Item = SemanticallyVerifiedBlock> + 'a {
     list_backup_dir_entries(backup_dir_path)
-        .into_iter()
         // It's okay to leave the file here, the backup task will delete it as long as
         // the block is not added to the non-finalized state.
         .filter(|&(block_hash, _)| !finalized_state.contains_hash(block_hash))
@@ -185,9 +182,7 @@ fn read_non_finalized_blocks_from_backup<'a>(
 fn list_backup_dir_entries(
     backup_dir_path: &PathBuf,
 ) -> impl Iterator<Item = (block::Hash, PathBuf)> {
-    read_backup_dir(backup_dir_path)
-        .into_iter()
-        .filter_map(process_backup_dir_entry)
+    read_backup_dir(backup_dir_path).filter_map(process_backup_dir_entry)
 }
 
 /// Accepts a backup directory path and opens the directory.
@@ -200,7 +195,6 @@ fn list_backup_dir_entries(
 fn read_backup_dir(backup_dir_path: &PathBuf) -> impl Iterator<Item = DirEntry> {
     std::fs::read_dir(backup_dir_path)
         .expect("failed to read non-finalized state backup directory")
-        .into_iter()
         .filter_map(|entry| match entry {
             Ok(entry) => Some(entry),
             Err(io_err) => {
@@ -209,7 +203,7 @@ fn read_backup_dir(backup_dir_path: &PathBuf) -> impl Iterator<Item = DirEntry> 
                     "failed to read DirEntry in non-finalized state backup dir"
                 );
 
-                return None;
+                None
             }
         })
 }
