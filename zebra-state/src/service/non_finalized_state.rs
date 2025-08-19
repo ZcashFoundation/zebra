@@ -135,7 +135,7 @@ impl NonFinalizedState {
     ///   the latest non-finalized state sent to the returned watch channel.
     ///
     /// Returns the non-finalized state with a watch channel sender and receiver.
-    pub fn with_backup(
+    pub async fn with_backup(
         self,
         backup_dir_path: Option<PathBuf>,
         finalized_state: &ZebraDb,
@@ -158,12 +158,19 @@ impl NonFinalizedState {
             "restoring non-finalized blocks from backup and spawning backup task"
         );
 
-        // Create a new backup directory if none exists
-        std::fs::create_dir_all(&backup_dir_path)
-            .expect("failed to create non-finalized state backup directory");
+        let restored_non_finalized_state = {
+            let backup_dir_path = backup_dir_path.clone();
+            let finalized_state = finalized_state.clone();
+            tokio::task::spawn_blocking(move || {
+                // Create a new backup directory if none exists
+                std::fs::create_dir_all(&backup_dir_path)
+                    .expect("failed to create non-finalized state backup directory");
 
-        let restored_non_finalized_state =
-            backup::restore_backup(self, &backup_dir_path, finalized_state);
+                backup::restore_backup(self, &backup_dir_path, &finalized_state)
+            })
+            .await
+            .expect("failed to join blocking task")
+        };
 
         let (non_finalized_state, sender, receiver) =
             with_watch_channel(restored_non_finalized_state);
