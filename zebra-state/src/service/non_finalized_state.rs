@@ -175,7 +175,11 @@ impl NonFinalizedState {
         let (non_finalized_state, sender, receiver) =
             with_watch_channel(restored_non_finalized_state);
 
-        backup::spawn_backup_task(&receiver, backup_dir_path, finalized_state);
+        tokio::spawn(backup::run_backup_task(
+            receiver.clone(),
+            backup_dir_path,
+            finalized_state.clone(),
+        ));
 
         (non_finalized_state, sender, receiver)
     }

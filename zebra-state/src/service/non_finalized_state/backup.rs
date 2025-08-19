@@ -6,7 +6,8 @@ use zebra_chain::{
 };
 
 use crate::{
-    service::write::validate_and_commit_non_finalized, NonFinalizedState, WatchReceiver, ZebraDb,
+    service::write::validate_and_commit_non_finalized, NonFinalizedState,
+    SemanticallyVerifiedBlock, WatchReceiver, ZebraDb,
 };
 
 /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
@@ -20,15 +21,10 @@ pub(super) fn restore_backup(
     backup_dir_path: &PathBuf,
     finalized_state: &ZebraDb,
 ) -> NonFinalizedState {
-    let mut store: BTreeMap<Height, Vec<Arc<Block>>> = BTreeMap::new();
+    let mut store: BTreeMap<Height, Vec<SemanticallyVerifiedBlock>> = BTreeMap::new();
 
     for block in read_non_finalized_blocks_from_backup(backup_dir_path, finalized_state) {
-        let Some(block_height) = block.coinbase_height() else {
-            tracing::warn!("invalid non-finalized backup block, missing coinbase height");
-            continue;
-        };
-
-        store.entry(block_height).or_default().push(block);
+        store.entry(block.height).or_default().push(block);
     }
 
     for (height, blocks) in store {
@@ -51,21 +47,9 @@ pub(super) fn restore_backup(
     non_finalized_state
 }
 
-// TODO: Spawn a task that deletes any files that aren't in the non-finalized state and writes files for
+// TODO: Delete any files that aren't in the non-finalized state and writes files for
 //       any blocks in the non-finalized state that are missing in the filesystem.
-pub(super) fn spawn_backup_task(
-    non_finalized_state_receiver: &WatchReceiver<NonFinalizedState>,
-    backup_dir_path: PathBuf,
-    finalized_state: &ZebraDb,
-) {
-    tokio::spawn(run_backup_task(
-        non_finalized_state_receiver.clone(),
-        backup_dir_path,
-        finalized_state.clone(),
-    ));
-}
-
-async fn run_backup_task(
+pub(super) async fn run_backup_task(
     mut non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
     _backup_dir_path: PathBuf,
     _finalized_state: ZebraDb,
@@ -82,30 +66,52 @@ async fn run_backup_task(
     )
 }
 
+/// Reads blocks from the provided non-finalized state backup directory path.
+///
+/// Returns any blocks that are valid and not present in the finalized state.
 fn read_non_finalized_blocks_from_backup<'a>(
     backup_dir_path: &PathBuf,
     finalized_state: &'a ZebraDb,
-) -> impl Iterator<Item = Arc<Block>> + 'a {
+) -> impl Iterator<Item = SemanticallyVerifiedBlock> + 'a {
     list_backup_dir_entries(backup_dir_path)
         .into_iter()
         // It's okay to leave the file here, the backup task will delete it as long as
         // the block is not added to the non-finalized state.
         .filter(|&(block_hash, _)| finalized_state.contains_hash(block_hash))
-        .filter_map(|(_, file_path)| match std::fs::read(file_path) {
-            Ok(block_data) => Some(block_data),
+        .filter_map(|(block_hash, file_path)| match std::fs::read(file_path) {
+            Ok(block_data) => Some((block_hash, block_data)),
             Err(err) => {
                 tracing::warn!(?err, "failed to open non-finalized state backup block file");
                 None
             }
         })
-        .filter_map(|block_bytes| match block_bytes.zcash_deserialize_into() {
-            Ok(block) => Some(Arc::new(block)),
-            Err(err) => {
-                tracing::warn!(
-                    ?err,
-                    "failed to deserialize non-finalized backup data into block"
-                );
-                None
+        .filter_map(|(expected_block_hash, block_bytes)| {
+            match block_bytes.zcash_deserialize_into::<Block>() {
+                Ok(block) if block.coinbase_height().is_some() => {
+                    let block = SemanticallyVerifiedBlock::from(Arc::new(block));
+                    if block.hash != expected_block_hash {
+                        tracing::warn!(
+                            block_hash = ?block.hash,
+                            ?expected_block_hash,
+                            "wrong block hash in file name"
+                        );
+                    }
+                    Some(block)
+                }
+                Ok(block) => {
+                    tracing::warn!(
+                        ?block,
+                        "invalid non-finalized backup block, missing coinbase height"
+                    );
+                    None
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        ?err,
+                        "failed to deserialize non-finalized backup data into block"
+                    );
+                    None
+                }
             }
         })
 }
