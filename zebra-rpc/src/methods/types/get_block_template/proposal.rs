@@ -7,7 +7,7 @@ use std::{num::ParseIntError, str::FromStr, sync::Arc};
 use zebra_chain::{
     block::{self, Block, Height},
     parameters::{Network, NetworkUpgrade},
-    serialization::{DateTime32, SerializationError, ZcashDeserializeInto},
+    serialization::{DateTime32, SerializationError, ZcashDeserializeInto, BytesInDisplayOrder},
     work::equihash::Solution,
 };
 use zebra_node_services::BoxError;
