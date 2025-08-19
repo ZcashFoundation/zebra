@@ -158,6 +158,7 @@ use zebra_chain::{
         Network::{self, *},
         NetworkUpgrade,
     },
+    serialization::BytesInDisplayOrder,
 };
 use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
