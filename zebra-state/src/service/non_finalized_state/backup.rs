@@ -1,13 +1,19 @@
-use std::{collections::BTreeMap, fs::DirEntry, path::PathBuf, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs::DirEntry,
+    path::PathBuf,
+    sync::Arc,
+};
 
+use hex::ToHex;
 use zebra_chain::{
     block::{self, Block, Height},
-    serialization::ZcashDeserializeInto,
+    serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
 use crate::{
-    service::write::validate_and_commit_non_finalized, NonFinalizedState,
-    SemanticallyVerifiedBlock, WatchReceiver, ZebraDb,
+    service::write::validate_and_commit_non_finalized, ContextuallyVerifiedBlock,
+    NonFinalizedState, SemanticallyVerifiedBlock, WatchReceiver, ZebraDb,
 };
 
 /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
@@ -47,23 +53,71 @@ pub(super) fn restore_backup(
     non_finalized_state
 }
 
-// TODO: Delete any files that aren't in the non-finalized state and writes files for
-//       any blocks in the non-finalized state that are missing in the filesystem.
+/// Updates the non-finalized state backup cache whenever the non-finalized state changes,
+/// deleting any outdated backup files and writing any blocks that are in the non-finalized
+/// state but missing in the backup cache.
 pub(super) async fn run_backup_task(
     mut non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
-    _backup_dir_path: PathBuf,
-    _finalized_state: ZebraDb,
+    backup_dir_path: PathBuf,
 ) {
     let err = loop {
+        let mut backup_blocks: HashMap<block::Hash, PathBuf> = {
+            let backup_dir_path = backup_dir_path.clone();
+            tokio::task::spawn_blocking(move || list_backup_dir_entries(&backup_dir_path))
+                .await
+                .expect("failed to join blocking task when reading in backup task")
+                .collect()
+        };
+
         if let Err(err) = non_finalized_state_receiver.changed().await {
             break err;
         };
+
+        let latest_non_finalized_state = non_finalized_state_receiver.cloned_watch_data();
+
+        let backup_dir_path = backup_dir_path.clone();
+        tokio::task::spawn_blocking(move || {
+            for block in latest_non_finalized_state
+                .chain_iter()
+                .flat_map(|chain| chain.blocks.values())
+                // Remove blocks from `backup_blocks` that are present in the non-finalized state
+                .filter(|block| backup_blocks.remove(&block.hash).is_none())
+            {
+                // This loop will typically iterate only once, but may write multiple blocks if it misses
+                // some non-finalized state changes while waiting for I/O ops.
+                write_backup_block(&backup_dir_path, block);
+            }
+
+            // Remove any backup blocks that are not present in the non-finalized state
+            for (_, outdated_backup_block_path) in backup_blocks {
+                if let Err(delete_error) = std::fs::remove_file(outdated_backup_block_path) {
+                    tracing::warn!(?delete_error, "failed to delete backup block file");
+                }
+            }
+        })
+        .await
+        .expect("failed to join blocking task when writing in backup task");
     };
 
     tracing::warn!(
         ?err,
         "got recv error waiting on non-finalized state change, is Zebra shutting down?"
     )
+}
+
+/// Writes a block to a file in the provided non-finalized state backup cache directory path.
+fn write_backup_block(backup_dir_path: &PathBuf, block: &ContextuallyVerifiedBlock) {
+    let backup_block_file_name: String = block.hash.encode_hex();
+    let backup_block_file_path = backup_dir_path.join(backup_block_file_name);
+    if let Err(err) = std::fs::write(
+        backup_block_file_path,
+        block
+            .block
+            .zcash_serialize_to_vec()
+            .expect("verified block header version should be valid"),
+    ) {
+        tracing::warn!(?err, "failed to write non-finalized state backup block");
+    }
 }
 
 /// Reads blocks from the provided non-finalized state backup directory path.
