@@ -3,8 +3,9 @@
 //! [RFC0005]: https://zebra.zfnd.org/dev/rfcs/0005-state-updates.html
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     mem,
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -12,6 +13,7 @@ use indexmap::IndexMap;
 use zebra_chain::{
     block::{self, Block, Hash, Height},
     parameters::Network,
+    serialization::ZcashDeserializeInto,
     sprout::{self},
     transparent,
 };
@@ -20,7 +22,7 @@ use crate::{
     constants::{MAX_INVALIDATED_BLOCKS, MAX_NON_FINALIZED_CHAIN_FORKS},
     error::ReconsiderError,
     request::{ContextuallyVerifiedBlock, FinalizableBlock},
-    service::{check, finalized_state::ZebraDb},
+    service::{check, finalized_state::ZebraDb, write::validate_and_commit_non_finalized},
     BoxError, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
@@ -121,6 +123,118 @@ impl NonFinalizedState {
             #[cfg(feature = "progress-bar")]
             chain_fork_length_bars: Vec::new(),
         }
+    }
+
+    /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
+    ///
+    /// Looks for blocks above the finalized tip height in the backup directory (if a path was provided) and
+    /// attempts to commit them to the non-finalized state.
+    ///
+    /// Creates a new backup directory at the provided path if none exists.
+    ///
+    /// Returns the non-finalized state.
+    pub fn restore_backup(
+        mut self,
+        backup_dir_path: Option<PathBuf>,
+        finalized_state: &ZebraDb,
+    ) -> Self {
+        let Some(backup_dir_path) = backup_dir_path else {
+            return self;
+        };
+
+        // Create a new backup directory if none exists
+        std::fs::create_dir_all(&backup_dir_path)
+            .expect("failed to create non-finalized state backup directory");
+
+        let backup_dir = std::fs::read_dir(backup_dir_path)
+            .expect("failed to read non-finalized state backup directory");
+
+        let mut store: BTreeMap<Height, Vec<Arc<Block>>> = BTreeMap::new();
+
+        for entry in backup_dir {
+            let block_file_entry = match entry {
+                Ok(entry) => entry,
+                Err(io_err) => {
+                    tracing::warn!(
+                        ?io_err,
+                        "failed to read DirEntry in non-finalized state backup dir"
+                    );
+
+                    continue;
+                }
+            };
+
+            let block_file_name = match block_file_entry.file_name().into_string() {
+                Ok(block_hash) => block_hash,
+                Err(err) => {
+                    tracing::warn!(?err, "failed to convert OsString to String");
+
+                    continue;
+                }
+            };
+
+            let block_hash: block::Hash = match block_file_name.parse() {
+                Ok(block_hash) => block_hash,
+                Err(err) => {
+                    tracing::warn!(
+                        ?err,
+                        "failed to parse hex-encoded block hash from file name"
+                    );
+
+                    continue;
+                }
+            };
+
+            if finalized_state.contains_hash(block_hash) {
+                // It's okay to leave the file here, the backup task will delete it as long as
+                // the block is not added to the non-finalized state.
+                tracing::info!("found finalized block in non-finalized state backup dir, ignoring");
+                continue;
+            }
+
+            let block_data = match std::fs::read(&block_file_entry.path()) {
+                Ok(block_data) => block_data,
+                Err(err) => {
+                    tracing::warn!(?err, "failed to open non-finalized state backup block file");
+                    continue;
+                }
+            };
+
+            let block: Arc<Block> = match block_data.zcash_deserialize_into() {
+                Ok(block) => Arc::new(block),
+                Err(err) => {
+                    tracing::warn!(
+                        ?err,
+                        "failed to deserialize non-finalized backup data into block"
+                    );
+                    continue;
+                }
+            };
+
+            let Some(block_height) = block.coinbase_height() else {
+                tracing::warn!("invalid non-finalized backup block, missing coinbase height");
+                continue;
+            };
+
+            store.entry(block_height).or_default().push(block);
+        }
+
+        for (height, blocks) in store {
+            for block in blocks {
+                // Re-computes the block hash in case the hash from the filename is wrong.
+                if let Err(commit_error) =
+                    validate_and_commit_non_finalized(finalized_state, &mut self, block.into())
+                {
+                    tracing::warn!(
+                        ?commit_error,
+                        ?height,
+                        "failed to commit non-finalized block from backup directory"
+                    );
+                }
+            }
+        }
+
+        self
     }
 
     /// Is the internal state of `self` the same as `other`?

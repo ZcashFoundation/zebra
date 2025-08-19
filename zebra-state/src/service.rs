@@ -321,7 +321,10 @@ impl StateService {
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
-        let non_finalized_state = NonFinalizedState::new(network);
+        let non_finalized_state = NonFinalizedState::new(network).restore_backup(
+            config.non_finalized_state_backup_dir(network),
+            &finalized_state.db,
+        );
 
         let (non_finalized_state_sender, non_finalized_state_receiver) =
             watch::channel(NonFinalizedState::new(&finalized_state.network()));

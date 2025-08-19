@@ -148,6 +148,22 @@ impl Config {
         }
     }
 
+    /// Returns the path for the non-finalized state backup directory, based on the network.
+    /// Non-finalized state backup files are encoded in the network protocol format and remain
+    /// valid across db format upgrades.
+    pub fn non_finalized_state_backup_dir(&self, network: &Network) -> Option<PathBuf> {
+        // TODO: Add a config field for disabling the non-finalized state backup?
+        //       It's often useful to have an ephemeral state only near the chain tip.
+        if self.ephemeral {
+            // Ephemeral databases are intended to be irrecoverable across restarts and don't
+            // require a backup for the non-finalized state.
+            return None;
+        }
+
+        let net_dir = network.lowercase_name();
+        Some(self.cache_dir.join("non_finalized_state").join(net_dir))
+    }
+
     /// Returns the path for the database format minor/patch version file,
     /// based on the kind, major version and network.
     pub fn version_file_path(
