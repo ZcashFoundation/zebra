@@ -51,6 +51,10 @@ serde_with = { workspace = true, features = ["hex"] }
 indexmap = { workspace = true, features = ["serde"] }
 derive-getters = { workspace = true, features = ["auto_copy_getters"] }
 derive-new = { workspace = true }
+thiserror = { workspace = true }
+lazy_static = { workspace = true }
+strum = { workspace = true }
+strum_macros = { workspace = true }
 
 # RPC endpoint basic auth
 base64 = { workspace = true }
@@ -77,9 +81,13 @@ serde = { workspace = true, features = ["serde_derive"] }
 # For the `stop` RPC method.
 nix = { workspace = true, features = ["signal"] }
 
+orchard = { workspace = true }
+sapling-crypto = { workspace = true }
+
 zcash_address = { workspace = true }
-zcash_keys = { workspace = true }
-zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
+zcash_keys = { workspace = true, features = ["orchard", "sapling"] }
+zcash_primitives = { workspace = true, features = ["transparent-inputs", "non-standard-fees"] }
+zcash_proofs = { workspace = true }
 zcash_protocol = { workspace = true }
 zcash_transparent = { workspace = true }
 
@@ -102,10 +110,9 @@ tonic-prost-build = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
-
+anyhow = { workspace = true }
 proptest = { workspace = true }
 
-thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full", "tracing", "test-util"] }
 
 zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = [
