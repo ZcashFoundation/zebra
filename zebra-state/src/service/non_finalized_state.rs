@@ -128,10 +128,11 @@ impl NonFinalizedState {
 
     /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
     ///
-    /// Restores non-finalized blocks from the backup directory, if any, and if a path is provided.
-    ///
-    /// If a backup directory path is provided, spawns a task that updates the non-finalized backup cache with
-    /// the latest non-finalized state sent to the returned watch channel.
+    /// If a path is backup directory path is provided:
+    /// - Creates a new backup directory at the provided path if none exists,
+    /// - Restores non-finalized blocks from the backup directory, if any, and
+    /// - Spawns a task that updates the non-finalized backup cache with
+    ///   the latest non-finalized state sent to the returned watch channel.
     ///
     /// Returns the non-finalized state with a watch channel sender and receiver.
     pub fn with_backup(
@@ -158,10 +159,19 @@ impl NonFinalizedState {
             return with_watch_channel(self);
         };
 
-        let restored_non_finalized_state =
-            backup::restore_backup(self, backup_dir_path, finalized_state);
+        // Create a new backup directory if none exists
+        std::fs::create_dir_all(&backup_dir_path)
+            .expect("failed to create non-finalized state backup directory");
 
-        with_watch_channel(restored_non_finalized_state)
+        let restored_non_finalized_state =
+            backup::restore_backup(self, &backup_dir_path, finalized_state);
+
+        let (non_finalized_state, sender, receiver) =
+            with_watch_channel(restored_non_finalized_state);
+
+        backup::spawn_backup_task(receiver.clone(), backup_dir_path, finalized_state);
+
+        (non_finalized_state, sender, receiver)
     }
 
     /// Is the internal state of `self` the same as `other`?
