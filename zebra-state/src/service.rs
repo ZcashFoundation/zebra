@@ -296,7 +296,8 @@ impl StateService {
     ///
     /// Returns the read-write and read-only state services,
     /// and read-only watch channels for its best chain tip.
-    pub fn new(
+    // TODO: Use `spawn_blocking` wherever there are I/O ops or expensive computations.
+    pub async fn new(
         config: Config,
         network: &Network,
         max_checkpoint_height: block::Height,
@@ -2170,7 +2171,7 @@ impl Service<ReadRequest> for ReadStateService {
 /// It's possible to construct multiple state services in the same application (as
 /// long as they, e.g., use different storage locations), but doing so is
 /// probably not what you want.
-pub fn init(
+pub async fn init(
     config: Config,
     network: &Network,
     max_checkpoint_height: block::Height,
@@ -2187,7 +2188,8 @@ pub fn init(
             network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
-        );
+        )
+        .await;
 
     (
         BoxService::new(state_service),
@@ -2247,40 +2249,17 @@ pub fn spawn_init_read_only(
     tokio::task::spawn_blocking(move || init_read_only(config, &network))
 }
 
-/// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.
-/// Returns a [`tokio::task::JoinHandle`] with a boxed state service,
-/// a read state service, and receivers for state chain tip updates.
-pub fn spawn_init(
-    config: Config,
-    network: &Network,
-    max_checkpoint_height: block::Height,
-    checkpoint_verify_concurrency_limit: usize,
-) -> tokio::task::JoinHandle<(
-    BoxService<Request, Response, BoxError>,
-    ReadStateService,
-    LatestChainTip,
-    ChainTipChange,
-)> {
-    let network = network.clone();
-    tokio::task::spawn_blocking(move || {
-        init(
-            config,
-            &network,
-            max_checkpoint_height,
-            checkpoint_verify_concurrency_limit,
-        )
-    })
-}
-
 /// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
 ///
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
-pub fn init_test(network: &Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+pub async fn init_test(
+    network: &Network,
+) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
     let (state_service, _, _, _) =
-        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0);
+        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
 
     Buffer::new(BoxService::new(state_service), 1)
 }
@@ -2290,7 +2269,7 @@ pub fn init_test(network: &Network) -> Buffer<BoxService<Request, Response, BoxE
 ///
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
-pub fn init_test_services(
+pub async fn init_test_services(
     network: &Network,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
@@ -2301,7 +2280,7 @@ pub fn init_test_services(
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
     let (state_service, read_state_service, latest_chain_tip, chain_tip_change) =
-        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0);
+        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
 
     let state_service = Buffer::new(BoxService::new(state_service), 1);
 
