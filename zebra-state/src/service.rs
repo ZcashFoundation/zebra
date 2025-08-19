@@ -25,7 +25,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -321,13 +321,11 @@ impl StateService {
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
-        let non_finalized_state = NonFinalizedState::new(network).restore_backup(
-            config.non_finalized_state_backup_dir(network),
-            &finalized_state.db,
-        );
-
-        let (non_finalized_state_sender, non_finalized_state_receiver) =
-            watch::channel(NonFinalizedState::new(&finalized_state.network()));
+        let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
+            NonFinalizedState::new(network).with_backup(
+                config.non_finalized_state_backup_dir(network),
+                &finalized_state.db,
+            );
 
         let finalized_state_for_writing = finalized_state.clone();
         let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
@@ -834,12 +832,12 @@ impl ReadStateService {
     pub(crate) fn new(
         finalized_state: &FinalizedState,
         block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
-        non_finalized_state_receiver: watch::Receiver<NonFinalizedState>,
+        non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
     ) -> Self {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
-            non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
+            non_finalized_state_receiver,
             block_write_task,
         };
 
@@ -2225,7 +2223,11 @@ pub fn init_read_only(
         tokio::sync::watch::channel(NonFinalizedState::new(network));
 
     (
-        ReadStateService::new(&finalized_state, None, non_finalized_state_receiver),
+        ReadStateService::new(
+            &finalized_state,
+            None,
+            WatchReceiver::new(non_finalized_state_receiver),
+        ),
         finalized_state.db.clone(),
         non_finalized_state_sender,
     )
