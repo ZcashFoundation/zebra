@@ -3,6 +3,7 @@ use std::{
     fs::DirEntry,
     path::PathBuf,
     sync::Arc,
+    time::Duration,
 };
 
 use hex::ToHex;
@@ -15,6 +16,9 @@ use crate::{
     service::write::validate_and_commit_non_finalized, ContextuallyVerifiedBlock,
     NonFinalizedState, SemanticallyVerifiedBlock, WatchReceiver, ZebraDb,
 };
+
+/// The minimum duration that Zebra will wait between updates to the non-finalized state backup cache.
+const MIN_DURATION_BETWEEN_BACKUP_UPDATES: Duration = Duration::from_secs(5);
 
 /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
 ///
@@ -61,6 +65,7 @@ pub(super) async fn run_backup_task(
     backup_dir_path: PathBuf,
 ) {
     let err = loop {
+        let rate_limit = tokio::time::sleep(MIN_DURATION_BETWEEN_BACKUP_UPDATES);
         let mut backup_blocks: HashMap<block::Hash, PathBuf> = {
             let backup_dir_path = backup_dir_path.clone();
             tokio::task::spawn_blocking(move || list_backup_dir_entries(&backup_dir_path))
@@ -69,7 +74,7 @@ pub(super) async fn run_backup_task(
                 .collect()
         };
 
-        if let Err(err) = non_finalized_state_receiver.changed().await {
+        if let (Err(err), _) = tokio::join!(non_finalized_state_receiver.changed(), rate_limit) {
             break err;
         };
 
