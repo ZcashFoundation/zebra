@@ -62,7 +62,7 @@ async fn verifiers_from_network(
         + Clone
         + 'static,
 ) {
-    let state_service = zs::init_test(&network);
+    let state_service = zs::init_test(&network).await;
     let (
         block_verifier_router,
         _transaction_verifier,
@@ -169,7 +169,7 @@ async fn verify_checkpoint(config: Config) -> Result<(), Report> {
         _transaction_verifier,
         _groth16_download_handle,
         _max_checkpoint_height,
-    ) = super::init_test(config.clone(), &network, zs::init_test(&network)).await;
+    ) = super::init_test(config.clone(), &network, zs::init_test(&network).await).await;
 
     // Add a timeout layer
     let block_verifier_router =

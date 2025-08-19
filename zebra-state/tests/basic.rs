@@ -81,7 +81,8 @@ async fn check_transcripts(network: Network) -> Result<(), Report> {
 
     for transcript_data in net_data {
         // We're not verifying UTXOs here.
-        let (service, _, _, _) = zebra_state::init(Config::ephemeral(), &network, Height::MAX, 0);
+        let (service, _, _, _) =
+            zebra_state::init(Config::ephemeral(), &network, Height::MAX, 0).await;
         let transcript = Transcript::from(transcript_data.iter().cloned());
         /// SPANDOC: check the on disk service against the transcript
         transcript.check(service).await?;
