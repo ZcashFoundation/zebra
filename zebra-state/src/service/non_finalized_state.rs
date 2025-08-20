@@ -30,6 +30,9 @@ mod backup;
 mod chain;
 
 #[cfg(test)]
+pub(crate) use backup::MIN_DURATION_BETWEEN_BACKUP_UPDATES;
+
+#[cfg(test)]
 mod tests;
 
 pub(crate) use chain::{Chain, SpendingTransactionId};

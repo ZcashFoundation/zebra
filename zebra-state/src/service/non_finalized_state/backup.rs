@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     fs::DirEntry,
+    io::{self, ErrorKind},
     path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
@@ -8,17 +9,21 @@ use std::{
 
 use hex::ToHex;
 use zebra_chain::{
+    amount::{Amount, DeferredPoolBalanceChange},
     block::{self, Block, Height},
     serialization::{ZcashDeserializeInto, ZcashSerialize},
 };
 
 use crate::{
-    service::write::validate_and_commit_non_finalized, ContextuallyVerifiedBlock,
-    NonFinalizedState, SemanticallyVerifiedBlock, WatchReceiver, ZebraDb,
+    ContextuallyVerifiedBlock, IntoDisk, NonFinalizedState, SemanticallyVerifiedBlock,
+    WatchReceiver, ZebraDb,
 };
 
+#[cfg(not(test))]
+use crate::service::write::validate_and_commit_non_finalized;
+
 /// The minimum duration that Zebra will wait between updates to the non-finalized state backup cache.
-const MIN_DURATION_BETWEEN_BACKUP_UPDATES: Duration = Duration::from_secs(5);
+pub(crate) const MIN_DURATION_BETWEEN_BACKUP_UPDATES: Duration = Duration::from_secs(5);
 
 /// Accepts an optional path to the non-finalized state backup directory and a handle to the database.
 ///
@@ -39,10 +44,21 @@ pub(super) fn restore_backup(
 
     for (height, blocks) in store {
         for block in blocks {
-            // Re-computes the block hash in case the hash from the filename is wrong.
-            if let Err(commit_error) =
-                validate_and_commit_non_finalized(finalized_state, &mut non_finalized_state, block)
+            #[cfg(test)]
+            let commit_result = if non_finalized_state
+                .any_chain_contains(&block.block.header.previous_block_hash)
             {
+                non_finalized_state.commit_block(block, &finalized_state)
+            } else {
+                non_finalized_state.commit_new_chain(block, &finalized_state)
+            };
+
+            #[cfg(not(test))]
+            let commit_result =
+                validate_and_commit_non_finalized(finalized_state, &mut non_finalized_state, block);
+
+            // Re-computes the block hash in case the hash from the filename is wrong.
+            if let Err(commit_error) = commit_result {
                 tracing::warn!(
                     ?commit_error,
                     ?height,
@@ -108,16 +124,69 @@ pub(super) async fn run_backup_task(
     )
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct NonFinalizedBlockBackup {
+    block: Arc<Block>,
+    deferred_pool_balance_change: Amount,
+}
+
+impl From<&ContextuallyVerifiedBlock> for NonFinalizedBlockBackup {
+    fn from(cv_block: &ContextuallyVerifiedBlock) -> Self {
+        Self {
+            block: cv_block.block.clone(),
+            deferred_pool_balance_change: cv_block.chain_value_pool_change.deferred_amount(),
+        }
+    }
+}
+
+impl NonFinalizedBlockBackup {
+    /// Encodes a [`NonFinalizedBlockBackup`] as a vector of bytes.
+    fn to_bytes(self) -> Vec<u8> {
+        let block_bytes = self
+            .block
+            .zcash_serialize_to_vec()
+            .expect("verified block header version should be valid");
+
+        let deferred_pool_balance_change_bytes =
+            self.deferred_pool_balance_change.as_bytes().to_vec();
+
+        [deferred_pool_balance_change_bytes, block_bytes].concat()
+    }
+
+    /// Constructs a new [`NonFinalizedBlockBackup`] from a vector of bytes.
+    fn from_bytes(bytes: Vec<u8>) -> Result<Self, io::Error> {
+        let (deferred_pool_balance_change_bytes, block_bytes) = bytes
+            .split_at_checked(size_of::<Amount>())
+            .ok_or(io::Error::new(
+                ErrorKind::InvalidInput,
+                "input is too short",
+            ))?;
+
+        Ok(Self {
+            block: Arc::new(
+                block_bytes
+                    .zcash_deserialize_into()
+                    .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?,
+            ),
+            deferred_pool_balance_change: Amount::from_bytes(
+                deferred_pool_balance_change_bytes
+                    .try_into()
+                    .expect("slice from `split_at_checked()` should fit in [u8; 8]"),
+            )
+            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?,
+        })
+    }
+}
+
 /// Writes a block to a file in the provided non-finalized state backup cache directory path.
 fn write_backup_block(backup_dir_path: &Path, block: &ContextuallyVerifiedBlock) {
     let backup_block_file_name: String = block.hash.encode_hex();
     let backup_block_file_path = backup_dir_path.join(backup_block_file_name);
+    let non_finalized_block_backup: NonFinalizedBlockBackup = block.into();
+
     if let Err(err) = std::fs::write(
         backup_block_file_path,
-        block
-            .block
-            .zcash_serialize_to_vec()
-            .expect("verified block header version should be valid"),
+        non_finalized_block_backup.to_bytes(),
     ) {
         tracing::warn!(?err, "failed to write non-finalized state backup block");
     }
@@ -135,16 +204,22 @@ fn read_non_finalized_blocks_from_backup<'a>(
         // the block is not added to the non-finalized state.
         .filter(|&(block_hash, _)| !finalized_state.contains_hash(block_hash))
         .filter_map(|(block_hash, file_path)| match std::fs::read(file_path) {
-            Ok(block_data) => Some((block_hash, block_data)),
+            Ok(block_bytes) => Some((block_hash, block_bytes)),
             Err(err) => {
                 tracing::warn!(?err, "failed to open non-finalized state backup block file");
                 None
             }
         })
-        .filter_map(|(expected_block_hash, block_bytes)| {
-            match block_bytes.zcash_deserialize_into::<Block>() {
-                Ok(block) if block.coinbase_height().is_some() => {
-                    let block = SemanticallyVerifiedBlock::from(Arc::new(block));
+        .filter_map(|(expected_block_hash, backup_block_file_contents)| {
+            match NonFinalizedBlockBackup::from_bytes(backup_block_file_contents) {
+                Ok(NonFinalizedBlockBackup {
+                    block,
+                    deferred_pool_balance_change,
+                }) if block.coinbase_height().is_some() => {
+                    let block = SemanticallyVerifiedBlock::from(block)
+                        .with_deferred_pool_balance_change(Some(DeferredPoolBalanceChange::new(
+                            deferred_pool_balance_change,
+                        )));
                     if block.hash != expected_block_hash {
                         tracing::warn!(
                             block_hash = ?block.hash,
