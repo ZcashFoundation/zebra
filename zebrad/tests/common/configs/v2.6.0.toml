@@ -61,13 +61,13 @@ network = "Mainnet"
 peerset_initial_target_size = 25
 
 [rpc]
-cookie_dir = "/home/ar/.cache/zebra"
+cookie_dir = "cache_dir"
 debug_force_finished_sync = false
 enable_cookie_auth = true
 parallel_cpu_threads = 0
 
 [state]
-cache_dir = "/home/ar/.cache/zebra"
+cache_dir = "cache_dir"
 delete_old_database = true
 ephemeral = false
 should_backup_non_finalized_state = true
