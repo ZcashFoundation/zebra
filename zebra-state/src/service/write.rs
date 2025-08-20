@@ -57,7 +57,9 @@ pub(crate) fn validate_and_commit_non_finalized(
     check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
-    if finalized_state.finalized_tip_hash() == parent_hash {
+    if !non_finalized_state.any_chain_contains(&parent_hash)
+        && finalized_state.finalized_tip_hash() == parent_hash
+    {
         non_finalized_state.commit_new_chain(prepared, finalized_state)?;
     } else {
         non_finalized_state.commit_block(prepared, finalized_state)?;
