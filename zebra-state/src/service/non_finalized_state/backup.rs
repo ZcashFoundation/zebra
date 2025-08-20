@@ -48,9 +48,9 @@ pub(super) fn restore_backup(
             let commit_result = if non_finalized_state
                 .any_chain_contains(&block.block.header.previous_block_hash)
             {
-                non_finalized_state.commit_block(block, &finalized_state)
+                non_finalized_state.commit_block(block, finalized_state)
             } else {
-                non_finalized_state.commit_new_chain(block, &finalized_state)
+                non_finalized_state.commit_new_chain(block, finalized_state)
             };
 
             #[cfg(not(test))]
@@ -141,7 +141,7 @@ impl From<&ContextuallyVerifiedBlock> for NonFinalizedBlockBackup {
 
 impl NonFinalizedBlockBackup {
     /// Encodes a [`NonFinalizedBlockBackup`] as a vector of bytes.
-    fn to_bytes(self) -> Vec<u8> {
+    fn as_bytes(&self) -> Vec<u8> {
         let block_bytes = self
             .block
             .zcash_serialize_to_vec()
@@ -154,6 +154,7 @@ impl NonFinalizedBlockBackup {
     }
 
     /// Constructs a new [`NonFinalizedBlockBackup`] from a vector of bytes.
+    #[allow(clippy::unwrap_in_result)]
     fn from_bytes(bytes: Vec<u8>) -> Result<Self, io::Error> {
         let (deferred_pool_balance_change_bytes, block_bytes) = bytes
             .split_at_checked(size_of::<Amount>())
@@ -186,7 +187,7 @@ fn write_backup_block(backup_dir_path: &Path, block: &ContextuallyVerifiedBlock)
 
     if let Err(err) = std::fs::write(
         backup_block_file_path,
-        non_finalized_block_backup.to_bytes(),
+        non_finalized_block_backup.as_bytes(),
     ) {
         tracing::warn!(?err, "failed to write non-finalized state backup block");
     }
