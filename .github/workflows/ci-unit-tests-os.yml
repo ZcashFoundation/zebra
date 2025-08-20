@@ -144,11 +144,12 @@ jobs:
           echo "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           echo "LIBCLANG_PATH=C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Skip network tests on Ubuntu and Windows
+      - name: Skip network tests on all OSes
+        # TODO: remove this step once we have reliable network on all OSes.
         # Ubuntu runners don't have reliable network or DNS during test steps.
         # Windows runners have an unreliable network.
+        # macOS is affected locally and in the CI, so we skip the tests on all OSes.
         shell: bash
-        if: matrix.os != 'macos-latest'
         run: echo "SKIP_NETWORK_TESTS=1" >> $GITHUB_ENV
 
       - name: Minimise proptest cases on macOS and Windows
