@@ -222,3 +222,10 @@ panic = "abort"
 #     - add "-flto=thin" to all C/C++ code builds
 #     - see https://doc.rust-lang.org/rustc/linker-plugin-lto.html#cc-code-as-a-dependency-in-rust
 lto = "thin"
+
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+    'cfg(tokio_unstable)',
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))'
+] }

@@ -50,3 +50,6 @@ reqwest = { workspace = true, features = ["rustls-tls"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 jsonrpsee-types = { workspace = true }
+
+[lints]
+workspace = true

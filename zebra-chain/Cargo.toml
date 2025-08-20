@@ -164,3 +164,6 @@ required-features = ["bench"]
 [[bench]]
 name = "redpallas"
 harness = false
+
+[lints]
+workspace = true

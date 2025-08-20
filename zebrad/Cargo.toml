@@ -302,5 +302,5 @@ zebra-test = { path = "../zebra-test", version = "1.0.1" }
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
 zebra-utils = { path = "../zebra-utils", version = "2.0.0" }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+[lints]
+workspace = true

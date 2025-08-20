@@ -122,3 +122,6 @@ zebra-state = { path = "../zebra-state", version = "2.0.0", features = [
 ] }
 
 zebra-test = { path = "../zebra-test", version = "1.0.1" }
+
+[lints]
+workspace = true
