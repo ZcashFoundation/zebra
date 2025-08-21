@@ -328,9 +328,8 @@ pub struct ConfiguredActivationHeights {
     #[serde(rename = "NU7")]
     pub nu7: Option<u32>,
     /// Activation height for `ZFuture` network upgrade.
-    /// Note: This field is ignored unless Zebra is compiled with `zcash_unstable = "zfuture"`
-    ///       (try RUST_FLAGS="--cfg zcash_unstable=\"zfuture\"" cargo build)
     #[serde(rename = "ZFuture")]
+    #[cfg(zcash_unstable = "zfuture")]
     pub zfuture: Option<u32>,
 }
 
@@ -349,6 +348,7 @@ impl ConfiguredActivationHeights {
             nu6,
             nu6_1,
             nu7,
+            #[cfg(zcash_unstable = "zfuture")]
             zfuture,
         } = self;
 
@@ -369,6 +369,7 @@ impl ConfiguredActivationHeights {
             nu6,
             nu6_1,
             nu7,
+            #[cfg(zcash_unstable = "zfuture")]
             zfuture,
         }
     }
@@ -507,6 +508,7 @@ impl ParametersBuilder {
             nu6,
             nu6_1,
             nu7,
+            #[cfg(zcash_unstable = "zfuture")]
             zfuture,
         }: ConfiguredActivationHeights,
     ) -> Self {
