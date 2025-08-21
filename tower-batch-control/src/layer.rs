@@ -5,6 +5,8 @@ use std::{fmt, marker::PhantomData};
 use tower::layer::Layer;
 use tower::Service;
 
+use crate::RequestWeight;
+
 use super::{service::Batch, BatchControl};
 
 /// Adds a layer performing batch processing of requests.
@@ -14,7 +16,7 @@ use super::{service::Batch, BatchControl};
 ///
 /// See the module documentation for more details.
 pub struct BatchLayer<Request> {
-    max_items_in_batch: usize,
+    max_items_weight_in_batch: usize,
     max_batches: Option<usize>,
     max_latency: std::time::Duration,
 
@@ -30,12 +32,12 @@ impl<Request> BatchLayer<Request> {
     /// The wrapper is responsible for telling the inner service when to flush a
     /// batch of requests. See [`Batch::new()`] for details.
     pub fn new(
-        max_items_in_batch: usize,
+        max_items_weight_in_batch: usize,
         max_batches: impl Into<Option<usize>>,
         max_latency: std::time::Duration,
     ) -> Self {
         BatchLayer {
-            max_items_in_batch,
+            max_items_weight_in_batch,
             max_batches: max_batches.into(),
             max_latency,
             _handles_requests: PhantomData,
@@ -43,7 +45,7 @@ impl<Request> BatchLayer<Request> {
     }
 }
 
-impl<S, Request> Layer<S> for BatchLayer<Request>
+impl<S, Request: RequestWeight> Layer<S> for BatchLayer<Request>
 where
     S: Service<BatchControl<Request>> + Send + 'static,
     S::Future: Send,
@@ -56,7 +58,7 @@ where
     fn layer(&self, service: S) -> Self::Service {
         Batch::new(
             service,
-            self.max_items_in_batch,
+            self.max_items_weight_in_batch,
             self.max_batches,
             self.max_latency,
         )
@@ -66,7 +68,7 @@ where
 impl<Request> fmt::Debug for BatchLayer<Request> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("BufferLayer")
-            .field("max_items_in_batch", &self.max_items_in_batch)
+            .field("max_items_weight_in_batch", &self.max_items_weight_in_batch)
             .field("max_batches", &self.max_batches)
             .field("max_latency", &self.max_latency)
             .finish()
