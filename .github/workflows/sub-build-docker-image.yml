@@ -162,7 +162,7 @@ jobs:
           push: true
           # It's recommended to build images with max-level provenance attestations
           # https://docs.docker.com/build/ci/github-actions/attestations/
-          provenance: ${{ vars.DOCKER_PROVENANCE || 'false' }}
+          provenance: ${{ vars.DOCKER_PROVENANCE || '' }}
           sbom: true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
