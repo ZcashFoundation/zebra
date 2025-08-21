@@ -85,6 +85,11 @@ impl ZebradConfig {
     /// - `KEY` is the configuration key within that section
     /// - Double underscores (`__`) separate nested keys
     ///
+    /// # Security
+    /// Environment variables whose leaf key names end with sensitive suffixes (case-insensitive)
+    /// will cause configuration loading to fail with an error: `password`, `secret`, `token`, `cookie`, `private_key`.
+    /// This prevents both silent misconfigurations and process table exposure of sensitive values.
+    ///
     /// # Examples
     /// - `ZEBRA_NETWORK__NETWORK=Testnet` sets `network.network = "Testnet"`
     /// - `ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232` sets `rpc.listen_addr = "127.0.0.1:8232"`
@@ -102,6 +107,7 @@ impl ZebradConfig {
         // 3. Load from standard ZEBRA_ environment variables with a sensitive-leaf deny-list
         // Use ZEBRA_ prefix and __ as separator for nested keys
         // We filter the raw environment first, then let config-rs parse types via try_parsing(true).
+        // Sensitive environment variables cause configuration loading to fail for security.
         let mut filtered_env: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for (key, value) in std::env::vars() {
@@ -114,8 +120,11 @@ impl ZebradConfig {
                 let parts: Vec<&str> = without_prefix.split("__").collect();
                 if let Some(leaf) = parts.last() {
                     if is_sensitive_leaf_key(leaf) {
-                        // Skip sensitive leaf keys from env overrides
-                        continue;
+                        return Err(config::ConfigError::Message(format!(
+                            "Environment variable '{}' contains sensitive key '{}' which cannot be overridden via environment variables. \
+                             Use the configuration file instead to prevent process table exposure.",
+                            key, leaf
+                        )));
                     }
                 }
             }

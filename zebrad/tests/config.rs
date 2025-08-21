@@ -309,32 +309,31 @@ fn config_env_unknown_non_sensitive_key_errors() {
 }
 
 #[test]
-fn config_env_unknown_sensitive_key_is_ignored() {
+fn config_env_unknown_sensitive_key_errors() {
     let env = EnvGuard::new();
 
-    // Unknown field with sensitive suffix should be filtered out and ignored
+    // Unknown field with sensitive suffix should cause an error
     env.set_var("ZEBRA_MINING__TOKEN", "secret-token");
 
     let result = ZebradConfig::load(None);
-    assert!(
-        result.is_ok(),
-        "Unknown sensitive-suffix env key should be ignored (no error)"
-    );
+    assert!(result.is_err(), "Sensitive env key should cause an error");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("sensitive key"), "error message: {}", msg);
 }
 
 #[test]
-fn config_env_elasticsearch_password_is_ignored() {
+fn config_env_elasticsearch_password_errors() {
     let env = EnvGuard::new();
 
     // This key may or may not exist depending on features. It should be filtered regardless.
     env.set_var("ZEBRA_STATE__ELASTICSEARCH_PASSWORD", "topsecret");
 
-    let _config = ZebradConfig::load(None)
-        .expect("Setting elasticsearch password via env should not cause errors (filtered)");
+    let result = ZebradConfig::load(None);
+    assert!(result.is_err(), "Sensitive env key should cause an error");
 
     #[cfg(feature = "elasticsearch")]
     {
-        // When the feature is enabled, ensure env override didn't apply and default remains.
-        assert_eq!(_config.state.elasticsearch_password, "");
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("sensitive key"), "error message: {}", msg);
     }
 }
