@@ -164,7 +164,7 @@ jobs:
           # https://docs.docker.com/build/ci/github-actions/attestations/
           # TODO: Uncomment this once we have a better way to turn on/off provenance
           # provenance: mode=max
-          sbom: true
+          # sbom: true
           # Don't read from the cache if the caller disabled it.
           # https://docs.docker.com/engine/reference/commandline/buildx_build/#options
           no-cache: ${{ inputs.no_cache }}
