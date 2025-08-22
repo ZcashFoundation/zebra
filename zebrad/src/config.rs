@@ -4,23 +4,28 @@
 //! application's configuration file and/or command-line options
 //! for specifying it.
 
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
+
+/// Centralized, case-insensitive suffix-based deny-list to ban setting config fields with
+/// environment variables if those config field names end with any of these suffixes.
+const DENY_CONFIG_KEY_SUFFIX_LIST: [&str; 5] = [
+    "password",
+    "secret",
+    "token",
+    // Block raw cookies only if a field is literally named "cookie".
+    // (Paths like cookie_dir are not affected.)
+    "cookie",
+    // Only raw private keys; paths like *_private_key_path are not affected.
+    "private_key",
+];
 
 /// Returns true if a leaf key name should be considered sensitive and blocked
 /// from environment variable overrides.
 fn is_sensitive_leaf_key(leaf_key: &str) -> bool {
-    let lower = leaf_key.to_ascii_lowercase();
-    // Centralized, case-insensitive suffix-based deny-list
-    lower.ends_with("password")
-        || lower.ends_with("secret")
-        || lower.ends_with("token")
-        // Block raw cookies only if a field is literally named "cookie".
-        // (Paths like cookie_dir are not affected.)
-        || lower.ends_with("cookie")
-        // Only raw private keys; paths like *_private_key_path are not affected.
-        || lower.ends_with("private_key")
+    let key = leaf_key.to_ascii_lowercase();
+    DENY_CONFIG_KEY_SUFFIX_LIST.iter().any(|deny_suffix| key.ends_with(deny_suffix))
 }
 
 /// Configuration for `zebrad`.
@@ -76,9 +81,9 @@ impl ZebradConfig {
     /// Loads the configuration from the conventional sources.
     ///
     /// Configuration is loaded from three sources, in order of precedence:
-    /// 1. Hard-coded defaults (lowest precedence)
+    /// 1. Environment variables with `ZEBRA_` prefix (highest precedence)
     /// 2. TOML configuration file (if provided)
-    /// 3. Environment variables with `ZEBRA_` prefix (highest precedence)
+    /// 3. Hard-coded defaults (lowest precedence)
     ///
     /// Environment variables use the format `ZEBRA_SECTION__KEY` where:
     /// - `SECTION` is the configuration section (e.g., `network`, `rpc`)
@@ -86,9 +91,12 @@ impl ZebradConfig {
     /// - Double underscores (`__`) separate nested keys
     ///
     /// # Security
+    ///
     /// Environment variables whose leaf key names end with sensitive suffixes (case-insensitive)
     /// will cause configuration loading to fail with an error: `password`, `secret`, `token`, `cookie`, `private_key`.
     /// This prevents both silent misconfigurations and process table exposure of sensitive values.
+    ///
+    /// See [`DENY_CONFIG_KEY_SUFFIX_LIST`] and [`is_sensitive_leaf_key()`] above
     ///
     /// # Examples
     /// - `ZEBRA_NETWORK__NETWORK=Testnet` sets `network.network = "Testnet"`
@@ -108,8 +116,7 @@ impl ZebradConfig {
         // Use ZEBRA_ prefix and __ as separator for nested keys
         // We filter the raw environment first, then let config-rs parse types via try_parsing(true).
         // Sensitive environment variables cause configuration loading to fail for security.
-        let mut filtered_env: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let mut filtered_env: HashMap<String, String> = HashMap::new();
         for (key, value) in std::env::vars() {
             if !key.starts_with("ZEBRA_") {
                 continue;

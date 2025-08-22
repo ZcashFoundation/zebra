@@ -51,8 +51,8 @@ impl Runnable for GenerateCmd {
 #      - ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
 #
 # 2. Configuration file (TOML format)
-#    - Specified via -c flag: `zebrad -c myconfig.toml start`
-#    - Or default location in preference directory (see below)
+#    - At the path specified via -c flag, e.g. `zebrad -c myconfig.toml start`, or
+#    - At the default path in the user's preference directory (platform-dependent, see below)
 #
 # 3. Hard-coded defaults (lowest precedence)
 #

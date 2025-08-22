@@ -85,7 +85,7 @@ impl CopyStateCmd {
         let base_config = APPLICATION.config();
         let source_config = base_config.state.clone();
 
-        // Load the target config using the new config-rs method
+        // Load the target config if a target config path was provided, or use an ephemeral config otherwise.
         let target_config = self
             .target_config_path
             .as_ref()
