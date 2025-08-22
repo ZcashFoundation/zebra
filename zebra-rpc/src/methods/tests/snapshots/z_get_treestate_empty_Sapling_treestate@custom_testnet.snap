@@ -8,6 +8,7 @@ expression: treestate
   "time": 1477676169,
   "sapling": {
     "commitments": {
+      "finalRoot": "3e49b5f954aa9d3545bc6c37744661eea48d7c34e3000d82b7f0010c30f4c2fb",
       "finalState": "000000"
     }
   },
