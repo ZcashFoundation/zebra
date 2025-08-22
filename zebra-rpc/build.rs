@@ -4,12 +4,48 @@ use std::{env, fs, path::PathBuf, process::Command};
 const ZALLET_COMMIT: Option<&str> = None;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let out_dir = env::var("OUT_DIR").map(PathBuf::from);
-    tonic_prost_build::configure()
-        .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
-        .file_descriptor_set_path(out_dir.unwrap().join("indexer_descriptor.bin"))
-        .compile_protos(&["proto/indexer.proto"], &[""])?;
+    build_or_copy_proto()?;
+    build_zallet_for_qa_tests();
 
+    Ok(())
+}
+
+fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
+    let out_dir = env::var("OUT_DIR")
+        .map(PathBuf::from)
+        .expect("requires OUT_DIR environment variable definition");
+    let file_names = ["indexer_descriptor.bin", "zebra.indexer.rpc.rs"];
+
+    let is_protoc_available = env::var_os("PROTOC")
+        .map(PathBuf::from)
+        .or_else(|| which::which("protoc").ok())
+        .is_some();
+
+    if is_protoc_available {
+        tonic_prost_build::configure()
+            .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
+            .file_descriptor_set_path(out_dir.join("indexer_descriptor.bin"))
+            .compile_protos(&["proto/indexer.proto"], &[""])?;
+
+        for file_name in file_names {
+            fs::copy(
+                out_dir.join(file_name),
+                format!("proto/__generated__/{file_name}"),
+            )?;
+        }
+    } else {
+        for file_name in file_names {
+            fs::copy(
+                format!("proto/__generated__/{file_name}"),
+                out_dir.join(file_name),
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+fn build_zallet_for_qa_tests() {
     if env::var_os("ZALLET").is_some() {
         // The following code will clone the zallet repo and build the binary,
         // then copy the binary to the project target directory.
@@ -65,6 +101,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
         });
     }
-
-    Ok(())
 }
