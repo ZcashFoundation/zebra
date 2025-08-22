@@ -56,8 +56,7 @@ tracing-futures = { workspace = true }
 sapling-crypto.workspace = true
 orchard.workspace = true
 
-zcash_proofs = { workspace = true, features = ["multicore" ] }
-wagyu-zcash-parameters = { workspace = true }
+zcash_proofs = { workspace = true, features = ["multicore", "bundled-prover"] }
 
 tower-fallback = { path = "../tower-fallback/", version = "0.2.41" }
 tower-batch-control = { path = "../tower-batch-control/", version = "0.2.41" }
