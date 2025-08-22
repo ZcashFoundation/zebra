@@ -256,6 +256,7 @@ lazy_static! {
     /// The funding streams for Mainnet as described in:
     /// - [protocol specification §7.10.1][7.10.1]
     /// - [ZIP-1015](https://zips.z.cash/zip-1015)
+    /// - [ZIP-214#funding-streams](https://zips.z.cash/zip-0214#funding-streams)
     ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAMS_MAINNET: Vec<FundingStreams> = vec![
@@ -296,9 +297,9 @@ lazy_static! {
     ];
 
     /// The funding streams for Testnet as described in:
-    ///
     /// - [protocol specification §7.10.1][7.10.1]
     /// - [ZIP-1015](https://zips.z.cash/zip-1015)
+    /// - [ZIP-214#funding-streams](https://zips.z.cash/zip-0214#funding-streams)
     ///
     /// [7.10.1]: https://zips.z.cash/protocol/protocol.pdf#zip214fundingstreams
     pub static ref FUNDING_STREAMS_TESTNET: Vec<FundingStreams> = vec![
@@ -337,12 +338,6 @@ lazy_static! {
             .collect(),
         },
         FundingStreams {
-            // See discussed NU6 activation height and funding stream start/end heights:
-            // <https://discord.com/channels/809218587167293450/811004767043977288/1400566147585409074>
-            // <https://github.com/zcash/zcash/blob/b65b008a7b334a2f7c2eaae1b028e011f2e21dd1/src/chainparams.cpp#L472>
-            // <https://github.com/zcash/zcash/blob/b65b008a7b334a2f7c2eaae1b028e011f2e21dd1/src/chainparams.cpp#L608-L618>
-            // <https://github.com/zcash/zips/pull/1058/files?diff=unified&w=0#diff-e11a6a8ad34a7d686c41caccf93fe5745663cf0b38deb0ff0dad2917cdfb75e9R209-R210>
-            // TODO: Remove these references once <https://github.com/zcash/zips/pull/1058> has merged.
             height_range: NU6_1_ACTIVATION_HEIGHT_TESTNET..Height(4_476_000),
             recipients: [
                 (
@@ -368,25 +363,28 @@ const POST_NU6_FUNDING_STREAM_START_HEIGHT_TESTNET: u32 = 2_976_000;
 
 /// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
 /// coinbase transaction on Mainnet.
-// TODO: Update this with specified values once the ZIP is finalized.
+/// See:
+/// - <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>
+/// - <https://zips.z.cash/zip-0214#mainnet-recipients-for-revision-2>
 pub const NU6_1_LOCKBOX_DISBURSEMENTS_MAINNET: [(&str, Amount<NonNegative>); 0] = [];
 
 /// The one-time lockbox disbursement output addresses and amounts expected in the NU6.1 activation block's
 /// coinbase transaction on Testnet.
-// See: <https://github.com/zcash/zcash/commit/56878f92b7e178c7c89ac00f42e7c2b0b2d7b25f#diff-ff53e63501a5e89fd650b378c9708274df8ad5d38fcffa6c64be417c4d438b6dR626-R635>
-// TODO: Add a reference to the ZIP once the ZIP is finalized and remove reference to zcashd code.
+/// See:
+/// - <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>
+/// - <https://zips.z.cash/zip-0214#testnet-recipients-for-revision-2>
 pub const NU6_1_LOCKBOX_DISBURSEMENTS_TESTNET: [(&str, Amount<NonNegative>); 10] = [(
     "t2RnBRiqrN1nW4ecZs1Fj3WWjNdnSs4kiX8",
     EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET.div_exact(10),
 ); 10];
 
 /// The expected total amount of the one-time lockbox disbursement on Mainnet.
-// TODO: Add a reference to the ZIP and update this value if needed.
+/// See: <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>.
 pub(crate) const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_MAINNET: Amount<NonNegative> =
     Amount::new_from_zec(78_750);
 
 /// The expected total amount of the one-time lockbox disbursement on Testnet.
-// TODO: Add a reference to the ZIP and update this value if needed.
+/// See <https://zips.z.cash/zip-0271#one-timelockboxdisbursement>.
 pub(crate) const EXPECTED_NU6_1_LOCKBOX_DISBURSEMENTS_TOTAL_TESTNET: Amount<NonNegative> =
     Amount::new_from_zec(78_750);
 
