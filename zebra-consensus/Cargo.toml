@@ -95,3 +95,6 @@ tracing-subscriber = { workspace = true }
 zebra-state = { path = "../zebra-state", version = "2.0.0", features = ["proptest-impl"] }
 zebra-chain = { path = "../zebra-chain", version = "2.0.0", features = ["proptest-impl"] }
 zebra-test = { path = "../zebra-test/", version = "1.0.1" }
+
+[lints]
+workspace = true

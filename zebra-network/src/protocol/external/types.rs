@@ -113,6 +113,11 @@ impl Version {
 
             // It should be fine to reject peers with earlier network protocol versions on custom testnets for now.
             (Testnet(_), _) => CURRENT_NETWORK_PROTOCOL_VERSION.0,
+
+            #[cfg(zcash_unstable = "zfuture")]
+            (Mainnet, ZFuture) => {
+                panic!("ZFuture network upgrade should not be active on Mainnet")
+            }
         })
     }
 }
