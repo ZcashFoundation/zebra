@@ -52,7 +52,7 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=all-tests \
-          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e ZEBRA_NETWORK__NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
           -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
@@ -74,14 +74,12 @@ jobs:
           short-length: 7
 
       - name: Run zebrad large sync tests
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=sync-large-checkpoints-empty \
           -e TEST_LARGE_CHECKPOINTS=1 \
-          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e ZEBRA_NETWORK__NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
           -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
@@ -103,14 +101,12 @@ jobs:
           short-length: 7
 
       - name: Run tests with empty lightwalletd launch
-        env:
-          NETWORK: ${{ inputs.network || vars.ZCASH_NETWORK }}
         run: |
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=lwd-integration \
           -e TEST_LIGHTWALLETD=1 \
-          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e ZEBRA_NETWORK__NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
           -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \
@@ -163,7 +159,7 @@ jobs:
           docker pull ${{ vars.GAR_BASE }}/${{ vars.CI_IMAGE_NAME }}@${{ inputs.image_digest }}
           docker run --tty \
           -e NEXTEST_PROFILE=check-no-git-dependencies \
-          -e NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
+          -e ZEBRA_NETWORK__NETWORK="${{ inputs.network || vars.ZCASH_NETWORK }}" \
           -e RUST_LOG=${{ env.RUST_LOG }} \
           -e RUST_BACKTRACE=${{ env.RUST_BACKTRACE }} \
           -e RUST_LIB_BACKTRACE=${{ env.RUST_LIB_BACKTRACE }} \

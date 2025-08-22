@@ -32,12 +32,12 @@ If you don't want to set any environment variables, you can edit the
 the container. There's an example in `docker/docker-compose.yml` of how to do
 that.
 
-If you want to mine on Testnet, you need to set the `NETWORK` environment
+If you want to mine on Testnet, you need to set the `ZEBRA_NETWORK__NETWORK` environment
 variable to `Testnet` and use a Testnet address for the rewards. For example,
 running
 
 ```bash
-docker run --name zebra_local -e NETWORK="Testnet" -e MINER_ADDRESS="t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v" -e ZEBRA_RPC_PORT=18232 -p 18232:18232 zfnd/zebra:latest
+docker run --name zebra_local -e ZEBRA_NETWORK__NETWORK="Testnet" -e MINER_ADDRESS="t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v" -e ZEBRA_RPC_PORT=18232 -p 18232:18232 zfnd/zebra:latest
 ```
 
 will start a container on Testnet and bind port 18232 on your Docker host, which
