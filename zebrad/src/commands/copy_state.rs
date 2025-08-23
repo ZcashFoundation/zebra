@@ -86,10 +86,16 @@ impl CopyStateCmd {
         let source_config = base_config.state.clone();
 
         // Load the target config if a target config path was provided, or use an ephemeral config otherwise.
+        //
+        // Use the `ZEBRA_TARGET_` environment prefix for target overrides to avoid
+        // conflicting with the source/base config (`ZEBRA_...`).
+        // Example: `ZEBRA_TARGET_STATE__CACHE_DIR=/dst/cache`.
         let target_config = self
             .target_config_path
             .as_ref()
-            .map(|path| crate::config::ZebradConfig::load(Some(path.clone())))
+            .map(|path| {
+                crate::config::ZebradConfig::load_with_env(Some(path.clone()), "ZEBRA_TARGET")
+            })
             .transpose()?
             .map(|app_config| app_config.state)
             .unwrap_or_else(new_zs::Config::ephemeral);

@@ -104,6 +104,21 @@ impl ZebradConfig {
     /// - `ZEBRA_NETWORK__NETWORK=Testnet` sets `network.network = "Testnet"`
     /// - `ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232` sets `rpc.listen_addr = "127.0.0.1:8232"`
     pub fn load(config_path: Option<PathBuf>) -> Result<Self, config::ConfigError> {
+        Self::load_with_env(config_path, "ZEBRA")
+    }
+
+    /// Loads configuration using a caller-provided environment variable prefix.
+    ///
+    /// This allows callers that need multiple configs in the same process (e.g.,
+    /// the `copy-state` command) to keep overrides separate. For example:
+    /// - Source/base config uses `ZEBRA_...` env vars (default prefix)
+    /// - Target config uses `ZEBRA_TARGET_...` env vars
+    ///
+    /// The nested key separator remains `__`, e.g., `ZEBRA_TARGET_STATE__CACHE_DIR`.
+    pub fn load_with_env(
+        config_path: Option<PathBuf>,
+        env_prefix: &str,
+    ) -> Result<Self, config::ConfigError> {
         // 1. Start with an empty `config::Config` builder (no pre-populated values).
         // We merge sources, then deserialize into `ZebradConfig`, which uses
         // `ZebradConfig::default()` wherever keys are missing.
@@ -114,18 +129,18 @@ impl ZebradConfig {
             builder = builder.add_source(config::File::from(path).required(true));
         }
 
-        // 3. Load from standard ZEBRA_ environment variables with a sensitive-leaf deny-list
-        // Use ZEBRA_ prefix and __ as separator for nested keys
+        // 3. Load from environment variables (with a sensitive-leaf deny-list)
+        // Use the provided prefix and `__` as separator for nested keys.
         // We filter the raw environment first, then let config-rs parse types via try_parsing(true).
-        // Sensitive environment variables cause configuration loading to fail for security.
         let mut filtered_env: HashMap<String, String> = HashMap::new();
+        let required_prefix = format!("{}_", env_prefix);
         for (key, value) in std::env::vars() {
-            if !key.starts_with("ZEBRA_") {
+            if !key.starts_with(&required_prefix) {
                 continue;
             }
 
             // Strip the prefix and split nested keys on "__" to find the leaf key name.
-            if let Some(without_prefix) = key.strip_prefix("ZEBRA_") {
+            if let Some(without_prefix) = key.strip_prefix(&required_prefix) {
                 let parts: Vec<&str> = without_prefix.split("__").collect();
                 if let Some(leaf) = parts.last() {
                     if is_sensitive_leaf_key(leaf) {
@@ -142,7 +157,7 @@ impl ZebradConfig {
         }
 
         builder = builder.add_source(
-            config::Environment::with_prefix("ZEBRA")
+            config::Environment::with_prefix(env_prefix)
                 .separator("__")
                 .try_parsing(true)
                 .source(Some(filtered_env)),
@@ -150,9 +165,7 @@ impl ZebradConfig {
 
         // Build the configuration
         let config = builder.build()?;
-
-        // Deserialize into our struct, which will use the Default implementations
-        // for any missing fields
+        // Deserialize into our struct, which will use defaults for any missing fields
         config.try_deserialize()
     }
 }
