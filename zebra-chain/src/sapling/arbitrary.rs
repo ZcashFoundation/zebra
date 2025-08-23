@@ -1,7 +1,7 @@
 //! Randomised data generation for sapling types.
 
 use group::Group;
-use jubjub::{AffinePoint, ExtendedPoint};
+use jubjub::ExtendedPoint;
 use rand::SeedableRng;
 use rand_chacha::ChaChaRng;
 
@@ -11,8 +11,8 @@ use crate::primitives::Groth16Proof;
 
 use super::{
     keys::{self, ValidatingKey},
-    note, tree, FieldNotPresent, NoteCommitment, Output, OutputInTransactionV4, PerSpendAnchor,
-    SharedAnchor, Spend,
+    note, tree, FieldNotPresent, Output, OutputInTransactionV4, PerSpendAnchor, SharedAnchor,
+    Spend,
 };
 
 impl Arbitrary for Spend<PerSpendAnchor> {
@@ -28,7 +28,7 @@ impl Arbitrary for Spend<PerSpendAnchor> {
         )
             .prop_map(|(per_spend_anchor, nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor,
-                cv: ExtendedPoint::generator().try_into().unwrap(),
+                cv: ExtendedPoint::generator().into(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -56,7 +56,7 @@ impl Arbitrary for Spend<SharedAnchor> {
         )
             .prop_map(|(nullifier, rk, proof, sig_bytes)| Self {
                 per_spend_anchor: FieldNotPresent,
-                cv: ExtendedPoint::generator().try_into().unwrap(),
+                cv: ExtendedPoint::generator().into(),
                 nullifier,
                 rk,
                 zkproof: proof,
@@ -82,8 +82,8 @@ impl Arbitrary for Output {
             any::<Groth16Proof>(),
         )
             .prop_map(|(enc_ciphertext, out_ciphertext, zkproof)| Self {
-                cv: ExtendedPoint::generator().try_into().unwrap(),
-                cm_u: NoteCommitment(AffinePoint::identity()).extract_u(),
+                cv: ExtendedPoint::generator().into(),
+                cm_u: jubjub::Fq::zero(),
                 ephemeral_key: keys::EphemeralPublicKey(ExtendedPoint::generator().into()),
                 enc_ciphertext,
                 out_ciphertext,

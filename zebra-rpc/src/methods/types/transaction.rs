@@ -13,7 +13,7 @@ use zebra_chain::{
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::Network,
     primitives::ed25519,
-    sapling::NotSmallOrderValueCommitment,
+    sapling::ValueCommitment,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
@@ -383,8 +383,8 @@ pub struct ScriptSig {
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    #[getter(copy)]
-    cv: NotSmallOrderValueCommitment,
+    //#[getter(copy)]
+    cv: ValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -412,8 +412,8 @@ pub struct ShieldedSpend {
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    #[getter(copy)]
-    cv: NotSmallOrderValueCommitment,
+    //#[getter(copy)]
+    cv: ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(rename = "cmu", with = "hex")]
     cm_u: [u8; 32],
@@ -598,7 +598,7 @@ impl TransactionObject {
                     let spend_auth_sig: [u8; 64] = spend.spend_auth_sig.into();
 
                     ShieldedSpend {
-                        cv: spend.cv,
+                        cv: spend.cv.clone(),
                         anchor,
                         nullifier,
                         rk,
@@ -618,7 +618,7 @@ impl TransactionObject {
                     let out_ciphertext: [u8; 80] = output.out_ciphertext.into();
 
                     ShieldedOutput {
-                        cv: output.cv,
+                        cv: output.cv.clone(),
                         cm_u,
                         ephemeral_key,
                         enc_ciphertext,

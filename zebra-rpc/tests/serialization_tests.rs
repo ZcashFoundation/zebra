@@ -15,7 +15,7 @@ use vectors::{
 
 use zebra_rpc::client::{
     zebra_chain::{
-        sapling::NotSmallOrderValueCommitment,
+        sapling::ValueCommitment,
         serialization::{ZcashDeserialize, ZcashSerialize},
         subtree::NoteCommitmentSubtreeIndex,
         transparent::{OutputIndex, Script},
@@ -689,8 +689,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let proof = spend.proof();
             let spend_auth_sig = spend.spend_auth_sig();
             ShieldedSpend::new(
-                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
-                    .expect("was just serialized"),
+                ValueCommitment::zcash_deserialize(Cursor::new(cv)).expect("was just serialized"),
                 anchor,
                 nullifier,
                 rk,
@@ -710,8 +709,7 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             let out_ciphertext = output.out_ciphertext();
             let proof = output.proof();
             ShieldedOutput::new(
-                NotSmallOrderValueCommitment::zcash_deserialize(Cursor::new(cv))
-                    .expect("was just serialized"),
+                ValueCommitment::zcash_deserialize(Cursor::new(cv)).expect("was just serialized"),
                 cm_u,
                 ephemeral_key,
                 enc_ciphertext,

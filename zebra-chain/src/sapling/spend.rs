@@ -34,7 +34,7 @@ use super::{
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::NotSmallOrderValueCommitment,
+    pub cv: commitment::ValueCommitment,
     /// An anchor for this spend.
     ///
     /// The anchor is the root of the Sapling note commitment tree in a previous
@@ -66,7 +66,7 @@ pub struct Spend<AnchorV: AnchorVariant> {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct SpendPrefixInTransactionV5 {
     /// A value commitment to the value of the input note.
-    pub cv: commitment::NotSmallOrderValueCommitment,
+    pub cv: commitment::ValueCommitment,
     /// The nullifier of the input note.
     pub nullifier: note::Nullifier,
     /// The randomized public key for `spend_auth_sig`.
@@ -157,7 +157,7 @@ impl Spend<SharedAnchor> {
 
 impl ZcashSerialize for Spend<PerSpendAnchor> {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.cv.zcash_serialize(&mut writer)?;
+        writer.write_all(&self.cv.0.to_bytes())?;
         self.per_spend_anchor.zcash_serialize(&mut writer)?;
         writer.write_32_bytes(&self.nullifier.into())?;
         writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
@@ -201,7 +201,9 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
-            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::ValueCommitment(
+                sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
+            ),
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
             // But as mentioned above, we validate it further as an integer.
             per_spend_anchor: (&mut reader).zcash_deserialize_into()?,
@@ -236,7 +238,7 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
 
 impl ZcashSerialize for SpendPrefixInTransactionV5 {
     fn zcash_serialize<W: io::Write>(&self, mut writer: W) -> Result<(), io::Error> {
-        self.cv.zcash_serialize(&mut writer)?;
+        writer.write_all(&self.cv.0.to_bytes())?;
         writer.write_32_bytes(&self.nullifier.into())?;
         writer.write_all(&<[u8; 32]>::from(self.rk.clone())[..])?;
         Ok(())
@@ -256,7 +258,9 @@ impl ZcashDeserialize for SpendPrefixInTransactionV5 {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
             // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
-            cv: commitment::NotSmallOrderValueCommitment::zcash_deserialize(&mut reader)?,
+            cv: commitment::ValueCommitment(
+                sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
+            ),
             // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
             // Type is `SpendAuthSig^{Sapling}.Public`, i.e. J
