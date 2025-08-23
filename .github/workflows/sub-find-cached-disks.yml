@@ -91,7 +91,7 @@ jobs:
       - name: Format network name and branch name for disks
         run: |
           NETWORK_CAPS="${{ inputs.network }}"
-          echo "ZEBRA_NETWORK__NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
+          echo "NETWORK=${NETWORK_CAPS,,}" >> "$GITHUB_ENV"
           LONG_GITHUB_REF="${{ env.GITHUB_REF_POINT_SLUG_URL }}"
           echo "SHORT_GITHUB_REF=${LONG_GITHUB_REF:0:12}" >> "$GITHUB_ENV"
 
