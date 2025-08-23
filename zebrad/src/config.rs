@@ -25,7 +25,9 @@ const DENY_CONFIG_KEY_SUFFIX_LIST: [&str; 5] = [
 /// from environment variable overrides.
 fn is_sensitive_leaf_key(leaf_key: &str) -> bool {
     let key = leaf_key.to_ascii_lowercase();
-    DENY_CONFIG_KEY_SUFFIX_LIST.iter().any(|deny_suffix| key.ends_with(deny_suffix))
+    DENY_CONFIG_KEY_SUFFIX_LIST
+        .iter()
+        .any(|deny_suffix| key.ends_with(deny_suffix))
 }
 
 /// Configuration for `zebrad`.
@@ -102,10 +104,10 @@ impl ZebradConfig {
     /// - `ZEBRA_NETWORK__NETWORK=Testnet` sets `network.network = "Testnet"`
     /// - `ZEBRA_RPC__LISTEN_ADDR=127.0.0.1:8232` sets `rpc.listen_addr = "127.0.0.1:8232"`
     pub fn load(config_path: Option<PathBuf>) -> Result<Self, config::ConfigError> {
+        // 1. Start with an empty `config::Config` builder (no pre-populated values).
+        // We merge sources, then deserialize into `ZebradConfig`, which uses
+        // `ZebradConfig::default()` wherever keys are missing.
         let mut builder = config::Config::builder();
-
-        // 1. Start with defaults - but don't use try_from with the struct directly
-        // Instead, we'll let config-rs use its own defaults and override as needed
 
         // 2. Add TOML configuration file as a source if provided
         if let Some(path) = config_path {
@@ -134,7 +136,6 @@ impl ZebradConfig {
                         )));
                     }
                 }
-
             }
 
             filtered_env.insert(key, value);
@@ -142,7 +143,6 @@ impl ZebradConfig {
 
         builder = builder.add_source(
             config::Environment::with_prefix("ZEBRA")
-                .prefix_separator("_")
                 .separator("__")
                 .try_parsing(true)
                 .source(Some(filtered_env)),
