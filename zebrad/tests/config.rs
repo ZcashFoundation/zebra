@@ -21,7 +21,10 @@ struct EnvGuard {
 impl EnvGuard {
     /// Acquire the global lock and clear all ZEBRA_* env vars, saving originals.
     fn new() -> Self {
-        let guard = TEST_MUTEX.lock().unwrap();
+        // If a test panics, the mutex guard is dropped, but the mutex remains poisoned.
+        // We can recover from the poison error and get the lock, because we're going
+        // to overwrite the environment variables anyway.
+        let guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
         let original_vars: Vec<(String, String)> = env::vars()
             .filter(|(key, _)| key.starts_with("ZEBRA_"))
