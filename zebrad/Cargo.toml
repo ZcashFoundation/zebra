@@ -202,7 +202,7 @@ dirs = { workspace = true }
 atty = { workspace = true }
 
 # Configuration management
-config = { version = "0.15.13", features = ["toml", "json"] }
+config = { workspace = true }
 
 num-integer = { workspace = true }
 rand = { workspace = true }
