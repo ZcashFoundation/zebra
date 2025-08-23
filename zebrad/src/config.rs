@@ -135,12 +135,8 @@ impl ZebradConfig {
         let mut filtered_env: HashMap<String, String> = HashMap::new();
         let required_prefix = format!("{}_", env_prefix);
         for (key, value) in std::env::vars() {
-            if !key.starts_with(&required_prefix) {
-                continue;
-            }
-
-            // Strip the prefix and split nested keys on "__" to find the leaf key name.
             if let Some(without_prefix) = key.strip_prefix(&required_prefix) {
+                // Check for sensitive keys on the stripped key.
                 let parts: Vec<&str> = without_prefix.split("__").collect();
                 if let Some(leaf) = parts.last() {
                     if is_sensitive_leaf_key(leaf) {
@@ -151,13 +147,16 @@ impl ZebradConfig {
                         )));
                     }
                 }
-            }
 
-            filtered_env.insert(key, value);
+                // When providing a `source` map, the keys should not have the prefix.
+                filtered_env.insert(without_prefix.to_string(), value);
+            }
         }
 
+        // When using `source`, we provide a map of already-filtered and processed
+        // keys, so we use a default `Environment` without a prefix.
         builder = builder.add_source(
-            config::Environment::with_prefix(env_prefix)
+            config::Environment::default()
                 .separator("__")
                 .try_parsing(true)
                 .source(Some(filtered_env)),

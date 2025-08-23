@@ -27,7 +27,7 @@ impl EnvGuard {
         let guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
         let original_vars: Vec<(String, String)> = env::vars()
-            .filter(|(key, _)| key.starts_with("ZEBRA_"))
+            .filter(|(key, _val)| key.starts_with("ZEBRA_"))
             .collect();
 
         for (key, _) in &original_vars {
