@@ -248,15 +248,7 @@ impl Application for ZebradApp {
             // Ignore errors loading the config for some commands.
             Err(_e) if command.cmd().should_ignore_load_config_error() => Default::default(),
             Err(e) => {
-                // Check if this looks like a deprecated config format issue
-                let error_msg = e.to_string();
-                if error_msg.contains("invalid type: map, expected a string")
-                    || error_msg.contains("eviction_memory_time")
-                {
-                    status_err!("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file.");
-                } else {
-                    status_err!("Zebra could not load its configuration: {}", e);
-                }
+                status_err!("Zebra could not load its configuration: {}", e);
                 // Convert config::ConfigError to FrameworkError using a generic IO error
                 let io_error = std::io::Error::new(
                     std::io::ErrorKind::InvalidData,

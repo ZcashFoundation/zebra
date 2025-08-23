@@ -107,7 +107,7 @@ impl ZebradConfig {
         // 1. Start with defaults - but don't use try_from with the struct directly
         // Instead, we'll let config-rs use its own defaults and override as needed
 
-        // 2. Load from TOML file if provided
+        // 2. Add TOML configuration file as a source if provided
         if let Some(path) = config_path {
             builder = builder.add_source(config::File::from(path).required(true));
         }
@@ -134,6 +134,7 @@ impl ZebradConfig {
                         )));
                     }
                 }
+
             }
 
             filtered_env.insert(key, value);

@@ -903,7 +903,7 @@ fn invalid_generated_config() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Check that Zebra produced an informative message.
-    output.stderr_contains("Zebra could not parse the provided config file. This might mean you are using a deprecated format of the file.")?;
+    output.stderr_contains("Zebra could not load its configuration: invalid type: map, expected a string for key `mempool.eviction_memory_time`")?;
 
     Ok(())
 }
