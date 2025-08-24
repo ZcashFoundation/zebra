@@ -83,7 +83,8 @@ impl Arbitrary for Output {
         )
             .prop_map(|(enc_ciphertext, out_ciphertext, zkproof)| Self {
                 cv: ExtendedPoint::generator().into(),
-                cm_u: jubjub::Fq::zero(),
+                cm_u: sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&[0u8; 32])
+                    .unwrap(),
                 ephemeral_key: keys::EphemeralPublicKey(ExtendedPoint::generator().into()),
                 enc_ciphertext,
                 out_ciphertext,

@@ -958,7 +958,9 @@ impl Transaction {
     }
 
     /// Returns the Sapling note commitments in this transaction, regardless of version.
-    pub fn sapling_note_commitments(&self) -> Box<dyn Iterator<Item = &jubjub::Fq> + '_> {
+    pub fn sapling_note_commitments(
+        &self,
+    ) -> Box<dyn Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> + '_> {
         // This function returns a boxed iterator because the different
         // transaction variants end up having different iterator types
         match self {

@@ -256,7 +256,7 @@ impl Description for Output {
         inputs.push(epk_affine.get_u());
         inputs.push(epk_affine.get_v());
 
-        inputs.push(self.cm_u);
+        inputs.push(jubjub::Fq::from_bytes(&self.cm_u.to_bytes()).unwrap());
 
         inputs
     }

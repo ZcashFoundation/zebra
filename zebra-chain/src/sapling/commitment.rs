@@ -107,3 +107,17 @@ impl ZcashSerialize for ValueCommitment {
         Ok(())
     }
 }
+
+impl ZcashDeserialize for sapling_crypto::note::ExtractedNoteCommitment {
+    fn zcash_deserialize<R: io::Read>(mut reader: R) -> Result<Self, SerializationError> {
+        let mut buf = [0u8; 32];
+        reader.read_exact(&mut buf)?;
+
+        let extracted_note_commitment: Option<sapling_crypto::note::ExtractedNoteCommitment> =
+            sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&buf).into_option();
+
+        extracted_note_commitment.ok_or(SerializationError::Parse(
+            "invalid ExtractedNoteCommitment bytes",
+        ))
+    }
+}

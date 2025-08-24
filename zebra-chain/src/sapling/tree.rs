@@ -43,7 +43,7 @@ use legacy::LegacyNoteCommitmentTree;
 /// The type that is used to update the note commitment tree.
 ///
 /// Unfortunately, this is not the same as `sapling::NoteCommitment`.
-pub type NoteCommitmentUpdate = jubjub::Fq;
+pub type NoteCommitmentUpdate = sapling_crypto::note::ExtractedNoteCommitment;
 
 pub(super) const MERKLE_DEPTH: u8 = 32;
 
@@ -276,6 +276,12 @@ impl Hashable for Node {
     fn empty_root(level: incrementalmerkletree::Level) -> Self {
         let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
+    }
+}
+
+impl From<sapling_crypto::note::ExtractedNoteCommitment> for Node {
+    fn from(x: sapling_crypto::note::ExtractedNoteCommitment) -> Self {
+        Node(x.to_bytes())
     }
 }
 
@@ -688,9 +694,9 @@ impl PartialEq for NoteCommitmentTree {
     }
 }
 
-impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
+impl From<Vec<sapling_crypto::note::ExtractedNoteCommitment>> for NoteCommitmentTree {
     /// Computes the tree from a whole bunch of note commitments at once.
-    fn from(values: Vec<jubjub::Fq>) -> Self {
+    fn from(values: Vec<sapling_crypto::note::ExtractedNoteCommitment>) -> Self {
         let mut tree = Self::default();
 
         if values.is_empty() {
