@@ -666,17 +666,9 @@ where
     let has_shielded_outputs = transaction.has_shielded_outputs();
     let delete_transparent_outputs =
         CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height };
-    let mut attempts: usize = 0;
-
-    // choose an arbitrary spendable UTXO, in hash set order
-    while let Some((candidate_outpoint, candidate_utxo)) = utxos.iter().next() {
-        attempts += 1;
-
-        // Avoid O(n^2) algorithmic complexity by giving up early,
-        // rather than exhaustively checking the entire UTXO set
-        if attempts > 100 {
-            return None;
-        }
+    // choose an arbitrary spendable UTXO, in hash set order, with a bounded scan
+    for (attempts, (candidate_outpoint, candidate_utxo)) in utxos.iter().take(100).enumerate() {
+        // Avoid O(n^2) algorithmic complexity by limiting the number of checks
 
         // try the utxo as-is, then try it with deleted transparent outputs
         if check_transparent_coinbase_spend(
