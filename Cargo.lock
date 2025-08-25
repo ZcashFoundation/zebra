@@ -6770,6 +6770,7 @@ dependencies = [
  "regex",
  "rlimit",
  "rocksdb",
+ "sapling-crypto",
  "semver",
  "serde",
  "serde_json",

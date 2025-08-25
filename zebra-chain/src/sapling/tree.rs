@@ -43,7 +43,7 @@ use legacy::LegacyNoteCommitmentTree;
 /// The type that is used to update the note commitment tree.
 ///
 /// Unfortunately, this is not the same as `sapling::NoteCommitment`.
-pub type NoteCommitmentUpdate = jubjub::Fq;
+pub type NoteCommitmentUpdate = sapling_crypto::note::ExtractedNoteCommitment;
 
 pub(super) const MERKLE_DEPTH: u8 = 32;
 
@@ -65,6 +65,9 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left)[0..255]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right)[0..255]);
 
+    // TODO:
+    // - Use `sapling_crypto::pedersen_hash::pedersen_hash()` when it allow domain.
+    // - Remove our own `pedersen_hash` implementation.
     pedersen_hash(*b"Zcash_PH", &s).to_bytes()
 }
 
@@ -286,6 +289,12 @@ impl Hashable for Node {
     fn empty_root(level: incrementalmerkletree::Level) -> Self {
         let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
         Self(EMPTY_ROOTS[layer_below])
+    }
+}
+
+impl From<sapling_crypto::note::ExtractedNoteCommitment> for Node {
+    fn from(x: sapling_crypto::note::ExtractedNoteCommitment) -> Self {
+        Node(x.to_bytes())
     }
 }
 
@@ -698,9 +707,9 @@ impl PartialEq for NoteCommitmentTree {
     }
 }
 
-impl From<Vec<jubjub::Fq>> for NoteCommitmentTree {
+impl From<Vec<sapling_crypto::note::ExtractedNoteCommitment>> for NoteCommitmentTree {
     /// Computes the tree from a whole bunch of note commitments at once.
-    fn from(values: Vec<jubjub::Fq>) -> Self {
+    fn from(values: Vec<sapling_crypto::note::ExtractedNoteCommitment>) -> Self {
         let mut tree = Self::default();
 
         if values.is_empty() {

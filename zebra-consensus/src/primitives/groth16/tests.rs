@@ -148,7 +148,10 @@ where
             // verification, causing it to fail for this proof.
             let mut modified_output = output.clone();
             match modification {
-                Groth16OutputModification::ZeroCMU => modified_output.cm_u = jubjub::Fq::zero(),
+                Groth16OutputModification::ZeroCMU => {
+                    modified_output.cm_u =
+                        sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&[0; 32]).unwrap()
+                }
                 Groth16OutputModification::ZeroProof => modified_output.zkproof.0 = [0; 192],
             }
 

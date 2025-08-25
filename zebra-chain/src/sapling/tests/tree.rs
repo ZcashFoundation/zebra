@@ -34,7 +34,7 @@ fn incremental_roots() {
     for (i, cm_u) in test_vectors::COMMITMENTS.iter().enumerate() {
         let bytes = <[u8; 32]>::from_hex(cm_u).unwrap();
 
-        let cm_u = jubjub::Fq::from_bytes(&bytes).unwrap();
+        let cm_u = sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&bytes).unwrap();
 
         leaves.push(cm_u);
 
