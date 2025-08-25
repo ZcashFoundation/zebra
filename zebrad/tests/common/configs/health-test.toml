@@ -1,0 +1,12 @@
+[health]
+endpoint_addr = "127.0.0.1:8080"
+
+[network]
+network = "Testnet"
+
+[metrics]
+endpoint_addr = "127.0.0.1:9999"
+
+[tracing]
+endpoint_addr = "127.0.0.1:3000"
+

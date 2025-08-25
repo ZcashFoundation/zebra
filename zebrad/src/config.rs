@@ -51,6 +51,10 @@ pub struct ZebradConfig {
     /// RPC configuration
     pub rpc: zebra_rpc::config::Config,
 
+    #[cfg(feature = "health-endpoint")]
+    /// Health endpoint configuration
+    pub health: crate::components::health::Config,
+
     #[serde(skip_serializing_if = "zebra_rpc::config::mining::Config::skip_getblocktemplate")]
     /// Mining configuration
     pub mining: zebra_rpc::config::mining::Config,

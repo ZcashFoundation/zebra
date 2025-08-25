@@ -89,6 +89,7 @@ elasticsearch = [
 sentry = ["dep:sentry"]
 journald = ["tracing-journald"]
 filter-reload = ["hyper", "http-body-util", "hyper-util", "bytes"]
+health-endpoint = ["hyper", "hyper-util", "serde/derive", "chrono/serde", "serde_json"]
 
 progress-bar = [
     "howudoin",
@@ -231,6 +232,9 @@ http-body-util = { version = "0.1.2", optional = true }
 hyper-util = { version = "0.1.9", optional = true }
 bytes = { version = "1.8.0", optional = true }
 
+# prod feature health-endpoint
+serde_json = { version = "1.0.132", features = ["preserve_order"], optional = true }
+
 # prod feature prometheus
 metrics-exporter-prometheus = { version = "0.16.0", default-features = false, features = ["http-listener"], optional = true }
 
@@ -267,7 +271,6 @@ regex = "1.11.0"
 insta = { version = "1.40.0", features = ["json"] }
 
 # zebra-rpc needs the preserve_order feature, it also makes test results more stable
-serde_json = { version = "1.0.132", features = ["preserve_order"] }
 tempfile = "3.13.0"
 
 hyper = { version = "1.5.0", features = ["http1", "http2", "server"]}

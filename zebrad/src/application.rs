@@ -232,6 +232,8 @@ impl Application for ZebradApp {
         use crate::components::{
             metrics::MetricsEndpoint, tokio::TokioComponent, tracing::TracingEndpoint,
         };
+        #[cfg(feature = "health-endpoint")]
+        use crate::components::health::HealthEndpoint;
 
         let mut components = self.framework_components(command)?;
 
@@ -482,6 +484,8 @@ impl Application for ZebradApp {
             components.push(Box::new(TokioComponent::new()?));
             components.push(Box::new(TracingEndpoint::new(cfg_ref)?));
             components.push(Box::new(MetricsEndpoint::new(&metrics_config)?));
+            #[cfg(feature = "health-endpoint")]
+            components.push(Box::new(HealthEndpoint::new(&config.health)?));
         }
 
         self.state.components_mut().register(components)?;
