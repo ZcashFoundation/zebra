@@ -612,6 +612,43 @@ impl Transaction {
         }
     }
 
+    /// Returns the Sprout `GenericJoinSplit`s in this transaction, regardless of version.
+    pub fn sprout_joinsplits(&self) -> Box<dyn Iterator<Item = sprout::GenericJoinSplit> + '_> {
+        match self {
+            // JoinSplits with Bctv14 Proofs
+            Transaction::V2 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.joinsplits().map(|js| js.clone().into())),
+            // JoinSplits with Groth Proofs
+            Transaction::V4 {
+                joinsplit_data: Some(joinsplit_data),
+                ..
+            } => Box::new(joinsplit_data.joinsplits().map(|js| js.clone().into())),
+            // No JoinSplits
+            Transaction::V1 { .. }
+            | Transaction::V2 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V3 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V4 {
+                joinsplit_data: None,
+                ..
+            }
+            | Transaction::V5 { .. } => Box::new(std::iter::empty()),
+            #[cfg(feature = "tx_v6")]
+            Transaction::V6 { .. } => Box::new(std::iter::empty()),
+        }
+    }
+
     /// Returns the number of `JoinSplit`s in this transaction, regardless of version.
     pub fn joinsplit_count(&self) -> usize {
         match self {
