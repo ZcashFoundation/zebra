@@ -65,6 +65,9 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left)[0..255]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right)[0..255]);
 
+    // TODO:
+    // - Use `sapling_crypto::pedersen_hash::pedersen_hash()` when it allow domain.
+    // - Remove our own `pedersen_hash` implementation.
     pedersen_hash(*b"Zcash_PH", &s).to_bytes()
 }
 
