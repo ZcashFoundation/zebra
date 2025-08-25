@@ -18,6 +18,7 @@ use std::{
 };
 
 use bitvec::prelude::*;
+use group::GroupEncoding;
 use hex::ToHex;
 use incrementalmerkletree::{
     frontier::{Frontier, NonEmptyFrontier},
@@ -61,14 +62,12 @@ fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
 
     // Prefix: l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
     let l = MERKLE_DEPTH - 1 - layer;
-    s.extend_from_bitslice(&BitSlice::<_, Lsb0>::from_element(&l)[0..6]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left)[0..255]);
     s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right)[0..255]);
 
-    // TODO:
-    // - Use `sapling_crypto::pedersen_hash::pedersen_hash()` when it allow domain.
-    // - Remove our own `pedersen_hash` implementation.
-    pedersen_hash(*b"Zcash_PH", &s).to_bytes()
+    let personalization = sapling_crypto::pedersen_hash::Personalization::MerkleTree(l as usize);
+    let hash = sapling_crypto::pedersen_hash::pedersen_hash(personalization, s);
+    hash.to_bytes()
 }
 
 lazy_static! {
