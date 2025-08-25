@@ -82,7 +82,7 @@ impl From<ValueCommitment> for sapling_crypto::value::ValueCommitment {
 #[derive(Deserialize, Serialize)]
 #[serde(remote = "sapling_crypto::note::ExtractedNoteCommitment")]
 pub struct SaplingExtractedNoteCommitment {
-    #[serde(getter = "temp_sapling_convert_fn")]
+    #[serde(getter = "SaplingExtractedNoteCommitment::as_serializable_bytes")]
     bytes: [u8; 32],
 }
 
@@ -92,7 +92,8 @@ impl From<SaplingExtractedNoteCommitment> for sapling_crypto::note::ExtractedNot
     }
 }
 
-// TODO: Replace this with something reasonable like a method.
-fn temp_sapling_convert_fn(cm_u: &sapling_crypto::note::ExtractedNoteCommitment) -> [u8; 32] {
-    cm_u.to_bytes()
+impl SaplingExtractedNoteCommitment {
+    fn as_serializable_bytes(remote: &sapling_crypto::note::ExtractedNoteCommitment) -> [u8; 32] {
+        remote.to_bytes()
+    }
 }

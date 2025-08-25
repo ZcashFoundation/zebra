@@ -200,7 +200,7 @@ impl ZcashDeserialize for Spend<PerSpendAnchor> {
         Ok(Spend {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
-            // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
+            // See [`sapling_crypto::value::ValueCommitment::::zcash_deserialize`].
             cv: commitment::ValueCommitment(
                 sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
             ),
@@ -257,7 +257,7 @@ impl ZcashDeserialize for SpendPrefixInTransactionV5 {
         Ok(SpendPrefixInTransactionV5 {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
-            // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
+            // See [`sapling_crypto::value::ValueCommitment::::zcash_deserialize`].
             cv: commitment::ValueCommitment(
                 sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
             ),

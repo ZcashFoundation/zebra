@@ -148,13 +148,13 @@ impl ZcashDeserialize for OutputInTransactionV4 {
         Ok(OutputInTransactionV4(Output {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
-            // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
+            // See [`sapling_crypto::value::ValueCommitment::zcash_deserialize`].
             cv: commitment::ValueCommitment(
                 sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
             ),
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
             // However, the consensus rule above restricts it even more.
-            // See [`jubjub::Fq::zcash_deserialize`].
+            // See [`sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize`].
             cm_u: sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize(&mut reader)?,
             // Type is `KA^{Sapling}.Public`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement
@@ -213,13 +213,13 @@ impl ZcashDeserialize for OutputPrefixInTransactionV5 {
         Ok(OutputPrefixInTransactionV5 {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
-            // See [`commitment::NotSmallOrderValueCommitment::zcash_deserialize`].
+            // See [`sapling_crypto::value::ValueCommitment::zcash_deserialize`].
             cv: commitment::ValueCommitment(
                 sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
             ),
             // Type is `B^{[ℓ_{Sapling}_{Merkle}]}`, i.e. 32 bytes.
             // However, the consensus rule above restricts it even more.
-            // See [`jubjub::Fq::zcash_deserialize`].
+            // See [`sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize`].
             cm_u: sapling_crypto::note::ExtractedNoteCommitment::zcash_deserialize(&mut reader)?,
             // Type is `KA^{Sapling}.Public`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#concretesaplingkeyagreement

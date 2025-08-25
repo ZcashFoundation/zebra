@@ -167,7 +167,8 @@ impl Block {
             .flat_map(|transaction| transaction.sprout_note_commitments())
     }
 
-    /// Access the [sapling note commitments](jubjub::Fq) from all transactions in this block.
+    /// Access the [sapling note commitments](`sapling_crypto::note::ExtractedNoteCommitment`)
+    /// from all transactions in this block.
     pub fn sapling_note_commitments(
         &self,
     ) -> impl Iterator<Item = &sapling_crypto::note::ExtractedNoteCommitment> {

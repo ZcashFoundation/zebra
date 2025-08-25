@@ -383,7 +383,7 @@ pub struct ScriptSig {
 pub struct ShieldedSpend {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    //#[getter(copy)]
+    #[getter(skip)]
     cv: ValueCommitment,
     /// Merkle root of the Sapling note commitment tree.
     #[serde(with = "hex")]
@@ -407,12 +407,20 @@ pub struct ShieldedSpend {
     spend_auth_sig: [u8; 64],
 }
 
+// We can't use `#[getter(skip)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+impl ShieldedSpend {
+    /// The value commitment to the input note.
+    pub fn cv(&self) -> ValueCommitment {
+        self.cv.clone()
+    }
+}
+
 /// A Sapling output of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ShieldedOutput {
     /// Value commitment to the input note.
     #[serde(with = "hex")]
-    //#[getter(copy)]
+    #[getter(skip)]
     cv: ValueCommitment,
     /// The u-coordinate of the note commitment for the output note.
     #[serde(rename = "cmu", with = "hex")]
@@ -429,6 +437,14 @@ pub struct ShieldedOutput {
     /// A zero-knowledge proof using the Sapling Output circuit.
     #[serde(with = "hex")]
     proof: [u8; 192],
+}
+
+// We can't use `#[getter(skip)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+impl ShieldedOutput {
+    /// The value commitment to the output note.
+    pub fn cv(&self) -> ValueCommitment {
+        self.cv.clone()
+    }
 }
 
 /// Object with Orchard-specific information.

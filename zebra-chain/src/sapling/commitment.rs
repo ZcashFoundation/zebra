@@ -12,10 +12,15 @@ pub mod pedersen_hashes;
 mod test_vectors;
 
 /// The randomness used in the Pedersen Hash for note commitment.
+///
+/// Equivalent to `sapling_crypto::note::CommitmentRandomness`,
+/// but we can't use it directly as it is not public.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CommitmentRandomness(jubjub::Fr);
 
-/// A wrapper for the Sapling value commitment type.
+/// A wrapper for the `sapling_crypto::value::ValueCommitment` type.
+///
+/// We need the wrapper to derive Serialize, Deserialize and Equality.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ValueCommitment(
     #[serde(with = "serde_helpers::ValueCommitment")] pub sapling_crypto::value::ValueCommitment,
@@ -64,6 +69,7 @@ impl FromHex for ValueCommitment {
     }
 }
 
+#[cfg(any(test, feature = "proptest-impl"))]
 impl From<jubjub::ExtendedPoint> for ValueCommitment {
     /// Convert a Jubjub point into a ValueCommitment.
     ///
