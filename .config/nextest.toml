@@ -21,7 +21,7 @@ status-level = "pass"
 #   below for running them when needed.
 # TODO: We need a better test architecture to run all non-stateful
 [profile.all-tests]
-default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=sync_update_mainnet) and and not test(=activate_mempool_mainnet)"
+default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=sync_update_mainnet) and not test(=activate_mempool_mainnet)"
 
 # --- Individual Test Profiles ---
 
