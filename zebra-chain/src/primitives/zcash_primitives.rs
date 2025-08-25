@@ -29,8 +29,8 @@ impl zp_tx::components::transparent::Authorization for TransparentAuth<'_> {
 
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
-impl zp_tx::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
-    fn input_amounts(&self) -> Vec<zp_tx::components::amount::NonNegativeAmount> {
+impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth<'_> {
+    fn input_amounts(&self) -> Vec<zcash_protocol::value::Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
@@ -137,7 +137,7 @@ impl zp_tx::components::orchard::MapAuth<orchard::bundle::Authorized, orchard::b
     }
 }
 
-#[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+#[cfg(zcash_unstable = "nu7")]
 impl zp_tx::components::issuance::MapIssueAuth<orchard::issuance::Signed, orchard::issuance::Signed>
     for IdentityMap
 {
@@ -156,7 +156,7 @@ impl<'a> zp_tx::Authorization for PrecomputedAuth<'a> {
     type SaplingAuth = sapling_crypto::bundle::Authorized;
     type OrchardAuth = orchard::bundle::Authorized;
 
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */ )]
+    #[cfg(zcash_unstable = "nu7")]
     type IssueAuth = orchard::issuance::Signed;
 }
 
@@ -209,7 +209,7 @@ pub(crate) fn convert_tx_to_librustzcash(
 }
 
 /// Convert a Zebra transparent::Output into a librustzcash one.
-impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
+impl TryFrom<&transparent::Output> for zcash_transparent::bundle::TxOut {
     type Error = io::Error;
 
     #[allow(clippy::unwrap_in_result)]
@@ -218,12 +218,12 @@ impl TryFrom<&transparent::Output> for zp_tx::components::TxOut {
             .zcash_serialize_to_vec()
             .expect("zcash_primitives and Zebra transparent output formats must be compatible");
 
-        zp_tx::components::TxOut::read(&mut serialized_output_bytes.as_slice())
+        zcash_transparent::bundle::TxOut::read(&mut serialized_output_bytes.as_slice())
     }
 }
 
 /// Convert a Zebra transparent::Output into a librustzcash one.
-impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
+impl TryFrom<transparent::Output> for zcash_transparent::bundle::TxOut {
     type Error = io::Error;
 
     // The borrow is actually needed to use TryFrom<&transparent::Output>
@@ -234,11 +234,11 @@ impl TryFrom<transparent::Output> for zp_tx::components::TxOut {
 }
 
 /// Convert a Zebra non-negative Amount into a librustzcash one.
-impl TryFrom<Amount<NonNegative>> for zp_tx::components::amount::NonNegativeAmount {
+impl TryFrom<Amount<NonNegative>> for zcash_protocol::value::Zatoshis {
     type Error = BalanceError;
 
     fn try_from(amount: Amount<NonNegative>) -> Result<Self, Self::Error> {
-        zp_tx::components::amount::NonNegativeAmount::from_nonnegative_i64(amount.into())
+        zcash_protocol::value::Zatoshis::from_nonnegative_i64(amount.into())
     }
 }
 
@@ -323,16 +323,18 @@ pub(crate) fn sighash(
             let output = &precomputed_tx_data.all_previous_outputs[input_index];
             lock_script = output.lock_script.clone().into();
             unlock_script = zcash_primitives::legacy::Script(script_code);
-            zp_tx::sighash::SignableInput::Transparent {
-                hash_type: hash_type.bits() as _,
-                index: input_index,
-                script_code: &unlock_script,
-                script_pubkey: &lock_script,
-                value: output
-                    .value
-                    .try_into()
-                    .expect("amount was previously validated"),
-            }
+            zp_tx::sighash::SignableInput::Transparent(
+                zcash_transparent::sighash::SignableInput::from_parts(
+                    hash_type.try_into().expect("hash type should be ALL"),
+                    input_index,
+                    &unlock_script,
+                    &lock_script,
+                    output
+                        .value
+                        .try_into()
+                        .expect("amount was previously validated"),
+                ),
+            )
         }
         None => zp_tx::sighash::SignableInput::Shielded,
     };
@@ -376,7 +378,7 @@ pub(crate) fn transparent_output_address(
     output: &transparent::Output,
     network: &Network,
 ) -> Option<transparent::Address> {
-    let tx_out = zp_tx::components::TxOut::try_from(output)
+    let tx_out = zcash_transparent::bundle::TxOut::try_from(output)
         .expect("zcash_primitives and Zebra transparent output formats must be compatible");
 
     let alt_addr = tx_out.recipient_address();

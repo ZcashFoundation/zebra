@@ -54,6 +54,8 @@ where
             );
 
             for _ in 0..num_recipients {
+                let mut memo: [u8; 512] = [0; 512];
+                memo[0] = 0xF6;
                 builder
                     .add_output(
                         None,
@@ -61,7 +63,7 @@ where
                         NoteValue::from_raw(note_value),
                         // FIXME: Use another AssetBase for OrchardZSA?
                         AssetBase::native(),
-                        None,
+                        memo,
                     )
                     .unwrap();
             }
