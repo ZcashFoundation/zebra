@@ -328,7 +328,7 @@ jobs:
           --container-stdin \
           --container-tty \
           --container-image ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }} \
-          --container-env "NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
+          --container-env "ZEBRA_NETWORK__NETWORK=${{ matrix.network }},LOG_FILE=${{ vars.CD_LOG_FILE }},SENTRY_DSN=${{ vars.SENTRY_DSN }}" \
           --service-account ${{ vars.GCP_DEPLOYMENTS_SA }} \
           --scopes cloud-platform \
           --metadata google-logging-enabled=true,google-logging-use-fluentbit=true,google-monitoring-enabled=true \
