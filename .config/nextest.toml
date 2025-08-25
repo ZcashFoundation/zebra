@@ -21,7 +21,7 @@ status-level = "pass"
 #   below for running them when needed.
 # TODO: We need a better test architecture to run all non-stateful
 [profile.all-tests]
-default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=trusted_chain_sync_handles_forks_correctly) and not test(=sync_update_mainnet) and not test(=trusted_chain_sync_handles_forks_correctly) and not test(=activate_mempool_mainnet) and not test(=downgrade_state_format) and not test(=invalidate_and_reconsider_block) and not test(=nu6_funding_streams_and_coinbase_balance)"
+default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=sync_update_mainnet) and and not test(=activate_mempool_mainnet)"
 
 # --- Individual Test Profiles ---
 
@@ -116,16 +116,3 @@ default-filter = 'package(zebrad) and test(=lightwalletd_test_suite)'
 [profile.rpc-z-getsubtreesbyindex-snapshot]
 slow-timeout = { period = "30m", terminate-after = 2 }
 default-filter = 'package(zebrad) and test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test)'
-
-# TODO: This are not being tested in CI (they run forever)
-[profile.downgrade-state-format]
-slow-timeout = { period = "30m", terminate-after = 2 }
-default-filter = 'package(zebrad) and test(=downgrade_state_format)'
-
-[profile.invalidate-and-reconsider-block]
-slow-timeout = { period = "30m", terminate-after = 2 }
-default-filter = 'package(zebrad) and test(=invalidate_and_reconsider_block)'
-
-[profile.nu6-funding-streams-and-coinbase-balance]
-slow-timeout = { period = "30m", terminate-after = 2 }
-default-filter = 'package(zebrad) and test(=nu6_funding_streams_and_coinbase_balance)'
