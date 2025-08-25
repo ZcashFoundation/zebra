@@ -469,9 +469,9 @@ where
         mined_block_sender: Option<watch::Sender<(block::Hash, block::Height)>>,
     ) -> Self {
         // Check that the configured miner address is valid.
-        let miner_address = conf.miner_address.map(|zaddr| {
-            if zaddr.can_receive_as(PoolType::Transparent) {
-                Address::try_from_zcash_address(net, zaddr)
+        let miner_address = conf.miner_address.map(|addr| {
+            if addr.can_receive_as(PoolType::Transparent) {
+                Address::try_from_zcash_address(net, addr)
                     .expect("miner_address must be a valid Zcash address")
             } else {
                 // TODO: Remove this panic once we support mining to shielded addresses.
