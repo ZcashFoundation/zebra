@@ -13,7 +13,7 @@ Tier 1 platforms can be thought of as "guaranteed to work". The Zebra project
 builds official binary releases for each tier 1 platform, and automated testing
 ensures that each tier 1 platform builds and passes tests after each change.
 
-For the full requirements, see [Tier 1 platform policy](https://github.com/ZcashFoundation/zebra/blob/main/book/src/user/target-tier-policies.md#tier-1-platform-policy) in the Platform Tier Policy.
+For the full requirements, see [Tier 1 platform policy](target-tier-policies.md#tier-1-platform-policy) in the Platform Tier Policy.
 
 | platform | os | notes | rust | artifacts
 | -------|-------|-------|-------|-------
