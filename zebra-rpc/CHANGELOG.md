@@ -16,6 +16,12 @@ delete this before the release.)
 
 - Changed the `GetTreestateResponse::new()` to take an optional Sprout tree state;
   changed `Commitments::new()` to take the `final_root` parameter.
+  
+## [2.0.1] - 2025-08-22
+
+### Changed
+
+- Removed dependency on `protoc`
 
 ## [2.0.0] - 2025-08-07
 
