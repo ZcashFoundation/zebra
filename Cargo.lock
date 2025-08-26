@@ -1975,7 +1975,7 @@ version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
 dependencies = [
- "hashbrown 0.15.4",
+ "hashbrown 0.15.5",
 ]
 
 [[package]]
@@ -7087,7 +7087,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml 0.9.5",
- "tonic 0.14.0",
+ "tonic 0.14.1",
  "tonic-prost",
  "tonic-prost-build",
  "tower 0.4.13",
