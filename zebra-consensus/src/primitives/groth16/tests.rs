@@ -14,200 +14,6 @@ use zebra_chain::{
 
 use crate::primitives::groth16::*;
 
-async fn verify_groth16_spends_and_outputs<V>(
-    spend_verifier: &mut V,
-    output_verifier: &mut V,
-    transactions: Vec<std::sync::Arc<Transaction>>,
-) -> Result<(), V::Error>
-where
-    V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<Item>>::Error: std::fmt::Debug
-        + std::convert::From<
-            std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-        >,
-{
-    let _init_guard = zebra_test::init();
-
-    let mut async_checks = FuturesUnordered::new();
-
-    for tx in transactions {
-        let spends = tx.sapling_spends_per_anchor();
-        let outputs = tx.sapling_outputs();
-
-        for spend in spends {
-            tracing::trace!(?spend);
-
-            let spend_rsp = spend_verifier.ready().await?.call(
-                DescriptionWrapper(&spend)
-                    .try_into()
-                    .map_err(tower_fallback::BoxedError::from)?,
-            );
-
-            async_checks.push(spend_rsp);
-        }
-
-        for output in outputs {
-            tracing::trace!(?output);
-
-            let output_rsp = output_verifier.ready().await?.call(
-                DescriptionWrapper(output)
-                    .try_into()
-                    .map_err(tower_fallback::BoxedError::from)?,
-            );
-
-            async_checks.push(output_rsp);
-        }
-
-        while let Some(result) = async_checks.next().await {
-            tracing::trace!(?result);
-            result?;
-        }
-    }
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn verify_sapling_groth16() {
-    // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390)
-    let mut spend_verifier = Fallback::new(
-        Batch::new(
-            Verifier::new(&GROTH16_PARAMETERS.sapling.spend.vk),
-            crate::primitives::MAX_BATCH_SIZE,
-            None,
-            crate::primitives::MAX_BATCH_LATENCY,
-        ),
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.spend_prepared_verifying_key))
-            }) as fn(_) -> _,
-        ),
-    );
-    let mut output_verifier = Fallback::new(
-        Batch::new(
-            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
-            crate::primitives::MAX_BATCH_SIZE,
-            None,
-            crate::primitives::MAX_BATCH_LATENCY,
-        ),
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key))
-            }) as fn(_) -> _,
-        ),
-    );
-
-    let transactions = zebra_test::vectors::MAINNET_BLOCKS
-        .clone()
-        .iter()
-        .flat_map(|(_, bytes)| {
-            let block = bytes
-                .zcash_deserialize_into::<Block>()
-                .expect("a valid block");
-            block.transactions
-        })
-        .collect();
-
-    // This should fail if any of the proofs fail to validate.
-    verify_groth16_spends_and_outputs(&mut spend_verifier, &mut output_verifier, transactions)
-        .await
-        .unwrap()
-}
-
-#[derive(Clone, Copy)]
-enum Groth16OutputModification {
-    ZeroCMU,
-    ZeroProof,
-}
-
-static GROTH16_OUTPUT_MODIFICATIONS: [Groth16OutputModification; 2] = [
-    Groth16OutputModification::ZeroCMU,
-    Groth16OutputModification::ZeroProof,
-];
-
-async fn verify_invalid_groth16_output_description<V>(
-    output_verifier: &mut V,
-    transactions: Vec<std::sync::Arc<Transaction>>,
-    modification: Groth16OutputModification,
-) -> Result<(), V::Error>
-where
-    V: tower::Service<Item, Response = ()>,
-    <V as tower::Service<Item>>::Error: std::convert::From<
-        std::boxed::Box<dyn std::error::Error + std::marker::Send + std::marker::Sync>,
-    >,
-{
-    let _init_guard = zebra_test::init();
-
-    let mut async_checks = FuturesUnordered::new();
-
-    for tx in transactions {
-        let outputs = tx.sapling_outputs();
-
-        for output in outputs {
-            // This changes the primary inputs to the proof
-            // verification, causing it to fail for this proof.
-            let mut modified_output = output.clone();
-            match modification {
-                Groth16OutputModification::ZeroCMU => {
-                    modified_output.cm_u =
-                        sapling_crypto::note::ExtractedNoteCommitment::from_bytes(&[0; 32]).unwrap()
-                }
-                Groth16OutputModification::ZeroProof => modified_output.zkproof.0 = [0; 192],
-            }
-
-            tracing::trace!(?modified_output);
-
-            let output_rsp = output_verifier.ready().await?.call(
-                DescriptionWrapper(&modified_output)
-                    .try_into()
-                    .map_err(tower_fallback::BoxedError::from)?,
-            );
-
-            async_checks.push(output_rsp);
-        }
-
-        while let Some(result) = async_checks.next().await {
-            result?;
-        }
-    }
-
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn correctly_err_on_invalid_output_proof() {
-    // Use separate verifiers so shared batch tasks aren't killed when the test ends (#2390).
-    // Also, since we expect these to fail, we don't want to slow down the communal verifiers.
-    let mut output_verifier = Fallback::new(
-        Batch::new(
-            Verifier::new(&GROTH16_PARAMETERS.sapling.output.vk),
-            crate::primitives::MAX_BATCH_SIZE,
-            None,
-            crate::primitives::MAX_BATCH_LATENCY,
-        ),
-        tower::service_fn(
-            (|item: Item| {
-                ready(item.verify_single(&GROTH16_PARAMETERS.sapling.output_prepared_verifying_key))
-            }) as fn(_) -> _,
-        ),
-    );
-
-    let block = zebra_test::vectors::BLOCK_MAINNET_903001_BYTES
-        .clone()
-        .zcash_deserialize_into::<Block>()
-        .expect("a valid block");
-
-    for modification in GROTH16_OUTPUT_MODIFICATIONS {
-        verify_invalid_groth16_output_description(
-            &mut output_verifier,
-            block.transactions.clone(),
-            modification,
-        )
-        .await
-        .expect_err("unexpected success checking invalid groth16 inputs");
-    }
-}
-
 async fn verify_groth16_joinsplits<V>(
     verifier: &mut V,
     transactions: Vec<std::sync::Arc<Transaction>>,
@@ -255,8 +61,8 @@ async fn verify_sprout_groth16() {
     let mut verifier = tower::service_fn(
         (|item: Item| {
             ready(
-                item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
-                    .map_err(tower_fallback::BoxedError::from),
+                item.verify_single(SPROUT.prepared_verifying_key())
+                    .map_err(BoxedError::from),
             )
         }) as fn(_) -> _,
     );
@@ -317,8 +123,8 @@ async fn verify_sprout_groth16_vector() {
     let mut verifier = tower::service_fn(
         (|item: Item| {
             ready(
-                item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
-                    .map_err(tower_fallback::BoxedError::from),
+                item.verify_single(SPROUT.prepared_verifying_key())
+                    .map_err(BoxedError::from),
             )
         }) as fn(_) -> _,
     );
@@ -440,8 +246,8 @@ async fn correctly_err_on_invalid_joinsplit_proof() {
     let mut verifier = tower::service_fn(
         (|item: Item| {
             ready(
-                item.verify_single(&GROTH16_PARAMETERS.sprout.joinsplit_prepared_verifying_key)
-                    .map_err(tower_fallback::BoxedError::from),
+                item.verify_single(SPROUT.prepared_verifying_key())
+                    .map_err(BoxedError::from),
             )
         }) as fn(_) -> _,
     );

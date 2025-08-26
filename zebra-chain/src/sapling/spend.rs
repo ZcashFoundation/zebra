@@ -5,6 +5,8 @@
 
 use std::{fmt, io};
 
+use derive_getters::Getters;
+
 use crate::{
     block::MAX_BLOCK_BYTES,
     primitives::{redjubjub::SpendAuth, Groth16Proof},
@@ -31,7 +33,7 @@ use super::{
 /// `V5` transactions split them into multiple arrays.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#spendencoding
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Getters)]
 pub struct Spend<AnchorV: AnchorVariant> {
     /// A value commitment to the value of the input note.
     pub cv: commitment::ValueCommitment,

@@ -30,7 +30,6 @@ use zebra_chain::{
     block,
     parameters::{Network, NetworkUpgrade},
     primitives::Groth16Proof,
-    sapling,
     serialization::DateTime32,
     transaction::{
         self, HashType, SigHash, Transaction, UnminedTx, UnminedTxId, VerifiedUnminedTx,
@@ -502,7 +501,6 @@ where
                 }
                 Transaction::V4 {
                     joinsplit_data,
-                    sapling_shielded_data,
                     ..
                 } => Self::verify_v4_transaction(
                     &req,
@@ -510,28 +508,23 @@ where
                     script_verifier,
                     cached_ffi_transaction.clone(),
                     joinsplit_data,
-                    sapling_shielded_data,
                 )?,
                 Transaction::V5 {
-                    sapling_shielded_data,
                     ..
                 } => Self::verify_v5_transaction(
                     &req,
                     &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    sapling_shielded_data,
                 )?,
                 #[cfg(feature="tx_v6")]
                 Transaction::V6 {
-                    sapling_shielded_data,
                     ..
                 } => Self::verify_v6_transaction(
                     &req,
                     &network,
                     script_verifier,
                     cached_ffi_transaction.clone(),
-                    sapling_shielded_data,
                 )?,
             };
 
@@ -555,8 +548,6 @@ where
 
             tracing::trace!(?tx_id, "awaiting async checks...");
 
-            // If the Groth16 parameter download hangs,
-            // Zebra will timeout here, waiting for the async checks.
             async_checks.check().await?;
 
             tracing::trace!(?tx_id, "finished async checks");
@@ -879,14 +870,15 @@ where
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
         joinsplit_data: &Option<transaction::JoinSplitData<Groth16Proof>>,
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::PerSpendAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let tx = request.transaction();
         let nu = request.upgrade(network);
 
         Self::verify_v4_transaction_network_upgrade(&tx, nu)?;
 
-        let shielded_sighash = cached_ffi_transaction
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
+
+        let sighash = cached_ffi_transaction
             .sighasher()
             .sighash(HashType::ALL, None);
 
@@ -895,14 +887,8 @@ where
             script_verifier,
             cached_ffi_transaction,
         )?
-        .and(Self::verify_sprout_shielded_data(
-            joinsplit_data,
-            &shielded_sighash,
-        )?)
-        .and(Self::verify_sapling_shielded_data(
-            sapling_shielded_data,
-            &shielded_sighash,
-        )?))
+        .and(Self::verify_sprout_shielded_data(joinsplit_data, &sighash)?)
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash)))
     }
 
     /// Verifies if a V4 `transaction` is supported by `network_upgrade`.
@@ -932,13 +918,13 @@ where
             | NetworkUpgrade::Canopy
             | NetworkUpgrade::Nu5
             | NetworkUpgrade::Nu6
-            | NetworkUpgrade::Nu6_1
-            | NetworkUpgrade::Nu7 => Ok(()),
+            | NetworkUpgrade::Nu6_1 => Ok(()),
 
             // Does not support V4 transactions
             NetworkUpgrade::Genesis
             | NetworkUpgrade::BeforeOverwinter
-            | NetworkUpgrade::Overwinter => Err(TransactionError::UnsupportedByNetworkUpgrade(
+            | NetworkUpgrade::Overwinter
+            | NetworkUpgrade::Nu7 => Err(TransactionError::UnsupportedByNetworkUpgrade(
                 transaction.version(),
                 network_upgrade,
             )),
@@ -970,15 +956,16 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
         let transaction = request.transaction();
         let nu = request.upgrade(network);
 
         Self::verify_v5_transaction_network_upgrade(&transaction, nu)?;
 
+        let sapling_bundle = cached_ffi_transaction.sighasher().sapling_bundle();
         let orchard_bundle = cached_ffi_transaction.sighasher().orchard_bundle();
-        let shielded_sighash = cached_ffi_transaction
+
+        let sighash = cached_ffi_transaction
             .sighasher()
             .sighash(HashType::ALL, None);
 
@@ -987,14 +974,8 @@ where
             script_verifier,
             cached_ffi_transaction,
         )?
-        .and(Self::verify_sapling_shielded_data(
-            sapling_shielded_data,
-            &shielded_sighash,
-        )?)
-        .and(Self::verify_orchard_shielded_data(
-            orchard_bundle,
-            &shielded_sighash,
-        )?))
+        .and(Self::verify_sapling_bundle(sapling_bundle, &sighash))
+        .and(Self::verify_orchard_bundle(orchard_bundle, &sighash)))
     }
 
     /// Verifies if a V5 `transaction` is supported by `network_upgrade`.
@@ -1041,15 +1022,8 @@ where
         network: &Network,
         script_verifier: script::Verifier,
         cached_ffi_transaction: Arc<CachedFfiTransaction>,
-        sapling_shielded_data: &Option<sapling::ShieldedData<sapling::SharedAnchor>>,
     ) -> Result<AsyncChecks, TransactionError> {
-        Self::verify_v5_transaction(
-            request,
-            network,
-            script_verifier,
-            cached_ffi_transaction,
-            sapling_shielded_data,
-        )
+        Self::verify_v5_transaction(request, network, script_verifier, cached_ffi_transaction)
     }
 
     /// Verifies if a transaction's transparent inputs are valid using the provided
@@ -1153,140 +1127,78 @@ where
     }
 
     /// Verifies a transaction's Sapling shielded data.
-    fn verify_sapling_shielded_data<A>(
-        sapling_shielded_data: &Option<sapling::ShieldedData<A>>,
-        shielded_sighash: &SigHash,
-    ) -> Result<AsyncChecks, TransactionError>
-    where
-        A: sapling::AnchorVariant + Clone,
-        sapling::Spend<sapling::PerSpendAnchor>: From<(sapling::Spend<A>, A::Shared)>,
-    {
+    fn verify_sapling_bundle(
+        bundle: Option<sapling_crypto::Bundle<sapling_crypto::bundle::Authorized, ZatBalance>>,
+        sighash: &SigHash,
+    ) -> AsyncChecks {
         let mut async_checks = AsyncChecks::new();
 
-        if let Some(sapling_shielded_data) = sapling_shielded_data {
-            for spend in sapling_shielded_data.spends_per_anchor() {
-                // # Consensus
-                //
-                // > The proof π_ZKSpend MUST be valid
-                // > given a primary input formed from the other
-                // > fields except spendAuthSig.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-                //
-                // Queue the verification of the Groth16 spend proof
-                // for each Spend description while adding the
-                // resulting future to our collection of async
-                // checks that (at a minimum) must pass for the
-                // transaction to verify.
-                async_checks.push(
-                    primitives::groth16::SPEND_VERIFIER
-                        .clone()
-                        .oneshot(DescriptionWrapper(&spend).try_into()?),
-                );
-
-                // # Consensus
-                //
-                // > The spend authorization signature
-                // > MUST be a valid SpendAuthSig signature over
-                // > SigHash using rk as the validating key.
-                //
-                // This is validated by the verifier.
-                //
-                // > [NU5 onward] As specified in § 5.4.7 ‘RedDSA, RedJubjub,
-                // > and RedPallas’ on p. 88, the validation of the 𝑅
-                // > component of the signature changes to prohibit non-canonical encodings.
-                //
-                // This is validated by the verifier, inside the `redjubjub` crate.
-                // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
-                // that enforces the canonical encoding.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#spenddesc
-                //
-                // Queue the validation of the RedJubjub spend
-                // authorization signature for each Spend
-                // description while adding the resulting future to
-                // our collection of async checks that (at a
-                // minimum) must pass for the transaction to verify.
-                async_checks.push(
-                    primitives::redjubjub::VERIFIER
-                        .clone()
-                        .oneshot((spend.rk.into(), spend.spend_auth_sig, shielded_sighash).into()),
-                );
-            }
-
-            for output in sapling_shielded_data.outputs() {
-                // # Consensus
-                //
-                // > The proof π_ZKOutput MUST be
-                // > valid given a primary input formed from the other
-                // > fields except C^enc and C^out.
-                //
-                // https://zips.z.cash/protocol/protocol.pdf#outputdesc
-                //
-                // Queue the verification of the Groth16 output
-                // proof for each Output description while adding
-                // the resulting future to our collection of async
-                // checks that (at a minimum) must pass for the
-                // transaction to verify.
-                async_checks.push(
-                    primitives::groth16::OUTPUT_VERIFIER
-                        .clone()
-                        .oneshot(DescriptionWrapper(output).try_into()?),
-                );
-            }
-
-            // # Consensus
-            //
-            // > The Spend transfers and Action transfers of a transaction MUST be
-            // > consistent with its vbalanceSapling value as specified in § 4.13
-            // > ‘Balance and Binding Signature (Sapling)’.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
-            //
-            // > [Sapling onward] If effectiveVersion ≥ 4 and
-            // > nSpendsSapling + nOutputsSapling > 0, then:
-            // > – let bvk^{Sapling} and SigHash be as defined in § 4.13;
-            // > – bindingSigSapling MUST represent a valid signature under the
-            // >   transaction binding validating key bvk Sapling of SigHash —
-            // >   i.e. BindingSig^{Sapling}.Validate_{bvk^{Sapling}}(SigHash, bindingSigSapling ) = 1.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            //
-            // This is validated by the verifier. The `if` part is indirectly
-            // enforced, since the `sapling_shielded_data` is only parsed if those
-            // conditions apply in [`Transaction::zcash_deserialize`].
-            //
-            // >   [NU5 onward] As specified in § 5.4.7, the validation of the 𝑅 component
-            // >   of the signature changes to prohibit non-canonical encodings.
-            //
-            // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
-            //
-            // This is validated by the verifier, inside the `redjubjub` crate.
-            // It calls [`jubjub::AffinePoint::from_bytes`] to parse R and
-            // that enforces the canonical encoding.
-
-            let bvk = sapling_shielded_data.binding_verification_key();
-
+        // The Sapling batch verifier checks the following consensus rules:
+        //
+        // # Consensus
+        //
+        // > The proof π_ZKSpend MUST be valid given a primary input formed from the other fields
+        // > except spendAuthSig.
+        //
+        // > The spend authorization signature MUST be a valid SpendAuthSig signature over SigHash
+        // > using rk as the validating key.
+        //
+        // > [NU5 onward] As specified in § 5.4.7 ‘RedDSA, RedJubjub, and RedPallas’ on p. 88, the
+        // > validation of the 𝑅 component of the signature changes to prohibit non-canonical
+        // > encodings.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spenddesc
+        //
+        // # Consensus
+        //
+        // > The proof π_ZKOutput MUST be valid given a primary input formed from the other fields
+        // > except C^enc and C^out.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#outputdesc
+        //
+        // # Consensus
+        //
+        // > The Spend transfers and Action transfers of a transaction MUST be consistent with its
+        // > vbalanceSapling value as specified in § 4.13 ‘Balance and Binding Signature (Sapling)’.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#spendsandoutputs
+        //
+        // # Consensus
+        //
+        // > [Sapling onward] If effectiveVersion ≥ 4 and nSpendsSapling + nOutputsSapling > 0,
+        // > then:
+        // >
+        // > – let bvk^{Sapling} and SigHash be as defined in § 4.13;
+        // > – bindingSigSapling MUST represent a valid signature under the transaction binding
+        // >   validating key bvk Sapling of SigHash — i.e.
+        // >   BindingSig^{Sapling}.Validate_{bvk^{Sapling}}(SigHash, bindingSigSapling ) = 1.
+        //
+        // Note that the `if` part is indirectly enforced, since the `sapling_shielded_data` is only
+        // parsed if those conditions apply in [`Transaction::zcash_deserialize`].
+        //
+        // > [NU5 onward] As specified in § 5.4.7, the validation of the 𝑅 component of the
+        // > signature changes to prohibit non-canonical encodings.
+        //
+        // https://zips.z.cash/protocol/protocol.pdf#txnconsensus
+        if let Some(bundle) = bundle {
             async_checks.push(
-                primitives::redjubjub::VERIFIER
+                primitives::sapling::VERIFIER
                     .clone()
-                    .oneshot((bvk, sapling_shielded_data.binding_sig, &shielded_sighash).into()),
+                    .oneshot(primitives::sapling::Item::new(bundle, *sighash)),
             );
         }
 
-        Ok(async_checks)
+        async_checks
     }
 
     /// Verifies a transaction's Orchard shielded data.
-    fn verify_orchard_shielded_data(
-        orchard_bundle: Option<
-            ::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>,
-        >,
-        shielded_sighash: &SigHash,
-    ) -> Result<AsyncChecks, TransactionError> {
+    fn verify_orchard_bundle(
+        bundle: Option<::orchard::bundle::Bundle<::orchard::bundle::Authorized, ZatBalance>>,
+        sighash: &SigHash,
+    ) -> AsyncChecks {
         let mut async_checks = AsyncChecks::new();
 
-        if let Some(orchard_bundle) = orchard_bundle {
+        if let Some(bundle) = bundle {
             // # Consensus
             //
             // > The proof 𝜋 MUST be valid given a primary input (cv, rt^{Orchard},
@@ -1298,12 +1210,14 @@ where
             // aggregated Halo2 proof per transaction, even with multiple
             // Actions in one transaction. So we queue it for verification
             // only once instead of queuing it up for every Action description.
-            async_checks.push(primitives::halo2::VERIFIER.clone().oneshot(
-                primitives::halo2::Item::new(orchard_bundle, *shielded_sighash),
-            ));
+            async_checks.push(
+                primitives::halo2::VERIFIER
+                    .clone()
+                    .oneshot(primitives::halo2::Item::new(bundle, *sighash)),
+            );
         }
 
-        Ok(async_checks)
+        async_checks
     }
 }
 
