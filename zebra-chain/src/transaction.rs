@@ -1034,7 +1034,7 @@ impl Transaction {
         }
     }
 
-    /// Return if the transaction has any Sapling shielded data.
+    /// Returns `true` if the transaction has any Sapling shielded data.
     pub fn has_sapling_shielded_data(&self) -> bool {
         match self {
             Transaction::V1 { .. } | Transaction::V2 { .. } | Transaction::V3 { .. } => false,
