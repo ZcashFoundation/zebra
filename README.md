@@ -7,7 +7,7 @@
 [![Continuous Delivery](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/cd-deploy-nodes-gcp.yml)
 [![codecov](https://codecov.io/gh/ZcashFoundation/zebra/branch/main/graph/badge.svg)](https://codecov.io/gh/ZcashFoundation/zebra)
 [![Build docs](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml/badge.svg)](https://github.com/ZcashFoundation/zebra/actions/workflows/docs-deploy-firebase.yml)
-![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#License)
 
 - [Getting Started](#getting-started)
   - [Docker](#docker)
