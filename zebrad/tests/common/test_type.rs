@@ -296,7 +296,7 @@ impl TestType {
             if default_path.exists() {
                 Some(default_path)
             } else {
-                tracing::info!(
+                tracing::warn!(
                     ?default_path,
                     "skipped {test_name:?} {self:?} lightwalletd test: no cached state found at default path",
                 );
@@ -307,7 +307,7 @@ impl TestType {
             if default_path.exists() {
                 Some(default_path)
             } else {
-                tracing::info!(
+                tracing::warn!(
                     ?default_path,
                     "running {test_name:?} {self:?} lightwalletd test without cached state (no default found)",
                 );

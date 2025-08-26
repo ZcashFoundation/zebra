@@ -80,7 +80,7 @@ All available Cargo features are listed at
 
 ## Configuring Zebra
 
-Zebra uses config-rs to layer configuration from defaults, an optional TOML file, and `ZEBRA_`-prefixed environment variables. When running with Docker, configure Zebra using any of the following (later items override earlier ones):
+Zebra uses [config-rs](https://crates.io/crates/config) to layer configuration from defaults, an optional TOML file, and `ZEBRA_`-prefixed environment variables. When running with Docker, configure Zebra using any of the following (later items override earlier ones):
 
 1. **Provide a specific config file path:** Set the `CONFIG_FILE_PATH` environment variable to point to your config file within the container. The entrypoint will pass it to `zebrad` via `--config`.
 2. **Use the default config file:** Mount a config file to `/home/zebra/.config/zebrad.toml` (for example using the `configs:` mapping in `docker-compose.yml`). This file is loaded if `CONFIG_FILE_PATH` is not set.
@@ -90,7 +90,7 @@ You can verify your configuration by inspecting Zebra's logs at startup.
 
 ### RPC
 
-Zebra's RPC server is disabled by default. Enable and configure it via TOML or environment variables:
+Zebra's RPC server is disabled by default. Enable and configure it via the TOML configuration file, or configuration environment variables:
 
 * **Using a config file:** Add or uncomment the `[rpc]` section in your `zebrad.toml`. Set `listen_addr` (e.g., `"0.0.0.0:8232"` for Mainnet).
 * **Using environment variables:** Set `ZEBRA_RPC__LISTEN_ADDR` (e.g., `0.0.0.0:8232`). To disable cookie auth, set `ZEBRA_RPC__ENABLE_COOKIE_AUTH=false`. To change the cookie directory, set `ZEBRA_RPC__COOKIE_DIR=/path/inside/container`.
@@ -135,7 +135,7 @@ docker compose -f docker/docker-compose.lwd.yml up
 ```
 
 Note that Docker will run Zebra with the RPC server enabled and the cookie
-authentication mechanism disabled since Lightwalletd doesn't support it. In this
+authentication mechanism disabled when running `docker compose -f docker/docker-compose.lwd.yml up`, since Lightwalletd doesn't support cookie authentication. In this
 example, the RPC server is configured by setting `ZEBRA_` environment variables
 directly in `docker/docker-compose.lwd.yml` (or an accompanying `.env` file).
 

@@ -68,9 +68,9 @@ pub fn default_test_config(net: &Network) -> Result<ZebradConfig> {
 
     // Determine the effective network kind: prefer environment override if present.
     let effective_kind: NetworkKind = match env::var("ZEBRA_NETWORK__NETWORK").ok().as_deref() {
-        Some("Mainnet") | Some("mainnet") | Some("Main") | Some("main") => NetworkKind::Mainnet,
-        Some("Regtest") | Some("regtest") => NetworkKind::Regtest,
-        Some("Testnet") | Some("testnet") => NetworkKind::Testnet,
+        Some("Mainnet") => NetworkKind::Mainnet,
+        Some("Regtest") => NetworkKind::Regtest,
+        Some("Testnet") => NetworkKind::Testnet,
         _ => net.kind(),
     };
 

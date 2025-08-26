@@ -326,9 +326,9 @@ pub fn check_sync_logs_until(
     Ok(zebrad)
 }
 
-/// Returns the cache directory for Zebra's state, as configured via config-rs.
+/// Returns the cache directory for Zebra's state, as configured with [`ZebradConfig::load`] with config-rs.
 ///
-/// Uses the resolved configuration from `ZebradConfig::load(None)`, which
+/// Uses the resolved configuration from [`ZebradConfig::load(None)`](ZebradConfig::load), which
 /// incorporates defaults, optional TOML, and environment overrides.
 fn get_zebra_cached_state_dir() -> PathBuf {
     ZebradConfig::load(None)

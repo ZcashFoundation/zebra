@@ -205,13 +205,13 @@ fn config_nested_env_vars() {
 
     let config = ZebradConfig::load(None).expect("load config with nested env vars");
 
-    assert_eq!(config.tracing.filter.as_ref().unwrap(), "debug");
+    assert_eq!(config.tracing.filter.as_ref(), Some("debug"));
 }
 
 // --- Specific env mappings used in Docker examples ---
 
 #[test]
-fn zebra_network_network_env() {
+fn config_zebra_network_network_env() {
     let env = EnvGuard::new();
 
     env.set_var("ZEBRA_NETWORK__NETWORK", "Testnet");
@@ -221,7 +221,7 @@ fn zebra_network_network_env() {
 }
 
 #[test]
-fn zebra_rpc_listen_addr_env() {
+fn config_zebra_rpc_listen_addr_env() {
     let env = EnvGuard::new();
 
     env.set_var("ZEBRA_RPC__LISTEN_ADDR", "127.0.0.1:18232");
@@ -234,7 +234,7 @@ fn zebra_rpc_listen_addr_env() {
 }
 
 #[test]
-fn zebra_state_cache_dir_env() {
+fn config_zebra_state_cache_dir_env() {
     let env = EnvGuard::new();
 
     env.set_var("ZEBRA_STATE__CACHE_DIR", "/test/cache");
@@ -244,7 +244,7 @@ fn zebra_state_cache_dir_env() {
 }
 
 #[test]
-fn zebra_metrics_endpoint_addr_env() {
+fn config_zebra_metrics_endpoint_addr_env() {
     let env = EnvGuard::new();
 
     env.set_var("ZEBRA_METRICS__ENDPOINT_ADDR", "0.0.0.0:9999");
@@ -257,7 +257,7 @@ fn zebra_metrics_endpoint_addr_env() {
 }
 
 #[test]
-fn zebra_tracing_log_file_env() {
+fn config_zebra_tracing_log_file_env() {
     let env = EnvGuard::new();
 
     env.set_var("ZEBRA_TRACING__LOG_FILE", "/test/zebra.log");
@@ -270,13 +270,16 @@ fn zebra_tracing_log_file_env() {
 }
 
 #[test]
-fn zebra_mining_miner_address_from_toml() {
+fn config_zebra_mining_miner_address_from_toml() {
     let _env = EnvGuard::new();
 
     let miner_address = "u1cymdny2u2vllkx7t5jnelp0kde0dgnwu0jzmggzguxvxj6fe7gpuqehywejndlrjwgk9snr6g69azs8jfet78s9zy60uepx6tltk7ee57jlax49dezkhkgvjy2puuue6dvaevt53nah7t2cc2k4p0h0jxmlu9sx58m2xdm5f9sy2n89jdf8llflvtml2ll43e334avu2fwytuna404a";
     let toml_string = format!(
-        "[network]\nnetwork = \"Testnet\"\n\n[mining]\nminer_address = \"{}\"",
-        miner_address
+        r#"[network]
+        network = "Testnet"
+        
+        [mining]
+        miner_address = "{miner_address}""#,
     );
 
     let mut file = Builder::new()
@@ -334,9 +337,6 @@ fn config_env_elasticsearch_password_errors() {
     let result = ZebradConfig::load(None);
     assert!(result.is_err(), "Sensitive env key should cause an error");
 
-    #[cfg(feature = "elasticsearch")]
-    {
-        let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("sensitive key"), "error message: {}", msg);
-    }
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("sensitive key"), "error message: {}", msg);
 }

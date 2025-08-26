@@ -30,7 +30,8 @@
 //!   will allow this test to run or give up. Value for the Mainnet full sync tests.
 //! - `SYNC_FULL_TESTNET_TIMEOUT_MINUTES` env variable: The total number of minutes we
 //!   will allow this test to run or give up. Value for the Testnet full sync tests.
-//! - `ZEBRA_STATE__CACHE_DIR` env variable: The path to a Zebra cached state directory.
+//! - A zebrad state cache directory is required for some tests, either at the default state cache
+//!   directory path, or at the path defined in the `ZEBRA_STATE__CACHE_DIR` env variable.
 //!   For some sync tests, this directory needs to be created in the file system
 //!   with write permissions.
 //!
@@ -903,7 +904,7 @@ fn invalid_generated_config() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Check that Zebra produced an informative message.
-    output.stderr_contains("Zebra could not load its configuration: invalid type: map, expected a string for key `mempool.eviction_memory_time`")?;
+    output.stderr_contains("Zebra could not load the provided configuration file and/or environment variables")?;
 
     Ok(())
 }
@@ -1784,7 +1785,7 @@ fn lwd_integration() -> Result<()> {
 
 /// Make sure `zebrad` can sync from peers, but don't actually launch `lightwalletd`.
 ///
-/// This test only runs when a persistent cached state is configured
+/// This test only runs when a persistent cached state directory path is configured
 /// (for example, by setting `ZEBRA_STATE__CACHE_DIR`).
 ///
 /// This test might work on Windows.
@@ -1797,7 +1798,7 @@ fn sync_update_mainnet() -> Result<()> {
 ///
 /// This test only runs when:
 /// - `TEST_LIGHTWALLETD` is set,
-/// - a persistent cached state is configured (e.g., via `ZEBRA_STATE__CACHE_DIR`), and
+/// - a persistent cached state directory path is configured (e.g., via `ZEBRA_STATE__CACHE_DIR`), and
 /// - Zebra is compiled with `--features=lightwalletd-grpc-tests`.
 ///
 /// This test doesn't work on Windows, so it is always skipped on that platform.
@@ -1831,9 +1832,9 @@ fn lwd_sync_full() -> Result<()> {
 ///
 /// Runs the tests in this order:
 /// - launch lightwalletd with empty states,
-/// - if a cached Zebra state is configured:
+/// - if a cached Zebra state directory path is configured:
 ///   - run a full sync
-/// - if a cached Zebra state is configured:
+/// - if a cached Zebra state directory path is configured:
 ///   - run a quick update sync,
 ///   - run a send transaction gRPC test,
 ///   - run read-only gRPC tests.

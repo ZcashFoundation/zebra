@@ -248,7 +248,13 @@ impl Application for ZebradApp {
             // Ignore errors loading the config for some commands.
             Err(_e) if command.cmd().should_ignore_load_config_error() => Default::default(),
             Err(e) => {
-                status_err!("Zebra could not load its configuration: {}", e);
+                status_err!(
+                    "Zebra could not load the provided configuration file and/or environment variables.\
+                     This might mean you are using a deprecated format of the file, or are attempting to
+                     configure deprecated or unknown fields via environment variables.\
+                     You can generate a valid config by running \"zebrad generate\", \
+                     and diff it against yours to examine any format inconsistencies."
+                );
                 // Convert config::ConfigError to FrameworkError using a generic IO error
                 let io_error = std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
