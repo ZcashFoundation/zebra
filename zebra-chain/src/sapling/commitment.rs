@@ -6,8 +6,6 @@ use hex::{FromHex, FromHexError, ToHex};
 
 use crate::serialization::{serde_helpers, SerializationError, ZcashDeserialize, ZcashSerialize};
 
-pub mod pedersen_hashes;
-
 #[cfg(test)]
 mod test_vectors;
 

@@ -17,19 +17,14 @@ use std::{
     io,
 };
 
-use bitvec::prelude::*;
-use group::GroupEncoding;
 use hex::ToHex;
 use incrementalmerkletree::{
     frontier::{Frontier, NonEmptyFrontier},
     Hashable,
 };
 
-use lazy_static::lazy_static;
 use thiserror::Error;
 use zcash_primitives::merkle_tree::HashSer;
-
-use super::commitment::pedersen_hashes::pedersen_hash;
 
 use crate::{
     serialization::{
@@ -47,52 +42,6 @@ use legacy::LegacyNoteCommitmentTree;
 pub type NoteCommitmentUpdate = sapling_crypto::note::ExtractedNoteCommitment;
 
 pub(super) const MERKLE_DEPTH: u8 = 32;
-
-/// MerkleCRH^Sapling Hash Function
-///
-/// Used to hash incremental Merkle tree hash values for Sapling.
-///
-/// MerkleCRH^Sapling(layer, left, right) := PedersenHash("Zcash_PH", l || left || right)
-/// where l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer) and
-/// left, right, and the output are all technically 255 bits (l_MerkleSapling), not 256.
-///
-/// <https://zips.z.cash/protocol/protocol.pdf#merklecrh>
-fn merkle_crh_sapling(layer: u8, left: [u8; 32], right: [u8; 32]) -> [u8; 32] {
-    let mut s = bitvec![u8, Lsb0;];
-
-    // Prefix: l = I2LEBSP_6(MerkleDepth^Sapling − 1 − layer)
-    let l = MERKLE_DEPTH - 1 - layer;
-    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(left)[0..255]);
-    s.extend_from_bitslice(&BitArray::<_, Lsb0>::from(right)[0..255]);
-
-    let personalization = sapling_crypto::pedersen_hash::Personalization::MerkleTree(l as usize);
-    let hash = sapling_crypto::pedersen_hash::pedersen_hash(personalization, s);
-    hash.to_bytes()
-}
-
-lazy_static! {
-    /// List of "empty" Sapling note commitment nodes, one for each layer.
-    ///
-    /// The list is indexed by the layer number (0: root; MERKLE_DEPTH: leaf).
-    ///
-    /// <https://zips.z.cash/protocol/protocol.pdf#constants>
-    pub(super) static ref EMPTY_ROOTS: Vec<[u8; 32]> = {
-        // The empty leaf node. This is layer 32.
-        let mut v = vec![NoteCommitmentTree::uncommitted()];
-
-        // Starting with layer 31 (the first internal layer, after the leaves),
-        // generate the empty roots up to layer 0, the root.
-        for layer in (0..MERKLE_DEPTH).rev() {
-            // The vector is generated from the end, pushing new nodes to its beginning.
-            // For this reason, the layer below is v[0].
-            let next = merkle_crh_sapling(layer, v[0], v[0]);
-            v.insert(0, next);
-        }
-
-        v
-
-    };
-}
 
 /// Sapling note commitment tree root node hash.
 ///
@@ -277,17 +226,20 @@ impl Hashable for Node {
     }
 
     /// Combine two nodes to generate a new node in the given level.
-    /// Level 0 is the layer above the leaves (layer 31).
-    /// Level 31 is the root (layer 0).
     fn combine(level: incrementalmerkletree::Level, a: &Self, b: &Self) -> Self {
-        let layer = MERKLE_DEPTH - 1 - u8::from(level);
-        Self(merkle_crh_sapling(layer, a.0, b.0))
+        Self(
+            sapling_crypto::Node::combine(
+                level,
+                &sapling_crypto::Node::from_bytes(a.0).unwrap(),
+                &sapling_crypto::Node::from_bytes(b.0).unwrap(),
+            )
+            .to_bytes(),
+        )
     }
 
     /// Return the node for the level below the given level. (A quirk of the API)
     fn empty_root(level: incrementalmerkletree::Level) -> Self {
-        let layer_below = usize::from(MERKLE_DEPTH) - usize::from(level);
-        Self(EMPTY_ROOTS[layer_below])
+        Self(sapling_crypto::Node::empty_root(level).to_bytes())
     }
 }
 
