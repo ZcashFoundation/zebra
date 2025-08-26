@@ -4,6 +4,8 @@
 
 use std::io;
 
+use derive_getters::Getters;
+
 use crate::{
     block::MAX_BLOCK_BYTES,
     primitives::Groth16Proof,
@@ -22,7 +24,7 @@ use super::{commitment, keys, note};
 /// `V5` transactions split them into multiple arrays.
 ///
 /// [ps]: https://zips.z.cash/protocol/protocol.pdf#outputencoding
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Getters)]
 pub struct Output {
     /// A value commitment to the value of the input note.
     pub cv: commitment::NotSmallOrderValueCommitment,

@@ -2511,8 +2511,10 @@ async fn v4_with_joinsplit_is_rejected_for_modification(
 
     let (height, mut transaction) = test_transactions(&network)
         .rev()
-        .filter(|(_, transaction)| !transaction.is_coinbase() && transaction.inputs().is_empty())
-        .find(|(_, transaction)| transaction.sprout_groth16_joinsplits().next().is_some())
+        .filter(|(_, tx)| {
+            !tx.is_coinbase() && tx.inputs().is_empty() && !tx.has_sapling_shielded_data()
+        })
+        .find(|(_, tx)| tx.sprout_groth16_joinsplits().next().is_some())
         .expect("There should be a tx with Groth16 JoinSplits.");
 
     let expected_error = Err(expected_error);
