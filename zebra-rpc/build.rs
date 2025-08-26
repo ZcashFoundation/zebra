@@ -28,17 +28,19 @@ fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
             .compile_protos(&["proto/indexer.proto"], &[""])?;
 
         for file_name in file_names {
-            fs::copy(
-                out_dir.join(file_name),
-                format!("proto/__generated__/{file_name}"),
-            )?;
+            let out_path = out_dir.join(file_name);
+            let generated_path = format!("proto/__generated__/{file_name}");
+            if fs::read_to_string(&out_path).ok() != fs::read_to_string(&generated_path).ok() {
+                fs::copy(out_path, generated_path)?;
+            }
         }
     } else {
         for file_name in file_names {
-            fs::copy(
-                format!("proto/__generated__/{file_name}"),
-                out_dir.join(file_name),
-            )?;
+            let out_path = out_dir.join(file_name);
+            let generated_path = format!("proto/__generated__/{file_name}");
+            if fs::read_to_string(&out_path).ok() != fs::read_to_string(&generated_path).ok() {
+                fs::copy(generated_path, out_path)?;
+            }
         }
     }
 
