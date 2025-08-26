@@ -205,7 +205,7 @@ fn config_nested_env_vars() {
 
     let config = ZebradConfig::load(None).expect("load config with nested env vars");
 
-    assert_eq!(config.tracing.filter.as_ref(), Some("debug"));
+    assert_eq!(config.tracing.filter.as_deref(), Some("debug"));
 }
 
 // --- Specific env mappings used in Docker examples ---

@@ -904,7 +904,9 @@ fn invalid_generated_config() -> Result<()> {
     let output = child.wait_with_output()?;
 
     // Check that Zebra produced an informative message.
-    output.stderr_contains("Zebra could not load the provided configuration file and/or environment variables")?;
+    output.stderr_contains(
+        "Zebra could not load the provided configuration file and/or environment variables",
+    )?;
 
     Ok(())
 }
