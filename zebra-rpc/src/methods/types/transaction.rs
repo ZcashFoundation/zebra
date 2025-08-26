@@ -8,12 +8,14 @@ use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
 
+use serde_with::serde_as;
 use zebra_chain::{
     amount::{self, Amount, NegativeOrZero, NonNegative},
     block::{self, merkle::AUTH_DIGEST_PLACEHOLDER, Height},
     parameters::Network,
     primitives::ed25519,
     sapling::NotSmallOrderValueCommitment,
+    serialization::ZcashSerialize,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx, VerifiedUnminedTx},
     transparent::Script,
 };
@@ -182,6 +184,10 @@ pub struct TransactionObject {
     #[serde(rename = "vShieldedOutput")]
     pub(crate) shielded_outputs: Vec<ShieldedOutput>,
 
+    /// Transparent outputs of the transaction.
+    #[serde(rename = "vjoinsplit")]
+    pub(crate) joinsplits: Vec<JoinSplit>,
+
     /// Sapling binding signature of the transaction.
     #[serde(
         skip_serializing_if = "Option::is_none",
@@ -241,8 +247,6 @@ pub struct TransactionObject {
     #[getter(copy)]
     pub txid: transaction::Hash,
 
-    // TODO: some fields not yet supported
-    //
     /// The transaction's auth digest. For pre-v5 transactions this will be
     /// ffff..ffff
     #[serde(
@@ -378,6 +382,54 @@ pub struct ScriptSig {
     hex: Script,
 }
 
+/// A Sprout JoinSplit of a transaction.
+#[allow(clippy::too_many_arguments)]
+#[serde_with::serde_as]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct JoinSplit {
+    /// Public input value in ZEC.
+    #[serde(rename = "vpub_old")]
+    old_public_value: f64,
+    /// Public input value in zatoshis.
+    #[serde(rename = "vpub_oldZat")]
+    old_public_value_zat: i64,
+    /// Public input value in ZEC.
+    #[serde(rename = "vpub_new")]
+    new_public_value: f64,
+    /// Public input value in zatoshis.
+    #[serde(rename = "vpub_newZat")]
+    new_public_value_zat: i64,
+    /// Merkle root of the Sprout note commitment tree.
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    anchor: [u8; 32],
+    /// The nullifier of the input notes.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    nullifiers: Vec<[u8; 32]>,
+    /// The commitments of the output notes.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    commitments: Vec<[u8; 32]>,
+    /// The onetime public key used to encrypt the ciphertexts
+    #[serde(rename = "onetimePubKey")]
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    one_time_pubkey: [u8; 32],
+    /// The random seed
+    #[serde(rename = "randomSeed")]
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    random_seed: [u8; 32],
+    /// The input notes MACs.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    macs: Vec<[u8; 32]>,
+    /// A zero-knowledge proof using the Sprout circuit.
+    #[serde(with = "hex")]
+    proof: Vec<u8>,
+    /// The output notes ciphertexts.
+    #[serde_as(as = "Vec<serde_with::hex::Hex>")]
+    ciphertexts: Vec<Vec<u8>>,
+}
+
 /// A Sapling spend of a transaction.
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
 pub struct ShieldedSpend {
@@ -486,6 +538,7 @@ impl Default for TransactionObject {
             outputs: Vec::new(),
             shielded_spends: Vec::new(),
             shielded_outputs: Vec::new(),
+            joinsplits: Vec::new(),
             orchard: None,
             binding_sig: None,
             joinsplit_pub_key: None,
@@ -624,6 +677,44 @@ impl TransactionObject {
                         enc_ciphertext,
                         out_ciphertext,
                         proof: output.proof().0,
+                    }
+                })
+                .collect(),
+            joinsplits: tx
+                .sprout_joinsplits()
+                .map(|joinsplit| {
+                    let mut ephemeral_key_bytes: [u8; 32] = joinsplit.ephemeral_key.to_bytes();
+                    ephemeral_key_bytes.reverse();
+
+                    JoinSplit {
+                        old_public_value: Zec::from(joinsplit.vpub_old).lossy_zec(),
+                        old_public_value_zat: joinsplit.vpub_old.zatoshis(),
+                        new_public_value: Zec::from(joinsplit.vpub_new).lossy_zec(),
+                        new_public_value_zat: joinsplit.vpub_new.zatoshis(),
+                        anchor: joinsplit.anchor.bytes_in_display_order(),
+                        nullifiers: joinsplit
+                            .nullifiers
+                            .iter()
+                            .map(|n| n.bytes_in_display_order())
+                            .collect(),
+                        commitments: joinsplit
+                            .commitments
+                            .iter()
+                            .map(|c| c.bytes_in_display_order())
+                            .collect(),
+                        one_time_pubkey: ephemeral_key_bytes,
+                        random_seed: joinsplit.random_seed.bytes_in_display_order(),
+                        macs: joinsplit
+                            .vmacs
+                            .iter()
+                            .map(|m| m.bytes_in_display_order())
+                            .collect(),
+                        proof: joinsplit.zkproof.unwrap_or_default(),
+                        ciphertexts: joinsplit
+                            .enc_ciphertexts
+                            .iter()
+                            .map(|c| c.zcash_serialize_to_vec().unwrap_or_default())
+                            .collect(),
                     }
                 })
                 .collect(),

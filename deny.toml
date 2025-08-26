@@ -121,6 +121,9 @@ skip-tree = [
     { name = "rand", version = "0.8" },
     { name = "rand_core", version = "0.6" },
     { name = "rand_chacha", version = "0.3" },
+
+    # TODO: Remove once https://github.com/zcash/librustzcash/pull/1893 merges.
+    { name = "equihash", version = "0.2" }
 ]
 
 # This section is considered when running `cargo deny check sources`.

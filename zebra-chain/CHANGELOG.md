@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - XXXX-XX-XX
+
+### Added
+
+- Added `{sapling,orchard}::Root::bytes_in_display_order()`
+- Added `bytes_in_display_order()` for multiple `sprout` types.
+
 ## [2.0.0] - 2025-08-07
 
 Support for NU6.1 testnet activation; added testnet activation height for NU6.1.

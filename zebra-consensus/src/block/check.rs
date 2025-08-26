@@ -214,8 +214,8 @@ pub fn subsidy_is_valid(
             .constrain::<NegativeAllowed>()
             .expect("should be valid Amount");
 
-        // TODO: Add references to the one-time lockbox disbursement & community coinholder funding model ZIPs
-        //       (https://zips.z.cash/draft-ecc-lockbox-disbursement, https://zips.z.cash/draft-ecc-community-and-coinholder)
+        // Checks the one-time lockbox disbursements in the NU6.1 activation block's coinbase transaction
+        // See [ZIP-271](https://zips.z.cash/zip-0271) and [ZIP-1016](https://zips.z.cash/zip-1016) for more details.
         let expected_one_time_lockbox_disbursements = network.lockbox_disbursements(height);
         for (address, expected_amount) in &expected_one_time_lockbox_disbursements {
             if !has_expected_output(address, *expected_amount) {

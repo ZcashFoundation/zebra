@@ -101,6 +101,16 @@ lazy_static! {
 #[derive(Clone, Copy, Default, Eq, Serialize, Deserialize)]
 pub struct Root(#[serde(with = "serde_helpers::Fq")] pub(crate) jubjub::Base);
 
+impl Root {
+    /// Return the node bytes in little-endian byte order as required
+    /// by RPCs such as `z_gettreestate`.
+    pub fn bytes_in_display_order(&self) -> [u8; 32] {
+        let mut root: [u8; 32] = self.into();
+        root.reverse();
+        root
+    }
+}
+
 impl fmt::Debug for Root {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Root")
