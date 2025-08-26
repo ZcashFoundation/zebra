@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added `{sapling,orchard}::Root::bytes_in_display_order()`
+- Added `bytes_in_display_order()` for multiple `sprout` types.
 
 ## [2.0.0] - 2025-08-07
 
