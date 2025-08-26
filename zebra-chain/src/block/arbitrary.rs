@@ -667,7 +667,7 @@ where
     let delete_transparent_outputs =
         CoinbaseSpendRestriction::CheckCoinbaseMaturity { spend_height };
     // choose an arbitrary spendable UTXO, in hash set order, with a bounded scan
-    for (attempts, (candidate_outpoint, candidate_utxo)) in utxos.iter().take(100).enumerate() {
+    for (candidate_outpoint, candidate_utxo) in utxos.iter().take(100) {
         // Avoid O(n^2) algorithmic complexity by limiting the number of checks
 
         // try the utxo as-is, then try it with deleted transparent outputs
