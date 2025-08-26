@@ -9,6 +9,9 @@ use std::{env, fs, io::Write, path::PathBuf, sync::Mutex};
 use tempfile::{Builder, TempDir};
 use zebrad::config::ZebradConfig;
 
+// Prefix used for environment variables mapped to config values in tests.
+const ZEBRA_ENV_PREFIX: &str = "ZEBRA_";
+
 // Global mutex to ensure tests run sequentially to avoid env var races
 static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -27,7 +30,7 @@ impl EnvGuard {
         let guard = TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
         let original_vars: Vec<(String, String)> = env::vars()
-            .filter(|(key, _val)| key.starts_with("ZEBRA_"))
+            .filter(|(key, _val)| key.starts_with(ZEBRA_ENV_PREFIX))
             .collect();
 
         for (key, _) in &original_vars {
@@ -50,7 +53,7 @@ impl Drop for EnvGuard {
     fn drop(&mut self) {
         // Clear any ZEBRA_* set during the test
         let current_vars: Vec<String> = env::vars()
-            .filter(|(key, _)| key.starts_with("ZEBRA_"))
+            .filter(|(key, _)| key.starts_with(ZEBRA_ENV_PREFIX))
             .map(|(key, _)| key)
             .collect();
         for key in current_vars {
@@ -115,8 +118,7 @@ fn config_nonexistent_file_errors() {
     let _env = EnvGuard::new();
 
     let nonexistent_path = PathBuf::from("/this/path/does/not/exist.toml");
-    let result = ZebradConfig::load(Some(nonexistent_path));
-    assert!(result.is_err(), "Should fail to load nonexistent file");
+    ZebradConfig::load(Some(nonexistent_path)).expect_err("Should fail to load nonexistent file");
 }
 
 // --- Environment variable precedence ---
@@ -180,8 +182,7 @@ network = "Testnet"
 
     fs::write(&config_path, invalid_config).expect("write invalid config");
 
-    let result = ZebradConfig::load(Some(config_path));
-    assert!(result.is_err(), "Should fail to load invalid TOML");
+    ZebradConfig::load(Some(config_path)).expect_err("Should fail to load invalid TOML");
 }
 
 #[test]
@@ -190,11 +191,7 @@ fn config_invalid_env_values_error() {
 
     env.set_var("ZEBRA_RPC__LISTEN_ADDR", "invalid_address");
 
-    let result = ZebradConfig::load(None);
-    assert!(
-        result.is_err(),
-        "Should fail with invalid RPC listen address"
-    );
+    ZebradConfig::load(None).expect_err("Should fail with invalid RPC listen address");
 }
 
 #[test]
@@ -307,11 +304,8 @@ fn config_env_unknown_non_sensitive_key_errors() {
     // Unknown field without sensitive suffix should cause an error
     env.set_var("ZEBRA_MINING__FOO", "bar");
 
-    let result = ZebradConfig::load(None);
-    assert!(
-        result.is_err(),
-        "Unknown non-sensitive env key should error (deny_unknown_fields)"
-    );
+    ZebradConfig::load(None)
+        .expect_err("Unknown non-sensitive env key should error (deny_unknown_fields)");
 }
 
 #[test]
