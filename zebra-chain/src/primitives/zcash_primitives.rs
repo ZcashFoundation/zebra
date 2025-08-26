@@ -4,7 +4,7 @@
 use std::{io, ops::Deref, sync::Arc};
 
 use zcash_primitives::transaction::{self as zp_tx, TxDigests};
-use zcash_protocol::value::{BalanceError, ZatBalance};
+use zcash_protocol::value::{BalanceError, ZatBalance, Zatoshis};
 
 use crate::{
     amount::{Amount, NonNegative},
@@ -31,7 +31,7 @@ impl zcash_transparent::bundle::Authorization for TransparentAuth {
 // In this block we convert our Output to a librustzcash to TxOut.
 // (We could do the serialize/deserialize route but it's simple enough to convert manually)
 impl zcash_transparent::sighash::TransparentAuthorizingContext for TransparentAuth {
-    fn input_amounts(&self) -> Vec<zcash_protocol::value::Zatoshis> {
+    fn input_amounts(&self) -> Vec<Zatoshis> {
         self.all_prev_outputs
             .iter()
             .map(|prevout| {
