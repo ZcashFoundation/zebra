@@ -31,8 +31,6 @@ use crate::common::{
     test_type::TestType,
 };
 
-// Deprecated: tests should read the cache dir from `ZEBRA_STATE__CACHE_DIR` if they need
-// an external cached state directory. The actual application reads this via config-rs.
 
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///

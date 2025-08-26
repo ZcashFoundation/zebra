@@ -1852,7 +1852,7 @@ async fn lightwalletd_test_suite() -> Result<()> {
         launches_lightwalletd: true,
     })?;
 
-    // Only runs when a cached Zebra state is configured.
+    // Only runs when a cached Zebra state directory path is configured with an environment variable.
     lwd_integration_test(UpdateZebraCachedStateNoRpc)?;
 
     // These tests need the compile-time gRPC feature
