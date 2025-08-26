@@ -31,7 +31,6 @@ use crate::common::{
     test_type::TestType,
 };
 
-
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///
 /// This should be short enough that format bugs cause CI test failures,
