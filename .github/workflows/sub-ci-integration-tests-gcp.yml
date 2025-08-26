@@ -79,7 +79,7 @@ jobs:
       app_name: zebrad
       test_id: sync-to-mandatory-checkpoint
       test_description: Test sync up to mandatory checkpoint
-      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-to-mandatory-checkpoint,TEST_SYNC_TO_CHECKPOINT=1"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-to-mandatory-checkpoint-${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }},TEST_SYNC_TO_CHECKPOINT=1"
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       # This test commonly less than 3 hours by October 2024, but now it takes longer
       is_long_test: true
