@@ -14,6 +14,13 @@ use crate::serialization::{
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Halo2Proof(pub Vec<u8>);
 
+impl Halo2Proof {
+    /// Encode as bytes for RPC usage.
+    pub fn bytes_in_display_order(&self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+}
+
 impl fmt::Debug for Halo2Proof {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_tuple("Halo2Proof")
