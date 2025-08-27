@@ -26,7 +26,7 @@ use zebra_state::{ChainTipChange, LatestChainTip, MAX_BLOCK_REORG_HEIGHT};
 use zebra_test::command::TestChild;
 
 use crate::common::{
-    launch::spawn_zebrad_for_rpc,
+    launch::spawn_zebrad_for_rpc_with_opts,
     sync::{check_sync_logs_until, MempoolBehavior, SYNC_FINISHED_REGEX},
     test_type::TestType,
 };
@@ -213,7 +213,7 @@ pub async fn raw_future_blocks(
 
     let should_sync = true;
     let (zebrad, zebra_rpc_address) =
-        spawn_zebrad_for_rpc(network.clone(), test_name, test_type, should_sync)?
+        spawn_zebrad_for_rpc_with_opts(network.clone(), test_name, test_type, should_sync, false)?
             .ok_or_else(|| eyre!("raw_future_blocks requires a cached state"))?;
     let rpc_address = zebra_rpc_address.expect("test type must have RPC port");
 
