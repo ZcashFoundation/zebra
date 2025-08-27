@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+# Copyright (c) 2025 The Zcash developers
+# Distributed under the MIT software license, see the accompanying
+# file COPYING or https://www.opensource.org/licenses/mit-license.php .
+
+from decimal import Decimal
+
+from test_framework.util import (
+    assert_equal,
+    start_nodes,
+)
+
+from test_framework.test_framework import BitcoinTestFramework
+
+import time
+
+args = [[False, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
+
+# Test that Zebra can backup and restore non finalized state
+class BackupNonFinalized(BitcoinTestFramework):
+
+    def __init__(self):
+        super().__init__()
+        self.num_nodes = 1
+        self.cache_behavior = 'clean'
+
+    def setup_network(self):
+        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
+
+    def run_test(self):
+        self.nodes[0].generate(10)
+        # Wait for `MIN_DURATION_BETWEEN_BACKUP_UPDATES`, 5 secs in zebra
+        time.sleep(5)
+
+        blocks = self.nodes[0].getblockchaininfo()['blocks']
+        assert_equal(blocks, 10)
+
+        # Stop the node
+        self.nodes[0].stop()
+        time.sleep(1)
+
+        self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, args)
+
+        # Good, the node has recovered the non finalized state
+        blocks = self.nodes[0].getblockchaininfo()['blocks']
+        assert_equal(blocks, 10)
+
+        # But generate more blocks is not happening
+        self.nodes[0].generate(1)
+        assert_equal(blocks, 11)
+
+
+if __name__ == '__main__':
+    BackupNonFinalized().main()
