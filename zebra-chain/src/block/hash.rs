@@ -4,7 +4,8 @@ use hex::{FromHex, ToHex};
 use serde::{Deserialize, Serialize};
 
 use crate::serialization::{
-    sha256d, ReadZcashExt, SerializationError, ZcashDeserialize, ZcashSerialize, BytesInDisplayOrder,
+    sha256d, BytesInDisplayOrder, ReadZcashExt, SerializationError, ZcashDeserialize,
+    ZcashSerialize,
 };
 
 use super::Header;
@@ -24,7 +25,7 @@ use proptest_derive::Arbitrary;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary, Default))]
 pub struct Hash(pub [u8; 32]);
 
-impl BytesInDisplayOrder for Hash {
+impl BytesInDisplayOrder<true, 32> for Hash {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }

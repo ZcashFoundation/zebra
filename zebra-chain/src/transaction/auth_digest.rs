@@ -7,7 +7,8 @@ use hex::{FromHex, ToHex};
 use crate::{
     primitives::zcash_primitives::auth_digest,
     serialization::{
-        ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize, BytesInDisplayOrder,
+        BytesInDisplayOrder, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+        ZcashSerialize,
     },
 };
 
@@ -26,7 +27,7 @@ use proptest_derive::Arbitrary;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDigest(pub [u8; 32]);
 
-impl BytesInDisplayOrder for AuthDigest {
+impl BytesInDisplayOrder<true, 32> for AuthDigest {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }
