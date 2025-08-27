@@ -7,8 +7,8 @@ use chrono::{DateTime, Utc};
 use derive_getters::Getters;
 use derive_new::new;
 use hex::ToHex;
-use serde_with::serde_as;
 use rand::rngs::OsRng;
+use serde_with::serde_as;
 
 use zcash_keys::address::Address;
 use zcash_primitives::{
@@ -167,7 +167,7 @@ impl TransactionTemplate<NegativeOrZero> {
         let add_orchard_reward = |builder: &mut Builder<'_, _, _>, addr: &_| {
             trace_err!(
                 builder.add_orchard_output::<String>(
-                    Some(orchard::keys::OutgoingViewingKey::from([0u8; 32])),
+                    Some(::orchard::keys::OutgoingViewingKey::from([0u8; 32])),
                     *addr,
                     miner_reward,
                     memo.clone(),
