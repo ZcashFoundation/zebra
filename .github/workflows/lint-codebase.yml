@@ -1,0 +1,292 @@
+name: Lint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - clippy.toml
+      - .cargo/config.toml
+      - .github/workflows/lint-codebase.yml
+
+  push:
+    branches: [main]
+    paths:
+      - "**/*.rs"
+      - "**/Cargo.toml"
+      - "**/Cargo.lock"
+      - clippy.toml
+      - .cargo/config.toml
+      - .github/workflows/lint-codebase.yml
+
+# Ensures that only one workflow task will run at a time. Previous builds, if
+# already in process, will get cancelled. Only the latest commit will be allowed
+# to run, cancelling any workflows in between
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  actions: read
+  attestations: read
+  checks: read
+  contents: read
+  deployments: read
+  id-token: write
+  issues: read
+  discussions: read
+  packages: read
+  pages: read
+  pull-requests: read
+  repository-projects: read
+  security-events: read
+  statuses: write
+  models: read
+
+jobs:
+  clippy:
+    name: clippy ${{ matrix.rust-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        rust-version: [stable, beta, nightly]
+        type: [release, test]
+        include:
+          - type: release
+            args: --workspace --all-targets
+            features: default-release-binaries
+          - type: test
+            args: --workspace --all-targets
+            features: default-release-binaries proptest-impl lightwalletd-grpc-tests zebra-checkpoints
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          components: clippy
+          toolchain: ${{ matrix.rust-version }}
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 #v2.8.0
+        with:
+          cache-on-failure: true
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Run clippy
+        run: cargo clippy ${{ matrix.args }} --features "${{ matrix.features }}"
+
+  crate-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+      - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+        with:
+          tool: cargo-hack
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 #v2.8.0
+        with:
+          cache-on-failure: true
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo hack check --workspace
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        include:
+          - binary: zebrad
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          toolchain: 1.89 # MSRV
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 #v2.8.0
+        with:
+          cache-on-failure: true
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo build --bin "${{ matrix.binary }}" --workspace
+
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          toolchain: beta
+          components: rustdoc
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 #v2.8.0
+        with:
+          cache-on-failure: true
+      - run: cargo docs --no-deps --workspace --all-features --document-private-items --target-dir "$(pwd)"/target/internal
+        env:
+          # Keep in sync with ./book.yml:jobs.build
+          # This should only add `-D warnings`
+          RUSTDOCFLAGS: --cfg docsrs --show-type-layout --generate-link-to-definition --enable-index-page -Zunstable-options -D warnings
+
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          toolchain: nightly
+          components: rustfmt
+      - name: Run fmt
+        run: cargo fmt --all -- --check
+
+  udeps:
+    name: udeps
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 #v2.8.0
+        with:
+          cache-on-failure: true
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+        with:
+          tool: cargo-udeps
+      - run: cargo udeps --workspace --all-targets --all-features --locked
+
+  typos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: crate-ci/typos@a4c3e43aea0a9e9b9e6578d2731ebd9a27e8f6cd #v1.34.0
+
+  check-toml:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - name: Run dprint
+        uses: dprint/check@9cb3a2b17a8e606d37aae341e49df3654933fc23 #v2.3
+        with:
+          config-path: dprint.json
+
+  no-test-deps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          toolchain: stable
+      - name: Ensure no arbitrary or proptest dependency on default build
+        run: cargo tree --package zebrad -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
+
+  # Checks that selected rates can compile with power set of features
+  features:
+    name: features
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+        with:
+          toolchain: nightly
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 #v2.8.0
+        with:
+          cache-on-failure: true
+      - uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b #v3.0.0
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@3ee5d63d29478156148c0b53e9f3447829b47bc2 #v2.58.23
+        with:
+          tool: cargo-hack
+      - run: cargo hack check --all
+        env:
+          RUSTFLAGS: -D warnings
+
+  # Check crates correctly propagate features
+  feature-format:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+      - name: fetch deps
+        run: |
+          # Eagerly pull dependencies
+          cargo metadata --format-version=1 --locked > /dev/null
+      - name: run zepter
+        run: |
+          cargo install zepter -f --locked
+          zepter --version
+          zepter format features
+
+  deny:
+    name: Check deny.toml ${{ matrix.checks }} ${{ matrix.features }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        checks:
+          - bans
+          - sources
+        # We don't need to check `--no-default-features` here, because (except in very rare cases):
+        # - disabling features isn't going to add duplicate dependencies
+        # - disabling features isn't going to add more crate sources
+        features: ["", --features default-release-binaries, --all-features]
+      # Always run the --all-features job, to get accurate "skip tree root was not found" warnings
+      fail-fast: false
+
+    # Prevent sudden announcement of a new advisory from failing ci:
+    continue-on-error: ${{ matrix.checks == 'advisories' }}
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@ab6845274e2ff01cd4462007e1a9d9df1ab49f42 #v1.14.0
+
+      - name: Check ${{ matrix.checks }} with features ${{ matrix.features }}
+        uses: EmbarkStudios/cargo-deny-action@f2ba7abc2abebaf185c833c3961145a3c275caad #v2.0.13
+        with:
+          # --all-features spuriously activates openssl, but we want to ban that dependency in
+          # all of zebrad's production features for security reasons. But the --all-features job is
+          # the only job that gives accurate "skip tree root was not found" warnings.
+          # In other jobs, we expect some of these warnings, due to disabled features.
+          command: check ${{ matrix.checks }} ${{ matrix.features == '--all-features' && '--allow banned' || '--allow unmatched-skip-root' }}
+          arguments: --workspace ${{ matrix.features }}
+
+  lint-success:
+    name: lint success
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - clippy
+      - crate-checks
+      - docs
+      - fmt
+      - udeps
+      - no-test-deps
+      - features
+      - feature-propagation
+      - deny
+    timeout-minutes: 30
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}
