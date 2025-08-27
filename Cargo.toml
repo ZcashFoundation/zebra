@@ -133,7 +133,7 @@ tokio = "1.44"
 tokio-stream = "0.1.17"
 tokio-test = "0.4"
 tokio-util = "0.7.14"
-toml = "0.8"
+toml = "0.9.5"
 tonic = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
@@ -153,6 +153,7 @@ vergen-git2 = { version = "1.0", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.3.2"
+config = { version = "0.15.14", features = ["toml"] }
 
 [workspace.metadata.release]
 

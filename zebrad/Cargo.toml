@@ -201,6 +201,9 @@ metrics = { workspace = true }
 dirs = { workspace = true }
 atty = { workspace = true }
 
+# Configuration management
+config = { workspace = true }
+
 num-integer = { workspace = true }
 rand = { workspace = true }
 

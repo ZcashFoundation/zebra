@@ -1,29 +1,4 @@
-//! `generate` subcommand - generates a default `zebrad.toml` config.
-
-use crate::config::ZebradConfig;
-use abscissa_core::{Command, Runnable};
-use clap::Parser;
-
-/// Generate a default `zebrad.toml` configuration
-#[derive(Command, Debug, Default, Parser)]
-pub struct GenerateCmd {
-    /// The file to write the generated config to.
-    //
-    // TODO: use PathBuf here instead, to support non-UTF-8 paths
-    #[clap(
-        long,
-        short,
-        help = "The file to write the generated config to (stdout if unspecified)"
-    )]
-    output_file: Option<String>,
-}
-
-impl Runnable for GenerateCmd {
-    /// Start the application.
-    #[allow(clippy::print_stdout)]
-    fn run(&self) {
-        let default_config = ZebradConfig::default();
-        let mut output = r"# Default configuration for zebrad.
+# Default configuration for zebrad.
 #
 # This file can be used as a skeleton for custom configs.
 #
@@ -51,8 +26,8 @@ impl Runnable for GenerateCmd {
 #      - ZEBRA_METRICS__ENDPOINT_ADDR=0.0.0.0:9999
 #
 # 2. Configuration file (TOML format)
-#    - At the path specified via -c flag, e.g. `zebrad -c myconfig.toml start`, or
-#    - At the default path in the user's preference directory (platform-dependent, see below)
+#    - Specified via -c flag: `zebrad -c myconfig.toml start`
+#    - Or default location in preference directory (see below)
 #
 # 3. Hard-coded defaults (lowest precedence)
 #
@@ -65,24 +40,57 @@ impl Runnable for GenerateCmd {
 # | macOS    | `$HOME/Library/Preferences`           | `/Users/Alice/Library/Preferences/zebrad.toml` |
 # | Windows  | `{FOLDERID_RoamingAppData}`           | `C:\Users\Alice\AppData\Local\zebrad.toml`     |
 
-"
-        .to_owned();
+[consensus]
+checkpoint_sync = true
 
-        // this avoids a ValueAfterTable error
-        // https://github.com/alexcrichton/toml-rs/issues/145
-        let conf = toml::Value::try_from(default_config).unwrap();
-        output += &toml::to_string_pretty(&conf).expect("default config should be serializable");
-        match self.output_file {
-            Some(ref output_file) => {
-                use std::{fs::File, io::Write};
-                File::create(output_file)
-                    .expect("must be able to open output file")
-                    .write_all(output.as_bytes())
-                    .expect("must be able to write output");
-            }
-            None => {
-                println!("{output}");
-            }
-        }
-    }
-}
+[mempool]
+eviction_memory_time = "1h"
+tx_cost_limit = 80000000
+
+[metrics]
+
+[mining]
+internal_miner = false
+
+[network]
+cache_dir = true
+crawl_new_peer_interval = "1m 1s"
+initial_mainnet_peers = [
+    "dnsseed.z.cash:8233",
+    "dnsseed.str4d.xyz:8233",
+    "mainnet.seeder.zfnd.org:8233",
+    "mainnet.is.yolo.money:8233",
+]
+initial_testnet_peers = [
+    "dnsseed.testnet.z.cash:18233",
+    "testnet.seeder.zfnd.org:18233",
+    "testnet.is.yolo.money:18233",
+]
+listen_addr = "[::]:8233"
+max_connections_per_ip = 1
+network = "Mainnet"
+peerset_initial_target_size = 25
+
+[rpc]
+cookie_dir = "cache_dir"
+debug_force_finished_sync = false
+enable_cookie_auth = true
+parallel_cpu_threads = 0
+
+[state]
+cache_dir = "cache_dir"
+delete_old_database = true
+ephemeral = false
+
+[sync]
+checkpoint_verify_concurrency_limit = 1000
+download_concurrency_limit = 50
+full_verify_concurrency_limit = 20
+parallel_cpu_threads = 0
+
+[tracing]
+buffer_limit = 128000
+force_use_color = false
+use_color = true
+use_journald = false
+
