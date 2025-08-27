@@ -36,7 +36,8 @@ use proptest_derive::Arbitrary;
 use hex::{FromHex, ToHex};
 
 use crate::serialization::{
-    ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize, ZcashSerialize, BytesInDisplayOrder,
+    BytesInDisplayOrder, ReadZcashExt, SerializationError, WriteZcashExt, ZcashDeserialize,
+    ZcashSerialize,
 };
 
 use super::{txid::TxIdBuilder, AuthDigest, Transaction};
@@ -101,7 +102,7 @@ impl From<&Hash> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder for Hash {
+impl BytesInDisplayOrder<true, 32> for Hash {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }

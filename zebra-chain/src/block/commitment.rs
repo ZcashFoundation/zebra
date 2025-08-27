@@ -7,8 +7,12 @@ use thiserror::Error;
 
 use crate::{
     block::{self, merkle::AuthDataRoot},
-    parameters::{Network, NetworkUpgrade::{self, *}},
-    sapling, serialization::BytesInDisplayOrder,
+    parameters::{
+        Network,
+        NetworkUpgrade::{self, *},
+    },
+    sapling,
+    serialization::BytesInDisplayOrder,
 };
 
 /// Zcash blocks contain different kinds of commitments to their contents,
@@ -198,7 +202,7 @@ impl From<ChainHistoryMmrRootHash> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder for ChainHistoryMmrRootHash {
+impl BytesInDisplayOrder<true, 32> for ChainHistoryMmrRootHash {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }
@@ -274,7 +278,7 @@ impl From<ChainHistoryBlockTxAuthCommitmentHash> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder for ChainHistoryBlockTxAuthCommitmentHash {
+impl BytesInDisplayOrder<true, 32> for ChainHistoryBlockTxAuthCommitmentHash {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }
