@@ -204,7 +204,7 @@ impl ConfiguredFundingStreams {
             });
 
         assert!(
-            height_range.start <= height_range.end,
+            height_range.start < height_range.end,
             "funding stream end height must be above start height"
         );
 
