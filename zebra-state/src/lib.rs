@@ -55,7 +55,7 @@ pub use service::{
     finalized_state::FinalizedState,
     init, init_read_only,
     non_finalized_state::NonFinalizedState,
-    spawn_init, spawn_init_read_only,
+    spawn_init_read_only,
     watch_receiver::WatchReceiver,
     OutputLocation, TransactionIndex, TransactionLocation,
 };

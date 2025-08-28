@@ -25,7 +25,7 @@ use std::{
 };
 
 use futures::future::FutureExt;
-use tokio::sync::{oneshot, watch};
+use tokio::sync::oneshot;
 use tower::{util::BoxService, Service, ServiceExt};
 use tracing::{instrument, Instrument, Span};
 
@@ -296,35 +296,51 @@ impl StateService {
     ///
     /// Returns the read-write and read-only state services,
     /// and read-only watch channels for its best chain tip.
-    pub fn new(
+    pub async fn new(
         config: Config,
         network: &Network,
         max_checkpoint_height: block::Height,
         checkpoint_verify_concurrency_limit: usize,
     ) -> (Self, ReadStateService, LatestChainTip, ChainTipChange) {
-        let timer = CodeTimer::start();
-        let finalized_state = FinalizedState::new(
-            &config,
-            network,
-            #[cfg(feature = "elasticsearch")]
-            true,
-        );
-        timer.finish(module_path!(), line!(), "opening finalized state database");
+        let (finalized_state, finalized_tip, timer) = {
+            let config = config.clone();
+            let network = network.clone();
+            tokio::task::spawn_blocking(move || {
+                let timer = CodeTimer::start();
+                let finalized_state = FinalizedState::new(
+                    &config,
+                    &network,
+                    #[cfg(feature = "elasticsearch")]
+                    true,
+                );
+                timer.finish(module_path!(), line!(), "opening finalized state database");
 
-        let timer = CodeTimer::start();
-        let initial_tip = finalized_state
-            .db
-            .tip_block()
+                let timer = CodeTimer::start();
+                let finalized_tip = finalized_state.db.tip_block();
+
+                (finalized_state, finalized_tip, timer)
+            })
+            .await
+            .expect("failed to join blocking task")
+        };
+
+        let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
+            NonFinalizedState::new(network)
+                .with_backup(
+                    config.non_finalized_state_backup_dir(network),
+                    &finalized_state.db,
+                )
+                .await;
+
+        let initial_tip = non_finalized_state
+            .best_tip_block()
+            .map(|cv_block| cv_block.block.clone())
+            .or(finalized_tip)
             .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
 
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
-
-        let non_finalized_state = NonFinalizedState::new(network);
-
-        let (non_finalized_state_sender, non_finalized_state_receiver) =
-            watch::channel(NonFinalizedState::new(&finalized_state.network()));
 
         let finalized_state_for_writing = finalized_state.clone();
         let (block_write_sender, invalid_block_write_reset_receiver, block_write_task) =
@@ -349,7 +365,10 @@ impl StateService {
         let non_finalized_state_queued_blocks = QueuedBlocks::default();
         let pending_utxos = PendingUtxos::default();
 
-        let finalized_block_write_last_sent_hash = finalized_state.db.finalized_tip_hash();
+        let finalized_block_write_last_sent_hash =
+            tokio::task::spawn_blocking(move || finalized_state.db.finalized_tip_hash())
+                .await
+                .expect("failed to join blocking task");
 
         let state = Self {
             network: network.clone(),
@@ -831,12 +850,12 @@ impl ReadStateService {
     pub(crate) fn new(
         finalized_state: &FinalizedState,
         block_write_task: Option<Arc<std::thread::JoinHandle<()>>>,
-        non_finalized_state_receiver: watch::Receiver<NonFinalizedState>,
+        non_finalized_state_receiver: WatchReceiver<NonFinalizedState>,
     ) -> Self {
         let read_service = Self {
             network: finalized_state.network(),
             db: finalized_state.db.clone(),
-            non_finalized_state_receiver: WatchReceiver::new(non_finalized_state_receiver),
+            non_finalized_state_receiver,
             block_write_task,
         };
 
@@ -2169,7 +2188,7 @@ impl Service<ReadRequest> for ReadStateService {
 /// It's possible to construct multiple state services in the same application (as
 /// long as they, e.g., use different storage locations), but doing so is
 /// probably not what you want.
-pub fn init(
+pub async fn init(
     config: Config,
     network: &Network,
     max_checkpoint_height: block::Height,
@@ -2186,7 +2205,8 @@ pub fn init(
             network,
             max_checkpoint_height,
             checkpoint_verify_concurrency_limit,
-        );
+        )
+        .await;
 
     (
         BoxService::new(state_service),
@@ -2222,7 +2242,11 @@ pub fn init_read_only(
         tokio::sync::watch::channel(NonFinalizedState::new(network));
 
     (
-        ReadStateService::new(&finalized_state, None, non_finalized_state_receiver),
+        ReadStateService::new(
+            &finalized_state,
+            None,
+            WatchReceiver::new(non_finalized_state_receiver),
+        ),
         finalized_state.db.clone(),
         non_finalized_state_sender,
     )
@@ -2242,40 +2266,17 @@ pub fn spawn_init_read_only(
     tokio::task::spawn_blocking(move || init_read_only(config, &network))
 }
 
-/// Calls [`init`] with the provided [`Config`] and [`Network`] from a blocking task.
-/// Returns a [`tokio::task::JoinHandle`] with a boxed state service,
-/// a read state service, and receivers for state chain tip updates.
-pub fn spawn_init(
-    config: Config,
-    network: &Network,
-    max_checkpoint_height: block::Height,
-    checkpoint_verify_concurrency_limit: usize,
-) -> tokio::task::JoinHandle<(
-    BoxService<Request, Response, BoxError>,
-    ReadStateService,
-    LatestChainTip,
-    ChainTipChange,
-)> {
-    let network = network.clone();
-    tokio::task::spawn_blocking(move || {
-        init(
-            config,
-            &network,
-            max_checkpoint_height,
-            checkpoint_verify_concurrency_limit,
-        )
-    })
-}
-
 /// Returns a [`StateService`] with an ephemeral [`Config`] and a buffer with a single slot.
 ///
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
-pub fn init_test(network: &Network) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
+pub async fn init_test(
+    network: &Network,
+) -> Buffer<BoxService<Request, Response, BoxError>, Request> {
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
     let (state_service, _, _, _) =
-        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0);
+        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
 
     Buffer::new(BoxService::new(state_service), 1)
 }
@@ -2285,7 +2286,7 @@ pub fn init_test(network: &Network) -> Buffer<BoxService<Request, Response, BoxE
 ///
 /// This can be used to create a state service for testing. See also [`init`].
 #[cfg(any(test, feature = "proptest-impl"))]
-pub fn init_test_services(
+pub async fn init_test_services(
     network: &Network,
 ) -> (
     Buffer<BoxService<Request, Response, BoxError>, Request>,
@@ -2296,7 +2297,7 @@ pub fn init_test_services(
     // TODO: pass max_checkpoint_height and checkpoint_verify_concurrency limit
     //       if we ever need to test final checkpoint sent UTXO queries
     let (state_service, read_state_service, latest_chain_tip, chain_tip_change) =
-        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0);
+        StateService::new(Config::ephemeral(), network, block::Height::MAX, 0).await;
 
     let state_service = Buffer::new(BoxService::new(state_service), 1);
 
