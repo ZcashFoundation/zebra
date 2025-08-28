@@ -555,13 +555,22 @@ where
             // Get the `value_balance` to calculate the transaction fee.
             let value_balance = tx.value_balance(&spent_utxos);
 
+            let zip233_amount = match *tx {
+            	#[cfg(feature="tx_v6")]
+                Transaction::V6{ .. } => tx.zip233_amount(),
+                _ => Amount::zero()
+            };
+
             // Calculate the fee only for non-coinbase transactions.
             let mut miner_fee = None;
             if !tx.is_coinbase() {
                 // TODO: deduplicate this code with remaining_transaction_value()?
                 miner_fee = match value_balance {
                     Ok(vb) => match vb.remaining_transaction_value() {
-                        Ok(tx_rtv) => Some(tx_rtv),
+                        Ok(tx_rtv) => match tx_rtv - zip233_amount {
+                            Ok(fee) => Some(fee),
+                            Err(_) => return Err(TransactionError::IncorrectFee),
+                        }
                         Err(_) => return Err(TransactionError::IncorrectFee),
                     },
                     Err(_) => return Err(TransactionError::IncorrectFee),
