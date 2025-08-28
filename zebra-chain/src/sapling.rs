@@ -24,9 +24,7 @@ pub mod shielded_data;
 pub mod spend;
 pub mod tree;
 
-pub use commitment::{
-    CommitmentRandomness, NotSmallOrderValueCommitment, NoteCommitment, ValueCommitment,
-};
+pub use commitment::{CommitmentRandomness, ValueCommitment};
 pub use keys::Diversifier;
 pub use note::{EncryptedNote, Note, Nullifier, WrappedNoteKey};
 pub use output::{Output, OutputInTransactionV4, OutputPrefixInTransactionV5};
