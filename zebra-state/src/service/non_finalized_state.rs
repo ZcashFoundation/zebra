@@ -162,7 +162,7 @@ impl NonFinalizedState {
             "restoring non-finalized blocks from backup and spawning backup task"
         );
 
-        let non_finalized_state = if should_restore_backup {
+        let non_finalized_state = {
             let backup_dir_path = backup_dir_path.clone();
             let finalized_state = finalized_state.clone();
             tokio::task::spawn_blocking(move || {
@@ -170,15 +170,18 @@ impl NonFinalizedState {
                 std::fs::create_dir_all(&backup_dir_path)
                     .expect("failed to create non-finalized state backup directory");
 
-                backup::restore_backup(self, &backup_dir_path, &finalized_state)
+                if should_restore_backup {
+                    backup::restore_backup(self, &backup_dir_path, &finalized_state)
+                } else {
+                    self
+                }
             })
             .await
             .expect("failed to join blocking task")
-        } else {
-            self
         };
 
         let (non_finalized_state, sender, receiver) = with_watch_channel(non_finalized_state);
+
         tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
 
         (non_finalized_state, sender, receiver)
