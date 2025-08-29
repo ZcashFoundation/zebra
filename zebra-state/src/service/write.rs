@@ -183,6 +183,7 @@ impl BlockWriteSender {
         non_finalized_state: NonFinalizedState,
         chain_tip_sender: ChainTipSender,
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
+        should_use_finalized_block_write_sender: bool,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
@@ -216,7 +217,8 @@ impl BlockWriteSender {
         (
             Self {
                 non_finalized: Some(non_finalized_block_write_sender),
-                finalized: Some(finalized_block_write_sender),
+                finalized: Some(finalized_block_write_sender)
+                    .filter(|_| should_use_finalized_block_write_sender),
             },
             invalid_block_write_reset_receiver,
             Some(Arc::new(task)),

@@ -142,6 +142,7 @@ impl NonFinalizedState {
         self,
         backup_dir_path: Option<PathBuf>,
         finalized_state: &ZebraDb,
+        should_restore_backup: bool,
     ) -> (
         Self,
         watch::Sender<NonFinalizedState>,
@@ -161,7 +162,7 @@ impl NonFinalizedState {
             "restoring non-finalized blocks from backup and spawning backup task"
         );
 
-        let restored_non_finalized_state = {
+        let non_finalized_state = if should_restore_backup {
             let backup_dir_path = backup_dir_path.clone();
             let finalized_state = finalized_state.clone();
             tokio::task::spawn_blocking(move || {
@@ -173,11 +174,11 @@ impl NonFinalizedState {
             })
             .await
             .expect("failed to join blocking task")
+        } else {
+            self
         };
 
-        let (non_finalized_state, sender, receiver) =
-            with_watch_channel(restored_non_finalized_state);
-
+        let (non_finalized_state, sender, receiver) = with_watch_channel(non_finalized_state);
         tokio::spawn(backup::run_backup_task(receiver.clone(), backup_dir_path));
 
         (non_finalized_state, sender, receiver)
@@ -793,6 +794,11 @@ impl NonFinalizedState {
     /// Return the number of chains.
     pub fn chain_count(&self) -> usize {
         self.chain_set.len()
+    }
+
+    /// Returns true if this [`NonFinalizedState`] contains no chains.
+    pub fn is_chain_set_empty(&self) -> bool {
+        self.chain_count() == 0
     }
 
     /// Return the invalidated blocks.

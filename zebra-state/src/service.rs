@@ -324,11 +324,28 @@ impl StateService {
             .expect("failed to join blocking task")
         };
 
+        // # Correctness
+        //
+        // The state service must set the finalized block write sender to `None`
+        // if there are blocks in the restored non-finalized state that are above
+        // the max checkpoint height so that non-finalized blocks can be written, otherwise,
+        // Zebra will be unable to commit semantically verified blocks, and its chain sync will stall.
+        //
+        // The state service must not set the finalized block write sender to `None` if there
+        // aren't blocks in the restored non-finalized state that are above the max checkpoint height,
+        // otherwise, unless checkpoint sync is disabled in the zebra-consensus configuration,
+        // Zebra will be unable to commit checkpoint verified blocks, and its chain sync will stall.
+        let is_finalized_tip_past_max_checkpoint = if let Some(tip) = &finalized_tip {
+            tip.coinbase_height().expect("valid block must have height") >= max_checkpoint_height
+        } else {
+            false
+        };
         let (non_finalized_state, non_finalized_state_sender, non_finalized_state_receiver) =
             NonFinalizedState::new(network)
                 .with_backup(
                     config.non_finalized_state_backup_dir(network),
                     &finalized_state.db,
+                    is_finalized_tip_past_max_checkpoint,
                 )
                 .await;
 
@@ -349,6 +366,7 @@ impl StateService {
                 non_finalized_state,
                 chain_tip_sender,
                 non_finalized_state_sender,
+                !is_finalized_tip_past_max_checkpoint,
             );
 
         let read_service = ReadStateService::new(
@@ -390,6 +408,7 @@ impl StateService {
         let timer = CodeTimer::start();
 
         if let (Some(tip), Some(nu5_activation_height)) = (
+            // TODO: put this in a spawn_blocking
             state.best_tip(),
             NetworkUpgrade::Nu5.activation_height(network),
         ) {
