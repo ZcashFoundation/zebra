@@ -357,6 +357,8 @@ impl StateService {
             .map(CheckpointVerifiedBlock::from)
             .map(ChainTipBlock::from);
 
+        tracing::info!(chain_tip = ?initial_tip.as_ref().map(|tip| (tip.hash, tip.height)), "loaded Zebra state cache");
+
         let (chain_tip_sender, latest_chain_tip, chain_tip_change) =
             ChainTipSender::new(initial_tip, network);
 
