@@ -349,6 +349,7 @@ impl StateService {
                 )
                 .await;
 
+        let non_finalized_block_write_sent_hashes = SentHashes::new(&non_finalized_state);
         let initial_tip = non_finalized_state
             .best_tip_block()
             .map(|cv_block| cv_block.block.clone())
@@ -395,7 +396,7 @@ impl StateService {
             finalized_state_queued_blocks: HashMap::new(),
             block_write_sender,
             finalized_block_write_last_sent_hash,
-            non_finalized_block_write_sent_hashes: SentHashes::default(),
+            non_finalized_block_write_sent_hashes,
             invalid_block_write_reset_receiver,
             pending_utxos,
             last_prune: Instant::now(),
