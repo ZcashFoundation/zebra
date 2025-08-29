@@ -3873,6 +3873,15 @@ fn check_no_git_dependencies() {
     }
 }
 
+#[tokio::test]
+async fn restores_non_finalized_state_and_commits_new_blocks() {
+    // TODO:
+    // - Check that the non-finalized state is restored from backup when there are no checkpoints
+    // - Check that the non-finalized state is not restored from backup when the finalized tip height is below the max checkpoint height
+    // - Check that Zebra can sync its chain in both cases
+    // - Use a custom testnet for both, add checkpoints to custom testnet config, mine some blocks, print them out and add them to `zebra-test` with their checkpoint list.
+}
+
 // /// Check that Zebra will disconnect from misbehaving peers.
 // #[tokio::test]
 // #[cfg(not(target_os = "windows"))]
