@@ -5,13 +5,13 @@
 
 from decimal import Decimal
 
-from test_framework.util import (
-    assert_equal,
-    start_nodes,
+from test_framework.config import (
+    ZebraExtraArgs,
+    test_pre_nu6_funding_streams,
+    test_post_nu6_funding_streams
 )
-
 from test_framework.test_framework import BitcoinTestFramework
-
+from test_framework.util import assert_equal, start_nodes
 
 # Check the behaviour of the value pools and funding streams at NU6.
 #
@@ -27,8 +27,9 @@ class PoolsTest(BitcoinTestFramework):
         self.cache_behavior = 'clean'
 
     def setup_network(self):
-        # Add pre and post NU6 funding streams to the node.
-        args = [[True, "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"]]
+        # Add test pre and post NU6 funding streams to the node.
+        args = [ZebraExtraArgs(pre_nu6_funding_streams=test_pre_nu6_funding_streams(),
+            post_nu6_funding_streams=test_post_nu6_funding_streams())]
 
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, extra_args=args)
 
@@ -162,7 +163,6 @@ class PoolsTest(BitcoinTestFramework):
         assert_equal(block_subsidy['founders'], Decimal('0'))
         assert_equal(block_subsidy['fundingstreamstotal'], Decimal('0.625'))
         assert_equal(block_subsidy['lockboxtotal'], Decimal('0'))
-        print(block_subsidy)
         assert_equal(block_subsidy['totalblocksubsidy'], Decimal('3.125'))
 
         print("Activating NU6")
