@@ -8,6 +8,7 @@ class ZebraExtraArgs:
         "miner_address": "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm",
         "pre_nu6_funding_streams": None,
         "post_nu6_funding_streams": None,
+        "activation_heights": {"NU5": 290, "NU6": 291},
     }
 
     def __init__(self, **kwargs):
@@ -35,11 +36,17 @@ class ZebraConfig:
         # Extra args updates
         config_file['mining']['miner_address'] = self.extra_args.miner_address
 
-        config_file['network']['testnet_parameters']['pre_nu6_funding_streams'] = \
-            self.extra_args.pre_nu6_funding_streams
-        config_file['network']['testnet_parameters']['post_nu6_funding_streams'] = \
-            self.extra_args.post_nu6_funding_streams
-        
+        streams = [
+            self.extra_args.pre_nu6_funding_streams,
+            self.extra_args.post_nu6_funding_streams,
+        ]
+
+        config_file['network']['testnet_parameters']['funding_streams'] = \
+            [s for s in streams if s is not None]
+
+        config_file['network']['testnet_parameters']['activation_heights'] = \
+            self.extra_args.activation_heights
+
         return config_file
 
 def test_pre_nu6_funding_streams() : return {

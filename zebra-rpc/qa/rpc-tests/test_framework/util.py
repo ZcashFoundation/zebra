@@ -913,7 +913,6 @@ def update_zallet_conf(datadir, validator_port, zallet_port):
 def stop_wallets(wallets):
     for wallet in wallets:
         try:
-            # TODO: Implement `stop` in zallet: https://github.com/zcash/wallet/issues/153
             wallet.stop()
         except http.client.CannotSendRequest as e:
             print("WARN: Unable to stop wallet: " + repr(e))
