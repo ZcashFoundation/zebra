@@ -12,6 +12,7 @@
 //! Typically, consensus parameters are accessed via a function that takes a
 //! `Network` and `block::Height`.
 
+pub mod checkpoint;
 pub mod constants;
 mod genesis;
 mod network;

@@ -27,7 +27,7 @@ use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
     block::{self, Height},
-    parameters::Network,
+    parameters::{checkpoint::list::CheckpointList, Network},
 };
 
 use zebra_node_services::mempool;
@@ -35,9 +35,9 @@ use zebra_state as zs;
 
 use crate::{
     block::{Request, SemanticBlockVerifier, VerifyBlockError},
-    checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
+    checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
-    transaction, BoxError, Config, ParameterCheckpoint as _,
+    transaction, BoxError, Config,
 };
 
 #[cfg(test)]

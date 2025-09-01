@@ -4,12 +4,14 @@ use std::sync::Arc;
 
 use num_integer::div_ceil;
 
-use zebra_chain::{
+use crate::{
     block::{Block, HeightDiff, MAX_BLOCK_BYTES},
-    parameters::Network::*,
+    parameters::{
+        checkpoint::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP},
+        Network::*,
+    },
     serialization::ZcashDeserialize,
 };
-use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 
 use super::*;
 
