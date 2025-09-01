@@ -1,5 +1,9 @@
 //! Compile proto files
-use std::{env, fs, path::PathBuf, process::Command};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 const ZALLET_COMMIT: Option<&str> = None;
 
@@ -11,21 +15,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn build_or_copy_proto() -> Result<(), Box<dyn std::error::Error>> {
+    const PROTO_FILE_PATH: &str = "proto/indexer.proto";
+
     let out_dir = env::var("OUT_DIR")
         .map(PathBuf::from)
         .expect("requires OUT_DIR environment variable definition");
     let file_names = ["indexer_descriptor.bin", "zebra.indexer.rpc.rs"];
 
+    let is_proto_file_available = Path::new(PROTO_FILE_PATH).exists();
     let is_protoc_available = env::var_os("PROTOC")
         .map(PathBuf::from)
         .or_else(|| which::which("protoc").ok())
         .is_some();
 
-    if is_protoc_available {
+    if is_proto_file_available && is_protoc_available {
         tonic_prost_build::configure()
             .type_attribute(".", "#[derive(serde::Deserialize, serde::Serialize)]")
             .file_descriptor_set_path(out_dir.join("indexer_descriptor.bin"))
-            .compile_protos(&["proto/indexer.proto"], &[""])?;
+            .compile_protos(&[PROTO_FILE_PATH], &[""])?;
 
         for file_name in file_names {
             let out_path = out_dir.join(file_name);

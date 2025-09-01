@@ -19,6 +19,9 @@ categories = [
     "network-programming",
 ]
 
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
+
 [features]
 
 # Production features that activate extra dependencies, or extra features in
