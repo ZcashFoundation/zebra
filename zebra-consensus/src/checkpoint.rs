@@ -31,6 +31,7 @@ use zebra_chain::{
     amount::{self, DeferredPoolBalanceChange},
     block::{self, Block},
     parameters::{
+        checkpoint::list::CheckpointList,
         subsidy::{block_subsidy, funding_stream_values, FundingStreamReceiver, SubsidyError},
         Network, GENESIS_PREVIOUS_BLOCK_HASH,
     },
@@ -45,18 +46,15 @@ use crate::{
         TargetHeight::{self, *},
     },
     error::BlockError,
-    BoxError, ParameterCheckpoint as _,
+    BoxError,
 };
 
-pub(crate) mod list;
 mod types;
 
 #[cfg(test)]
 mod tests;
 
 pub use zebra_node_services::constants::{MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
-
-pub use list::CheckpointList;
 
 /// An unverified block, which is in the queue for checkpoint verification.
 #[derive(Debug)]

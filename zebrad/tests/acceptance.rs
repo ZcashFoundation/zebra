@@ -160,7 +160,6 @@ use zebra_chain::{
         NetworkUpgrade,
     },
 };
-use zebra_consensus::ParameterCheckpoint;
 use zebra_node_services::rpc_client::RpcRequestClient;
 use zebra_rpc::{
     client::{

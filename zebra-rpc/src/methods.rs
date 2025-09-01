@@ -82,7 +82,7 @@ use zebra_chain::{
         equihash::Solution,
     },
 };
-use zebra_consensus::{funding_stream_address, ParameterCheckpoint, RouterError};
+use zebra_consensus::{funding_stream_address, RouterError};
 use zebra_network::{address_book_peers::AddressBookPeers, PeerSocketAddr};
 use zebra_node_services::mempool;
 use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, TransactionLocation};

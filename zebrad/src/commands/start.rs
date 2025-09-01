@@ -83,7 +83,7 @@ use tower::{builder::ServiceBuilder, util::BoxService, ServiceExt};
 use tracing_futures::Instrument;
 
 use zebra_chain::block::genesis::regtest_genesis_block;
-use zebra_consensus::{router::BackgroundTaskHandles, ParameterCheckpoint};
+use zebra_consensus::router::BackgroundTaskHandles;
 use zebra_rpc::{methods::RpcImpl, server::RpcServer, SubmitBlockChannel};
 
 use crate::{
