@@ -6539,9 +6539,9 @@ dependencies = [
 
 [[package]]
 name = "zcash_keys"
-version = "0.10.0"
+version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e401b87caabf016a414786749c9386e9ae934a4c40abaaeb901a338b7d3ef5fd"
+checksum = "c6c8d3d5a08a66f76264c72172e692ec362218b091181cda30c04d00a4561cd8"
 dependencies = [
  "bech32",
  "blake2b_simd",
