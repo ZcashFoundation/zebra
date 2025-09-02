@@ -102,7 +102,7 @@ impl From<&Hash> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder<true, 32> for Hash {
+impl BytesInDisplayOrder<true> for Hash {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }

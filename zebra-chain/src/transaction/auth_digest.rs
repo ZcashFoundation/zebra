@@ -27,7 +27,7 @@ use proptest_derive::Arbitrary;
 #[cfg_attr(any(test, feature = "proptest-impl"), derive(Arbitrary))]
 pub struct AuthDigest(pub [u8; 32]);
 
-impl BytesInDisplayOrder<true, 32> for AuthDigest {
+impl BytesInDisplayOrder<true> for AuthDigest {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }

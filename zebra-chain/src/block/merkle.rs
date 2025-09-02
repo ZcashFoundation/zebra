@@ -91,7 +91,7 @@ impl From<Root> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder<true, 32> for Root {
+impl BytesInDisplayOrder<true> for Root {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }
@@ -258,7 +258,7 @@ impl From<AuthDataRoot> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder<true, 32> for AuthDataRoot {
+impl BytesInDisplayOrder<true> for AuthDataRoot {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }
