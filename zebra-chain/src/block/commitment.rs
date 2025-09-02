@@ -202,7 +202,7 @@ impl From<ChainHistoryMmrRootHash> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder<true, 32> for ChainHistoryMmrRootHash {
+impl BytesInDisplayOrder<true> for ChainHistoryMmrRootHash {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }
@@ -278,7 +278,7 @@ impl From<ChainHistoryBlockTxAuthCommitmentHash> for [u8; 32] {
     }
 }
 
-impl BytesInDisplayOrder<true, 32> for ChainHistoryBlockTxAuthCommitmentHash {
+impl BytesInDisplayOrder<true> for ChainHistoryBlockTxAuthCommitmentHash {
     fn bytes_in_serialized_order(&self) -> [u8; 32] {
         self.0
     }

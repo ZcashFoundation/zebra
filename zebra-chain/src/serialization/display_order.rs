@@ -3,6 +3,9 @@
 /// This trait provides methods to access and construct types from their
 /// internal serialized byte order (typically little-endian) as well as their
 /// big-endian byte order used for display and RPC.
+///
+/// Zebra displays transaction and block hashes in big-endian byte-order,
+/// following the u256 convention set by Bitcoin and zcashd.
 pub trait BytesInDisplayOrder<
     const SHOULD_REVERSE_BYTES_IN_DISPLAY_ORDER: bool = false,
     const BYTE_LEN: usize = 32,
