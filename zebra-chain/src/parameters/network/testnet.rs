@@ -654,17 +654,9 @@ impl ParametersBuilder {
     /// Sets the expected one-time lockbox disbursement outputs for this network
     pub fn with_lockbox_disbursements(
         mut self,
-        _lockbox_disbursements: Vec<ConfiguredLockboxDisbursement>,
+        lockbox_disbursements: Vec<ConfiguredLockboxDisbursement>,
     ) -> Self {
-        // `lockbox_disbursements` is present the first time this is called,
-        // but empty on subsequent calls, hardcoded as a test.
-        // TODO: Fix and remove this.
-        let hardcoded_lockbox = vec![ConfiguredLockboxDisbursement {
-            address: "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz".to_string(),
-            amount: Amount::new_from_zec(2),
-        }];
-
-        self.lockbox_disbursements = hardcoded_lockbox
+        self.lockbox_disbursements = lockbox_disbursements
             .into_iter()
             .map(|ConfiguredLockboxDisbursement { address, amount }| (address, amount))
             .collect();
@@ -881,7 +873,7 @@ impl Parameters {
             should_allow_unshielded_coinbase_spends,
             pre_blossom_halving_interval,
             post_blossom_halving_interval,
-            lockbox_disbursements,
+            lockbox_disbursements: _,
         } = Self::new_regtest(Default::default());
 
         self.network_name == network_name
@@ -894,7 +886,6 @@ impl Parameters {
                 == should_allow_unshielded_coinbase_spends
             && self.pre_blossom_halving_interval == pre_blossom_halving_interval
             && self.post_blossom_halving_interval == post_blossom_halving_interval
-            && self.lockbox_disbursements == lockbox_disbursements
     }
 
     /// Returns the network name
