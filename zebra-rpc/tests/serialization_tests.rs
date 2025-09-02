@@ -16,7 +16,7 @@ use vectors::{
 use zebra_rpc::client::{
     zebra_chain::{
         sapling::NotSmallOrderValueCommitment,
-        serialization::{ZcashDeserialize, ZcashSerialize},
+        serialization::{BytesInDisplayOrder, ZcashDeserialize, ZcashSerialize},
         subtree::NoteCommitmentSubtreeIndex,
         transparent::{OutputIndex, Script},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty},
