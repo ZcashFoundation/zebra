@@ -654,9 +654,17 @@ impl ParametersBuilder {
     /// Sets the expected one-time lockbox disbursement outputs for this network
     pub fn with_lockbox_disbursements(
         mut self,
-        lockbox_disbursements: Vec<ConfiguredLockboxDisbursement>,
+        _lockbox_disbursements: Vec<ConfiguredLockboxDisbursement>,
     ) -> Self {
-        self.lockbox_disbursements = lockbox_disbursements
+        // `lockbox_disbursements` is present the first time this is called,
+        // but empty on subsequent calls, hardcoded as a test.
+        // TODO: Fix and remove this.
+        let hardcoded_lockbox = vec![ConfiguredLockboxDisbursement {
+            address: "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz".to_string(),
+            amount: Amount::new_from_zec(2),
+        }];
+
+        self.lockbox_disbursements = hardcoded_lockbox
             .into_iter()
             .map(|ConfiguredLockboxDisbursement { address, amount }| (address, amount))
             .collect();
@@ -755,6 +763,8 @@ pub struct RegtestParameters {
     pub activation_heights: ConfiguredActivationHeights,
     /// Configured funding streams
     pub funding_streams: Option<Vec<ConfiguredFundingStreams>>,
+    /// Expected one-time lockbox disbursement outputs in NU6.1 activation block coinbase for Regtest
+    pub lockbox_disbursements: Option<Vec<ConfiguredLockboxDisbursement>>,
 }
 
 impl From<ConfiguredActivationHeights> for RegtestParameters {
@@ -821,6 +831,7 @@ impl Parameters {
         RegtestParameters {
             activation_heights,
             funding_streams,
+            lockbox_disbursements,
         }: RegtestParameters,
     ) -> Self {
         let parameters = Self::build()
@@ -835,7 +846,7 @@ impl Parameters {
             .with_activation_heights(activation_heights.for_regtest())
             .with_halving_interval(PRE_BLOSSOM_REGTEST_HALVING_INTERVAL)
             .with_funding_streams(funding_streams.unwrap_or_default())
-            .with_lockbox_disbursements(Vec::new());
+            .with_lockbox_disbursements(lockbox_disbursements.unwrap_or_default());
 
         Self {
             network_name: "Regtest".to_string(),

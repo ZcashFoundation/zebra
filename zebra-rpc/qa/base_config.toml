@@ -18,3 +18,7 @@ cache_dir = ""
 NU5 = 290
 NU6 = 291
 
+# TODO: Remove from base and add it to config as argument, if requested.
+[[network.testnet_parameters.lockbox_disbursements]]
+address = "t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz"
+amount = 200_000_000

@@ -6,8 +6,7 @@
 class ZebraExtraArgs:
     defaults = {
         "miner_address": "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm",
-        "pre_nu6_funding_streams": None,
-        "post_nu6_funding_streams": None,
+        "funding_streams": [],
         "activation_heights": {"NU5": 290, "NU6": 291},
     }
 
@@ -36,13 +35,8 @@ class ZebraConfig:
         # Extra args updates
         config_file['mining']['miner_address'] = self.extra_args.miner_address
 
-        streams = [
-            self.extra_args.pre_nu6_funding_streams,
-            self.extra_args.post_nu6_funding_streams,
-        ]
 
-        config_file['network']['testnet_parameters']['funding_streams'] = \
-            [s for s in streams if s is not None]
+        config_file['network']['testnet_parameters']['funding_streams'] = self.extra_args.funding_streams
 
         config_file['network']['testnet_parameters']['activation_heights'] = \
             self.extra_args.activation_heights
