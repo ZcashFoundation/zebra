@@ -8,6 +8,7 @@ class ZebraExtraArgs:
         "miner_address": "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm",
         "funding_streams": [],
         "activation_heights": {"NU5": 290, "NU6": 291},
+        "lockbox_disbursements": []
     }
 
     def __init__(self, **kwargs):
@@ -36,5 +37,6 @@ class ZebraConfig:
         config_file['mining']['miner_address'] = self.extra_args.miner_address
         config_file['network']['testnet_parameters']['funding_streams'] = self.extra_args.funding_streams
         config_file['network']['testnet_parameters']['activation_heights'] = self.extra_args.activation_heights
+        config_file['network']['testnet_parameters']['lockbox_disbursements'] = self.extra_args.lockbox_disbursements
 
         return config_file

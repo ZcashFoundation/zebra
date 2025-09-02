@@ -25,8 +25,7 @@ class PoolsTest(BitcoinTestFramework):
 
     def setup_network(self):
         # Add test pre and post NU6 funding streams to the node.
-        args = [ZebraExtraArgs(pre_nu6_funding_streams=test_pre_nu6_funding_streams(),
-            post_nu6_funding_streams=test_post_nu6_funding_streams())]
+        args = ZebraExtraArgs(funding_streams=[pre_nu6_funding_streams(), post_nu6_funding_streams()]),
 
         self.nodes = start_nodes(self.num_nodes, self.options.tmpdir, extra_args=args)
 
@@ -246,7 +245,7 @@ class PoolsTest(BitcoinTestFramework):
         assert_equal(block_subsidy['lockboxtotal'], Decimal('0'))
         assert_equal(block_subsidy['totalblocksubsidy'], Decimal('3.125'))
         
-def test_pre_nu6_funding_streams() : return {
+def pre_nu6_funding_streams() : return {
     'recipients': [
         {
             'receiver': 'ECC',
@@ -270,7 +269,7 @@ def test_pre_nu6_funding_streams() : return {
     }
 }
 
-def test_post_nu6_funding_streams() : return {
+def post_nu6_funding_streams() : return {
     'recipients': [
         {
             'receiver': 'MajorGrants',
