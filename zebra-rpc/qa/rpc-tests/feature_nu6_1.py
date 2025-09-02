@@ -12,42 +12,6 @@ from test_framework.util import (
     start_node,
 )
 
-def pre_nu_6_1_funding_streams() : return {
-    'recipients': [
-        {
-            'receiver': 'MajorGrants',
-            'numerator': 8,
-            'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P', 't2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
-        },
-        {
-            'receiver': 'Deferred',
-            'numerator': 12
-        }
-    ],
-    'height_range': {
-        'start': 4,
-        'end': 8
-    }
-}
-
-def post_nu_6_1_funding_streams() : return {
-    'recipients': [
-        {
-            'receiver': 'MajorGrants',
-            'numerator': 8,
-            'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P', 't2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
-        },
-        {
-            'receiver': 'Deferred',
-            'numerator': 12
-        }
-    ],
-    'height_range': {
-        'start': 8,
-        'end': 12
-    }
-}
-
 # Verify the NU6.1 activation block contains the expected lockbox disbursement.
 # This is a reduced version (no wallet functionality, no multiple nodes) of:
 # https://github.com/zcash/zcash/blob/v6.3.0/qa/rpc-tests/feature_nu6_1.py
@@ -121,6 +85,42 @@ class OnetimeLockboxDisbursementTest(BitcoinTestFramework):
             self.nodes[0].getblock('8'),
             (5 * fs_lockbox_per_block) - ld_amount,
         )
+
+def pre_nu_6_1_funding_streams() : return {
+    'recipients': [
+        {
+            'receiver': 'MajorGrants',
+            'numerator': 8,
+            'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P', 't2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
+        },
+        {
+            'receiver': 'Deferred',
+            'numerator': 12
+        }
+    ],
+    'height_range': {
+        'start': 4,
+        'end': 8
+    }
+}
+
+def post_nu_6_1_funding_streams() : return {
+    'recipients': [
+        {
+            'receiver': 'MajorGrants',
+            'numerator': 8,
+            'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P', 't2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
+        },
+        {
+            'receiver': 'Deferred',
+            'numerator': 12
+        }
+    ],
+    'height_range': {
+        'start': 8,
+        'end': 12
+    }
+}
 
 if __name__ == '__main__':
     OnetimeLockboxDisbursementTest().main()

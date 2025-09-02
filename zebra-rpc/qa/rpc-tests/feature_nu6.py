@@ -5,11 +5,8 @@
 
 from decimal import Decimal
 
-from test_framework.config import (
-    ZebraExtraArgs,
-    test_pre_nu6_funding_streams,
-    test_post_nu6_funding_streams
-)
+from test_framework.config import ZebraExtraArgs
+
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal, start_nodes
 
@@ -249,6 +246,48 @@ class PoolsTest(BitcoinTestFramework):
         assert_equal(block_subsidy['lockboxtotal'], Decimal('0'))
         assert_equal(block_subsidy['totalblocksubsidy'], Decimal('3.125'))
         
+def test_pre_nu6_funding_streams() : return {
+    'recipients': [
+        {
+            'receiver': 'ECC',
+            'numerator': 7,
+            'addresses': ['t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz']
+        },
+        {
+            'receiver': 'ZcashFoundation',
+            'numerator': 5,
+            'addresses': ['t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v']
+        },
+        {
+            'receiver': 'MajorGrants',
+            'numerator': 8,
+            'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
+        },
+    ],
+    'height_range': {
+        'start': 290,
+        'end': 291
+    }
+}
+
+def test_post_nu6_funding_streams() : return {
+    'recipients': [
+        {
+            'receiver': 'MajorGrants',
+            'numerator': 8,
+            'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
+        },
+        {
+            'receiver': 'Deferred',
+            'numerator': 12
+            # No addresses field is valid for Deferred
+        }
+    ],
+    'height_range': {
+        'start': 291,
+        'end': 293
+    }
+}
 
 if __name__ == '__main__':
     PoolsTest().main()
