@@ -34,11 +34,7 @@ class ZebraConfig:
 
         # Extra args updates
         config_file['mining']['miner_address'] = self.extra_args.miner_address
-
-
         config_file['network']['testnet_parameters']['funding_streams'] = self.extra_args.funding_streams
-
-        config_file['network']['testnet_parameters']['activation_heights'] = \
-            self.extra_args.activation_heights
+        config_file['network']['testnet_parameters']['activation_heights'] = self.extra_args.activation_heights
 
         return config_file

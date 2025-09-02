@@ -32,15 +32,12 @@ class OnetimeLockboxDisbursementTest(BitcoinTestFramework):
     def setup_network(self, split=False):
         self.nodes = []
         self.nodes.append(self.start_node_with(0))
-        self.is_network_split = False
-        self.sync_all()
 
     def run_test(self):
 
         print("Activating NU5")
         self.nodes[0].generate(2)
         
-        self.sync_all()
         assert_equal(self.nodes[0].getblockchaininfo()['blocks'], 2)
 
         fs_lockbox_per_block = Decimal('0.75')
@@ -48,7 +45,6 @@ class OnetimeLockboxDisbursementTest(BitcoinTestFramework):
 
         print("Reaching block before NU6")
         self.nodes[0].generate(1)
-        self.sync_all()
         assert_equal(self.nodes[0].getblockchaininfo()['blocks'], 3)
 
         # The lockbox should have zero value.
@@ -60,7 +56,6 @@ class OnetimeLockboxDisbursementTest(BitcoinTestFramework):
 
         print("Activating NU6")
         self.nodes[0].generate(1)
-        self.sync_all()
         assert_equal(self.nodes[0].getblockchaininfo()['blocks'], 4)
 
         # We should see the lockbox balance increase.
@@ -68,7 +63,6 @@ class OnetimeLockboxDisbursementTest(BitcoinTestFramework):
 
         print("Reaching block before NU6.1")
         self.nodes[0].generate(3)
-        self.sync_all()
         assert_equal(self.nodes[0].getblockchaininfo()['blocks'], 7)
 
         # We should see the lockbox balance increase.
@@ -76,7 +70,6 @@ class OnetimeLockboxDisbursementTest(BitcoinTestFramework):
 
         print("Activating NU6.1")
         self.nodes[0].generate(1)
-        self.sync_all()
         assert_equal(self.nodes[0].getblockchaininfo()['blocks'], 8)
 
         # We should see the lockbox balance decrease from the disbursement,
