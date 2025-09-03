@@ -71,7 +71,6 @@ use zebra_chain::{
         },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
-    primitives,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -90,7 +89,7 @@ use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, Trans
 use crate::{
     client::Treestate,
     config,
-    methods::types::validate_address::validate_address,
+    methods::types::{validate_address::validate_address, z_validate_address::z_validate_address},
     queue::Queue,
     server::{
         self,
@@ -124,7 +123,7 @@ use types::{
     transaction::TransactionObject,
     unified_address::ZListUnifiedReceiversResponse,
     validate_address::ValidateAddressResponse,
-    z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
+    z_validate_address::ZValidateAddressResponse,
 };
 
 #[cfg(test)]
@@ -2642,36 +2641,7 @@ where
     async fn z_validate_address(&self, raw_address: String) -> Result<ZValidateAddressResponse> {
         let network = self.network.clone();
 
-        let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
-            return Ok(ZValidateAddressResponse::invalid());
-        };
-
-        let address = match address.convert::<primitives::Address>() {
-            Ok(address) => address,
-            Err(err) => {
-                tracing::debug!(?err, "conversion error");
-                return Ok(ZValidateAddressResponse::invalid());
-            }
-        };
-
-        if address.network() == network.kind() {
-            Ok(ZValidateAddressResponse {
-                is_valid: true,
-                address: Some(raw_address),
-                address_type: Some(ZValidateAddressType::from(&address)),
-                is_mine: Some(false),
-            })
-        } else {
-            tracing::info!(
-                ?network,
-                address_network = ?address.network(),
-                "invalid address network in z_validateaddress RPC: address is for {:?} but Zebra is on {:?}",
-                address.network(),
-                network
-            );
-
-            Ok(ZValidateAddressResponse::invalid())
-        }
+        z_validate_address(network, raw_address)
     }
 
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
