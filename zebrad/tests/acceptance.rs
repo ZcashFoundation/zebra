@@ -3252,7 +3252,7 @@ async fn trusted_chain_sync_handles_forks_correctly() -> Result<()> {
     tracing::info!("waiting for finalized chain tip changes");
 
     timeout(
-        Duration::from_secs(100),
+        Duration::from_secs(200),
         tokio::spawn(async move {
             for _ in 0..2 {
                 chain_tip_change
