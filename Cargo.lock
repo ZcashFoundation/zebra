@@ -1508,6 +1508,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "equihash"
+version = "0.2.2"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
+dependencies = [
+ "blake2b_simd",
+ "core2",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1546,8 +1555,7 @@ dependencies = [
 [[package]]
 name = "f4jumble"
 version = "0.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d42773cb15447644d170be20231a3268600e0c4cea8987d013b93ac973d3cf7"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "blake2b_simd",
 ]
@@ -4912,6 +4920,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "strum"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
+
+[[package]]
+name = "strum_macros"
+version = "0.27.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.104",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6483,8 +6509,7 @@ dependencies = [
 [[package]]
 name = "zcash_address"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c984ae01367a4a3d20e9d34ae4e4cc0dca004b22d9a10a51eec43f43934612e"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "bech32",
  "bs58",
@@ -6497,8 +6522,7 @@ dependencies = [
 [[package]]
 name = "zcash_encoding"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bca38087e6524e5f51a5b0fb3fc18f36d7b84bf67b2056f494ca0c281590953d"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "core2",
  "nonempty",
@@ -6507,8 +6531,7 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -6518,8 +6541,7 @@ dependencies = [
 [[package]]
 name = "zcash_keys"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e401b87caabf016a414786749c9386e9ae934a4c40abaaeb901a338b7d3ef5fd"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "bech32",
  "blake2b_simd",
@@ -6530,7 +6552,9 @@ dependencies = [
  "group",
  "memuse",
  "nonempty",
+ "orchard",
  "rand_core 0.6.4",
+ "sapling-crypto",
  "secrecy",
  "subtle",
  "tracing",
@@ -6557,8 +6581,7 @@ dependencies = [
 [[package]]
 name = "zcash_primitives"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a0c26140f2e6b760dcf052d22bd01f1a8773cdefb650ff5829430798a21b85b"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6567,7 +6590,7 @@ dependencies = [
  "core2",
  "crypto-common 0.2.0-rc.1",
  "document-features",
- "equihash",
+ "equihash 0.2.2 (git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs)",
  "ff",
  "fpe",
  "getset",
@@ -6599,8 +6622,7 @@ dependencies = [
 [[package]]
 name = "zcash_proofs"
 version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f90d9521161f7308c2fe6bddf771947f1a0fcd01b9e8a3b624c30a5661ad945"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "bellman",
  "blake2b_simd",
@@ -6623,8 +6645,7 @@ dependencies = [
 [[package]]
 name = "zcash_protocol"
 version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9cfe9e3fb08e6851efe3d0ced457e4cb2c305daa928f64cb0d70c040f8f8336"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "core2",
  "document-features",
@@ -6662,8 +6683,7 @@ dependencies = [
 [[package]]
 name = "zcash_transparent"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a7c162a8aa6f708e842503ed5157032465dadfb1d7f63adf9db2d45213a0b11"
+source = "git+https://github.com/zcash/librustzcash?branch=construct-coinbase-txs#413094023b8d5ebc030a16cdbba0821fd704e87d"
 dependencies = [
  "bip32",
  "blake2b_simd",
@@ -6674,6 +6694,7 @@ dependencies = [
  "hex",
  "ripemd 0.1.3",
  "secp256k1",
+ "serde",
  "sha2 0.10.9",
  "subtle",
  "zcash_address",
@@ -6701,7 +6722,7 @@ dependencies = [
  "derive-getters",
  "dirs",
  "ed25519-zebra",
- "equihash",
+ "equihash 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures",
  "group",
  "halo2_proofs",
@@ -6789,8 +6810,11 @@ dependencies = [
  "tracing-error",
  "tracing-futures",
  "tracing-subscriber",
+ "zcash_primitives",
  "zcash_proofs",
  "zcash_protocol",
+ "zcash_script",
+ "zcash_transparent",
  "zebra-chain",
  "zebra-node-services",
  "zebra-script",
@@ -6856,6 +6880,7 @@ dependencies = [
 name = "zebra-rpc"
 version = "2.0.0"
 dependencies = [
+ "anyhow",
  "base64 0.22.1",
  "chrono",
  "color-eyre",
@@ -6870,14 +6895,19 @@ dependencies = [
  "jsonrpsee",
  "jsonrpsee-proc-macros",
  "jsonrpsee-types",
+ "lazy_static",
  "nix",
+ "orchard",
  "proptest",
  "prost 0.14.1",
  "rand 0.8.5",
+ "sapling-crypto",
  "semver",
  "serde",
  "serde_json",
  "serde_with",
+ "strum",
+ "strum_macros",
  "thiserror 2.0.12",
  "tokio",
  "tokio-stream",
@@ -6890,6 +6920,7 @@ dependencies = [
  "zcash_address",
  "zcash_keys",
  "zcash_primitives",
+ "zcash_proofs",
  "zcash_protocol",
  "zcash_transparent",
  "zebra-chain",
@@ -7023,6 +7054,7 @@ name = "zebrad"
 version = "2.5.0"
 dependencies = [
  "abscissa_core",
+ "anyhow",
  "atty",
  "bytes",
  "chrono",
@@ -7061,6 +7093,8 @@ dependencies = [
  "sentry",
  "serde",
  "serde_json",
+ "strum",
+ "strum_macros",
  "tempfile",
  "thiserror 2.0.12",
  "thread-priority",
