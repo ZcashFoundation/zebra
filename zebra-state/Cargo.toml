@@ -66,7 +66,7 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 
 rayon = { workspace = true }
-tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing", "macros", "time"] }
 tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
 

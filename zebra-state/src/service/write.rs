@@ -57,7 +57,9 @@ pub(crate) fn validate_and_commit_non_finalized(
     check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
-    if finalized_state.finalized_tip_hash() == parent_hash {
+    if !non_finalized_state.any_chain_contains(&parent_hash)
+        && finalized_state.finalized_tip_hash() == parent_hash
+    {
         non_finalized_state.commit_new_chain(prepared, finalized_state)?;
     } else {
         non_finalized_state.commit_block(prepared, finalized_state)?;
@@ -181,6 +183,7 @@ impl BlockWriteSender {
         non_finalized_state: NonFinalizedState,
         chain_tip_sender: ChainTipSender,
         non_finalized_state_sender: watch::Sender<NonFinalizedState>,
+        should_use_finalized_block_write_sender: bool,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedReceiver<block::Hash>,
@@ -214,7 +217,8 @@ impl BlockWriteSender {
         (
             Self {
                 non_finalized: Some(non_finalized_block_write_sender),
-                finalized: Some(finalized_block_write_sender),
+                finalized: Some(finalized_block_write_sender)
+                    .filter(|_| should_use_finalized_block_write_sender),
             },
             invalid_block_write_reset_receiver,
             Some(Arc::new(task)),
