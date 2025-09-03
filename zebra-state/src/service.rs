@@ -55,8 +55,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config,
-    ReadRequest, ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
+    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, ReadRequest,
+    ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 pub mod block_iter;
