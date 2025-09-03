@@ -363,10 +363,21 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `request`: (object, required, example={\"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"], \"start\": 1000, \"end\": 2000}) A struct with the following named fields:
-    ///     - `addresses`: (json array of string, required) The addresses to get transactions from.
-    ///     - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
-    ///     - `end`: (numeric, optional) The top height to stop looking for transactions (inclusive).
+    /// - `params`: (required) Either:
+    ///     - A single address string (e.g., `"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"`), or
+    ///     - An object with the following named fields:
+    ///         - `addresses`: (array of strings, required) The addresses to get transactions from.
+    ///         - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
+    ///         - `end`: (numeric, optional) The upper height to stop looking for transactions (inclusive).
+    ///
+    /// Example of the object form:
+    /// ```json
+    /// {
+    ///   "addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"],
+    ///   "start": 1000,
+    ///   "end": 2000
+    /// }
+    /// ```
     ///
     /// # Notes
     ///
@@ -374,7 +385,7 @@ pub trait Rpc {
     /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>
     /// - It is recommended that users call the method with start/end heights such that the response can't be too large.
     #[method(name = "getaddresstxids")]
-    async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>>;
+    async fn get_address_tx_ids(&self, params: GetAddressTxIdsParams) -> Result<Vec<String>>;
 
     /// Returns all unspent outputs for a list of addresses.
     ///
@@ -1960,7 +1971,9 @@ where
         }
     }
 
-    async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>> {
+    async fn get_address_tx_ids(&self, params: GetAddressTxIdsParams) -> Result<Vec<String>> {
+        let request = params.into_request();
+
         let mut read_state = self.read_state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
@@ -3936,6 +3949,30 @@ impl GetAddressTxIdsRequest {
             self.start.unwrap_or(0),
             self.end.unwrap_or(0),
         )
+    }
+}
+
+/// Parameters for the `getaddresstxids` RPC method.
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+pub enum GetAddressTxIdsParams {
+    /// A single address string.
+    Single(String),
+    /// A full request object with address list and optional height range.
+    Object(GetAddressTxIdsRequest),
+}
+
+impl GetAddressTxIdsParams {
+    /// Converts the enum into a `GetAddressTxIdsRequest`, normalizing the input format.
+    pub fn into_request(self) -> GetAddressTxIdsRequest {
+        match self {
+            GetAddressTxIdsParams::Single(addr) => GetAddressTxIdsRequest {
+                addresses: vec![addr],
+                start: None,
+                end: None,
+            },
+            GetAddressTxIdsParams::Object(req) => req,
+        }
     }
 }
 
