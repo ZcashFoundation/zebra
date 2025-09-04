@@ -404,7 +404,7 @@ pub trait Rpc {
     #[method(name = "getaddressutxos")]
     async fn get_address_utxos(
         &self,
-        address_strings: AddressStrings,
+        request: GetAddressUtxosRequest,
     ) -> Result<GetAddressUtxosResponse>;
 
     /// Stop the running zebrad process.
@@ -2027,12 +2027,12 @@ where
 
     async fn get_address_utxos(
         &self,
-        address_strings: AddressStrings,
+        utxos_request: GetAddressUtxosRequest,
     ) -> Result<GetAddressUtxosResponse> {
         let mut read_state = self.read_state.clone();
         let mut response_utxos = vec![];
 
-        let valid_addresses = address_strings.valid_addresses()?;
+        let valid_addresses = utxos_request.valid_addresses()?;
 
         // get utxos data for addresses
         let request = zebra_state::ReadRequest::UtxosByAddresses(valid_addresses);
@@ -2078,7 +2078,29 @@ where
             last_output_location = output_location;
         }
 
-        Ok(response_utxos)
+        match utxos_request {
+            GetAddressUtxosRequest::Single(_) => {
+                Ok(GetAddressUtxosResponse::ChainInfoFalse(response_utxos))
+            }
+            GetAddressUtxosRequest::Object(get_address_utxos_object) => {
+                if !get_address_utxos_object.chain_info {
+                    Ok(GetAddressUtxosResponse::ChainInfoFalse(response_utxos))
+                } else {
+                    let (height, hash) = self
+                        .latest_chain_tip
+                        .best_tip_height_and_hash()
+                        .ok_or_misc_error("No blocks in state")?;
+
+                    Ok(GetAddressUtxosResponse::ChainInfoTrue(
+                        GetAddressUtxosResponseObject {
+                            utxos: response_utxos,
+                            hash,
+                            height,
+                        },
+                    ))
+                }
+            }
+        }
     }
 
     fn stop(&self) -> Result<String> {
@@ -3240,6 +3262,38 @@ enum DAddressStrings {
 /// A request to get the transparent balance of a set of addresses.
 pub type GetAddressBalanceRequest = AddressStrings;
 
+/// Trait for an input type that contains a list of addresses.
+///
+/// Adds some convenience methods for working with address lists.
+trait AddressesInput {
+    fn addresses(&self) -> Vec<String>;
+
+    /// Given a list of addresses as strings:
+    /// - check if provided list have all valid transparent addresses.
+    /// - return valid addresses as a set of `Address`.
+    fn valid_addresses(&self) -> Result<HashSet<Address>> {
+        // Reference for the legacy error code:
+        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
+        let valid_addresses: HashSet<Address> = self
+            .addresses()
+            .into_iter()
+            .map(|address| {
+                address
+                    .parse()
+                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
+            })
+            .collect::<Result<_>>()?;
+
+        Ok(valid_addresses)
+    }
+}
+
+impl AddressesInput for AddressStrings {
+    fn addresses(&self) -> Vec<String> {
+        self.addresses.clone()
+    }
+}
+
 impl AddressStrings {
     /// Creates a new `AddressStrings` given a vector.
     pub fn new(addresses: Vec<String>) -> AddressStrings {
@@ -3254,33 +3308,6 @@ impl AddressStrings {
         let address_strings = Self { addresses };
         address_strings.clone().valid_addresses()?;
         Ok(address_strings)
-    }
-
-    /// Given a list of addresses as strings:
-    /// - check if provided list have all valid transparent addresses.
-    /// - return valid addresses as a set of `Address`.
-    pub fn valid_addresses(self) -> Result<HashSet<Address>> {
-        // Reference for the legacy error code:
-        // <https://github.com/zcash/zcash/blob/99ad6fdc3a549ab510422820eea5e5ce9f60a5fd/src/rpc/misc.cpp#L783-L784>
-        let valid_addresses: HashSet<Address> = self
-            .addresses
-            .into_iter()
-            .map(|address| {
-                address
-                    .parse()
-                    .map_error(server::error::LegacyCode::InvalidAddressOrKey)
-            })
-            .collect::<Result<_>>()?;
-
-        Ok(valid_addresses)
-    }
-
-    /// Given a list of addresses as strings:
-    /// - check if provided list have all valid transparent addresses.
-    /// - return valid addresses as a vec of strings.
-    pub fn valid_address_strings(self) -> Result<Vec<String>> {
-        self.clone().valid_addresses()?;
-        Ok(self.addresses)
     }
 }
 
@@ -3307,6 +3334,49 @@ pub struct GetAddressBalanceResponse {
 
 #[deprecated(note = "Use `GetAddressBalanceResponse` instead.")]
 pub use self::GetAddressBalanceResponse as AddressBalance;
+
+/// Parameters for the `getaddresstxids` RPC method.
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+pub enum GetAddressUtxosRequest {
+    /// A single address string.
+    Single(String),
+    /// A full request object with address list and chainInfo flag.
+    Object(GetAddressUtxosObject),
+}
+
+impl GetAddressUtxosRequest {
+    /// Converts the enum into a `GetAddressUtxosObject`, normalizing the input format.
+    pub fn into_object(self) -> GetAddressUtxosObject {
+        match self {
+            GetAddressUtxosRequest::Single(addr) => GetAddressUtxosObject {
+                addresses: vec![addr],
+                chain_info: false,
+            },
+            GetAddressUtxosRequest::Object(req) => req,
+        }
+    }
+}
+
+impl AddressesInput for GetAddressUtxosRequest {
+    fn addresses(&self) -> Vec<String> {
+        match self {
+            GetAddressUtxosRequest::Single(addr) => vec![addr.clone()],
+            GetAddressUtxosRequest::Object(req) => req.addresses.clone(),
+        }
+    }
+}
+
+/// A struct to use as parameter of the `getaddressutxos`.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize, Getters, new)]
+pub struct GetAddressUtxosObject {
+    // A list of addresses to get transactions from.
+    addresses: Vec<String>,
+    // The height to start looking for transactions.
+    #[serde(default)]
+    #[serde(rename = "chainInfo")]
+    chain_info: bool,
+}
 
 /// A hex-encoded [`ConsensusBranchId`] string.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
@@ -3822,7 +3892,25 @@ impl Default for GetRawTransactionResponse {
 }
 
 /// Response to a `getaddressutxos` RPC request.
-pub type GetAddressUtxosResponse = Vec<Utxo>;
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+pub enum GetAddressUtxosResponse {
+    /// Response when `chainInfo` is false or not provided.
+    ChainInfoFalse(Vec<Utxo>),
+    /// Response when `chainInfo` is true.
+    ChainInfoTrue(GetAddressUtxosResponseObject),
+}
+
+/// Response to a `getaddressutxos` RPC request, when `chainInfo` is true.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize, Getters, new)]
+pub struct GetAddressUtxosResponseObject {
+    utxos: Vec<Utxo>,
+    #[serde(with = "hex")]
+    #[getter(copy)]
+    hash: block::Hash,
+    #[getter(copy)]
+    height: block::Height,
+}
 
 /// A UTXO returned by the `getaddressutxos` RPC request.
 ///

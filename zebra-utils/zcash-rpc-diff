@@ -112,11 +112,11 @@ echo "$@"
 echo
 
 echo "Querying $ZEBRAD $ZEBRAD_NET chain at height >=$ZEBRAD_HEIGHT..."
-time $ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" "$@" | jq -S > "$ZEBRAD_RESPONSE"
+time $ZCASH_CLI $ZEBRAD_EXTRA_ARGS -rpcport="$ZEBRAD_RPC_PORT" "$@" | $JQ -S > "$ZEBRAD_RESPONSE"
 echo
 
 echo "Querying $ZCASHD $ZCASHD_NET chain at height >=$ZCASHD_HEIGHT..."
-time $ZCASH_CLI $ZCASHD_EXTRA_ARGS "$@" | jq -S > "$ZCASHD_RESPONSE"
+time $ZCASH_CLI $ZCASHD_EXTRA_ARGS "$@" | $JQ -S > "$ZCASHD_RESPONSE"
 echo
 
 echo
@@ -214,8 +214,10 @@ if [ "$1" == "getaddressbalance" ]; then
     ZEBRAD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZEBRAD_NAME-$ZEBRAD_NET-$ZEBRAD_HEIGHT-getaddressutxos-sum.txt"
     ZCASHD_SUM_RESPONSE="$ZCASH_RPC_TMP_DIR/$ZCASHD_NAME-$ZCASHD_NET-$ZCASHD_HEIGHT-getaddressutxos-sum.txt"
 
-    cat "$ZEBRAD_RESPONSE" | $JQ 'map(.satoshis) | add // 0' > "$ZEBRAD_SUM_RESPONSE"
-    cat "$ZCASHD_RESPONSE" | $JQ 'map(.satoshis) | add // 0' > "$ZCASHD_SUM_RESPONSE"
+    # getaddressutxos returns either an array of UTXOs, or an object with an "utxos" field containing that array,
+    # depending on the `chainInfo` parameter.
+    cat "$ZEBRAD_RESPONSE" | $JQ 'if type == "array" then . else .utxos end | map(.satoshis) | add // 0' > "$ZEBRAD_SUM_RESPONSE"
+    cat "$ZCASHD_RESPONSE" | $JQ 'if type == "array" then . else .utxos end | map(.satoshis) | add // 0' > "$ZCASHD_SUM_RESPONSE"
 
     echo
 

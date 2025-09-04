@@ -572,10 +572,15 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddressutxos`
     let get_address_utxos = rpc
-        .get_address_utxos(AddressStrings { addresses })
+        .get_address_utxos(GetAddressUtxosRequest::Object(GetAddressUtxosObject::new(
+            addresses, false,
+        )))
         .await
         .expect("We should have a vector of strings");
-    snapshot_rpc_getaddressutxos(get_address_utxos, &settings);
+    let GetAddressUtxosResponse::ChainInfoFalse(addresses) = get_address_utxos else {
+        panic!("We should have a GetAddressUtxosResponse::ChainInfoFalse struct");
+    };
+    snapshot_rpc_getaddressutxos(addresses, &settings);
 }
 
 async fn test_mocked_rpc_response_data_for_network(network: &Network) {
