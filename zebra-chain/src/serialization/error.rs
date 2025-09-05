@@ -54,7 +54,7 @@ pub enum SerializationError {
 
     /// Invalid coinbase transaction.
     #[error("coinbase error: {0}")]
-    Coinbase(coinbase::Error),
+    Coinbase(#[from] coinbase::Error),
 }
 
 impl From<crate::Error> for SerializationError {
