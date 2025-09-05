@@ -78,9 +78,3 @@ impl From<io::Error> for SerializationError {
         Arc::new(value).into()
     }
 }
-
-impl From<coinbase::Error> for SerializationError {
-    fn from(e: zcash_transparent::coinbase::Error) -> Self {
-        Self::Coinbase(e)
-    }
-}
