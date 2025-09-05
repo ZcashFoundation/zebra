@@ -425,6 +425,32 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .expect("We should have a GetBlockHash struct");
     snapshot_rpc_getbestblockhash(get_best_block_hash, &settings);
 
+    // `getmempoolinfo`
+    //
+    // - this RPC method returns mempool stats like size and bytes
+    // - we simulate a call to the mempool with the `QueueStats` request,
+    //   and respond with mock stats to verify RPC output formatting.
+    let mempool_req = mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::QueueStats))
+        .map(|responder| {
+            responder.respond(mempool::Response::QueueStats {
+                size: 67,
+                bytes: 32_500,
+                usage: 41_000,
+                fully_notified: None,
+            });
+        });
+
+    let (rsp, _) = futures::join!(rpc.get_mempool_info(), mempool_req);
+
+    println!("{}", serde_json::to_string_pretty(&rsp).unwrap());
+
+    if let Ok(inner) = rsp {
+        insta::assert_json_snapshot!("get_mempool_info", inner);
+    } else {
+        panic!("getmempoolinfo RPC must return a valid response");
+    }
+
     // `getrawmempool`
     //
     // - a request to get all mempool transactions will be made by `getrawmempool` behind the scenes.

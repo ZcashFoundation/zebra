@@ -102,6 +102,9 @@ pub enum Request {
     /// when too many slots are reserved but unused:
     /// <https://docs.rs/tower/0.4.10/tower/buffer/struct.Buffer.html#a-note-on-choosing-a-bound>
     CheckForVerifiedTransactions,
+
+    /// Request summary statistics from the mempool for `getmempoolinfo`.
+    QueueStats,
 }
 
 /// A response to a mempool service request.
@@ -159,4 +162,16 @@ pub enum Response {
 
     /// Confirms that the mempool has checked for recently verified transactions.
     CheckedForVerifiedTransactions,
+
+    /// Summary statistics for the mempool: count, total size, memory usage, and regtest info.
+    QueueStats {
+        /// Number of transactions currently in the mempool
+        size: usize,
+        /// Total size in bytes of all transactions
+        bytes: usize,
+        /// Estimated memory usage in bytes
+        usage: usize,
+        /// Whether all transactions have been fully notified (regtest only)
+        fully_notified: Option<bool>,
+    },
 }

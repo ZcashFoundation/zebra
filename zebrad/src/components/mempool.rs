@@ -891,6 +891,38 @@ impl Service<Request> for Mempool {
                     // all the work for this request is done in poll_ready
                     async move { Ok(Response::CheckedForVerifiedTransactions) }.boxed()
                 }
+
+                // Summary statistics for the mempool: count, total size, and memory usage.
+                //
+                // Used by the `getmempoolinfo` RPC method
+                Request::QueueStats => {
+                    trace!(?req, "got mempool request");
+
+                    let size = storage.transaction_count();
+
+                    let bytes = storage
+                        .transactions()
+                        .values()
+                        .map(|tx| tx.transaction.size)
+                        .sum();
+
+                    let usage = bytes; // TODO: Placeholder, should be fixed later
+
+                    // TODO: Set to Some(true) on regtest once network info is available.
+                    let fully_notified = None;
+
+                    trace!(size, bytes, usage, "answered mempool request");
+
+                    async move {
+                        Ok(Response::QueueStats {
+                            size,
+                            bytes,
+                            usage,
+                            fully_notified,
+                        })
+                    }
+                    .boxed()
+                }
             },
             ActiveState::Disabled => {
                 // TODO: add the name of the request, but not the content,
@@ -941,6 +973,14 @@ impl Service<Request> for Mempool {
                         // all the work for this request is done in poll_ready
                         Response::CheckedForVerifiedTransactions
                     }
+
+                    // Return empty mempool stats
+                    Request::QueueStats => Response::QueueStats {
+                        size: 0,
+                        bytes: 0,
+                        usage: 0,
+                        fully_notified: None,
+                    },
                 };
 
                 async move { Ok(resp) }.boxed()
