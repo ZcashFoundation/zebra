@@ -668,16 +668,17 @@ impl<'de> Deserialize<'de> for Config {
             (NetworkKind::Mainnet, _) => Network::Mainnet,
             (NetworkKind::Testnet, None) => Network::new_default_testnet(),
             (NetworkKind::Regtest, testnet_parameters) => {
-                let (nu5_activation_height, nu6_activation_height, nu7_activation_height) =
+                let (nu5_activation_height, nu6_activation_height, nu7_activation_height, swap_activation_height) =
                     testnet_parameters
                         .and_then(|params| params.activation_heights)
-                        .map(|ConfiguredActivationHeights { nu5, nu6, nu7, .. }| (nu5, nu6, nu7))
+                        .map(|ConfiguredActivationHeights { nu5, nu6, nu7, swap, .. }| (nu5, nu6, nu7, swap))
                         .unwrap_or_default();
 
                 Network::new_regtest(
                     nu5_activation_height,
                     nu6_activation_height,
                     nu7_activation_height,
+                    swap_activation_height,
                 )
             }
             (

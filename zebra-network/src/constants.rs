@@ -341,11 +341,11 @@ pub const TIMESTAMP_TRUNCATION_SECONDS: u32 = 30 * 60;
 /// This version of Zebra draws the current network protocol version from
 /// [ZIP-253](https://zips.z.cash/zip-0253).
 pub const CURRENT_NETWORK_PROTOCOL_VERSION: Version = {
-    #[cfg(not(zcash_unstable = "nu6" /* TODO nu7 */))]
+    #[cfg(not(zcash_unstable = "nu7" /* TODO nu7 */))]
     {
         Version(170_120)
     }
-    #[cfg(zcash_unstable = "nu6" /* TODO nu7 */)]
+    #[cfg(zcash_unstable = "nu7" /* TODO nu7 */)]
     {
         Version(170_140)
     }
@@ -412,7 +412,7 @@ lazy_static! {
 
         hash_map.insert(NetworkKind::Mainnet, Version::min_specified_for_upgrade(&Mainnet, Nu5));
         hash_map.insert(NetworkKind::Testnet, Version::min_specified_for_upgrade(&Network::new_default_testnet(), Nu5));
-        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(None, None, None), Nu5));
+        hash_map.insert(NetworkKind::Regtest, Version::min_specified_for_upgrade(&Network::new_regtest(None, None, None, None), Nu5));
 
         hash_map
     };

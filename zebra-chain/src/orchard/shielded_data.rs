@@ -46,6 +46,8 @@ pub struct ActionGroup<Flavor: ShieldedDataFlavor> {
     /// The shared anchor for all `Spend`s in this transaction.
     /// Denoted as `anchorOrchard` in the spec.
     pub shared_anchor: tree::Root,
+    /// Block height after which this Bundle's Actions are invalid by consensus.
+    pub expiry_height: u32,
     /// The aggregated zk-SNARK proof for all the actions in this transaction.
     /// Denoted as `proofsOrchard` in the spec.
     pub proof: Halo2Proof,
@@ -398,6 +400,8 @@ bitflags! {
         /// Enable ZSA transaction (otherwise all notes within actions must use native asset).
         // FIXME: Should we use this flag explicitly anywhere in Zebra?
         const ENABLE_ZSA = 0b00000100;
+        /// Enable creating Asset Swap transactions.
+        const FLAG_SWAPS_ENABLED = 0b00001000;
     }
 }
 

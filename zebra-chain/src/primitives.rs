@@ -24,4 +24,4 @@ pub use proofs::{Bctv14Proof, Groth16Proof, Halo2Proof, ZkSnarkProof};
 
 pub mod zcash_history;
 pub mod zcash_note_encryption;
-pub(crate) mod zcash_primitives;
+pub mod zcash_primitives; // FIXME quick hack for prototyping

@@ -153,11 +153,13 @@ impl Network {
         nu5_activation_height: Option<u32>,
         nu6_activation_height: Option<u32>,
         nu7_activation_height: Option<u32>,
+        swap_activation_height: Option<u32>,
     ) -> Self {
         Self::new_configured_testnet(testnet::Parameters::new_regtest(
             nu5_activation_height,
             nu6_activation_height,
             nu7_activation_height,
+            swap_activation_height,
         ))
     }
 

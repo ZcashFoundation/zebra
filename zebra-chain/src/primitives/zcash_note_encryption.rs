@@ -10,7 +10,7 @@ use crate::{
 
 use orchard::{
     bundle::{Authorization, Bundle},
-    domain::OrchardDomainCommon,
+    primitives::OrchardPrimitives,
 };
 
 use zcash_primitives::transaction::OrchardBundle;
@@ -59,6 +59,7 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
         let is_decrypted_successfully = match bundle {
             OrchardBundle::OrchardVanilla(bundle) => orchard_bundle_decrypts_successfully(bundle),
             OrchardBundle::OrchardZSA(bundle) => orchard_bundle_decrypts_successfully(bundle),
+            OrchardBundle::OrchardSwap(bundle) => !bundle.action_groups().iter().any(|group| !orchard_bundle_decrypts_successfully(group)),
         };
 
         if !is_decrypted_successfully {
@@ -70,12 +71,12 @@ pub fn decrypts_successfully(transaction: &Transaction, network: &Network, heigh
 }
 
 /// Checks if all actions in an Orchard bundle decrypt successfully.
-fn orchard_bundle_decrypts_successfully<A: Authorization, V, D: OrchardDomainCommon>(
-    bundle: &Bundle<A, V, D>,
+fn orchard_bundle_decrypts_successfully<A: Authorization, V, O: OrchardPrimitives>(
+    bundle: &Bundle<A, V, O>,
 ) -> bool {
     bundle.actions().iter().all(|act| {
         zcash_note_encryption::try_output_recovery_with_ovk(
-            &orchard::domain::OrchardDomain::for_action(act),
+            &orchard::primitives::OrchardDomain::for_action(act),
             &orchard::keys::OutgoingViewingKey::from([0u8; 32]),
             act,
             act.cv_net(),

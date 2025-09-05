@@ -217,7 +217,7 @@ pub fn proposal_block_from_template(
         | NetworkUpgrade::Blossom
         | NetworkUpgrade::Heartwood => panic!("pre-Canopy block templates not supported"),
         NetworkUpgrade::Canopy => chain_history_root.bytes_in_serialized_order().into(),
-        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu7 => {
+        NetworkUpgrade::Nu5 | NetworkUpgrade::Nu6 | NetworkUpgrade::Nu7 | NetworkUpgrade::Swap => {
             block_commitments_hash.bytes_in_serialized_order().into()
         }
     };

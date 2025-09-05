@@ -22,18 +22,19 @@ resolver = "2"
 # `cargo release` settings
 
 [workspace.dependencies]
-incrementalmerkletree = "0.5.1"
-orchard = "0.8.0"
-sapling-crypto = "0.1.3"
+incrementalmerkletree = { version = "0.5.1", features = ["legacy-api"] }
+orchard = "0.11.0"
+sapling-crypto = "0.5.0"
 # The dependency versions below are in accordance with the currently used orchard version.
 zcash_history = "0.4.0"
-zcash_address = "0.3.2"
-zcash_client_backend = "0.12.1"
-zcash_encoding = "0.2.0"
-zcash_keys = "0.2.0"
-zcash_primitives = "0.15.0"
-zcash_proofs = "0.15.0"
-zcash_protocol = "0.1.1"
+zcash_address = "0.8.0"
+zcash_client_backend = "0.19.0"
+zcash_encoding = "0.3.0"
+zcash_keys = "0.9.0"
+zcash_primitives = "0.23.0"
+zcash_proofs = "0.23.0"
+zcash_protocol = "0.5.3"
+zcash_transparent = { version = "0.3.0", features = ["transparent-inputs"] }
 
 [workspace.metadata.release]
 
@@ -107,13 +108,13 @@ lto = "thin"
 [patch.crates-io]
 halo2_proofs = { version = "0.3.0", git = "https://github.com/QED-it/halo2", branch = "zsa1" }
 halo2_gadgets = { version = "0.3.0", git = "https://github.com/QED-it/halo2", branch = "zsa1" }
-zcash_note_encryption = { version = "0.4.0", git = "https://github.com/QED-it/zcash_note_encryption", branch = "zsa1" }
-sapling-crypto = { version = "0.1.3", git = "https://github.com/QED-it/sapling-crypto", branch = "zsa1" }
-orchard = { version = "0.8.0", git = "https://github.com/QED-it/orchard", rev = "831ca109705a409bc3d3b82e76245e45dd0f0812" }
-zcash_primitives = { version = "0.15.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
-zcash_protocol = { version = "0.1.1", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
-zcash_address = { version = "0.3.2", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
-zcash_encoding = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
-zcash_history = { version = "0.4.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
-zcash_client_backend = { version = "0.12.1", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
-zcash_keys = { version = "0.2.0", git = "https://github.com/QED-it/librustzcash", rev = "e88964e248c9038e757771b8225c47ac8772abc4" }
+orchard = { git = "https://github.com/QED-it/orchard", branch = "zsa_swap" }
+sapling-crypto = { git = "https://github.com/QED-it/sapling-crypto", rev = "b0d2e4c1139f23fb7e9e410f2e5d986d5662ee03" }
+zcash_note_encryption = { version = "0.4.1", git = "https://github.com/zcash/zcash_note_encryption", rev = "668ea44cf59a226715a5f3cb1bf88710a8c188a3" }
+zcash_primitives = { git = "https://github.com/QED-it/librustzcash", branch = "zsa-swap" }
+zcash_protocol = { git = "https://github.com/QED-it/librustzcash", branch = "zsa-swap" }
+zcash_address = { git = "https://github.com/QED-it/librustzcash", branch = "zsa-swap" }
+zcash_client_backend = { git = "https://github.com/QED-it/librustzcash", branch = "zsa-swap" }
+zcash_proofs = { git = "https://github.com/QED-it/librustzcash", branch = "zsa-swap" }
+zcash_encoding = { git = "https://github.com/QED-it/librustzcash", branch = "zsa-swap" }
+zcash_transparent = { git = "https://github.com/QED-it/librustzcash", branch = "zsa-swap" }

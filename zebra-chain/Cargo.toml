@@ -113,6 +113,7 @@ zcash_primitives = { workspace = true, features = ["transparent-inputs"] }
 sapling-crypto.workspace = true
 zcash_protocol.workspace = true
 zcash_address.workspace = true
+zcash_transparent.workspace = true
 
 # Used for orchard serialization
 nonempty = { version = "0.7", optional = true }
@@ -197,4 +198,4 @@ name = "redpallas"
 harness = false
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu6"))'] }
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zcash_unstable, values("nu7"))'] }

@@ -434,7 +434,7 @@ impl ZcashSerialize for orchard::ShieldedData<OrchardZSA> {
             action_group.shared_anchor.zcash_serialize(&mut writer)?;
 
             // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
-            writer.write_u32::<LittleEndian>(0)?;
+            writer.write_u32::<LittleEndian>(action_group.expiry_height)?;
 
             // Denoted as `vAssetBurn` in the spec (ZIP 230).
             action_group.burn.zcash_serialize(&mut writer)?;
@@ -523,6 +523,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardVanilla>> {
             action_groups: AtLeastOne::from_one(ActionGroup {
                 flags,
                 shared_anchor,
+                expiry_height: 0,
                 proof,
                 actions,
                 #[cfg(feature = "tx-v6")]
@@ -584,11 +585,10 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
             let shared_anchor: orchard::tree::Root = (&mut reader).zcash_deserialize_into()?;
 
             // Denoted as `nAGExpiryHeight` in the spec  (ZIP 230) (must be zero for V6/NU7).
-            let n_ag_expiry_height = reader.read_u32::<LittleEndian>()?;
-            if n_ag_expiry_height != 0 {
-                return Err(SerializationError::Parse(
-                    "nAGExpiryHeight must be zero for NU7",
-                ));
+            let expiry_height = reader.read_u32::<LittleEndian>()?;
+            #[cfg(not(feature = "zsa-swap"))]
+            if expiry_height != 0 {
+                return Err(SerializationError::Parse("nAGExpiryHeight for V6/NU7"));
             }
 
             // Denoted as `vAssetBurn` in the spec  (ZIP 230).
@@ -618,6 +618,7 @@ impl ZcashDeserialize for Option<orchard::ShieldedData<OrchardZSA>> {
             action_groups.push(ActionGroup {
                 flags,
                 shared_anchor,
+                expiry_height,
                 proof,
                 actions,
                 burn,
