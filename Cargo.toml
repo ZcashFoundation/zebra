@@ -165,48 +165,109 @@ allow-branch = ["main"]
 [profile.dev]
 panic = "abort"
 
-# Speed up tests by optimizing performance-critical crates
+# Speed up tests by optimizing performance-critical crates. The parameters
+# values are the ones from the `release` profile
+# (https://doc.rust-lang.org/cargo/reference/profiles.html#release)
 
 # Cryptographic crates
 
 [profile.dev.package.blake2b_simd]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.ff]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.group]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.pasta_curves]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.halo2_proofs]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.halo2_gadgets]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.bls12_381]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.byteorder]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.equihash]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.zcash_proofs]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.ring]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.spin]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.untrusted]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
+
+[profile.dev.package.bitvec]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 
 [profile.release]
