@@ -281,7 +281,7 @@ async fn verify_fail_add_block_checkpoint() -> Result<(), Report> {
 async fn verify_issuance_blocks_test() -> Result<(), Report> {
     use block::genesis::regtest_genesis_block;
 
-    use zebra_test::vectors::{OrchardWorkflowBlock, ORCHARD_WORKFLOW_BLOCKS_ZSA};
+    use zebra_test::vectors::{OrchardWorkflowBlock, ORCHARD_ZSA_WORKFLOW_BLOCKS};
 
     let _init_guard = zebra_test::init();
 
@@ -297,7 +297,7 @@ async fn verify_issuance_blocks_test() -> Result<(), Report> {
     )];
 
     let commit_issuance_blocks =
-        ORCHARD_WORKFLOW_BLOCKS_ZSA
+        ORCHARD_ZSA_WORKFLOW_BLOCKS
             .iter()
             .map(|OrchardWorkflowBlock { bytes, is_valid }| {
                 let block = Arc::new(

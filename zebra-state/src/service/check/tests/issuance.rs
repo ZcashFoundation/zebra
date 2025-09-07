@@ -7,7 +7,7 @@ use zebra_chain::{
     serialization::ZcashDeserialize,
 };
 
-use zebra_test::vectors::{OrchardWorkflowBlock, ORCHARD_WORKFLOW_BLOCKS_ZSA};
+use zebra_test::vectors::{OrchardWorkflowBlock, ORCHARD_ZSA_WORKFLOW_BLOCKS};
 
 use crate::{
     check::{self, Chain},
@@ -16,7 +16,7 @@ use crate::{
 };
 
 fn valid_issuance_blocks() -> Vec<Arc<Block>> {
-    ORCHARD_WORKFLOW_BLOCKS_ZSA
+    ORCHARD_ZSA_WORKFLOW_BLOCKS
         .iter()
         .map(|OrchardWorkflowBlock { bytes, .. }| {
             Arc::new(Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"))

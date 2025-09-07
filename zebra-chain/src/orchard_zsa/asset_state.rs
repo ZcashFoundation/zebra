@@ -387,9 +387,9 @@ impl RandomAssetBase for AssetBase {
         )
         .unwrap();
         let ik = orchard::keys::IssuanceValidatingKey::from(&isk);
-        let asset_desc = b"zsa_asset".to_vec();
+        let asset_desc = b"zsa_asset";
         let asset_desc_hash =
-            compute_asset_desc_hash(&asset_desc).expect("asset descriptor hashing should succeed");
+            compute_asset_desc_hash(&(asset_desc[0], asset_desc[1..].to_vec()).into());
         AssetBase::derive(&ik, &asset_desc_hash)
             .zcash_serialize_to_vec()
             .map(hex::encode)

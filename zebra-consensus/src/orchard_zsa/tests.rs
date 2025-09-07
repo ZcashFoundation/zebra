@@ -40,7 +40,7 @@ use zebra_state::{ReadRequest, ReadResponse, ReadStateService};
 
 use zebra_test::{
     transcript::{ExpectedTranscriptError, Transcript},
-    vectors::{OrchardWorkflowBlock, ORCHARD_WORKFLOW_BLOCKS_ZSA},
+    vectors::{OrchardWorkflowBlock, ORCHARD_ZSA_WORKFLOW_BLOCKS},
 };
 
 use crate::{block::Request, Config};
@@ -224,7 +224,7 @@ async fn check_orchard_zsa_workflow() -> Result<(), Report> {
         crate::router::init(Config::default(), &network, state_service.clone()).await;
 
     let transcript_data =
-        create_transcript_data(ORCHARD_WORKFLOW_BLOCKS_ZSA.iter()).collect::<Vec<_>>();
+        create_transcript_data(ORCHARD_ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();
 
     let asset_records =
         build_asset_records(&transcript_data).expect("should calculate asset_records");

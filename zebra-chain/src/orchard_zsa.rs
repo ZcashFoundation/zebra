@@ -7,7 +7,7 @@ pub mod asset_state;
 mod burn;
 mod issuance;
 
-pub(crate) use burn::{Burn, NoBurn};
+pub(crate) use burn::{compute_burn_value_commitment, Burn, NoBurn};
 pub(crate) use issuance::IssueData;
 
 pub use burn::BurnItem;

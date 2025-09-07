@@ -21,34 +21,34 @@ lazy_static! {
     /// Test blocks for a Zcash Shielded Assets (ZSA) workflow.
     /// The sequence demonstrates issuing, transferring and burning a custom
     /// asset, then finalising the issuance and attempting an extra issue.
-    pub static ref ORCHARD_WORKFLOW_BLOCKS_ZSA: Vec<OrchardWorkflowBlock> = vec![
+    pub static ref ORCHARD_ZSA_WORKFLOW_BLOCKS: Vec<OrchardWorkflowBlock> = vec![
         // Issue: 1000
         OrchardWorkflowBlock {
-            bytes: decode_bytes(include_str!("orchard-workflow-blocks-zsa-1.txt")),
+            bytes: decode_bytes(include_str!("orchard-zsa-workflow-blocks-1.txt")),
             is_valid: true
         },
 
         // Transfer
         OrchardWorkflowBlock {
-            bytes: decode_bytes(include_str!("orchard-workflow-blocks-zsa-2.txt")),
+            bytes: decode_bytes(include_str!("orchard-zsa-workflow-blocks-2.txt")),
             is_valid: true
         },
 
         // Burn: 7, Burn: 2
         OrchardWorkflowBlock {
-            bytes: decode_bytes(include_str!("orchard-workflow-blocks-zsa-3.txt")),
+            bytes: decode_bytes(include_str!("orchard-zsa-workflow-blocks-3.txt")),
             is_valid: true
         },
 
         // Issue: finalize
         OrchardWorkflowBlock {
-            bytes: decode_bytes(include_str!("orchard-workflow-blocks-zsa-4.txt")),
+            bytes: decode_bytes(include_str!("orchard-zsa-workflow-blocks-4.txt")),
             is_valid: true
         },
 
         // Try to issue: 2000
         OrchardWorkflowBlock {
-            bytes: decode_bytes(include_str!("orchard-workflow-blocks-zsa-5.txt")),
+            bytes: decode_bytes(include_str!("orchard-zsa-workflow-blocks-5.txt")),
             is_valid: false
         },
     ];

@@ -153,7 +153,7 @@ pub fn conventional_actions(transaction: &Transaction) -> u32 {
     let n_join_split = transaction.joinsplit_count();
     let n_spends_sapling = transaction.sapling_spends_per_anchor().count();
     let n_outputs_sapling = transaction.sapling_outputs().count();
-    let n_actions_orchard = transaction.orchard_actions().count();
+    let n_actions_orchard = transaction.orchard_action_count();
 
     let tx_in_logical_actions = div_ceil(tx_in_total_size, P2PKH_STANDARD_INPUT_SIZE);
     let tx_out_logical_actions = div_ceil(tx_out_total_size, P2PKH_STANDARD_OUTPUT_SIZE);
