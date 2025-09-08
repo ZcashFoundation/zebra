@@ -1228,11 +1228,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
 
     // call the method with an invalid address string
     let rpc_rsp = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: vec!["t1invalidaddress".to_owned()],
             start: Some(1),
             end: Some(2),
-        }))
+        })
         .await
         .unwrap_err();
 
@@ -1248,11 +1248,11 @@ async fn rpc_getaddresstxids_invalid_arguments() {
     let start: Option<u32> = Some(2);
     let end: Option<u32> = Some(1);
     let error = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start,
             end,
-        }))
+        })
         .await
         .unwrap_err();
     assert_eq!(
@@ -1419,11 +1419,11 @@ async fn rpc_getaddresstxids_response_with(
     // call the method with valid arguments
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses,
             start,
             end,
-        }))
+        })
         .await
         .expect("arguments are valid so no error can happen here");
 
@@ -1494,16 +1494,18 @@ async fn getaddresstxids_single_equals_object_full_range() {
     let addr_str = address.to_string();
 
     let object_response = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsRequest {
             addresses: vec![addr_str.clone()],
             start: None,
             end: None,
-        }))
+        })
         .await
         .expect("Object variant should succeed");
 
+    let request = DGetAddressTxIdsRequest::Single(addr_str.clone());
+
     let single_response = rpc
-        .get_address_tx_ids(GetAddressTxIdsParams::Single(addr_str))
+        .get_address_tx_ids(request.into())
         .await
         .expect("Single variant should succeed");
 
@@ -1544,10 +1546,10 @@ async fn rpc_getaddressutxos_invalid_arguments() {
 
     // call the method with an invalid address string
     let error = rpc
-        .get_address_utxos(GetAddressUtxosRequest::Object(GetAddressUtxosObject::new(
+        .get_address_utxos(GetAddressUtxosRequest::new(
             vec!["t1invalidaddress".to_owned()],
             false,
-        )))
+        ))
         .await
         .unwrap_err();
 
@@ -1604,9 +1606,7 @@ async fn rpc_getaddressutxos_response() {
     // call the method with a valid address
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_utxos(GetAddressUtxosRequest::Object(GetAddressUtxosObject::new(
-            addresses, false,
-        )))
+        .get_address_utxos(GetAddressUtxosRequest::new(addresses, false))
         .await
         .expect("address is valid so no error can happen here");
 
@@ -1620,7 +1620,7 @@ async fn rpc_getaddressutxos_response() {
 
     // call the method with a valid address, single argument
     let response = rpc
-        .get_address_utxos(GetAddressUtxosRequest::Single(address.to_string()))
+        .get_address_utxos(DGetAddressUtxosRequest::Single(address.to_string()).into())
         .await
         .expect("address is valid so no error can happen here");
 
@@ -1635,9 +1635,7 @@ async fn rpc_getaddressutxos_response() {
     // call the method with a valid address, and chainInfo = true
     let addresses = vec![address.to_string()];
     let response = rpc
-        .get_address_utxos(GetAddressUtxosRequest::Object(GetAddressUtxosObject::new(
-            addresses, true,
-        )))
+        .get_address_utxos(GetAddressUtxosRequest::new(addresses, true))
         .await
         .expect("address is valid so no error can happen here");
 

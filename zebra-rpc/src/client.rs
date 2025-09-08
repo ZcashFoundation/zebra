@@ -9,6 +9,7 @@
 
 pub use zebra_chain;
 
+#[allow(deprecated)]
 pub use crate::methods::{
     hex_data::HexData,
     trees::{
@@ -35,11 +36,11 @@ pub use crate::methods::{
         validate_address::ValidateAddressResponse,
         z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
     },
-    BlockHeaderObject, BlockObject, GetAddressBalanceRequest, GetAddressBalanceResponse,
-    GetAddressTxIdsRequest, GetAddressUtxosResponse, GetBlockHashResponse, GetBlockHeaderResponse,
-    GetBlockHeightAndHashResponse, GetBlockResponse, GetBlockTransaction, GetBlockTrees,
-    GetBlockchainInfoResponse, GetInfoResponse, GetRawTransactionResponse, Hash,
-    SendRawTransactionResponse, Utxo,
+    AddressStrings, BlockHeaderObject, BlockObject, GetAddressBalanceRequest,
+    GetAddressBalanceResponse, GetAddressTxIdsRequest, GetAddressUtxosResponse,
+    GetBlockHashResponse, GetBlockHeaderResponse, GetBlockHeightAndHashResponse, GetBlockResponse,
+    GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
+    GetRawTransactionResponse, Hash, SendRawTransactionResponse, Utxo,
 };
 
 /// Constants needed by clients of Zebra's RPC server
