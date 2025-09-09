@@ -900,11 +900,7 @@ impl Service<Request> for Mempool {
 
                     let size = storage.transaction_count();
 
-                    let bytes = storage
-                        .transactions()
-                        .values()
-                        .map(|tx| tx.transaction.size)
-                        .sum();
+                    let bytes = storage.total_serialized_size();
 
                     let usage = bytes; // TODO: Placeholder, should be fixed later
 
