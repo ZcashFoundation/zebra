@@ -2895,6 +2895,8 @@ async fn rpc_addnode() {
         [PeerInfo {
             addr,
             inbound: false,
+            pingtime: None,
+            pingwait: None,
         }]
     );
 
