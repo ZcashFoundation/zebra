@@ -442,9 +442,6 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         });
 
     let (rsp, _) = futures::join!(rpc.get_mempool_info(), mempool_req);
-
-    println!("{}", serde_json::to_string_pretty(&rsp).unwrap());
-
     if let Ok(inner) = rsp {
         insta::assert_json_snapshot!("get_mempool_info", inner);
     } else {
