@@ -21,6 +21,9 @@ use crate::{
 };
 
 #[cfg(feature = "tx-v6")]
+use crate::orchard_zsa::compute_burn_value_commitment;
+
+#[cfg(feature = "tx-v6")]
 use orchard::{note::AssetBase, value::ValueSum};
 
 use super::{OrchardVanilla, ShieldedDataFlavor};
@@ -134,12 +137,6 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
             .map(|authorized_action| &authorized_action.action)
     }
 
-    /// Return an iterator for the [`ActionCommon`] copy of the Actions in this
-    /// transaction, in the order they appear in it.
-    pub fn action_commons(&self) -> impl Iterator<Item = ActionCommon> + '_ {
-        self.actions().map(|action| action.into())
-    }
-
     /// Collect the [`Nullifier`]s for this transaction.
     pub fn nullifiers(&self) -> impl Iterator<Item = &Nullifier> {
         self.actions().map(|action| &action.nullifier)
@@ -192,7 +189,7 @@ impl<Flavor: ShieldedDataFlavor> ShieldedData<Flavor> {
             let burn_value_commitment = self
                 .action_groups
                 .iter()
-                .map(|action_group| action_group.burn.clone().into())
+                .map(|action_group| compute_burn_value_commitment(action_group.burn.as_ref()))
                 .sum::<ValueCommitment>();
             cv - cv_balance - burn_value_commitment
         };
@@ -330,29 +327,6 @@ impl<Flavor: ShieldedDataFlavor> AuthorizedAction<Flavor> {
         AuthorizedAction {
             action,
             spend_auth_sig,
-        }
-    }
-}
-
-/// The common field used both in Vanilla actions and ZSA actions.
-pub struct ActionCommon {
-    /// A value commitment to net value of the input note minus the output note
-    pub cv: ValueCommitment,
-    /// The nullifier of the input note being spent.
-    pub nullifier: super::note::Nullifier,
-    /// The randomized validating key for spendAuthSig,
-    pub rk: reddsa::VerificationKeyBytes<SpendAuth>,
-    /// The x-coordinate of the note commitment for the output note.
-    pub cm_x: pallas::Base,
-}
-
-impl<Flavor: ShieldedDataFlavor> From<&Action<Flavor>> for ActionCommon {
-    fn from(action: &Action<Flavor>) -> Self {
-        Self {
-            cv: action.cv,
-            nullifier: action.nullifier,
-            rk: action.rk,
-            cm_x: action.cm_x,
         }
     }
 }

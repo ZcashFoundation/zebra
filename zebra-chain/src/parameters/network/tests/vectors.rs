@@ -1,7 +1,6 @@
 //! Fixed test vectors for the network consensus parameters.
 
-use zcash_primitives::consensus::{self as zp_consensus, Parameters};
-use zcash_protocol::consensus::NetworkConstants as _;
+use zcash_protocol::consensus::{self as zp_consensus, NetworkConstants as _, Parameters};
 
 use crate::{
     block::Height,
@@ -147,7 +146,7 @@ fn activates_network_upgrades_correctly() {
         (Network::Mainnet, MAINNET_ACTIVATION_HEIGHTS),
         (Network::new_default_testnet(), TESTNET_ACTIVATION_HEIGHTS),
         (
-            Network::new_regtest(None, None, None),
+            Network::new_regtest(None, None, None, None),
             expected_default_regtest_activation_heights,
         ),
     ] {
@@ -198,7 +197,7 @@ fn check_configured_network_name() {
         "Mainnet should be displayed as 'Mainnet'"
     );
     assert_eq!(
-        Network::new_regtest(None, None, None).to_string(),
+        Network::new_regtest(None, None, None, None).to_string(),
         "Regtest",
         "Regtest should be displayed as 'Regtest'"
     );

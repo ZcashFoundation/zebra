@@ -100,16 +100,6 @@ impl From<&[(AssetBase, NoteValue)]> for NoBurn {
     }
 }
 
-impl From<NoBurn> for ValueCommitment {
-    fn from(_burn: NoBurn) -> ValueCommitment {
-        ValueCommitment::new(
-            pallas::Scalar::zero(),
-            NoteValue::from_raw(0).into(),
-            AssetBase::native(),
-        )
-    }
-}
-
 impl AsRef<[BurnItem]> for NoBurn {
     fn as_ref(&self) -> &[BurnItem] {
         &[]
@@ -149,18 +139,6 @@ impl From<&[(AssetBase, NoteValue)]> for Burn {
     }
 }
 
-impl From<Burn> for ValueCommitment {
-    fn from(burn: Burn) -> ValueCommitment {
-        burn.0
-            .into_iter()
-            .map(|BurnItem(asset, amount)| {
-                // The trapdoor for the burn which is public is always zero.
-                ValueCommitment::new(pallas::Scalar::zero(), amount.into(), asset)
-            })
-            .sum()
-    }
-}
-
 impl AsRef<[BurnItem]> for Burn {
     fn as_ref(&self) -> &[BurnItem] {
         &self.0
@@ -185,4 +163,15 @@ impl ZcashDeserialize for Burn {
                 .collect(),
         ))
     }
+}
+
+/// Computes the value commitment for a list of burns.
+///
+/// For burns, the public trapdoor is always zero.
+pub(crate) fn compute_burn_value_commitment(burn: &[BurnItem]) -> ValueCommitment {
+    burn.iter()
+        .map(|&BurnItem(asset, amount)| {
+            ValueCommitment::new(pallas::Scalar::zero(), amount.into(), asset)
+        })
+        .sum()
 }

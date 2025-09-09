@@ -1,16 +1,13 @@
 //! Defines and implements the issued asset state types
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
-use orchard::issuance::IssueAction;
+use orchard::issuance::{compute_asset_desc_hash, IssueAction};
 pub use orchard::note::AssetBase;
 
 use crate::{serialization::ZcashSerialize, transaction::Transaction};
 
-use super::BurnItem;
+use super::{BurnItem, IssueData};
 
 /// The circulating supply and whether that supply has been finalized.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
@@ -183,52 +180,39 @@ impl AssetStateChange {
     /// Accepts a transaction and returns an iterator of asset bases and issued asset state changes
     /// that should be applied to those asset bases when committing the transaction to the chain state.
     fn from_transaction(tx: &Arc<Transaction>) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
-        Self::from_burns(tx.orchard_burns())
-            .chain(Self::from_issue_actions(tx.orchard_issue_actions()))
+        Self::from_burns(tx.orchard_burns()).chain(
+            tx.orchard_issue_data()
+                .iter()
+                .flat_map(Self::from_issue_data),
+        )
     }
 
-    /// Accepts an iterator of [`IssueAction`]s and returns an iterator of asset bases and issued asset state changes
+    /// Accepts an [`IssueData`] and returns an iterator of asset bases and issued asset state changes
     /// that should be applied to those asset bases when committing the provided issue actions to the chain state.
-    fn from_issue_actions<'a>(
-        actions: impl Iterator<Item = &'a IssueAction> + 'a,
-    ) -> impl Iterator<Item = (AssetBase, Self)> + 'a {
-        actions.flat_map(Self::from_issue_action)
+    fn from_issue_data(issue_data: &IssueData) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
+        let ik = issue_data.inner().ik();
+        issue_data.actions().flat_map(|action| {
+            let issue_asset = AssetBase::derive(ik, action.asset_desc_hash());
+            Self::from_issue_action(issue_asset, action)
+        })
     }
 
     /// Accepts an [`IssueAction`] and returns an iterator of asset bases and issued asset state changes
     /// that should be applied to those asset bases when committing the provided issue action to the chain state.
-    fn from_issue_action(action: &IssueAction) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
-        let supply_changes = Self::from_notes(action.notes());
-        let finalize_changes = action
-            .is_finalized()
-            .then(|| {
-                action
-                    .notes()
-                    .iter()
-                    .map(orchard::Note::asset)
-                    .collect::<HashSet<AssetBase>>()
-            })
-            .unwrap_or_default()
+    fn from_issue_action(
+        issue_asset: AssetBase,
+        action: &IssueAction,
+    ) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
+        (action.is_finalized() && action.notes().is_empty())
+            .then(|| Self::new(issue_asset, SupplyChange::Issuance(0), true))
             .into_iter()
-            .map(|asset_base| Self::new(asset_base, SupplyChange::Issuance(0), true));
-
-        supply_changes.chain(finalize_changes)
-    }
-
-    /// Accepts an iterator of [`orchard::Note`]s and returns an iterator of asset bases and issued asset state changes
-    /// that should be applied to those asset bases when committing the provided orchard notes to the chain state.
-    fn from_notes(notes: &[orchard::Note]) -> impl Iterator<Item = (AssetBase, Self)> + '_ {
-        notes.iter().copied().map(Self::from_note)
-    }
-
-    /// Accepts an [`orchard::Note`] and returns an iterator of asset bases and issued asset state changes
-    /// that should be applied to those asset bases when committing the provided orchard note to the chain state.
-    fn from_note(note: orchard::Note) -> (AssetBase, Self) {
-        Self::new(
-            note.asset(),
-            SupplyChange::Issuance(note.value().inner()),
-            false,
-        )
+            .chain(action.notes().iter().map(|note| {
+                Self::new(
+                    note.asset(),
+                    SupplyChange::Issuance(note.value().inner()),
+                    action.is_finalized(),
+                )
+            }))
     }
 
     /// Accepts an iterator of [`BurnItem`]s and returns an iterator of asset bases and issued asset state changes
@@ -403,10 +387,10 @@ impl RandomAssetBase for AssetBase {
         )
         .unwrap();
         let ik = orchard::keys::IssuanceValidatingKey::from(&isk);
-
-        let asset_descr: [u8; 32] = *b"zsa_asset\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
-
-        AssetBase::derive(&ik, &asset_descr)
+        let asset_desc = b"zsa_asset";
+        let asset_desc_hash =
+            compute_asset_desc_hash(&(asset_desc[0], asset_desc[1..].to_vec()).into());
+        AssetBase::derive(&ik, &asset_desc_hash)
             .zcash_serialize_to_vec()
             .map(hex::encode)
             .expect("random asset base should serialize")

@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use serde::{de::DeserializeOwned, Serialize};
 
-use orchard::{primitives::OrchardPrimitives, orchard_flavor::OrchardFlavor};
+use orchard::{orchard_flavor::OrchardFlavor, primitives::OrchardPrimitives};
 
 pub use orchard::orchard_flavor::OrchardVanilla;
 
@@ -14,10 +14,7 @@ pub use orchard::{note::AssetBase, orchard_flavor::OrchardZSA, value::NoteValue}
 use crate::serialization::{ZcashDeserialize, ZcashSerialize};
 
 #[cfg(feature = "tx-v6")]
-use crate::{
-    orchard::ValueCommitment,
-    orchard_zsa::{Burn, BurnItem, NoBurn},
-};
+use crate::orchard_zsa::{Burn, BurnItem, NoBurn};
 
 use super::note;
 
@@ -54,15 +51,12 @@ pub trait ShieldedDataFlavor: OrchardFlavor {
 
     /// A type representing a burn field for this protocol version.
     #[cfg(feature = "tx-v6")]
-    // FIXME: try to get rid
     type BurnType: Clone
         + Debug
-        + Default
         + PartialEq
         + Eq
         + ZcashDeserialize
         + ZcashSerialize
-        + Into<ValueCommitment>
         + AsRef<[BurnItem]>
         + for<'a> From<&'a [(AssetBase, NoteValue)]>
         + test_arbitrary::TestArbitrary;

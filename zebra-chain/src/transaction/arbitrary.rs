@@ -811,6 +811,8 @@ impl<Flavor: orchard::ShieldedDataFlavor + 'static> Arbitrary for orchard::Shiel
                     action_groups: AtLeastOne::from_one(orchard::ActionGroup {
                         flags,
                         shared_anchor,
+                        // FIXME: use a proper arbitrary value here?
+                        expiry_height: 0,
                         proof,
                         actions: actions
                             .try_into()
@@ -902,6 +904,8 @@ impl Arbitrary for Transaction {
                     .boxed()
                 }
             }
+            // FIXME: Implement this if needed
+            NetworkUpgrade::Swap => todo!(),
         }
     }
 
@@ -1175,6 +1179,8 @@ pub fn insert_fake_orchard_shielded_data(
         action_groups: AtLeastOne::from_one(orchard::ActionGroup {
             flags: orchard::Flags::empty(),
             shared_anchor: orchard::tree::Root::default(),
+            // FIXME: use a proper arbitrary value here?
+            expiry_height: 0,
             proof: Halo2Proof(vec![]),
             actions: at_least_one![dummy_authorized_action],
             #[cfg(feature = "tx-v6")]

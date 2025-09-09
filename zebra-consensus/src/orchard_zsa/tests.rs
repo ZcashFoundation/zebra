@@ -1,4 +1,6 @@
-// FIXME: consider merging it with router/tests.rs
+// FIXME: Consider moving thesr tests to `zebra-consensus/src/router/tests.rs`, or creating a
+// `zebra-consensus/src/router/tests` directory and placing this module with a name
+// 'orchard_zsa` there.
 
 //! Simulates a full Zebra node’s block‐processing pipeline on a predefined Orchard/ZSA workflow.
 //!
@@ -23,7 +25,8 @@ use color_eyre::eyre::Report;
 use tower::ServiceExt;
 
 use orchard::{
-    asset_record::AssetRecord, issuance::IssueAction, note::AssetBase, value::NoteValue,
+    asset_record::AssetRecord, issuance::IssueAction, keys::IssuanceValidatingKey, note::AssetBase,
+    value::NoteValue,
 };
 
 use zebra_chain::{
@@ -37,7 +40,7 @@ use zebra_state::{ReadRequest, ReadResponse, ReadStateService};
 
 use zebra_test::{
     transcript::{ExpectedTranscriptError, Transcript},
-    vectors::ORCHARD_WORKFLOW_BLOCKS_ZSA,
+    vectors::{OrchardWorkflowBlock, ORCHARD_ZSA_WORKFLOW_BLOCKS},
 };
 
 use crate::{block::Request, Config};
@@ -49,6 +52,7 @@ type TranscriptItem = (Request, Result<Hash, ExpectedTranscriptError>);
 #[derive(Debug)]
 enum AssetRecordsError {
     BurnAssetMissing,
+    EmptyActionNotFinalized,
     AmountOverflow,
     MissingRefNote,
     ModifyFinalized,
@@ -80,17 +84,38 @@ fn process_burns<'a, I: Iterator<Item = &'a BurnItem>>(
 /// Processes orchard issue actions, increasing asset supply.
 fn process_issue_actions<'a, I: Iterator<Item = &'a IssueAction>>(
     asset_records: &mut AssetRecords,
-    issue_actions: I,
+    ik: &IssuanceValidatingKey,
+    actions: I,
 ) -> Result<(), AssetRecordsError> {
-    for action in issue_actions {
+    for action in actions {
+        let action_asset = AssetBase::derive(ik, action.asset_desc_hash());
         let reference_note = action.get_reference_note();
         let is_finalized = action.is_finalized();
 
-        for note in action.notes() {
-            let amount = note.value();
+        let mut note_amounts = action.notes().iter().map(|note| {
+            if note.asset() == action_asset {
+                Ok(note.value())
+            } else {
+                Err(AssetRecordsError::BurnAssetMissing)
+            }
+        });
+
+        let first_note_amount = match note_amounts.next() {
+            Some(note_amount) => note_amount,
+            None => {
+                if is_finalized {
+                    Ok(NoteValue::from_raw(0))
+                } else {
+                    Err(AssetRecordsError::EmptyActionNotFinalized)
+                }
+            }
+        };
+
+        for amount_result in std::iter::once(first_note_amount).chain(note_amounts) {
+            let amount = amount_result?;
 
             // FIXME: check for issuance specific errors?
-            match asset_records.entry(note.asset()) {
+            match asset_records.entry(action_asset) {
                 hash_map::Entry::Occupied(mut entry) => {
                     let asset_record = entry.get_mut();
                     asset_record.amount =
@@ -121,30 +146,54 @@ fn build_asset_records<'a, I: IntoIterator<Item = &'a TranscriptItem>>(
 ) -> Result<AssetRecords, AssetRecordsError> {
     blocks
         .into_iter()
-        .filter_map(|(request, _)| match request {
-            Request::Commit(block) => Some(&block.transactions),
-            #[cfg(feature = "getblocktemplate-rpcs")]
-            Request::CheckProposal(_) => None,
+        .filter_map(|(request, result)| match (request, result) {
+            (Request::Commit(block), Ok(_)) => Some(&block.transactions),
+            _ => None,
         })
         .flatten()
         .try_fold(HashMap::new(), |mut asset_records, tx| {
             process_burns(&mut asset_records, tx.orchard_burns())?;
-            process_issue_actions(&mut asset_records, tx.orchard_issue_actions())?;
+
+            if let Some(issue_data) = tx.orchard_issue_data() {
+                process_issue_actions(
+                    &mut asset_records,
+                    issue_data.inner().ik(),
+                    issue_data.actions(),
+                )?;
+            }
+
             Ok(asset_records)
         })
 }
 
 /// Creates transcript data from predefined workflow blocks.
-fn create_transcript_data<'a, I: IntoIterator<Item = &'a Vec<u8>>>(
+fn create_transcript_data<'a, I: IntoIterator<Item = &'a OrchardWorkflowBlock>>(
     serialized_blocks: I,
 ) -> impl Iterator<Item = TranscriptItem> + use<'a, I> {
-    let workflow_blocks = serialized_blocks.into_iter().map(|block_bytes| {
-        Arc::new(Block::zcash_deserialize(&block_bytes[..]).expect("block should deserialize"))
-    });
+    let workflow_blocks =
+        serialized_blocks
+            .into_iter()
+            .map(|OrchardWorkflowBlock { bytes, is_valid }| {
+                (
+                    Arc::new(
+                        Block::zcash_deserialize(&bytes[..]).expect("block should deserialize"),
+                    ),
+                    *is_valid,
+                )
+            });
 
-    std::iter::once(regtest_genesis_block())
+    std::iter::once((regtest_genesis_block(), true))
         .chain(workflow_blocks)
-        .map(|block| (Request::Commit(block.clone()), Ok(block.hash())))
+        .map(|(block, is_valid)| {
+            (
+                Request::Commit(block.clone()),
+                if is_valid {
+                    Ok(block.hash())
+                } else {
+                    Err(ExpectedTranscriptError::Any)
+                },
+            )
+        })
 }
 
 /// Queries the state service for the asset state of the given asset.
@@ -164,10 +213,10 @@ async fn request_asset_state(
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn check_zsa_workflow() -> Result<(), Report> {
+async fn check_orchard_zsa_workflow() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
 
-    let network = Network::new_regtest(Some(1), Some(1), Some(1));
+    let network = Network::new_regtest(Some(1), Some(1), Some(1), Some(1));
 
     let (state_service, read_state_service, _, _) = zebra_state::init_test_services(&network);
 
@@ -175,7 +224,7 @@ async fn check_zsa_workflow() -> Result<(), Report> {
         crate::router::init(Config::default(), &network, state_service.clone()).await;
 
     let transcript_data =
-        create_transcript_data(ORCHARD_WORKFLOW_BLOCKS_ZSA.iter()).collect::<Vec<_>>();
+        create_transcript_data(ORCHARD_ZSA_WORKFLOW_BLOCKS.iter()).collect::<Vec<_>>();
 
     let asset_records =
         build_asset_records(&transcript_data).expect("should calculate asset_records");
@@ -209,6 +258,7 @@ async fn check_zsa_workflow() -> Result<(), Report> {
 
         assert_eq!(
             asset_state.total_supply,
+            // FIXME: Fix it after chaning ValueSum to NoteValue in AssetSupply in orchard
             u64::try_from(i128::from(asset_record.amount))
                 .expect("asset supply amount should be within u64 range"),
             "Total supply mismatch for asset {:?}.",

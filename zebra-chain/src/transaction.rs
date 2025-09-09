@@ -193,7 +193,7 @@ impl fmt::Display for Transaction {
         fmter.field("sprout_joinsplits", &self.joinsplit_count());
         fmter.field("sapling_spends", &self.sapling_spends_per_anchor().count());
         fmter.field("sapling_outputs", &self.sapling_outputs().count());
-        fmter.field("orchard_actions", &self.orchard_actions().count());
+        fmter.field("orchard_actions", &self.orchard_action_count());
 
         fmter.field("unmined_id", &self.unmined_id());
 
@@ -310,7 +310,7 @@ impl Transaction {
         // FIXME: is it correct to use orchard_flags_union here?
         self.joinsplit_count() > 0
             || self.sapling_spends_per_anchor().count() > 0
-            || (self.orchard_actions().count() > 0
+            || (self.orchard_action_count() > 0
                 && self
                     .orchard_flags_union()
                     .unwrap_or_else(orchard::Flags::empty)
@@ -329,7 +329,7 @@ impl Transaction {
         // FIXME: is it correct to use orchard_flags_union here?
         self.joinsplit_count() > 0
             || self.sapling_outputs().count() > 0
-            || (self.orchard_actions().count() > 0
+            || (self.orchard_action_count() > 0
                 && self
                     .orchard_flags_union()
                     .unwrap_or_else(orchard::Flags::empty)
@@ -338,7 +338,7 @@ impl Transaction {
 
     /// Does this transaction has at least one flag when we have at least one orchard action?
     pub fn has_enough_orchard_flags(&self) -> bool {
-        if self.version() < 5 || self.orchard_actions().count() == 0 {
+        if self.version() < 5 || self.orchard_action_count() == 0 {
             return true;
         }
         self.orchard_flags_union()
@@ -975,31 +975,29 @@ impl Transaction {
     // orchard
 
     /// Iterate over the [`orchard::Action`]s in this transaction.
-    pub fn orchard_actions(&self) -> Box<dyn Iterator<Item = orchard::ActionCommon> + '_> {
+    pub fn orchard_action_count(&self) -> usize {
         match self {
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
             | Transaction::V3 { .. }
-            | Transaction::V4 { .. } => Box::new(std::iter::empty()),
+            | Transaction::V4 { .. } => 0,
 
             Transaction::V5 {
                 orchard_shielded_data,
                 ..
-            } => Box::new(
-                orchard_shielded_data
-                    .iter()
-                    .flat_map(orchard::ShieldedData::action_commons),
-            ),
+            } => orchard_shielded_data
+                .iter()
+                .flat_map(orchard::ShieldedData::actions)
+                .count(),
 
             #[cfg(feature = "tx-v6")]
             Transaction::V6 {
                 orchard_shielded_data,
                 ..
-            } => Box::new(
-                orchard_shielded_data
-                    .iter()
-                    .flat_map(orchard::ShieldedData::action_commons),
-            ),
+            } => orchard_shielded_data
+                .iter()
+                .flat_map(orchard::ShieldedData::actions)
+                .count(),
         }
     }
 
@@ -1071,7 +1069,7 @@ impl Transaction {
     /// Access the Orchard issue data in this transaction, if any,
     /// regardless of version.
     #[cfg(feature = "tx-v6")]
-    fn orchard_issue_data(&self) -> &Option<orchard_zsa::IssueData> {
+    pub fn orchard_issue_data(&self) -> &Option<orchard_zsa::IssueData> {
         match self {
             Transaction::V1 { .. }
             | Transaction::V2 { .. }
@@ -1084,15 +1082,6 @@ impl Transaction {
                 ..
             } => orchard_zsa_issue_data,
         }
-    }
-
-    /// Access the Orchard issuance actions in this transaction, if there are any,
-    /// regardless of version.
-    #[cfg(feature = "tx-v6")]
-    pub fn orchard_issue_actions(&self) -> impl Iterator<Item = &::orchard::issuance::IssueAction> {
-        self.orchard_issue_data()
-            .iter()
-            .flat_map(orchard_zsa::IssueData::actions)
     }
 
     /// Access the Orchard asset burns in this transaction, if there are any,

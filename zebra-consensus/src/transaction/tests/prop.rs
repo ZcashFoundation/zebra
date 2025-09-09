@@ -346,6 +346,8 @@ fn sanitize_transaction_version(
             Sapling | Blossom | Heartwood | Canopy => 4,
             // FIXME: Use 6 for Nu7
             Nu5 | Nu6 | Nu7 => 5,
+            // FIXME: Implement this if needed
+            Swap => todo!(),
         }
     };
 

@@ -99,6 +99,7 @@ impl ContextuallyVerifiedBlock {
         ContextuallyVerifiedBlock::with_block_and_spent_utxos(
             block,
             zero_spent_utxos,
+            #[cfg(feature = "tx-v6")]
             Default::default(),
         )
         .expect("all UTXOs are provided with zero values")
@@ -129,6 +130,7 @@ impl ContextuallyVerifiedBlock {
             spent_outputs: new_outputs,
             transaction_hashes,
             chain_value_pool_change: ValueBalance::zero(),
+            #[cfg(feature = "tx-v6")]
             issued_assets: Default::default(),
         }
     }

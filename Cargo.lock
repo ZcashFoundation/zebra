@@ -554,11 +554,11 @@ dependencies = [
 
 [[package]]
 name = "bridgetree"
-version = "0.4.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fbfcb6c5a091e80cb3d3b0c1a7f126af4631cd5065b1f9929b139f1be8f3fb62"
+checksum = "3990cc973c3b9c41c4dbb66cde22e3af77c4c7b133008d81f292ad12c27ed794"
 dependencies = [
- "incrementalmerkletree 0.5.1",
+ "incrementalmerkletree",
 ]
 
 [[package]]
@@ -1407,21 +1407,12 @@ dependencies = [
 
 [[package]]
 name = "equihash"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab579d7cf78477773b03e80bc2f89702ef02d7112c711d54ca93dcdce68533d5"
-dependencies = [
- "blake2b_simd",
- "byteorder",
-]
-
-[[package]]
-name = "equihash"
 version = "0.2.2"
 source = "git+https://github.com/QED-it/librustzcash?branch=zsa-swap#30b59d579a8620d2adb82872067f7929a49604b5"
 dependencies = [
  "blake2b_simd",
  "core2",
+ "document-features",
 ]
 
 [[package]]
@@ -1808,13 +1799,13 @@ dependencies = [
 [[package]]
 name = "halo2_gadgets"
 version = "0.3.1"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#bcf4877772e24618f970908583a39331d4ae0e4b"
 dependencies = [
  "arrayvec",
  "bitvec",
  "ff",
  "group",
- "halo2_poseidon 0.1.0 (git+https://github.com/QED-it/halo2?branch=zsa1)",
+ "halo2_poseidon",
  "halo2_proofs",
  "lazy_static",
  "pasta_curves",
@@ -1833,19 +1824,7 @@ checksum = "47716fe1ae67969c5e0b2ef826f32db8c3be72be325e1aa3c1951d06b5575ec5"
 [[package]]
 name = "halo2_poseidon"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0fa3da60b81f02f9b33ebc6252d766f843291fb4d2247a07ae73d20b791fc56f"
-dependencies = [
- "bitvec",
- "ff",
- "group",
- "pasta_curves",
-]
-
-[[package]]
-name = "halo2_poseidon"
-version = "0.1.0"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#bcf4877772e24618f970908583a39331d4ae0e4b"
 dependencies = [
  "bitvec",
  "ff",
@@ -1855,14 +1834,13 @@ dependencies = [
 
 [[package]]
 name = "halo2_proofs"
-version = "0.3.1"
-source = "git+https://github.com/QED-it/halo2?branch=zsa1#e1a40e75b6011648c93e760cc846ff2f6f116430"
+version = "0.3.0"
+source = "git+https://github.com/QED-it/halo2?branch=zsa1#bcf4877772e24618f970908583a39331d4ae0e4b"
 dependencies = [
  "blake2b_simd",
  "ff",
  "group",
  "halo2_legacy_pdqsort",
- "indexmap 1.9.3",
  "maybe-rayon",
  "pasta_curves",
  "rand_core 0.6.4",
@@ -2252,15 +2230,6 @@ dependencies = [
 
 [[package]]
 name = "incrementalmerkletree"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eb1872810fb725b06b8c153dde9e86f3ec26747b9b60096da7a869883b549cbe"
-dependencies = [
- "either",
-]
-
-[[package]]
-name = "incrementalmerkletree"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "30821f91f0fa8660edca547918dc59812893b497d07c1144f326f07fdd94aba9"
@@ -2560,9 +2529,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.175"
+version = "0.2.174"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a82ae493e598baaea5209805c49bbf2ea7de956d50d7da0da1164f9c6d28543"
+checksum = "1171693293099992e19cddea4e8b849964e9846f4acee11b3948bcc337be8776"
 
 [[package]]
 name = "libgit2-sys"
@@ -2996,10 +2965,10 @@ dependencies = [
  "getset",
  "group",
  "halo2_gadgets",
- "halo2_poseidon 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "halo2_poseidon",
  "halo2_proofs",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "k256",
  "lazy_static",
  "memuse",
@@ -4065,7 +4034,7 @@ dependencies = [
  "getset",
  "group",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "jubjub",
  "lazy_static",
  "memuse",
@@ -4435,7 +4404,7 @@ checksum = "637e95dcd06bc1bb3f86ed9db1e1832a70125f32daae071ef37dcb7701b7d4fe"
 dependencies = [
  "bitflags 2.6.0",
  "either",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "tracing",
 ]
 
@@ -5977,7 +5946,7 @@ dependencies = [
  "document-features",
  "group",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "memuse",
  "nonempty 0.11.0",
  "percent-encoding",
@@ -5995,7 +5964,7 @@ dependencies = [
  "which 7.0.3",
  "zcash_address",
  "zcash_encoding",
- "zcash_keys 0.9.0 (git+https://github.com/QED-it/librustzcash?branch=zsa-swap)",
+ "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
  "zcash_protocol",
@@ -6016,39 +5985,11 @@ dependencies = [
 [[package]]
 name = "zcash_history"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fde17bf53792f9c756b313730da14880257d7661b5bfc69d0571c3a7c11a76d"
+source = "git+https://github.com/QED-it/librustzcash?branch=zsa-swap#30b59d579a8620d2adb82872067f7929a49604b5"
 dependencies = [
  "blake2b_simd",
  "byteorder",
  "primitive-types",
-]
-
-[[package]]
-name = "zcash_keys"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "20664d96a0e4de98f41b6b7a3b40a527e5f5428ca7f34758a084e60778d3b824"
-dependencies = [
- "bech32",
- "blake2b_simd",
- "bls12_381",
- "bs58",
- "core2",
- "document-features",
- "group",
- "memuse",
- "nonempty 0.11.0",
- "rand_core 0.6.4",
- "sapling-crypto",
- "secrecy",
- "subtle",
- "tracing",
- "zcash_address",
- "zcash_encoding",
- "zcash_protocol",
- "zcash_transparent",
- "zip32",
 ]
 
 [[package]]
@@ -6101,13 +6042,13 @@ dependencies = [
  "core2",
  "crypto-common 0.2.0-rc.1",
  "document-features",
- "equihash 0.2.2",
+ "equihash",
  "ff",
  "fpe",
  "getset",
  "group",
  "hex",
- "incrementalmerkletree 0.8.2",
+ "incrementalmerkletree",
  "jubjub",
  "memuse",
  "nonempty 0.11.0",
@@ -6223,13 +6164,13 @@ dependencies = [
  "criterion",
  "dirs",
  "ed25519-zebra",
- "equihash 0.2.0",
+ "equihash",
  "futures",
  "group",
  "halo2_proofs",
  "hex",
  "humantime",
- "incrementalmerkletree 0.5.1",
+ "incrementalmerkletree",
  "itertools 0.13.0",
  "jubjub",
  "k256",
@@ -6426,6 +6367,7 @@ dependencies = [
  "tracing",
  "zcash_address",
  "zcash_primitives",
+ "zcash_protocol",
  "zebra-chain",
  "zebra-consensus",
  "zebra-network",
@@ -6469,9 +6411,10 @@ dependencies = [
  "tracing-subscriber",
  "zcash_address",
  "zcash_client_backend",
- "zcash_keys 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "zcash_keys",
  "zcash_note_encryption",
  "zcash_primitives",
+ "zcash_protocol",
  "zebra-chain",
  "zebra-grpc",
  "zebra-node-services",

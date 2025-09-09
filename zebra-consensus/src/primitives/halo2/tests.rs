@@ -8,7 +8,7 @@ use tower::ServiceExt;
 use halo2::pasta::{group::ff::PrimeField, pallas};
 use orchard::{
     builder::{Builder, BundleType},
-    bundle::Flags,
+    bundle::{Authorization, Flags},
     circuit::ProvingKey,
     keys::{FullViewingKey, Scope, SpendingKey},
     note::AssetBase,
@@ -24,7 +24,6 @@ use zebra_chain::{
 
 use crate::primitives::halo2::*;
 
-// FIXME: Where is this function called from?
 #[allow(dead_code, clippy::print_stdout)]
 fn generate_test_vectors<Flavor: ShieldedDataFlavor>()
 where
@@ -55,6 +54,8 @@ where
             );
 
             for _ in 0..num_recipients {
+                let mut memo: [u8; 512] = [0; 512];
+                memo[0] = 0xF6;
                 builder
                     .add_output(
                         None,
@@ -62,7 +63,7 @@ where
                         NoteValue::from_raw(note_value),
                         // FIXME: Use another AssetBase for OrchardZSA?
                         AssetBase::native(),
-                        None,
+                        memo,
                     )
                     .unwrap();
             }
@@ -79,8 +80,16 @@ where
                 action_groups: AtLeastOne::from_one(ActionGroup {
                     flags,
                     shared_anchor: anchor_bytes.try_into().unwrap(),
+                    // FIXME: use a proper value below if needed
+                    expiry_height: 0,
                     proof: zebra_chain::primitives::Halo2Proof(
-                        bundle.authorization().proof().as_ref().into(),
+                        // FIXME: can we use `expect` here?
+                        bundle
+                            .authorization()
+                            .proof()
+                            .expect("should have a proof")
+                            .as_ref()
+                            .into(),
                     ),
                     actions: bundle
                         .actions()
@@ -204,7 +213,7 @@ async fn verify_generated_halo2_proofs_vanilla() {
 #[cfg(feature = "tx-v6")]
 #[tokio::test(flavor = "multi_thread")]
 async fn verify_generated_halo2_proofs_zsa() {
-    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA)
+    verify_generated_halo2_proofs::<OrchardZSA>(&zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA)
         .await
 }
 
@@ -298,7 +307,7 @@ async fn correctly_err_on_invalid_halo2_proofs_vanilla() {
 #[tokio::test(flavor = "multi_thread")]
 async fn correctly_err_on_invalid_halo2_proofs_zsa() {
     correctly_err_on_invalid_halo2_proofs::<OrchardZSA>(
-        &zebra_test::vectors::ORCHARD_SHIELDED_DATA_ZSA,
+        &zebra_test::vectors::ORCHARD_ZSA_SHIELDED_DATA,
     )
     .await
 }
