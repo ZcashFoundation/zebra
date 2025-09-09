@@ -141,7 +141,7 @@ impl Arbitrary for tree::Root {
         pallas_base_strat()
             .prop_map(|base| {
                 Self::try_from(base.to_repr())
-                    .expect("a valid generated Orchard note commitment tree root")
+                    .expect("a valid generated Orchard note commitment tree node")
             })
             .boxed()
     }
