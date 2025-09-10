@@ -96,7 +96,7 @@ pub struct BlockTemplateResponse {
 
     /// The block commitment for the new block's header.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "blockcommitmentshash")]
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -104,7 +104,7 @@ pub struct BlockTemplateResponse {
 
     /// Legacy backwards-compatibility header root field.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "lightclientroothash")]
     #[serde(with = "hex")]
     #[getter(copy)]
@@ -112,13 +112,13 @@ pub struct BlockTemplateResponse {
 
     /// Legacy backwards-compatibility header root field.
     ///
-    /// Same as [`DefaultRoots.block_commitments_hash`], see that field for details.
+    /// Same as [`DefaultRoots::block_commitments_hash`], see that field for details.
     #[serde(rename = "finalsaplingroothash")]
     #[serde(with = "hex")]
     #[getter(copy)]
     pub(crate) final_sapling_root_hash: ChainHistoryBlockTxAuthCommitmentHash,
 
-    /// The block header roots for [`GetBlockTemplate.transactions`].
+    /// The block header roots for the transactions in the block template.
     ///
     /// If the transactions in the block template are modified, these roots must be recalculated
     /// [according to the specification](https://zcash.github.io/rpc/getblocktemplate.html).

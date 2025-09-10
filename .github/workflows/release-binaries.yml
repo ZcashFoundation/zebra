@@ -1,5 +1,5 @@
 # This workflow is meant to trigger a build of Docker binaries when a release
-# is published, it uses the existing `sub-build-docker-image.yml` workflow
+# is published, it uses the existing `zfnd-build-docker-image.yml` workflow
 #
 # We use a separate action as we might want to trigger this under
 # different circumstances than a Continuous Deployment, for example.
@@ -14,11 +14,14 @@ on:
     types:
       - released
 
+permissions:
+  contents: read
+
 jobs:
   # The image will be named `zebra:<semver>`
   build:
     name: Build Release Docker
-    uses: ./.github/workflows/sub-build-docker-image.yml
+    uses: ./.github/workflows/zfnd-build-docker-image.yml
     with:
       dockerfile_path: ./docker/Dockerfile
       dockerfile_target: runtime
@@ -26,17 +29,50 @@ jobs:
       features: ${{ vars.RUST_PROD_FEATURES }}
       rust_log: ${{ vars.RUST_LOG }}
     # This step needs access to Docker Hub secrets to run successfully
-    secrets: inherit
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+  dockerhub-description:
+    if: github.repository_owner == 'ZcashFoundation'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Docker Hub Description
+        uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77 #v4.0.2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+          repository: zfnd/zebra
+          short-description: ${{ github.event.repository.description }}
+
+  release-binaries-success:
+    name: Release binaries success
+    runs-on: ubuntu-latest
+    # Always run this job to check the status of dependent jobs
+    if: always()
+    needs:
+      - build
+      - dockerhub-description
+    timeout-minutes: 1
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
 
   failure-issue:
     name: Open or update issues for release binaries failures
     # When a new job is added to this workflow, add it to this list.
-    needs: [ build ]
+    needs: [ build, dockerhub-description ]
     # Open tickets for any failed build in this workflow.
     if: failure() || cancelled()
     runs-on: ubuntu-latest
     steps:
-      - uses: jayqi/failed-build-issue-action@v1
+      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
         with:
           title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
           # New failures open an issue with this label.

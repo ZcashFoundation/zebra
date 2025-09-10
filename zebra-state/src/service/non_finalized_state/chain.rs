@@ -2227,8 +2227,8 @@ impl UpdateWith<(ValueBalance<NegativeAllowed>, Height, usize)> for Chain {
             }
             Err(value_balance_error) => Err(ValidateContextError::AddValuePool {
                 value_balance_error,
-                chain_value_pools: self.chain_value_pools,
-                block_value_pool_change: *block_value_pool_change,
+                chain_value_pools: Box::new(self.chain_value_pools),
+                block_value_pool_change: Box::new(*block_value_pool_change),
                 height: Some(*height),
             })?,
         };

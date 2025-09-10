@@ -33,7 +33,7 @@ graph TB
     subgraph "Main CI Pipeline"
         direction TB
         A[ci-tests.yml]
-        B[sub-build-docker-image.yml]
+        B[zfnd-build-docker-image.yml]
         A --> B
     end
 
@@ -60,9 +60,9 @@ graph TB
     %% Integration Test Flow with some parallel and some sequential steps
     subgraph "Integration Test Flow"
         direction TB
-        D[sub-ci-integration-tests-gcp.yml]
-        E[sub-find-cached-disks.yml]
-        F[sub-deploy-integration-tests-gcp.yml]
+        D[zfnd-ci-integration-tests-gcp.yml]
+        E[zfnd-find-cached-disks.yml]
+        F[zfnd-deploy-integration-tests-gcp.yml]
         G[sub-test-zebra-config.yml]
         D --> E
         D --> F

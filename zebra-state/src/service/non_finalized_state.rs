@@ -380,7 +380,7 @@ impl NonFinalizedState {
 
         let mut modified_chain = Arc::unwrap_or_clone(chain_result);
         for block in invalidated_blocks {
-            modified_chain = modified_chain.push(block)?;
+            modified_chain = modified_chain.push(block).map_err(Box::new)?;
         }
 
         let (height, hash) = modified_chain.non_finalized_tip();
