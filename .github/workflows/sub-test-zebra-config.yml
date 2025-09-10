@@ -85,7 +85,7 @@ jobs:
           #   grep_patterns: -e "configured miner address.*miner_address="
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
 
