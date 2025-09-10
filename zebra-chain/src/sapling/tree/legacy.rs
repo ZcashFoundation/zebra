@@ -104,7 +104,7 @@ impl From<Frontier<sapling_crypto::Node, MERKLE_DEPTH>> for LegacyFrontier<Node,
             let mut leaf = LegacyLeaf::Left(leaf_from_frontier.clone());
             let mut ommers = frontier_data
                 .ommers()
-                .into_iter()
+                .iter()
                 .map(|o| Node(*o))
                 .collect::<Vec<_>>();
             let position = usize::try_from(u64::from(frontier_data.position()))
