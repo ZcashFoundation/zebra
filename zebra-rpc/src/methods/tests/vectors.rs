@@ -1127,7 +1127,7 @@ async fn rpc_getrawtransaction() {
             let confirmations = confirmations.expect("state requests should have confirmations");
 
             assert_eq!(hex.as_ref(), tx.zcash_serialize_to_vec().unwrap());
-            assert_eq!(height, block_idx as u32);
+            assert_eq!(height, block_idx as i32);
 
             let depth_response = read_state
                 .oneshot(zebra_state::ReadRequest::Depth(block.hash()))
