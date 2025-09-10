@@ -16,7 +16,7 @@ use zebra_chain::{
         tree::NoteCommitmentTree as OrchardNoteCommitmentTree,
     },
     sapling::{
-        self, tree::legacy::LegacyNoteCommitmentTree as LegacySaplingNoteCommitmentTree,
+        tree::legacy::LegacyNoteCommitmentTree as LegacySaplingNoteCommitmentTree,
         tree::NoteCommitmentTree as SaplingNoteCommitmentTree,
     },
     sprout::{
@@ -528,7 +528,7 @@ fn sapling_checks(
 
     let subtree = NoteCommitmentSubtreeData::new(
         Height(100000),
-        sapling::tree::Node::from_bytes(incremental_tree.hash()),
+        sapling_crypto::Node::from_bytes(incremental_tree.hash()).unwrap(),
     );
 
     let serialized_subtree = subtree.as_bytes();
@@ -539,7 +539,7 @@ fn sapling_checks(
     );
 
     let deserialized_subtree =
-        NoteCommitmentSubtreeData::<sapling::tree::Node>::from_bytes(&serialized_subtree);
+        NoteCommitmentSubtreeData::<sapling_crypto::Node>::from_bytes(&serialized_subtree);
 
     assert_eq!(
         subtree, deserialized_subtree,

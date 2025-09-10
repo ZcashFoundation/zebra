@@ -31,7 +31,6 @@ use zebra_chain::{
         Network::{self, Mainnet},
         NetworkKind, NetworkUpgrade,
     },
-    sapling,
     serialization::{DateTime32, ZcashDeserializeInto},
     subtree::NoteCommitmentSubtreeData,
     transaction::Transaction,
@@ -610,7 +609,7 @@ async fn test_mocked_rpc_response_data_for_network(network: &Network) {
 
     // Mock the data for the response.
     let mut subtrees = BTreeMap::new();
-    let subtree_root = sapling::tree::Node::default();
+    let subtree_root = sapling_crypto::Node::from_bytes([0; 32]).unwrap();
 
     for i in 0..2u16 {
         let subtree = NoteCommitmentSubtreeData::new(Height(i.into()), subtree_root);

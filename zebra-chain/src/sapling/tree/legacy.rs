@@ -12,8 +12,25 @@
 //! [2]: https://github.com/zcash/incrementalmerkletree/blob/incrementalmerkletree-v0.3.1/src/lib.rs
 
 use incrementalmerkletree::{frontier::Frontier, Position};
+use serde::Serialize;
 
-use super::{Node, NoteCommitmentTree, Root, MERKLE_DEPTH};
+use super::{serde_helpers, NoteCommitmentTree, Root, MERKLE_DEPTH};
+
+/// A serializable version of `sapling_crypto::Node`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Node(#[serde(with = "serde_helpers::Node")] pub sapling_crypto::Node);
+
+impl From<sapling_crypto::Node> for Node {
+    fn from(n: sapling_crypto::Node) -> Self {
+        Node(n)
+    }
+}
+
+impl From<Node> for sapling_crypto::Node {
+    fn from(n: Node) -> Self {
+        n.0
+    }
+}
 
 /// A legacy version of [`NoteCommitmentTree`].
 #[derive(Debug, Serialize, Deserialize)]
@@ -49,19 +66,23 @@ pub struct LegacyFrontier<H, const DEPTH: u8> {
     pub frontier: Option<LegacyNonEmptyFrontier<H>>,
 }
 
-impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<Node, MERKLE_DEPTH> {
+impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<sapling_crypto::Node, MERKLE_DEPTH> {
     fn from(legacy_frontier: LegacyFrontier<Node, MERKLE_DEPTH>) -> Self {
         if let Some(legacy_frontier_data) = legacy_frontier.frontier {
-            let mut ommers = legacy_frontier_data.ommers;
+            let mut ommers = legacy_frontier_data
+                .ommers
+                .into_iter()
+                .map(|o| o.0)
+                .collect::<Vec<_>>();
             let position = Position::from(
                 u64::try_from(legacy_frontier_data.position.0)
                     .expect("old `usize` always fits in `u64`"),
             );
             let leaf = match legacy_frontier_data.leaf {
-                LegacyLeaf::Left(a) => a,
+                LegacyLeaf::Left(a) => a.0,
                 LegacyLeaf::Right(a, b) => {
-                    ommers.insert(0, a);
-                    b
+                    ommers.insert(0, a.0);
+                    b.0
                 }
             };
             Frontier::from_parts(
@@ -76,12 +97,16 @@ impl From<LegacyFrontier<Node, MERKLE_DEPTH>> for Frontier<Node, MERKLE_DEPTH> {
     }
 }
 
-impl From<Frontier<Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
-    fn from(frontier: Frontier<Node, MERKLE_DEPTH>) -> Self {
+impl From<Frontier<sapling_crypto::Node, MERKLE_DEPTH>> for LegacyFrontier<Node, MERKLE_DEPTH> {
+    fn from(frontier: Frontier<sapling_crypto::Node, MERKLE_DEPTH>) -> Self {
         if let Some(frontier_data) = frontier.value() {
-            let leaf_from_frontier = *frontier_data.leaf();
-            let mut leaf = LegacyLeaf::Left(leaf_from_frontier);
-            let mut ommers = frontier_data.ommers().to_vec();
+            let leaf_from_frontier = Node(*frontier_data.leaf());
+            let mut leaf = LegacyLeaf::Left(leaf_from_frontier.clone());
+            let mut ommers = frontier_data
+                .ommers()
+                .into_iter()
+                .map(|o| Node(*o))
+                .collect::<Vec<_>>();
             let position = usize::try_from(u64::from(frontier_data.position()))
                 .expect("new position should fit in a `usize`");
             if frontier_data.position().is_right_child() {

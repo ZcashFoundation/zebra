@@ -6700,6 +6700,7 @@ dependencies = [
  "proptest",
  "prost 0.14.1",
  "rand 0.8.5",
+ "sapling-crypto",
  "semver",
  "serde",
  "serde_json",

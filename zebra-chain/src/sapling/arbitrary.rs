@@ -137,12 +137,25 @@ impl Arbitrary for tree::Root {
     type Strategy = BoxedStrategy<Self>;
 }
 
-impl Arbitrary for tree::Node {
+impl Arbitrary for tree::legacy::Node {
     type Parameters = ();
 
     fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
-        jubjub_base_strat().prop_map(tree::Node::from).boxed()
+        jubjub_base_strat()
+            .prop_map(tree::legacy::Node::from)
+            .boxed()
     }
 
     type Strategy = BoxedStrategy<Self>;
+}
+
+impl From<jubjub::Fq> for tree::legacy::Node {
+    fn from(x: jubjub::Fq) -> Self {
+        let node = sapling_crypto::Node::from_bytes(x.to_bytes());
+        if node.is_some().into() {
+            tree::legacy::Node(node.unwrap())
+        } else {
+            sapling_crypto::Node::from_bytes([0; 32]).unwrap().into()
+        }
+    }
 }

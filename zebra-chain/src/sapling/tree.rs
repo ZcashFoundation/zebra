@@ -18,13 +18,9 @@ use std::{
 };
 
 use hex::ToHex;
-use incrementalmerkletree::{
-    frontier::{Frontier, NonEmptyFrontier},
-    Hashable,
-};
+use incrementalmerkletree::frontier::{Frontier, NonEmptyFrontier};
 
 use thiserror::Error;
-use zcash_primitives::merkle_tree::HashSer;
 
 use crate::{
     serialization::{
@@ -144,150 +140,6 @@ impl ZcashDeserialize for Root {
     }
 }
 
-/// A node of the Sapling Incremental Note Commitment Tree.
-///
-/// Note that it's handled as a byte buffer and not a point coordinate (jubjub::Fq)
-/// because that's how the spec handles the MerkleCRH^Sapling function inputs and outputs.
-#[derive(Copy, Clone, Eq, PartialEq, Default)]
-pub struct Node([u8; 32]);
-
-impl AsRef<[u8; 32]> for Node {
-    fn as_ref(&self) -> &[u8; 32] {
-        &self.0
-    }
-}
-
-impl fmt::Display for Node {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str(&self.encode_hex::<String>())
-    }
-}
-
-impl fmt::Debug for Node {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("sapling::Node")
-            .field(&self.encode_hex::<String>())
-            .finish()
-    }
-}
-
-impl Node {
-    /// Return the node bytes in little-endian byte order suitable for printing out byte by byte.
-    ///
-    /// `zcashd`'s `z_getsubtreesbyindex` does not reverse the byte order of subtree roots.
-    pub fn bytes_in_display_order(&self) -> [u8; 32] {
-        self.0
-    }
-}
-
-impl ToHex for &Node {
-    fn encode_hex<T: FromIterator<char>>(&self) -> T {
-        self.bytes_in_display_order().encode_hex()
-    }
-
-    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
-        self.bytes_in_display_order().encode_hex_upper()
-    }
-}
-
-impl ToHex for Node {
-    fn encode_hex<T: FromIterator<char>>(&self) -> T {
-        (&self).encode_hex()
-    }
-
-    fn encode_hex_upper<T: FromIterator<char>>(&self) -> T {
-        (&self).encode_hex_upper()
-    }
-}
-
-/// Required to serialize [`NoteCommitmentTree`]s in a format matching `zcashd`.
-///
-/// Zebra stores Sapling note commitment trees as [`Frontier`]s while the
-/// [`z_gettreestate`][1] RPC requires [`CommitmentTree`][2]s. Implementing
-/// [`incrementalmerkletree::Hashable`] for [`Node`]s allows the conversion.
-///
-/// [1]: https://zcash.github.io/rpc/z_gettreestate.html
-/// [2]: incrementalmerkletree::frontier::CommitmentTree
-impl HashSer for Node {
-    fn read<R: io::Read>(mut reader: R) -> io::Result<Self> {
-        let mut node = [0u8; 32];
-        reader.read_exact(&mut node)?;
-        Ok(Self(node))
-    }
-
-    fn write<W: io::Write>(&self, mut writer: W) -> io::Result<()> {
-        writer.write_all(self.0.as_ref())
-    }
-}
-
-impl Hashable for Node {
-    fn empty_leaf() -> Self {
-        Self(NoteCommitmentTree::uncommitted())
-    }
-
-    /// Combine two nodes to generate a new node in the given level.
-    fn combine(level: incrementalmerkletree::Level, a: &Self, b: &Self) -> Self {
-        Self(
-            sapling_crypto::Node::combine(
-                level,
-                &sapling_crypto::Node::from_bytes(a.0).unwrap(),
-                &sapling_crypto::Node::from_bytes(b.0).unwrap(),
-            )
-            .to_bytes(),
-        )
-    }
-
-    /// Return the node for the level below the given level. (A quirk of the API)
-    fn empty_root(level: incrementalmerkletree::Level) -> Self {
-        Self(sapling_crypto::Node::empty_root(level).to_bytes())
-    }
-}
-
-impl From<sapling_crypto::note::ExtractedNoteCommitment> for Node {
-    fn from(x: sapling_crypto::note::ExtractedNoteCommitment) -> Self {
-        Node(x.to_bytes())
-    }
-}
-
-impl From<jubjub::Fq> for Node {
-    fn from(x: jubjub::Fq) -> Self {
-        Node(x.into())
-    }
-}
-
-impl TryFrom<&[u8]> for Node {
-    type Error = &'static str;
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Self::Error> {
-        Option::<jubjub::Fq>::from(jubjub::Fq::from_bytes(
-            bytes.try_into().map_err(|_| "wrong byte slice len")?,
-        ))
-        .map(Node::from)
-        .ok_or("invalid jubjub field element")
-    }
-}
-
-impl serde::Serialize for Node {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for Node {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let bytes = <[u8; 32]>::deserialize(deserializer)?;
-        Option::<jubjub::Fq>::from(jubjub::Fq::from_bytes(&bytes))
-            .map(Node::from)
-            .ok_or_else(|| serde::de::Error::custom("invalid JubJub field element"))
-    }
-}
-
 #[derive(Error, Copy, Clone, Debug, Eq, PartialEq, Hash)]
 #[allow(missing_docs)]
 pub enum NoteCommitmentTreeError {
@@ -320,7 +172,7 @@ pub struct NoteCommitmentTree {
     /// <https://zips.z.cash/protocol/protocol.pdf#merkletree>
     ///
     /// Note: MerkleDepth^Sapling = MERKLE_DEPTH = 32.
-    inner: Frontier<Node, MERKLE_DEPTH>,
+    inner: Frontier<sapling_crypto::Node, MERKLE_DEPTH>,
 
     /// A cached root of the tree.
     ///
@@ -350,7 +202,7 @@ impl NoteCommitmentTree {
     /// Returns an error if the tree is full.
     #[allow(clippy::unwrap_in_result)]
     pub fn append(&mut self, cm_u: NoteCommitmentUpdate) -> Result<(), NoteCommitmentTreeError> {
-        if self.inner.append(cm_u.into()) {
+        if self.inner.append(sapling_crypto::Node::from_cmu(&cm_u)) {
             // Invalidate cached root
             let cached_root = self
                 .cached_root
@@ -366,7 +218,7 @@ impl NoteCommitmentTree {
     }
 
     /// Returns frontier of non-empty tree, or None.
-    fn frontier(&self) -> Option<&NonEmptyFrontier<Node>> {
+    fn frontier(&self) -> Option<&NonEmptyFrontier<sapling_crypto::Node>> {
         self.inner.value()
     }
 
@@ -511,7 +363,9 @@ impl NoteCommitmentTree {
     }
 
     /// Returns subtree index and root if the most recently appended leaf completes the subtree
-    pub fn completed_subtree_index_and_root(&self) -> Option<(NoteCommitmentSubtreeIndex, Node)> {
+    pub fn completed_subtree_index_and_root(
+        &self,
+    ) -> Option<(NoteCommitmentSubtreeIndex, sapling_crypto::Node)> {
         if !self.is_complete_subtree() {
             return None;
         }
@@ -559,7 +413,7 @@ impl NoteCommitmentTree {
 
     /// Calculates and returns the current root of the tree, ignoring any caching.
     pub fn recalculate_root(&self) -> Root {
-        Root::try_from(self.inner.root().0).unwrap()
+        Root::try_from(self.inner.root().to_bytes()).unwrap()
     }
 
     /// Gets the Jubjub-based Pedersen hash of root node of this merkle tree of

@@ -6,7 +6,6 @@ use zebra_chain::{
     block::{Block, Height},
     orchard,
     parameters::Network::*,
-    sapling,
     serialization::ZcashDeserializeInto,
     subtree::{NoteCommitmentSubtree, NoteCommitmentSubtreeData, NoteCommitmentSubtreeIndex},
     transaction,
@@ -112,7 +111,7 @@ async fn test_read_subtrees() -> Result<()> {
         NoteCommitmentSubtree::new(
             u16::try_from(index).expect("should fit in u16"),
             Height(height),
-            sapling::tree::Node::default(),
+            sapling_crypto::Node::from_bytes([0; 32]).unwrap(),
         )
     };
 
@@ -205,7 +204,7 @@ async fn test_read_subtrees() -> Result<()> {
 /// non-finalized states correctly.
 #[tokio::test]
 async fn test_sapling_subtrees() -> Result<()> {
-    let dummy_subtree_root = sapling::tree::Node::default();
+    let dummy_subtree_root = sapling_crypto::Node::from_bytes([0; 32]).unwrap();
 
     // Prepare the finalized state.
     let db_subtree = NoteCommitmentSubtree::new(0, Height(1), dummy_subtree_root);

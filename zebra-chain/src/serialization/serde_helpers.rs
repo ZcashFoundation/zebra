@@ -97,3 +97,22 @@ impl SaplingExtractedNoteCommitment {
         remote.to_bytes()
     }
 }
+
+#[derive(Deserialize, Serialize)]
+#[serde(remote = "sapling_crypto::Node")]
+pub struct Node {
+    #[serde(getter = "Node::as_serializable_bytes")]
+    bytes: [u8; 32],
+}
+
+impl From<Node> for sapling_crypto::Node {
+    fn from(local: Node) -> Self {
+        sapling_crypto::Node::from_bytes(local.bytes).unwrap()
+    }
+}
+
+impl Node {
+    fn as_serializable_bytes(remote: &sapling_crypto::Node) -> [u8; 32] {
+        remote.to_bytes()
+    }
+}
