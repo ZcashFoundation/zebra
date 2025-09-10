@@ -733,6 +733,14 @@ pub enum Request {
     /// * [`Response::Transaction(None)`](Response::Transaction) otherwise.
     Transaction(transaction::Hash),
 
+    /// Looks up a transaction by hash in the current best chain.
+    ///
+    /// Returns
+    ///
+    /// * [`Response::AnyChainTransaction(Some(Arc<Transaction>))`](Response::AnyChainTransaction) if the transaction is in the best chain;
+    /// * [`Response::AnyChainTransaction(None)`](Response::AnyChainTransaction) otherwise.
+    AnyChainTransaction(transaction::Hash),
+
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
     ///
@@ -884,6 +892,7 @@ impl Request {
             Request::Tip => "tip",
             Request::BlockLocator => "block_locator",
             Request::Transaction(_) => "transaction",
+            Request::AnyChainTransaction(_) => "any_chain_transaction",
             Request::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             Request::Block(_) => "block",
             Request::BlockAndSize(_) => "block_and_size",
@@ -980,6 +989,16 @@ pub enum ReadRequest {
     /// * [`ReadResponse::Transaction(None)`](ReadResponse::Transaction) otherwise.
     Transaction(transaction::Hash),
 
+    /// Looks up a transaction by hash in any chain.
+    ///
+    /// Returns
+    ///
+    /// * [`ReadResponse::AnyChainTransaction(Some(AnyTx))`](ReadResponse::AnyChainTransaction)
+    ///   if the transaction is in any chain;
+    /// * [`ReadResponse::AnyChainTransaction(None)`](ReadResponse::AnyChainTransaction)
+    ///   otherwise.
+    AnyChainTransaction(transaction::Hash),
+
     /// Looks up the transaction IDs for a block, using a block hash or height.
     ///
     /// Returns
@@ -991,6 +1010,20 @@ pub enum ReadRequest {
     ///
     /// Returned txids are in the order they appear in the block.
     TransactionIdsForBlock(HashOrHeight),
+
+    /// Looks up the transaction IDs for a block, using a block hash or height,
+    /// for any chain.
+    ///
+    /// Returns
+    ///
+    /// * An ordered list of transaction hashes and a flag indicating whether
+    ///   the block is in the best chain, or
+    /// * `None` if the block was not found.
+    ///
+    /// Note: Each block has at least one transaction: the coinbase transaction.
+    ///
+    /// Returned txids are in the order they appear in the block.
+    AnyChainTransactionIdsForBlock(HashOrHeight),
 
     /// Looks up a UTXO identified by the given [`OutPoint`](transparent::OutPoint),
     /// returning `None` immediately if it is unknown.
@@ -1213,7 +1246,9 @@ impl ReadRequest {
             ReadRequest::BlockAndSize(_) => "block_and_size",
             ReadRequest::BlockHeader(_) => "block_header",
             ReadRequest::Transaction(_) => "transaction",
+            ReadRequest::AnyChainTransaction(_) => "any_chain_transaction",
             ReadRequest::TransactionIdsForBlock(_) => "transaction_ids_for_block",
+            ReadRequest::AnyChainTransactionIdsForBlock(_) => "any_chain_transaction_ids_for_block",
             ReadRequest::UnspentBestChainUtxo { .. } => "unspent_best_chain_utxo",
             ReadRequest::AnyChainUtxo { .. } => "any_chain_utxo",
             ReadRequest::BlockLocator => "block_locator",
@@ -1269,6 +1304,7 @@ impl TryFrom<Request> for ReadRequest {
             Request::BlockAndSize(hash_or_height) => Ok(ReadRequest::BlockAndSize(hash_or_height)),
             Request::BlockHeader(hash_or_height) => Ok(ReadRequest::BlockHeader(hash_or_height)),
             Request::Transaction(tx_hash) => Ok(ReadRequest::Transaction(tx_hash)),
+            Request::AnyChainTransaction(tx_hash) => Ok(ReadRequest::AnyChainTransaction(tx_hash)),
             Request::UnspentBestChainUtxo(outpoint) => {
                 Ok(ReadRequest::UnspentBestChainUtxo(outpoint))
             }
