@@ -133,7 +133,7 @@ tokio = "1.44"
 tokio-stream = "0.1.17"
 tokio-test = "0.4"
 tokio-util = "0.7.14"
-toml = "0.8"
+toml = "0.9.5"
 tonic = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
@@ -153,6 +153,7 @@ vergen-git2 = { version = "1.0", default-features = false }
 x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.3.2"
+config = { version = "0.15.14", features = ["toml"] }
 
 [workspace.metadata.release]
 
@@ -164,48 +165,109 @@ allow-branch = ["main"]
 [profile.dev]
 panic = "abort"
 
-# Speed up tests by optimizing performance-critical crates
+# Speed up tests by optimizing performance-critical crates. The parameters
+# values are the ones from the `release` profile
+# (https://doc.rust-lang.org/cargo/reference/profiles.html#release)
 
 # Cryptographic crates
 
 [profile.dev.package.blake2b_simd]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.ff]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.group]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.pasta_curves]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.halo2_proofs]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.halo2_gadgets]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.bls12_381]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.byteorder]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.equihash]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.zcash_proofs]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.ring]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.spin]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 [profile.dev.package.untrusted]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
+
+[profile.dev.package.bitvec]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
+incremental = false
+codegen-units = 16
 
 
 [profile.release]

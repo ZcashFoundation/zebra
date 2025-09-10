@@ -32,9 +32,6 @@ on:
 #! The job names in `ci-integration-tests-gcp.yml`, `ci-integration-tests-gcp.patch.yml` and
 #! `ci-integration-tests-gcp.patch-external.yml` must be kept in sync.
 #!
-#! The test variables ZEBRA_CACHE_DIR and LWD_CACHE_DIR used in some steps are set in the
-#! `sub-deploy-integration-tests-gcp.yml` workflow file as inputs. If modified in this file, they must
-#! also be updated in the `sub-deploy-integration-tests-gcp.yml` file.
 jobs:
   # Check if the cached state disks used by the tests are available for the default network.
   #
@@ -82,7 +79,7 @@ jobs:
       app_name: zebrad
       test_id: sync-to-mandatory-checkpoint
       test_description: Test sync up to mandatory checkpoint
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-to-mandatory-checkpoint,ZEBRA_TEST_SYNC_TO_CHECKPOINT=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-to-mandatory-checkpoint-${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }},TEST_SYNC_TO_CHECKPOINT=1"
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
       # This test commonly less than 3 hours by October 2024, but now it takes longer
       is_long_test: true
@@ -106,7 +103,7 @@ jobs:
       app_name: zebrad
       test_id: sync-past-mandatory-checkpoint
       test_description: Test full validation sync from a cached state
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-past-mandatory-checkpoint-${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }},ZEBRA_TEST_SYNC_PAST_CHECKPOINT=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-past-mandatory-checkpoint-${{ (inputs.network || vars.ZCASH_NETWORK) == 'Mainnet' && 'mainnet' || 'testnet' }},TEST_SYNC_PAST_CHECKPOINT=1"
       needs_zebra_state: true
       saves_to_disk: false
       disk_suffix: checkpoint
@@ -138,7 +135,7 @@ jobs:
       test_id: sync-full-mainnet
       test_description: Test a full sync up to the tip
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: NETWORK=Mainnet,NEXTEST_PROFILE=sync-full-mainnet,SYNC_FULL_MAINNET_TIMEOUT_MINUTES=0,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: ZEBRA_NETWORK__NETWORK=Mainnet,NEXTEST_PROFILE=sync-full-mainnet,SYNC_FULL_MAINNET_TIMEOUT_MINUTES=0
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: false
@@ -165,7 +162,7 @@ jobs:
       app_name: zebrad
       test_id: sync-update-mainnet
       test_description: Test syncing to tip with a Zebra tip state
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-update-mainnet,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=sync-update-mainnet"
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
       saves_to_disk: true
@@ -196,7 +193,7 @@ jobs:
       test_id: generate-checkpoints-mainnet
       test_description: Generate Zebra checkpoints on mainnet
       # TODO: update the test to use {{ input.network }} instead?
-      test_variables: NETWORK=Mainnet,NEXTEST_PROFILE=generate-checkpoints-mainnet,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: ZEBRA_NETWORK__NETWORK=Mainnet,NEXTEST_PROFILE=generate-checkpoints-mainnet
       needs_zebra_state: true
       # sync-update-mainnet updates the disk on every PR, so we don't need to do it here
       saves_to_disk: false
@@ -230,7 +227,7 @@ jobs:
       app_name: zebrad
       test_id: sync-full-testnet
       test_description: Test a full sync up to the tip on testnet
-      test_variables: NETWORK=Testnet,NEXTEST_PROFILE=sync-full-testnet,SYNC_FULL_TESTNET_TIMEOUT_MINUTES=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: ZEBRA_NETWORK__NETWORK=Testnet,NEXTEST_PROFILE=sync-full-testnet,SYNC_FULL_TESTNET_TIMEOUT_MINUTES=1
       network: Testnet
       # A full testnet sync could take 2-10 hours in April 2023.
       # The time varies a lot due to the small number of nodes.
@@ -261,7 +258,7 @@ jobs:
       app_name: zebrad
       test_id: generate-checkpoints-testnet
       test_description: Generate Zebra checkpoints on testnet
-      test_variables: NETWORK=Testnet,NEXTEST_PROFILE=generate-checkpoints-testnet,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra
+      test_variables: ZEBRA_NETWORK__NETWORK=Testnet,NEXTEST_PROFILE=generate-checkpoints-testnet
       network: Testnet
       needs_zebra_state: true
       # update the disk on every PR, to increase CI speed
@@ -295,7 +292,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-full
       test_description: Test lightwalletd full sync
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-sync-full,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-sync-full,TEST_LIGHTWALLETD=1"
       # This test runs for longer than 6 hours, so it needs multiple jobs
       is_long_test: true
       needs_zebra_state: true
@@ -322,7 +319,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-sync-update
       test_description: Test lightwalletd update sync with both states
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-sync-update,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-sync-update,TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: true
@@ -350,7 +347,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-test
       test_description: Test lightwalletd RPC with a Zebra tip state
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-rpc-test,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-rpc-test,TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       saves_to_disk: false
     secrets: inherit
@@ -372,7 +369,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-rpc-send-tx
       test_description: Test sending transactions via lightwalletd
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-rpc-send-tx,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-rpc-send-tx,TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -395,7 +392,7 @@ jobs:
       app_name: lightwalletd
       test_id: lwd-grpc-wallet
       test_description: Test gRPC calls via lightwalletd
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-grpc-wallet,ZEBRA_TEST_LIGHTWALLETD=1,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra,LWD_CACHE_DIR=/home/zebra/.cache/lwd"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=lwd-grpc-wallet,TEST_LIGHTWALLETD=1"
       needs_zebra_state: true
       needs_lwd_state: true
       saves_to_disk: false
@@ -422,7 +419,7 @@ jobs:
       app_name: zebrad
       test_id: rpc-get-block-template
       test_description: Test getblocktemplate RPC method via Zebra's rpc server
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=rpc-get-block-template,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=rpc-get-block-template"
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false
@@ -445,7 +442,7 @@ jobs:
       app_name: zebrad
       test_id: rpc-submit-block
       test_description: Test submitting blocks via Zebra's rpc server
-      test_variables: "NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=rpc-submit-block,ZEBRA_CACHE_DIR=/home/zebra/.cache/zebra"
+      test_variables: "ZEBRA_NETWORK__NETWORK=${{ inputs.network || vars.ZCASH_NETWORK }},NEXTEST_PROFILE=rpc-submit-block"
       needs_zebra_state: true
       needs_lwd_state: false
       saves_to_disk: false

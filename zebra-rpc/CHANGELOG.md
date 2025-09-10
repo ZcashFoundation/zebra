@@ -16,6 +16,7 @@ delete this before the release.)
 
 - Changed the `GetTreestateResponse::new()` to take an optional Sprout tree state;
   changed `Commitments::new()` to take the `final_root` parameter.
+- Added new arguments to `Orchard::new()`
 
 ## [2.0.0] - 2025-08-07
 

@@ -424,6 +424,29 @@ async fn test_rpc_response_data_for_network(network: &Network) {
         .expect("We should have a GetBlockHash struct");
     snapshot_rpc_getbestblockhash(get_best_block_hash, &settings);
 
+    // `getmempoolinfo`
+    //
+    // - this RPC method returns mempool stats like size and bytes
+    // - we simulate a call to the mempool with the `QueueStats` request,
+    //   and respond with mock stats to verify RPC output formatting.
+    let mempool_req = mempool
+        .expect_request_that(|request| matches!(request, mempool::Request::QueueStats))
+        .map(|responder| {
+            responder.respond(mempool::Response::QueueStats {
+                size: 67,
+                bytes: 32_500,
+                usage: 41_000,
+                fully_notified: None,
+            });
+        });
+
+    let (rsp, _) = futures::join!(rpc.get_mempool_info(), mempool_req);
+    if let Ok(inner) = rsp {
+        insta::assert_json_snapshot!("get_mempool_info", inner);
+    } else {
+        panic!("getmempoolinfo RPC must return a valid response");
+    }
+
     // `getrawmempool`
     //
     // - a request to get all mempool transactions will be made by `getrawmempool` behind the scenes.
@@ -521,51 +544,51 @@ async fn test_rpc_response_data_for_network(network: &Network) {
 
     // `getaddresstxids`
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(1),
             end: Some(10),
-        })
+        }))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("multi_block", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(2),
             end: Some(2),
-        })
+        }))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("single_block", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(3),
             end: Some(EXCESSIVE_BLOCK_HEIGHT),
-        })
+        }))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("excessive_end", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(EXCESSIVE_BLOCK_HEIGHT),
             end: Some(EXCESSIVE_BLOCK_HEIGHT + 1),
-        })
+        }))
         .await
         .expect("We should have a vector of strings");
     snapshot_rpc_getaddresstxids_valid("excessive_start", get_address_tx_ids, &settings);
 
     let get_address_tx_ids = rpc
-        .get_address_tx_ids(GetAddressTxIdsRequest {
+        .get_address_tx_ids(GetAddressTxIdsParams::Object(GetAddressTxIdsRequest {
             addresses: addresses.clone(),
             start: Some(2),
             end: Some(1),
-        })
+        }))
         .await;
     snapshot_rpc_getaddresstxids_invalid("end_greater_start", get_address_tx_ids, &settings);
 

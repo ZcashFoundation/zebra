@@ -70,8 +70,8 @@ ARG FEATURES="default-release-binaries proptest-impl lightwalletd-grpc-tests zeb
 ENV FEATURES=${FEATURES}
 
 # Skip IPv6 tests by default, as some CI environment don't have IPv6 available
-ARG ZEBRA_SKIP_IPV6_TESTS
-ENV ZEBRA_SKIP_IPV6_TESTS=${ZEBRA_SKIP_IPV6_TESTS:-1}
+ARG SKIP_IPV6_TESTS
+ENV SKIP_IPV6_TESTS=${SKIP_IPV6_TESTS:-1}
 
 # This environment setup is almost identical to the `runtime` target so that the
 # `tests` target differs minimally. In fact, a subset of this setup is used for

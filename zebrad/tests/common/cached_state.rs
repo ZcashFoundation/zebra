@@ -31,9 +31,6 @@ use crate::common::{
     test_type::TestType,
 };
 
-/// The environmental variable that holds the path to a directory containing a cached Zebra state.
-pub const ZEBRA_CACHE_DIR: &str = "ZEBRA_CACHE_DIR";
-
 /// In integration tests, the interval between database format checks for newly added blocks.
 ///
 /// This should be short enough that format bugs cause CI test failures,
