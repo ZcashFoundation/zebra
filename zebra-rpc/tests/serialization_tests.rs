@@ -31,8 +31,8 @@ use zebra_rpc::client::{
     GetBlockTemplateParameters, GetBlockTemplateRequestMode, GetBlockTemplateResponse,
     GetBlockTransaction, GetBlockTrees, GetBlockchainInfoResponse, GetInfoResponse,
     GetMiningInfoResponse, GetPeerInfoResponse, GetRawMempoolResponse, GetRawTransactionResponse,
-    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject, Orchard,
-    OrchardAction, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
+    GetSubtreesByIndexResponse, GetTreestateResponse, Hash, Input, MempoolObject, NetworkInfo,
+    Orchard, OrchardAction, Output, PeerInfo, ScriptPubKey, ScriptSig, SendRawTransactionResponse,
     ShieldedOutput, ShieldedSpend, SubmitBlockErrorResponse, SubmitBlockResponse, SubtreeRpcData,
     TransactionObject, TransactionTemplate, Treestate, Utxo, ValidateAddressResponse,
     ZListUnifiedReceiversResponse, ZValidateAddressResponse,
@@ -1106,6 +1106,73 @@ fn test_get_mining_info() -> Result<(), Box<dyn std::error::Error>> {
         chain,
         testnet,
     );
+    assert_eq!(obj, new_obj);
+
+    Ok(())
+}
+
+#[test]
+fn test_get_network_info() -> Result<(), Box<dyn std::error::Error>> {
+    let json = r#"
+{
+  "version": 2030010,
+  "subversion": "/Zebra:2.3.0/",
+  "protocolversion": 170120,
+  "localservices": "0000000000000001",
+  "timeoffset": 0,
+  "connections": 75,
+  "networks": [
+  {
+    "name": "ipv4",
+    "limited": false,
+    "reachable": true,
+    "proxy": ""
+  },
+  {
+    "name": "ipv6",
+    "limited": false,
+    "reachable": true,
+    "proxy": ""
+  },
+  {
+    "name": "onion",
+    "limited": false,
+    "reachable": false,
+    "proxy": ""
+  }
+  ],
+  "relayfee": 1e-6,
+  "localaddresses": [],
+  "warnings": ""
+}
+"#;
+
+    let obj: NetworkInfo = serde_json::from_str(json)?;
+
+    let version = obj.version;
+    let subversion = obj.subversion.clone();
+    let protocol_version = obj.protocol_version;
+    let local_services = obj.local_services.clone();
+    let timeoffset = obj.timeoffset;
+    let connections = obj.connections;
+    let networks = obj.networks.clone();
+    let relay_fee = obj.relay_fee;
+    let local_addresses = obj.local_addresses.clone();
+    let warnings = obj.warnings.clone();
+
+    let new_obj = NetworkInfo {
+        version,
+        subversion,
+        protocol_version,
+        local_services,
+        timeoffset,
+        connections,
+        networks,
+        relay_fee,
+        local_addresses,
+        warnings,
+    };
+
     assert_eq!(obj, new_obj);
 
     Ok(())
