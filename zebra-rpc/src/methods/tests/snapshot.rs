@@ -892,6 +892,11 @@ fn snapshot_rpc_getblocksubsidy(
     });
 }
 
+/// Snapshot `getnetworkinfo` response, using `cargo insta` and JSON serialization.
+fn snapshot_rpc_getnetworkinfo(get_network_info: NetworkInfo, settings: &insta::Settings) {
+    settings.bind(|| insta::assert_json_snapshot!("get_network_info", get_network_info));
+}
+
 /// Snapshot `getpeerinfo` response, using `cargo insta` and JSON serialization.
 fn snapshot_rpc_getpeerinfo(get_peer_info: Vec<PeerInfo>, settings: &insta::Settings) {
     settings.bind(|| insta::assert_json_snapshot!("get_peer_info", get_peer_info));
@@ -1112,6 +1117,13 @@ pub async fn test_mining_rpcs<State, ReadState>(
         .await
         .expect("We should have a success response");
     snapshot_rpc_getblocksubsidy("excessive_height", get_block_subsidy, &settings);
+
+    // `getnetworkinfo`
+    let get_network_info = rpc
+        .get_network_info()
+        .await
+        .expect("We should have a success response");
+    snapshot_rpc_getnetworkinfo(get_network_info, &settings);
 
     // `getpeerinfo`
     let get_peer_info = rpc
