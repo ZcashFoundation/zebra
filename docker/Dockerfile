@@ -195,6 +195,12 @@ ENV USER=${USER}
 ARG HOME
 ENV HOME=${HOME}
 
+# Install curl for healtchecks
+RUN apt-get -qq update && \
+    apt-get -qq install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/* /tmp/*
+
 RUN addgroup --quiet --gid ${GID} ${USER} && \
     adduser --quiet --gid ${GID} --uid ${UID} --home ${HOME} ${USER} --disabled-password --gecos ""
 
