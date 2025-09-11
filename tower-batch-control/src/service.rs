@@ -302,7 +302,7 @@ where
     }
 
     fn call(&mut self, request: Request) -> Self::Future {
-        tracing::trace!("sending request to buffer worker");
+        tracing::trace!("sending request to batch worker");
         let _permit = self
             .permit
             .take()
