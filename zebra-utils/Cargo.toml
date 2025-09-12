@@ -108,3 +108,5 @@ serde_yml = { workspace = true, optional = true }
 serde = { workspace = true, features = ["serde_derive"], optional = true }
 indexmap = { workspace = true }
 
+[lints]
+workspace = true

@@ -48,5 +48,5 @@ tower-test = { workspace = true }
 
 zebra-test = { path = "../zebra-test/", version = "1.0.1" }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(tokio_unstable)'] }
+[lints]
+workspace = true
