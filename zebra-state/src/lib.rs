@@ -48,7 +48,7 @@ pub use request::{
 #[cfg(feature = "indexer")]
 pub use request::Spend;
 
-pub use response::{GetBlockTemplateChainInfo, KnownBlock, MinedTx, ReadResponse, Response};
+pub use response::{AnyTx, GetBlockTemplateChainInfo, KnownBlock, MinedTx, ReadResponse, Response};
 pub use service::{
     chain_tip::{ChainTipBlock, ChainTipChange, ChainTipSender, LatestChainTip, TipAction},
     check,
