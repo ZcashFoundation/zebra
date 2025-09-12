@@ -1,18 +1,6 @@
 name: Book
 
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - book/**
-      - katex-header.html
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "**/Cargo.lock"
-      - .cargo/config.toml
-      - "**/clippy.toml"
-      - .github/workflows/book.yml
-
   push:
     branches: [main]
     paths:
