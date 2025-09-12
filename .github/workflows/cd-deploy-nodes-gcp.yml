@@ -128,7 +128,7 @@ jobs:
     steps:
       - name: Getting Zebrad Version
         id: get
-        uses: actions/github-script@v7.0.1
+        uses: actions/github-script@v8.0.0
         with:
           result-encoding: string
           script: |
@@ -235,7 +235,7 @@ jobs:
     if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5.0.0
         with:
           persist-credentials: false
 
@@ -258,13 +258,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@v3.0.0
         with:
           workload_identity_provider: "${{ vars.GCP_WIF }}"
           service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@v3.0.1
 
       # Retrieves a static IP address for long-running nodes.
       # This step runs only when triggered by a release or a manual workflow_dispatch event.
