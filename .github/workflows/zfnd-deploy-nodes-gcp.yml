@@ -103,11 +103,6 @@ on:
     types:
       - published
 
-# IMPORTANT
-#
-# The job names in `zfnd-deploy-nodes-gcp.yml`, `cd-deploy-nodes-gcp.patch.yml` and
-# `cd-deploy-nodes-gcp.patch-external.yml` must be kept in sync.
-
 permissions:
   contents: read
 
