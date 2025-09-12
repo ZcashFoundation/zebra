@@ -393,6 +393,12 @@ impl From<Arc<CheckpointList>> for ConfiguredCheckpoints {
     }
 }
 
+impl From<bool> for ConfiguredCheckpoints {
+    fn from(value: bool) -> Self {
+        Self::Default(value)
+    }
+}
+
 /// Builder for the [`Parameters`] struct.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParametersBuilder {
@@ -696,8 +702,8 @@ impl ParametersBuilder {
     }
 
     /// Sets the checkpoints for the network as the provided [`ConfiguredCheckpoints`].
-    pub fn with_checkpoints(mut self, checkpoints: ConfiguredCheckpoints) -> Self {
-        self.checkpoints = Arc::new(match checkpoints {
+    pub fn with_checkpoints(mut self, checkpoints: impl Into<ConfiguredCheckpoints>) -> Self {
+        self.checkpoints = Arc::new(match checkpoints.into() {
             ConfiguredCheckpoints::Default(true) => TESTNET_CHECKPOINTS
                 .parse()
                 .expect("checkpoints file format must be valid"),
@@ -710,9 +716,9 @@ impl ParametersBuilder {
                     panic!("could not read file at configured checkpoints file path: {path_buf:?}");
                 };
 
-                raw_checkpoints_str.parse().expect(&format!(
-                    "could not parse checkpoints at the provided path: {path_buf:?}"
-                ))
+                raw_checkpoints_str.parse().unwrap_or_else(|err| {
+                    panic!("could not parse checkpoints at the provided path: {path_buf:?}, err: {err}")
+                })
             }
             ConfiguredCheckpoints::HeightsAndHashes(items) => {
                 CheckpointList::from_list(items).expect("configured checkpoints must be valid")

@@ -3303,6 +3303,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     let base_network_params = testnet::Parameters::build()
         // Regtest genesis hash
         .with_genesis_hash("029f11d80ef9765602235e1bc9727e3eb6ba20839319f761fee920d63401e327")
+        .with_checkpoints(false)
         .with_target_difficulty_limit(U256::from_big_endian(&[0x0f; 32]))
         .with_disable_pow(true)
         .with_slow_start_interval(Height::MIN)
