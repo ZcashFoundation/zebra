@@ -69,7 +69,7 @@ jobs:
 
       - name: Build Zebra book
         run: |
-          mdbook build book --dest-dir "$(pwd)"/target/docs/book
+          mdbook build book --dest-dir "$(pwd)"/target/docs
         env:
           # The -A and -W settings must be the same as the `rustdocflags` in:
           # https://github.com/ZcashFoundation/zebra/blob/main/.cargo/config.toml#L87
