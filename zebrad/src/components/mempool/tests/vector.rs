@@ -177,6 +177,41 @@ async fn mempool_service_basic_single() -> Result<(), Report> {
     assert!(queued_responses[0].is_ok());
     assert_eq!(service.tx_downloads().in_flight(), 1);
 
+    // Test `Request::QueueStats`
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueStats)
+        .await
+        .unwrap();
+
+    let (actual_size, actual_bytes, actual_usage) = match response {
+        Response::QueueStats {
+            size,
+            bytes,
+            usage,
+            fully_notified: None,
+        } => (size, bytes, usage),
+        _ => unreachable!("expected QueueStats response"),
+    };
+
+    // Expected values based on storage contents
+    let expected_size = service.storage().transaction_count();
+    let expected_bytes: usize = service
+        .storage()
+        .transactions()
+        .values()
+        .map(|tx| tx.transaction.size)
+        .sum();
+
+    // TODO: Derive memory usage when available
+    let expected_usage = expected_bytes;
+
+    assert_eq!(actual_size, expected_size, "QueueStats size mismatch");
+    assert_eq!(actual_bytes, expected_bytes, "QueueStats bytes mismatch");
+    assert_eq!(actual_usage, expected_usage, "QueueStats usage mismatch");
+
     Ok(())
 }
 
@@ -397,6 +432,33 @@ async fn mempool_service_disabled() -> Result<(), Report> {
             .unwrap()
             .unbox_mempool_error(),
         MempoolError::Disabled
+    );
+
+    // Test if mempool returns to QueueStats request correctly when disabled
+    let response = service
+        .ready()
+        .await
+        .unwrap()
+        .call(Request::QueueStats)
+        .await
+        .unwrap();
+
+    let (size, bytes, usage, fully_notified) = match response {
+        Response::QueueStats {
+            size,
+            bytes,
+            usage,
+            fully_notified,
+        } => (size, bytes, usage, fully_notified),
+        _ => unreachable!("expected QueueStats response"),
+    };
+
+    assert_eq!(size, 0, "size should be zero when mempool is disabled");
+    assert_eq!(bytes, 0, "bytes should be zero when mempool is disabled");
+    assert_eq!(usage, 0, "usage should be zero when mempool is disabled");
+    assert_eq!(
+        fully_notified, None,
+        "fully_notified should be None when mempool is disabled"
     );
 
     Ok(())

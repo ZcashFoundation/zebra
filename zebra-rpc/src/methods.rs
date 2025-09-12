@@ -71,7 +71,6 @@ use zebra_chain::{
         },
         ConsensusBranchId, Network, NetworkUpgrade, POW_AVERAGING_WINDOW,
     },
-    primitives,
     serialization::{ZcashDeserialize, ZcashDeserializeInto, ZcashSerialize},
     subtree::NoteCommitmentSubtreeIndex,
     transaction::{self, SerializedTransaction, Transaction, UnminedTx},
@@ -90,7 +89,7 @@ use zebra_state::{HashOrHeight, OutputLocation, ReadRequest, ReadResponse, Trans
 use crate::{
     client::Treestate,
     config,
-    methods::types::validate_address::validate_address,
+    methods::types::{validate_address::validate_address, z_validate_address::z_validate_address},
     queue::Queue,
     server::{
         self,
@@ -115,6 +114,7 @@ use types::{
         GetBlockTemplateParameters, GetBlockTemplateResponse,
     },
     get_blockchain_info::GetBlockchainInfoBalance,
+    get_mempool_info::GetMempoolInfoResponse,
     get_mining_info::GetMiningInfoResponse,
     get_raw_mempool::{self, GetRawMempoolResponse},
     long_poll::LongPollInput,
@@ -124,7 +124,7 @@ use types::{
     transaction::TransactionObject,
     unified_address::ZListUnifiedReceiversResponse,
     validate_address::ValidateAddressResponse,
-    z_validate_address::{ZValidateAddressResponse, ZValidateAddressType},
+    z_validate_address::ZValidateAddressResponse,
 };
 
 #[cfg(test)]
@@ -280,6 +280,12 @@ pub trait Rpc {
     #[method(name = "getbestblockheightandhash")]
     fn get_best_block_height_and_hash(&self) -> Result<GetBlockHeightAndHashResponse>;
 
+    /// Returns details on the active state of the TX memory pool.
+    ///
+    /// zcash reference: [`getmempoolinfo`](https://zcash.github.io/rpc/getmempoolinfo.html)
+    #[method(name = "getmempoolinfo")]
+    async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse>;
+
     /// Returns all transaction ids in the memory pool, as a JSON array.
     ///
     /// # Parameters
@@ -364,10 +370,21 @@ pub trait Rpc {
     ///
     /// # Parameters
     ///
-    /// - `request`: (object, required, example={\"addresses\": [\"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ\"], \"start\": 1000, \"end\": 2000}) A struct with the following named fields:
-    ///     - `addresses`: (json array of string, required) The addresses to get transactions from.
-    ///     - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
-    ///     - `end`: (numeric, optional) The top height to stop looking for transactions (inclusive).
+    /// - `params`: (required) Either:
+    ///     - A single address string (e.g., `"tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"`), or
+    ///     - An object with the following named fields:
+    ///         - `addresses`: (array of strings, required) The addresses to get transactions from.
+    ///         - `start`: (numeric, optional) The lower height to start looking for transactions (inclusive).
+    ///         - `end`: (numeric, optional) The upper height to stop looking for transactions (inclusive).
+    ///
+    /// Example of the object form:
+    /// ```json
+    /// {
+    ///   "addresses": ["tmYXBYJj1K7vhejSec5osXK2QsGa5MTisUQ"],
+    ///   "start": 1000,
+    ///   "end": 2000
+    /// }
+    /// ```
     ///
     /// # Notes
     ///
@@ -375,7 +392,7 @@ pub trait Rpc {
     /// <https://github.com/zcash/lightwalletd/blob/631bb16404e3d8b045e74a7c5489db626790b2f6/common/common.go#L97-L102>
     /// - It is recommended that users call the method with start/end heights such that the response can't be too large.
     #[method(name = "getaddresstxids")]
-    async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>>;
+    async fn get_address_tx_ids(&self, params: GetAddressTxIdsParams) -> Result<Vec<String>>;
 
     /// Returns all unspent outputs for a list of addresses.
     ///
@@ -1583,6 +1600,33 @@ where
             .ok_or_misc_error("No blocks in state")
     }
 
+    async fn get_mempool_info(&self) -> Result<GetMempoolInfoResponse> {
+        let mut mempool = self.mempool.clone();
+
+        let response = mempool
+            .ready()
+            .and_then(|service| service.call(mempool::Request::QueueStats))
+            .await
+            .map_misc_error()?;
+
+        if let mempool::Response::QueueStats {
+            size,
+            bytes,
+            usage,
+            fully_notified,
+        } = response
+        {
+            Ok(GetMempoolInfoResponse {
+                size,
+                bytes,
+                usage,
+                fully_notified,
+            })
+        } else {
+            unreachable!("unexpected response to QueueStats request")
+        }
+    }
+
     async fn get_raw_mempool(&self, verbose: Option<bool>) -> Result<GetRawMempoolResponse> {
         #[allow(unused)]
         let verbose = verbose.unwrap_or(false);
@@ -1961,7 +2005,9 @@ where
         }
     }
 
-    async fn get_address_tx_ids(&self, request: GetAddressTxIdsRequest) -> Result<Vec<String>> {
+    async fn get_address_tx_ids(&self, params: GetAddressTxIdsParams) -> Result<Vec<String>> {
+        let request = params.into_request();
+
         let mut read_state = self.read_state.clone();
         let latest_chain_tip = self.latest_chain_tip.clone();
 
@@ -2642,36 +2688,7 @@ where
     async fn z_validate_address(&self, raw_address: String) -> Result<ZValidateAddressResponse> {
         let network = self.network.clone();
 
-        let Ok(address) = raw_address.parse::<zcash_address::ZcashAddress>() else {
-            return Ok(ZValidateAddressResponse::invalid());
-        };
-
-        let address = match address.convert::<primitives::Address>() {
-            Ok(address) => address,
-            Err(err) => {
-                tracing::debug!(?err, "conversion error");
-                return Ok(ZValidateAddressResponse::invalid());
-            }
-        };
-
-        if address.network() == network.kind() {
-            Ok(ZValidateAddressResponse {
-                is_valid: true,
-                address: Some(raw_address),
-                address_type: Some(ZValidateAddressType::from(&address)),
-                is_mine: Some(false),
-            })
-        } else {
-            tracing::info!(
-                ?network,
-                address_network = ?address.network(),
-                "invalid address network in z_validateaddress RPC: address is for {:?} but Zebra is on {:?}",
-                address.network(),
-                network
-            );
-
-            Ok(ZValidateAddressResponse::invalid())
-        }
+        z_validate_address(network, raw_address)
     }
 
     async fn get_block_subsidy(&self, height: Option<u32>) -> Result<GetBlockSubsidyResponse> {
@@ -3966,6 +3983,30 @@ impl GetAddressTxIdsRequest {
             self.start.unwrap_or(0),
             self.end.unwrap_or(0),
         )
+    }
+}
+
+/// Parameters for the `getaddresstxids` RPC method.
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+pub enum GetAddressTxIdsParams {
+    /// A single address string.
+    Single(String),
+    /// A full request object with address list and optional height range.
+    Object(GetAddressTxIdsRequest),
+}
+
+impl GetAddressTxIdsParams {
+    /// Converts the enum into a `GetAddressTxIdsRequest`, normalizing the input format.
+    pub fn into_request(self) -> GetAddressTxIdsRequest {
+        match self {
+            GetAddressTxIdsParams::Single(addr) => GetAddressTxIdsRequest {
+                addresses: vec![addr],
+                start: None,
+                end: None,
+            },
+            GetAddressTxIdsParams::Object(req) => req,
+        }
     }
 }
 

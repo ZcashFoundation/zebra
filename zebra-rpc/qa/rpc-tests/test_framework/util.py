@@ -23,11 +23,14 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import toml
 import re
 import errno
 
 from . import coverage
 from .proxy import ServiceProxy, JSONRPCException
+
+from test_framework.config import ZebraConfig, ZebraExtraArgs
 
 LEGACY_DEFAULT_FEE = Decimal('0.00001')
 
@@ -198,6 +201,7 @@ def initialize_datadir(dirname, n, clock_offset=0):
     config_rpc_port = rpc_port(n)
     config_p2p_port = p2p_port(n)
 
+    """ TODO: Can create zebrad base_config here, or remove.
     with open(os.path.join(datadir, "zcash.conf"), 'w', encoding='utf8') as f:
         f.write("regtest=1\n")
         f.write("showmetrics=0\n")
@@ -208,72 +212,26 @@ def initialize_datadir(dirname, n, clock_offset=0):
         f.write("listenonion=0\n")
         if clock_offset != 0:
             f.write('clockoffset='+str(clock_offset)+'\n')
+    """
 
-    update_zebrad_conf(datadir, config_rpc_port, config_p2p_port)
+    update_zebrad_conf(datadir, config_rpc_port, config_p2p_port, None)
 
     return datadir
 
-def update_zebrad_conf(datadir, rpc_port, p2p_port, funding_streams=False, miner_address = "tmSRd1r8gs77Ja67Fw1JcdoXytxsyrLTPJm"):
-    import toml
-
+def update_zebrad_conf(datadir, rpc_port, p2p_port, extra_args=None):
     config_path = zebrad_config(datadir)
 
     with open(config_path, 'r') as f:
         config_file = toml.load(f)
 
-    config_file['rpc']['listen_addr'] = '127.0.0.1:'+str(rpc_port)
-    config_file['network']['listen_addr'] = '127.0.0.1:'+str(p2p_port)
-    config_file['state']['cache_dir'] = datadir
+    zebra_config = ZebraConfig(
+        network_listen_address='127.0.0.1:'+str(p2p_port),
+        rpc_listen_address='127.0.0.1:'+str(rpc_port),
+        data_dir=datadir)
 
-    config_file['mining']['miner_address'] = miner_address
+    zebra_config.extra_args = extra_args or ZebraExtraArgs()
 
-    # TODO: Add More config options. zcashd uses extra arguments to pass options
-    # to the binary, but zebrad uses a config file.
-    # We want to make the config accept different options.
-    # For now, we hardcode the funding streams to be enabled.
-    if funding_streams == True:
-        config_file['network']['testnet_parameters']['pre_nu6_funding_streams'] = {
-            'recipients': [
-                {
-                    'receiver': 'ECC',
-                    'numerator': 7,
-                    'addresses': ['t26ovBdKAJLtrvBsE2QGF4nqBkEuptuPFZz']
-                },
-                {
-                    'receiver': 'ZcashFoundation',
-                    'numerator': 5,
-                    'addresses': ['t27eWDgjFYJGVXmzrXeVjnb5J3uXDM9xH9v']
-                },
-                {
-                    'receiver': 'MajorGrants',
-                    'numerator': 8,
-                    'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
-                },
-            ],
-            'height_range': {
-                'start': 290,
-                'end': 291
-            }
-        }
-
-        config_file['network']['testnet_parameters']['post_nu6_funding_streams'] = {
-            'recipients': [
-                {
-                    'receiver': 'MajorGrants',
-                    'numerator': 8,
-                    'addresses': ['t2Gvxv2uNM7hbbACjNox4H6DjByoKZ2Fa3P']
-                },
-                {
-                    'receiver': 'Deferred',
-                    'numerator': 12
-                    # No addresses field is valid for Deferred
-                }
-            ],
-            'height_range': {
-                'start': 291,
-                'end': 293
-            }
-        }
+    config_file = zebra_config.update(config_file)
 
     with open(config_path, 'w') as f:
         toml.dump(config_file, f)
@@ -580,7 +538,7 @@ def start_node(i, dirname, extra_args=None, rpchost=None, timewait=None, binary=
         binary = zcashd_binary()
 
     if extra_args is not None:
-        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), funding_streams = extra_args[i][0], miner_address = extra_args[i][1])
+        config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i), extra_args)
     else:
         config = update_zebrad_conf(datadir, rpc_port(i), p2p_port(i))
     args = [ binary, "-c="+config, "start" ]
@@ -628,7 +586,7 @@ def start_nodes(num_nodes, dirname, extra_args=None, rpchost=None, binary=None):
     rpcs = []
     try:
         for i in range(num_nodes):
-            rpcs.append(start_node(i, dirname, extra_args, rpchost, binary=binary[i]))
+            rpcs.append(start_node(i, dirname, extra_args[i], rpchost, binary=binary[i]))
     except: # If one node failed to start, stop the others
         stop_nodes(rpcs)
         raise
@@ -935,8 +893,6 @@ def start_wallet(i, dirname, extra_args=None, rpchost=None, timewait=None, binar
     return proxy
 
 def update_zallet_conf(datadir, validator_port, zallet_port):
-    import toml
-
     config_path = zallet_config(datadir)
 
     with open(config_path, 'r') as f:
@@ -957,7 +913,6 @@ def update_zallet_conf(datadir, validator_port, zallet_port):
 def stop_wallets(wallets):
     for wallet in wallets:
         try:
-            # TODO: Implement `stop` in zallet: https://github.com/zcash/wallet/issues/153
             wallet.stop()
         except http.client.CannotSendRequest as e:
             print("WARN: Unable to stop wallet: " + repr(e))

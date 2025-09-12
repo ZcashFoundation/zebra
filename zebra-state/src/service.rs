@@ -55,8 +55,8 @@ use crate::{
         queued_blocks::QueuedBlocks,
         watch_receiver::WatchReceiver,
     },
-    BoxError, CheckpointVerifiedBlock, CloneError, Config, ReadRequest, ReadResponse, Request,
-    Response, SemanticallyVerifiedBlock,
+    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, Config, ReadRequest,
+    ReadResponse, Request, Response, SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 pub mod block_iter;
@@ -234,9 +234,9 @@ impl Drop for StateService {
         self.clear_finalized_block_queue(
             "dropping the state: dropped unused finalized state queue block",
         );
-        self.clear_non_finalized_block_queue(
-            "dropping the state: dropped unused non-finalized state queue block",
-        );
+        self.clear_non_finalized_block_queue(CommitSemanticallyVerifiedError::from(
+            ValidateContextError::DroppedUnusedBlock,
+        ));
 
         // Log database metrics before shutting down
         info!("dropping the state: logging database metrics");
@@ -603,7 +603,7 @@ impl StateService {
     }
 
     /// Drops all non-finalized state queue blocks, and sends an error on their result channels.
-    fn clear_non_finalized_block_queue(&mut self, error: impl Into<BoxError> + Clone) {
+    fn clear_non_finalized_block_queue(&mut self, error: CommitSemanticallyVerifiedError) {
         for (_hash, queued) in self.non_finalized_state_queued_blocks.drain() {
             Self::send_semantically_verified_block_error(queued, error.clone());
         }
@@ -612,13 +612,13 @@ impl StateService {
     /// Send an error on a `QueuedSemanticallyVerified` block's result channel, and drop the block
     fn send_semantically_verified_block_error(
         queued: QueuedSemanticallyVerified,
-        error: impl Into<BoxError>,
+        error: CommitSemanticallyVerifiedError,
     ) {
         let (finalized, rsp_tx) = queued;
 
         // The block sender might have already given up on this block,
         // so ignore any channel send errors.
-        let _ = rsp_tx.send(Err(error.into()));
+        let _ = rsp_tx.send(Err(error));
         std::mem::drop(finalized);
     }
 
@@ -633,7 +633,7 @@ impl StateService {
     fn queue_and_commit_to_non_finalized_state(
         &mut self,
         semantically_verrified: SemanticallyVerifiedBlock,
-    ) -> oneshot::Receiver<Result<block::Hash, BoxError>> {
+    ) -> oneshot::Receiver<Result<block::Hash, CommitSemanticallyVerifiedError>> {
         tracing::debug!(block = %semantically_verrified.block, "queueing block for contextual verification");
         let parent_hash = semantically_verrified.block.header.previous_block_hash;
 
@@ -642,9 +642,11 @@ impl StateService {
             .contains(&semantically_verrified.hash)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(
-                "block has already been sent to be committed to the state".into(),
-            ));
+            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(
+                ValidateContextError::DuplicateCommitRequest {
+                    block_hash: semantically_verrified.hash,
+                },
+            )));
             return rsp_rx;
         }
 
@@ -654,10 +656,11 @@ impl StateService {
             .contains_height(semantically_verrified.height)
         {
             let (rsp_tx, rsp_rx) = oneshot::channel();
-            let _ = rsp_tx.send(Err(
-                "block height is in the finalized state: block is already committed to the state"
-                    .into(),
-            ));
+            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(
+                ValidateContextError::AlreadyFinalized {
+                    block_height: semantically_verrified.height,
+                },
+            )));
             return rsp_rx;
         }
 
@@ -671,7 +674,11 @@ impl StateService {
             tracing::debug!("replacing older queued request with new request");
             let (mut rsp_tx, rsp_rx) = oneshot::channel();
             std::mem::swap(old_rsp_tx, &mut rsp_tx);
-            let _ = rsp_tx.send(Err("replaced by newer request".into()));
+            let _ = rsp_tx.send(Err(CommitSemanticallyVerifiedError::from(
+                ValidateContextError::ReplacedByNewerRequest {
+                    block_hash: semantically_verrified.hash,
+                },
+            )));
             rsp_rx
         } else {
             let (rsp_tx, rsp_rx) = oneshot::channel();
@@ -772,11 +779,15 @@ impl StateService {
                         // If Zebra is shutting down, drop blocks and return an error.
                         Self::send_semantically_verified_block_error(
                             queued,
-                            "block commit task exited. Is Zebra shutting down?",
+                            CommitSemanticallyVerifiedError::from(
+                                ValidateContextError::CommitTaskExited,
+                            ),
                         );
 
                         self.clear_non_finalized_block_queue(
-                            "block commit task exited. Is Zebra shutting down?",
+                            CommitSemanticallyVerifiedError::from(
+                                ValidateContextError::CommitTaskExited,
+                            ),
                         );
 
                         return;
@@ -994,18 +1005,20 @@ impl Service<Request> for StateService {
                 // The work is all done, the future just waits on a channel for the result
                 timer.finish(module_path!(), line!(), "CommitSemanticallyVerifiedBlock");
 
+                // Await the channel response, mapping any receive error into a BoxError.
+                // Then flatten the nested Result by converting the inner CommitSemanticallyVerifiedError into a BoxError.
                 let span = Span::current();
                 async move {
                     rsp_rx
                         .await
                         .map_err(|_recv_error| {
-                            BoxError::from(
-                                "block was dropped from the queue of non-finalized blocks",
-                            )
+                            BoxError::from(CommitSemanticallyVerifiedError::from(
+                                ValidateContextError::NotReadyToBeCommitted,
+                            ))
                         })
                         // TODO: replace with Result::flatten once it stabilises
                         // https://github.com/rust-lang/rust/issues/70142
-                        .and_then(convert::identity)
+                        .and_then(|res| res.map_err(BoxError::from))
                         .map(Response::Committed)
                 }
                 .instrument(span)
