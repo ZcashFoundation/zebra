@@ -36,7 +36,8 @@ async fn empty_read_state_still_responds_to_requests() -> Result<()> {
     let transcript = Transcript::from(empty_state_test_cases());
 
     let network = Mainnet;
-    let (_state, read_state, _latest_chain_tip, _chain_tip_change) = init_test_services(&network);
+    let (_state, read_state, _latest_chain_tip, _chain_tip_change) =
+        init_test_services(&network).await;
 
     transcript.check(read_state).await?;
 

@@ -258,8 +258,6 @@ impl FinalizedState {
             }
         }
 
-        tracing::info!(tip = ?new_state.db.tip(), "loaded Zebra state cache");
-
         new_state
     }
 

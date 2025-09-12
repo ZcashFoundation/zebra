@@ -219,7 +219,7 @@ impl NonFinalizedBlocksListener {
 
                 for new_block_with_hash in new_blocks {
                     if sender.send(new_block_with_hash).await.is_err() {
-                        tracing::debug!("non-finalized state change receiver closed, ending task");
+                        tracing::debug!("non-finalized blocks receiver closed, ending task");
                         return;
                     }
                 }
@@ -228,7 +228,10 @@ impl NonFinalizedBlocksListener {
 
                 // Wait for the next update to the non-finalized state
                 if let Err(error) = non_finalized_state_receiver.changed().await {
-                    warn!(?error, "non-finalized state receiver closed, ending task");
+                    warn!(
+                        ?error,
+                        "non-finalized state receiver closed, is Zebra shutting down?"
+                    );
                     break;
                 }
             }

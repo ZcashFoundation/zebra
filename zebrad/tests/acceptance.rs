@@ -385,12 +385,18 @@ async fn db_init_outside_future_executor() -> Result<()> {
     let start = Instant::now();
 
     // This test doesn't need UTXOs to be verified efficiently, because it uses an empty state.
-    let db_init_handle = zebra_state::spawn_init(
-        config.state.clone(),
-        &config.network.network,
-        Height::MAX,
-        0,
-    );
+    let db_init_handle = {
+        let config = config.clone();
+        tokio::spawn(async move {
+            zebra_state::init(
+                config.state.clone(),
+                &config.network.network,
+                Height::MAX,
+                0,
+            )
+            .await
+        })
+    };
 
     // it's faster to panic if it takes longer than expected, since the executor
     // will wait indefinitely for blocking operation to finish once started
@@ -2924,7 +2930,7 @@ async fn validate_regtest_genesis_block() {
     let _init_guard = zebra_test::init();
 
     let network = Network::new_regtest(Default::default());
-    let state = zebra_state::init_test(&network);
+    let state = zebra_state::init_test(&network).await;
     let (
         block_verifier_router,
         _transaction_verifier,
@@ -3333,7 +3339,7 @@ async fn nu6_funding_streams_and_coinbase_balance() -> Result<()> {
     .expect("configured mining address should be valid");
 
     let (state, read_state, latest_chain_tip, _chain_tip_change) =
-        zebra_state::init_test_services(&network);
+        zebra_state::init_test_services(&network).await;
 
     let (
         block_verifier_router,

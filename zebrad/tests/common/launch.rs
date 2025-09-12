@@ -209,9 +209,25 @@ where
 
 /// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
 ///
+/// See [`spawn_zebrad_for_rpc_with_opts`] for more details.
+#[tracing::instrument]
+pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
+    network: Network,
+    test_name: S,
+    test_type: TestType,
+    use_internet_connection: bool,
+) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
+    spawn_zebrad_for_rpc_with_opts(network, test_name, test_type, use_internet_connection, true)
+}
+
+/// Spawns a zebrad instance on `network` to test lightwalletd with `test_type`.
+///
 /// If `use_internet_connection` is `false` then spawn, but without any peers.
 /// This prevents it from downloading blocks. Instead, set `ZEBRA_STATE__CACHE_DIR`
 /// to provide an initial state to the zebrad instance.
+///
+/// If `use_non_finalized_backup` is `false` then configure the spawned zebrad instance
+/// not to cache a backup of its non-finalized state on disk.
 ///
 /// Returns:
 /// - `Ok(Some(zebrad, zebra_rpc_address))` on success,
@@ -220,11 +236,12 @@ where
 ///
 /// `zebra_rpc_address` is `None` if the test type doesn't need an RPC port.
 #[tracing::instrument]
-pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
+pub fn spawn_zebrad_for_rpc_with_opts<S: AsRef<str> + Debug>(
     network: Network,
     test_name: S,
     test_type: TestType,
     use_internet_connection: bool,
+    use_non_finalized_backup: bool,
 ) -> Result<Option<(TestChild<TempDir>, Option<SocketAddr>)>> {
     let test_name = test_name.as_ref();
 
@@ -234,9 +251,10 @@ pub fn spawn_zebrad_for_rpc<S: AsRef<str> + Debug>(
     }
 
     // Get the zebrad config
-    let config = test_type
+    let mut config = test_type
         .zebrad_config(test_name, use_internet_connection, None, &network)
         .expect("already checked config")?;
+    config.state.should_backup_non_finalized_state = use_non_finalized_backup;
 
     let (zebrad_failure_messages, zebrad_ignore_messages) = test_type.zebrad_failure_messages();
 

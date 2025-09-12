@@ -11,8 +11,8 @@ use tracing::instrument;
 use zebra_chain::{block, transparent};
 
 use crate::{
-    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, SemanticallyVerifiedBlock,
-    ValidateContextError,
+    BoxError, CheckpointVerifiedBlock, CommitSemanticallyVerifiedError, NonFinalizedState,
+    SemanticallyVerifiedBlock, ValidateContextError,
 };
 
 #[cfg(test)]
@@ -238,7 +238,7 @@ pub(crate) struct SentHashes {
 
     /// Stores a set of hashes that have been sent to the block write task but
     /// may not be in the finalized state yet.
-    sent: HashMap<block::Hash, Vec<transparent::OutPoint>>,
+    pub sent: HashMap<block::Hash, Vec<transparent::OutPoint>>,
 
     /// Known UTXOs.
     known_utxos: HashMap<transparent::OutPoint, transparent::Utxo>,
@@ -249,6 +249,23 @@ pub(crate) struct SentHashes {
 }
 
 impl SentHashes {
+    /// Creates a new [`SentHashes`] with the block hashes and UTXOs in the provided non-finalized state.
+    pub fn new(non_finalized_state: &NonFinalizedState) -> Self {
+        let mut sent_hashes = Self::default();
+        for (_, block) in non_finalized_state
+            .chain_iter()
+            .flat_map(|c| c.blocks.clone())
+        {
+            sent_hashes.add(&block.into());
+        }
+
+        if !sent_hashes.sent.is_empty() {
+            sent_hashes.can_fork_chain_at_hashes = true;
+        }
+
+        sent_hashes
+    }
+
     /// Stores the `block`'s hash, height, and UTXOs, so they can be used to check if a block or UTXO
     /// is available in the state.
     ///

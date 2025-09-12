@@ -1667,7 +1667,7 @@ async fn rpc_getblockcount_empty_state() {
     // Get a mempool handle
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
     // Create an empty state
-    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet);
+    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
     let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
@@ -1716,7 +1716,7 @@ async fn rpc_getpeerinfo() {
     let network = Mainnet;
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet);
+    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
     let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
@@ -2839,7 +2839,7 @@ async fn rpc_addnode() {
     )));
 
     let mut mempool: MockService<_, _, _, BoxError> = MockService::build().for_unit_tests();
-    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet);
+    let (state, read_state, tip, _) = zebra_state::init_test_services(&Mainnet).await;
 
     let (block_verifier_router, _, _, _) = zebra_consensus::router::init_test(
         zebra_consensus::Config::default(),
