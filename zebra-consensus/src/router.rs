@@ -16,6 +16,7 @@ use core::fmt;
 use std::{
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -27,7 +28,7 @@ use tracing::{instrument, Instrument, Span};
 
 use zebra_chain::{
     block::{self, Height},
-    parameters::Network,
+    parameters::{checkpoint::list::CheckpointList, Network},
 };
 
 use zebra_node_services::mempool;
@@ -35,9 +36,9 @@ use zebra_state as zs;
 
 use crate::{
     block::{Request, SemanticBlockVerifier, VerifyBlockError},
-    checkpoint::{CheckpointList, CheckpointVerifier, VerifyCheckpointError},
+    checkpoint::{CheckpointVerifier, VerifyCheckpointError},
     error::TransactionError,
-    transaction, BoxError, Config, ParameterCheckpoint as _,
+    transaction, BoxError, Config,
 };
 
 #[cfg(test)]
@@ -390,7 +391,7 @@ where
 
 /// Parses the checkpoint list for `network` and `config`.
 /// Returns the checkpoint list and maximum checkpoint height.
-pub fn init_checkpoint_list(config: Config, network: &Network) -> (CheckpointList, Height) {
+pub fn init_checkpoint_list(config: Config, network: &Network) -> (Arc<CheckpointList>, Height) {
     // TODO: Zebra parses the checkpoint list three times at startup.
     //       Instead, cache the checkpoint list for each `network`.
     let list = network.checkpoint_list();

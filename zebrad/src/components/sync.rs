@@ -22,7 +22,6 @@ use zebra_chain::{
     block::{self, Height, HeightDiff},
     chain_tip::ChainTip,
 };
-use zebra_consensus::ParameterCheckpoint as _;
 use zebra_network::{self as zn, PeerSocketAddr};
 use zebra_state as zs;
 

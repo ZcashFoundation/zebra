@@ -51,10 +51,7 @@ pub use block::{
     subsidy::{funding_streams::funding_stream_address, new_coinbase_script},
     Request, VerifyBlockError, MAX_BLOCK_SIGOPS,
 };
-pub use checkpoint::{
-    list::ParameterCheckpoint, CheckpointList, VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT,
-    MAX_CHECKPOINT_HEIGHT_GAP,
-};
+pub use checkpoint::{VerifyCheckpointError, MAX_CHECKPOINT_BYTE_COUNT, MAX_CHECKPOINT_HEIGHT_GAP};
 pub use config::Config;
 pub use error::BlockError;
 pub use primitives::{ed25519, groth16, halo2, redjubjub, redpallas};

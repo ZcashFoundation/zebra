@@ -5,19 +5,21 @@
 //! Checkpoints can be used to verify their ancestors, by chaining backwards
 //! to another checkpoint, via each block's parent block hash.
 
-#[cfg(test)]
-mod tests;
-
-use crate::BoxError;
-
 use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
     str::FromStr,
+    sync::Arc,
 };
 
-use zebra_chain::block;
-use zebra_chain::parameters::Network;
+use crate::{
+    block::{self, Height},
+    parameters::{Network, NetworkUpgrade},
+    BoxError,
+};
+
+#[cfg(test)]
+mod tests;
 
 /// The hard-coded checkpoints for mainnet, generated using the
 /// `zebra-checkpoints` tool.
@@ -41,18 +43,11 @@ const MAINNET_CHECKPOINTS: &str = include_str!("main-checkpoints.txt");
 ///
 /// See [`MAINNET_CHECKPOINTS`] for detailed `zebra-checkpoints` usage
 /// information.
-const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
+pub(crate) const TESTNET_CHECKPOINTS: &str = include_str!("test-checkpoints.txt");
 
-/// Network methods related to checkpoints
-pub trait ParameterCheckpoint {
+impl Network {
     /// Returns the hash for the genesis block in `network`.
-    fn genesis_hash(&self) -> zebra_chain::block::Hash;
-    /// Returns the hard-coded checkpoint list for `network`.
-    fn checkpoint_list(&self) -> CheckpointList;
-}
-
-impl ParameterCheckpoint for Network {
-    fn genesis_hash(&self) -> zebra_chain::block::Hash {
+    pub fn genesis_hash(&self) -> block::Hash {
         match self {
             // zcash-cli getblockhash 0
             Network::Mainnet => "00040fe8ec8471911baa1db1266ea15dd06b4a8a5c453883c000b031973dce08"
@@ -62,12 +57,11 @@ impl ParameterCheckpoint for Network {
             Network::Testnet(params) => params.genesis_hash(),
         }
     }
-
-    fn checkpoint_list(&self) -> CheckpointList {
-        let (checkpoints_for_network, should_fallback_to_genesis_hash_as_checkpoint) = match self {
-            Network::Mainnet => (MAINNET_CHECKPOINTS, false),
-            Network::Testnet(params) if params.is_default_testnet() => (TESTNET_CHECKPOINTS, false),
-            Network::Testnet(_params) => ("", true),
+    /// Returns the hard-coded checkpoint list for `network`.
+    pub fn checkpoint_list(&self) -> Arc<CheckpointList> {
+        let checkpoints_for_network = match self {
+            Network::Mainnet => MAINNET_CHECKPOINTS,
+            Network::Testnet(params) => return params.checkpoints(),
         };
 
         // Check that the list starts with the correct genesis block and parses checkpoint list.
@@ -76,15 +70,11 @@ impl ParameterCheckpoint for Network {
             .next()
             .map(checkpoint_height_and_hash);
 
-        match first_checkpoint_height {
+        let checkpoints = match first_checkpoint_height {
             // parse calls CheckpointList::from_list
             Some(Ok((block::Height(0), hash))) if hash == self.genesis_hash() => {
                 checkpoints_for_network
                     .parse()
-                    .expect("hard-coded checkpoint list parses and validates")
-            }
-            _ if should_fallback_to_genesis_hash_as_checkpoint => {
-                CheckpointList::from_list([(block::Height(0), self.genesis_hash())])
                     .expect("hard-coded checkpoint list parses and validates")
             }
             Some(Ok((block::Height(0), _))) => {
@@ -92,10 +82,18 @@ impl ParameterCheckpoint for Network {
             }
             Some(Ok(_)) => panic!("checkpoints must start at the genesis block height 0"),
             Some(Err(err)) => panic!("{err}"),
+
+            None if NetworkUpgrade::Canopy.activation_height(self) == Some(Height(1)) => {
+                CheckpointList::from_list([(block::Height(0), self.genesis_hash())])
+                    .expect("hard-coded checkpoint list parses and validates")
+            }
             None => panic!(
-                "there must be at least one checkpoint on default networks, for the genesis block"
+                "Zebra requires checkpoints on networks which do not activate \
+                 the Canopy network upgrade at block height 1"
             ),
-        }
+        };
+
+        Arc::new(checkpoints)
     }
 }
 
@@ -149,7 +147,7 @@ impl CheckpointList {
     /// Checkpoint heights and checkpoint hashes must be unique.
     /// There must be a checkpoint for a genesis block at block::Height 0.
     /// (All other checkpoints are optional.)
-    pub(crate) fn from_list(
+    pub fn from_list(
         list: impl IntoIterator<Item = (block::Height, block::Hash)>,
     ) -> Result<Self, BoxError> {
         // BTreeMap silently ignores duplicates, so we count the checkpoints
@@ -235,6 +233,11 @@ impl CheckpointList {
     /// Returns an iterator over all the checkpoints, in increasing height order.
     pub fn iter(&self) -> impl Iterator<Item = (&block::Height, &block::Hash)> {
         self.0.iter()
+    }
+
+    /// Returns an iterator over all the checkpoints, in increasing height order.
+    pub fn iter_cloned(&self) -> impl Iterator<Item = (block::Height, block::Hash)> + '_ {
+        self.iter().map(|(&height, &hash)| (height, hash))
     }
 
     /// Returns the checkpoint at `height`, as a zero-based index.
