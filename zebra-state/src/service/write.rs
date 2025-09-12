@@ -54,13 +54,18 @@ pub(crate) fn validate_and_commit_non_finalized(
     non_finalized_state: &mut NonFinalizedState,
     prepared: SemanticallyVerifiedBlock,
 ) -> Result<(), CommitSemanticallyVerifiedError> {
-    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)?;
+    check::initial_contextual_validity(finalized_state, non_finalized_state, &prepared)
+        .map_err(Box::new)?;
     let parent_hash = prepared.block.header.previous_block_hash;
 
     if finalized_state.finalized_tip_hash() == parent_hash {
-        non_finalized_state.commit_new_chain(prepared, finalized_state)?;
+        non_finalized_state
+            .commit_new_chain(prepared, finalized_state)
+            .map_err(Box::new)?;
     } else {
-        non_finalized_state.commit_block(prepared, finalized_state)?;
+        non_finalized_state
+            .commit_block(prepared, finalized_state)
+            .map_err(Box::new)?;
     }
 
     Ok(())

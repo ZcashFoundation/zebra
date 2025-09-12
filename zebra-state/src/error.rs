@@ -44,7 +44,7 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
 /// An error describing the reason a semantically verified block could not be committed to the state.
 #[derive(Debug, Clone, Error, PartialEq, Eq)]
 #[error("block is not contextually valid: {}", .0)]
-pub struct CommitSemanticallyVerifiedError(#[from] ValidateContextError);
+pub struct CommitSemanticallyVerifiedError(#[from] Box<ValidateContextError>);
 
 /// An error describing the reason a block or its descendants could not be reconsidered after
 /// potentially being invalidated from the chain_set.
@@ -60,7 +60,7 @@ pub enum ReconsiderError {
     InvalidatedBlocksEmpty,
 
     #[error("{0}")]
-    ValidationError(#[from] ValidateContextError),
+    ValidationError(#[from] Box<ValidateContextError>),
 }
 
 /// An error describing why a block failed contextual validation.
@@ -236,8 +236,8 @@ pub enum ValidateContextError {
     #[non_exhaustive]
     AddValuePool {
         value_balance_error: ValueBalanceError,
-        chain_value_pools: ValueBalance<NonNegative>,
-        block_value_pool_change: ValueBalance<NegativeAllowed>,
+        chain_value_pools: Box<ValueBalance<NonNegative>>,
+        block_value_pool_change: Box<ValueBalance<NegativeAllowed>>,
         height: Option<block::Height>,
     },
 

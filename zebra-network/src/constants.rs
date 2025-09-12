@@ -24,7 +24,7 @@ use zebra_chain::{
 
 /// A multiplier used to calculate the inbound connection limit for the peer set,
 ///
-/// When it starts up, Zebra opens [`Config.peerset_initial_target_size`]
+/// When it starts up, Zebra opens [`crate::Config::peerset_initial_target_size`]
 /// outbound connections.
 ///
 /// Then it opens additional outbound connections as needed for network requests,

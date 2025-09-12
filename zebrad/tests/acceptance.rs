@@ -722,6 +722,7 @@ fn valid_generated_config(command: &str, expect_stdout_line_contains: &str) -> R
 }
 
 /// Check if the config produced by current zebrad is stored.
+#[cfg(not(target_os = "windows"))]
 #[tracing::instrument]
 #[allow(clippy::print_stdout)]
 fn last_config_is_stored() -> Result<()> {
@@ -2448,6 +2449,7 @@ async fn lwd_rpc_test() -> Result<()> {
 }
 
 #[test]
+#[cfg(not(target_os = "windows"))]
 fn delete_old_databases() -> Result<()> {
     use std::fs::{canonicalize, create_dir};
 

@@ -184,9 +184,6 @@ tower = { workspace = true, features = ["hedge", "limit"] }
 pin-project = { workspace = true }
 
 color-eyre = { workspace = true, features = ["issue-url"] }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 thiserror = { workspace = true }
 
@@ -304,6 +301,16 @@ zebra-test = { path = "../zebra-test", version = "1.0.1" }
 # https://github.com/rust-lang/cargo/issues/9096
 # zebra-utils { path = "../zebra-utils", artifact = "bin:zebra-checkpoints" }
 zebra-utils = { path = "../zebra-utils", version = "2.0.0" }
+
+[package.metadata.cargo-udeps.ignore]
+# These dependencies are false positives - they are actually used
+normal = [
+    "console-subscriber",  # Used behind the tokio-console feature flag
+    "zebra-utils",         # Used for the zebra-checkpoints feature
+]
+development = [
+    "zebra-utils",         # Required workaround to build zebra-checkpoints binary for tests (see zebra-utils/tests/build_utils_for_zebrad_tests.rs)
+]
 
 [lints]
 workspace = true

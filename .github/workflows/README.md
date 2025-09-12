@@ -19,85 +19,58 @@ Zebra's CI/CD system is built on GitHub Actions, providing a unified platform fo
 
 ## CI/CD Workflow Diagram
 
-Below is a Mermaid diagram illustrating how our CI workflows relate to each other, with a focus on parallel execution patterns and job dependencies. The diagram shows the main CI pipeline, integration test flow, unit test flow, underlying infrastructure, and the various triggers that initiate the pipeline.
+Below is a simplified Mermaid diagram showing the current workflows, their key triggers, and major dependencies.
 
 ```mermaid
 graph TB
-    %% Define Triggers subgraph with parallel triggers
-    subgraph "Triggers"
-        direction TB
-        P[Pull Request] & Q[Push to main] & R[Weekly Schedule] & S[Manual Trigger] & T[Merge Queue]
-    end
+  %% Triggers
+  subgraph Triggers
+    PR[Pull Request] & Push[Push to main] & Schedule[Weekly] & Manual[Manual]
+  end
 
-    %% Main CI Pipeline with parallel flows after build
-    subgraph "Main CI Pipeline"
-        direction TB
-        A[ci-tests.yml]
-        B[sub-build-docker-image.yml]
-        A --> B
-    end
+  %% Reusable build
+  subgraph Build
+    BuildDocker[zfnd-build-docker-image.yml]
+  end
 
-    %% Infrastructure dependencies
-    subgraph "Infrastructure"
-        direction TB
-        M[Docker Build Cloud]
-        N[GCP Resources]
-        O[GitHub Runners]
-    end
+  %% CI workflows
+  subgraph CI
+    Unit[tests-unit.yml]
+    Lint[lint.yml]
+    Coverage[coverage.yml]
+    DockerCfg[test-docker.yml]
+    CrateBuild[test-crates.yml]
+    Docs[book.yml]
+    Security[zizmor.yml]
+  end
 
-    %% Unit Test Flow with parallel test execution
-    subgraph "Unit Test Flow"
-        direction TB
-        C[sub-ci-unit-tests-docker.yml]
-        H[test-all] & I[test-fake-activation-heights] & J[test-empty-sync] & K[test-lightwalletd-integration] & L[test-docker-configurations]
-        C --> H
-        C --> I
-        C --> J
-        C --> K
-        C --> L
-    end
+  %% Integration tests on GCP
+  subgraph GCP Integration
+    IT[zfnd-ci-integration-tests-gcp.yml]
+    FindDisks[zfnd-find-cached-disks.yml]
+    Deploy[zfnd-deploy-integration-tests-gcp.yml]
+    DeployNodes[zfnd-deploy-nodes-gcp.yml]
+    Cleanup[zfnd-delete-gcp-resources.yml]
+  end
 
-    %% Integration Test Flow with some parallel and some sequential steps
-    subgraph "Integration Test Flow"
-        direction TB
-        D[sub-ci-integration-tests-gcp.yml]
-        E[sub-find-cached-disks.yml]
-        F[sub-deploy-integration-tests-gcp.yml]
-        G[sub-test-zebra-config.yml]
-        D --> E
-        D --> F
-        E --> F
-        F --> G
-    end
+  %% Trigger wiring
+  PR --> Unit & Lint & DockerCfg & CrateBuild & IT & Security
+  Push --> Unit & Lint & Coverage & Docs & Security
+  Schedule --> IT
+  Manual --> IT & DeployNodes & Cleanup
 
-    %% Connect triggers to main pipeline
-    P --> A
-    Q --> A
-    R --> A
-    S --> A
-    T --> A
+  %% Build dependency
+  BuildDocker --> IT
+  IT --> FindDisks --> Deploy
 
-    %% Connect infrastructure to respective components
-    M --> B
-    N --> D
-    O --> C
-
-    %% Connect main pipeline to test flows
-    B --> C
-    B --> D
-
-    %% Style definitions
-    classDef primary fill:#2374ab,stroke:#2374ab,color:white
-    classDef secondary fill:#48a9a6,stroke:#48a9a6,color:white
-    classDef infra fill:#4b4e6d,stroke:#4b4e6d,color:white
-    classDef trigger fill:#95a5a6,stroke:#95a5a6,color:white
-
-    %% Apply styles
-    class A,B primary
-    class C,D,E,F,G secondary
-    class H,I,J,K,L secondary
-    class M,N,O infra
-    class P,Q,R,S,T trigger
+  %% Styling
+  classDef primary fill:#2374ab,stroke:#2374ab,color:white
+  classDef secondary fill:#48a9a6,stroke:#48a9a6,color:white
+  classDef trigger fill:#95a5a6,stroke:#95a5a6,color:white
+  class BuildDocker primary
+  class Unit,Lint,Coverage,DockerCfg,CrateBuild,Docs,Security secondary
+  class IT,FindDisks,Deploy,DeployNodes,Cleanup secondary
+  class PR,Push,Schedule,Manual trigger
 ```
 
 *The diagram above illustrates the parallel execution patterns in our CI/CD system. All triggers can initiate the pipeline concurrently, unit tests run in parallel after the Docker image build, and integration tests follow a mix of parallel and sequential steps. The infrastructure components support their respective workflow parts concurrently.*
@@ -168,41 +141,25 @@ graph TB
 
 ### Main Workflows
 
-- **CI Tests** (`ci-*.yml`): Core testing workflows
-  - Unit tests
-  - Integration tests
-  - Code coverage
-  - Linting
-- **CD Deployments** (`cd-*.yml`): Deployment workflows
-  - Node deployment to GCP
-  - Documentation deployment
-- **Release Management** (`release-*.yml`): Version and release workflows
+- **Unit Tests** (`tests-unit.yml`): OS matrix unit tests via nextest
+- **Lint** (`lint.yml`): Clippy, fmt, deny, features, docs build checks
+- **Coverage** (`coverage.yml`): llvm-cov with nextest, uploads to Codecov
+- **Test Docker Config** (`test-docker.yml`): Validates zebrad configs against built test image
+- **Test Crate Build** (`test-crates.yml`): Builds each crate under various feature sets
+- **Docs (Book + internal)** (`book.yml`): Builds mdBook and internal rustdoc, publishes to Pages
+- **Security Analysis** (`zizmor.yml`): GitHub Actions security lint (SARIF)
+- **Release Binaries** (`release-binaries.yml`): Build and publish release artifacts
+- **Release Drafter** (`release-drafter.yml`): Automates release notes
+- **Integration Tests on GCP** (`zfnd-ci-integration-tests-gcp.yml`): Stateful tests, cached disks, lwd flows
 
-### Supporting Workflows
+### Supporting/Re-usable Workflows
 
-- **Sub-workflows** (`sub-*.yml`): Reusable workflow components
-  - Docker image building
-  - Test configurations
-  - GCP resource management
-- **Patch Workflows** (`*.patch.yml`, `*.patch-external.yml`): Handle GitHub Actions limitations for required checks
-
-### Patch Workflows Rationale
-
-Our use of patch workflows (`.patch.yml` and `.patch-external.yml`) is a workaround for a [known limitation in GitHub Actions](https://github.com/orgs/community/discussions/44490) regarding path filters and required checks. When a workflow is marked as required for PR merging:
-
-1. **Path Filtering Limitation**: GitHub Actions does not properly handle the case where a required workflow is skipped due to path filters. Instead of marking the check as "skipped" or "passed", it remains in a "pending" state, blocking PR merges.  
-
-2. **Our Solution**: We maintain parallel "patch" workflows that:  
-
-   - Run without path filters  
-   - Contain minimal steps that always pass when the original workflow would have been skipped  
-   - Allow PRs to merge when changes don't affect relevant paths
-
-3. **Impact**:  
-
-   - Doubled number of workflow files to maintain  
-   - Additional complexity in workflow management  
-   - Extra status checks in PR UI
+- **Build docker image** (`zfnd-build-docker-image.yml`): Reusable image build with caching and tagging
+- **Find cached disks** (`zfnd-find-cached-disks.yml`): Discovers GCP disks for stateful tests
+- **Deploy integration tests** (`zfnd-deploy-integration-tests-gcp.yml`): Orchestrates GCP VMs and test runs
+- **Deploy nodes** (`zfnd-deploy-nodes-gcp.yml`): Provision long-lived nodes
+- **Delete GCP resources** (`zfnd-delete-gcp-resources.yml`): Cleanup utilities
+- Helper scripts in `.github/workflows/scripts/` used by the above
 
 ## Test Execution Strategy
 

@@ -44,6 +44,18 @@ use super::{check, Request, Verifier};
 #[cfg(test)]
 mod prop;
 
+/// Returns the timeout duration for tests, extended when running under coverage
+/// instrumentation to account for the performance overhead.
+fn test_timeout() -> std::time::Duration {
+    // Check if we're running under cargo-llvm-cov by looking for its environment variables
+    if std::env::var("LLVM_COV_FLAGS").is_ok() || std::env::var("CARGO_LLVM_COV").is_ok() {
+        // Use a 5x longer timeout when running with coverage (150 seconds)
+        std::time::Duration::from_secs(150)
+    } else {
+        std::time::Duration::from_secs(30)
+    }
+}
+
 #[test]
 fn v5_transactions_basic_check() -> Result<(), Report> {
     let _init_guard = zebra_test::init();
@@ -2594,7 +2606,7 @@ fn v4_with_sapling_spends() {
 
         // Test the transaction verifier
         let result = timeout(
-            std::time::Duration::from_secs(30),
+            test_timeout(),
             verifier.oneshot(Request::Block {
                 transaction_hash: transaction.hash(),
                 transaction,
@@ -2729,7 +2741,7 @@ async fn v5_with_sapling_spends() {
 
         assert_eq!(
             timeout(
-                std::time::Duration::from_secs(30),
+                test_timeout(),
                 verifier.oneshot(Request::Block {
                     transaction_hash: tx.hash(),
                     transaction: Arc::new(tx),

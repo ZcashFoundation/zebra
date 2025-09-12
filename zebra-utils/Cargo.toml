@@ -67,9 +67,6 @@ openapi-generator = [
 
 [dependencies]
 color-eyre = { workspace = true }
-# This is a transitive dependency via color-eyre.
-# Enable a feature that makes tinyvec compile much faster.
-tinyvec = { workspace = true, features = ["rustc_1_55"] }
 
 structopt = { workspace = true }
 hex = { workspace = true }
@@ -94,8 +91,6 @@ reqwest = { workspace = true, features = ["rustls-tls"], optional = true }
 
 # These crates are needed for the zebra-checkpoints and search-issue-refs binaries
 tokio = { workspace = true, features = ["full"], optional = true }
-
-jsonrpc = { workspace = true, optional = true }
 
 zcash_primitives = { workspace = true, optional = true }
 zcash_protocol.workspace = true

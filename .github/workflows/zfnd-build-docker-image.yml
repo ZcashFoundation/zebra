@@ -36,15 +36,24 @@ on:
         required: false
         type: string
       no_cache:
-        description: "Disable the Docker cache for this build"
+        description: Disable the Docker cache for this build
         required: false
         type: boolean
         default: false
 
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+      DOCKERHUB_TOKEN:
+        required: false
+
     outputs:
       image_digest:
-        description: "The image digest to be used on a caller workflow"
+        description: The image digest to be used on a caller workflow
         value: ${{ jobs.build.outputs.image_digest }}
+
+permissions:
+  contents: read
 
 env:
   FEATURES: ${{ inputs.features }}
@@ -62,26 +71,25 @@ jobs:
       image_digest: ${{ steps.docker_build.outputs.digest }}
       image_name: ${{ fromJSON(steps.docker_build.outputs.metadata)['image.name'] }}
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: read
+      id-token: write
       pull-requests: write # for `docker-scout` to be able to write the comment
     env:
       DOCKER_BUILD_SUMMARY: ${{ vars.DOCKER_BUILD_SUMMARY }}
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
-      - uses: r7kamura/rust-problem-matchers@v1.5.0
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v5
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
         with:
           short-length: 7
 
       # Automatic tag management and OCI Image Format Specification for labels
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5.7.0
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f #v5.8.0
         with:
           # list of Docker images to use as base name for tags
           # We only publish images to DockerHub if a release is not a pre-release
@@ -112,25 +120,25 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
           workload_identity_provider: "${{ vars.GCP_WIF }}"
           service_account: "${{ vars.GCP_ARTIFACTS_SA }}"
-          token_format: "access_token"
+          token_format: access_token
           # Some builds might take over an hour, and Google's default lifetime duration for
           # an access token is 1 hour (3600s). We increase this to 3 hours (10800s)
           # as some builds take over an hour.
           access_token_lifetime: 10800s
 
       - name: Login to Google Artifact Registry
-        uses: docker/login-action@v3.4.0
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
         with:
           registry: us-docker.pkg.dev
           username: oauth2accesstoken
           password: ${{ steps.auth.outputs.access_token }}
 
       - name: Login to DockerHub
-        uses: docker/login-action@v3.4.0
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1 #v3.5.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -138,16 +146,16 @@ jobs:
       # Setup Docker Buildx to use Docker Build Cloud
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v3.10.0
+        uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 #v3.11.1
         with:
-          version: "lab:latest"
+          version: lab:latest
           driver: ${{ vars.DOCKER_BUILDER || 'docker' }}
-          endpoint: "zfnd/zebra"
+          endpoint: zfnd/zebra
 
       # Build and push image to Google Artifact Registry, and possibly DockerHub
       - name: Build & push
         id: docker_build
-        uses: docker/build-push-action@v6.18.0
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 #v6.18.0
         with:
           target: ${{ inputs.dockerfile_target }}
           context: .
@@ -180,7 +188,7 @@ jobs:
         # - `dev` for a pull request event
       - name: Docker Scout
         id: docker-scout
-        uses: docker/scout-action@v1.18.1
+        uses: docker/scout-action@f8c776824083494ab0d56b8105ba2ca85c86e4de #v1.18.2
         # We only run Docker Scout on the `runtime` target, as the other targets are not meant to be released
         # and are commonly used for testing, and thus are ephemeral.
         # TODO: Remove the `contains` check once we have a better way to determine if just new vulnerabilities are present.

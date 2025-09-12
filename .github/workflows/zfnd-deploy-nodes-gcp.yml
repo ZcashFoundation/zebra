@@ -25,8 +25,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 on:
-  merge_group:
-    types: [checks_requested]
 
   workflow_dispatch:
     inputs:
@@ -40,7 +38,7 @@ on:
           - Testnet
       cached_disk_type:
         default: tip
-        description: "Type of cached disk to use"
+        description: Type of cached disk to use
         required: true
         type: choice
         options:
@@ -48,17 +46,17 @@ on:
           - checkpoint
       need_cached_disk:
         default: true
-        description: "Use a cached state disk"
+        description: Use a cached state disk
         required: false
         type: boolean
       no_cache:
-        description: "Disable the Docker cache for this build"
+        description: Disable the Docker cache for this build
         required: false
         type: boolean
         default: false
       log_file:
         default: ""
-        description: "Log to a file path rather than standard output"
+        description: Log to a file path rather than standard output
 
   push:
     # Skip main branch updates where Rust code and dependencies aren't modified.
@@ -73,13 +71,13 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       # configuration files
-      - ".cargo/config.toml"
+      - .cargo/config.toml
       - "**/clippy.toml"
       # workflow definitions
-      - "docker/**"
-      - ".dockerignore"
-      - ".github/workflows/cd-deploy-nodes-gcp.yml"
-      - ".github/workflows/sub-build-docker-image.yml"
+      - docker/**
+      - .dockerignore
+      - .github/workflows/zfnd-deploy-nodes-gcp.yml
+      - .github/workflows/zfnd-build-docker-image.yml
 
   # Only runs the Docker image tests, doesn't deploy any instances
   pull_request:
@@ -93,22 +91,21 @@ on:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
       # configuration files
-      - ".cargo/config.toml"
+      - .cargo/config.toml
       - "**/clippy.toml"
       # workflow definitions
-      - "docker/**"
-      - ".dockerignore"
-      - ".github/workflows/cd-deploy-nodes-gcp.yml"
-      - ".github/workflows/sub-build-docker-image.yml"
+      - docker/**
+      - .dockerignore
+      - .github/workflows/zfnd-deploy-nodes-gcp.yml
+      - .github/workflows/zfnd-build-docker-image.yml
 
   release:
     types:
       - published
 
-# IMPORTANT
-#
-# The job names in `cd-deploy-nodes-gcp.yml`, `cd-deploy-nodes-gcp.patch.yml` and
-# `cd-deploy-nodes-gcp.patch-external.yml` must be kept in sync.
+permissions:
+  contents: read
+
 jobs:
   # If a release was made we want to extract the first part of the semver from the
   # tag_name
@@ -128,7 +125,7 @@ jobs:
     steps:
       - name: Getting Zebrad Version
         id: get
-        uses: actions/github-script@v7.0.1
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd #v8.0.0
         with:
           result-encoding: string
           script: |
@@ -146,7 +143,7 @@ jobs:
   # PRs from forked repositories are skipped.
   get-disk-name:
     name: Get disk name
-    uses: ./.github/workflows/sub-find-cached-disks.yml
+    uses: ./.github/workflows/zfnd-find-cached-disks.yml
     if: ${{ !(github.event.pull_request.head.repo.fork) && (github.event_name != 'workflow_dispatch' || inputs.need_cached_disk) }}
     with:
       network: ${{ inputs.network || vars.ZCASH_NETWORK }}
@@ -159,7 +156,7 @@ jobs:
   # The image will be commonly named `zebrad:<short-hash | github-ref | semver>`
   build:
     name: Build CD Docker
-    uses: ./.github/workflows/sub-build-docker-image.yml
+    uses: ./.github/workflows/zfnd-build-docker-image.yml
     if: ${{ github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
     with:
       dockerfile_path: ./docker/Dockerfile
@@ -169,15 +166,9 @@ jobs:
       rust_log: info
       features: ${{ format('{0} {1}', vars.RUST_PROD_FEATURES, vars.RUST_TEST_FEATURES) }}
     # This step needs access to Docker Hub secrets to run successfully
-    secrets: inherit
-
-  # Run a matrix of configuration tests against the Docker image
-  test-docker-configurations:
-    name: Test Zebra Docker configurations
-    needs: build
-    uses: ./.github/workflows/sub-test-zebra-config.yml
-    with:
-      docker_image: ${{ vars.GAR_BASE }}/zebrad@${{ needs.build.outputs.image_digest }}
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # Deploy Managed Instance Groups (MiGs) for Mainnet and Testnet,
   # with one node in the configured GCP region.
@@ -221,7 +212,6 @@ jobs:
         set-matrix,
         build,
         versioning,
-        test-docker-configurations,
         get-disk-name,
       ]
     runs-on: ubuntu-latest
@@ -230,17 +220,17 @@ jobs:
       CACHED_DISK_NAME: ${{ needs.get-disk-name.outputs.cached_disk_name }}
     environment: ${{ github.event_name == 'release' && 'prod' || 'dev' }}
     permissions:
-      contents: "read"
-      id-token: "write"
+      contents: read
+      id-token: write
     if: ${{ !cancelled() && !failure() && needs.build.result == 'success' && github.repository_owner == 'ZcashFoundation' && ((github.event_name == 'push' && github.ref_name == 'main') || github.event_name == 'release' || github.event_name == 'workflow_dispatch') }}
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v4.2.2
         with:
           persist-credentials: false
 
       - name: Inject slug/short variables
-        uses: rlespinasse/github-slug-action@v5
+        uses: rlespinasse/github-slug-action@c33ff65466c58d57e4d796f88bb1ae0ff26ee453 #v5.2.0
         with:
           short-length: 7
 
@@ -258,13 +248,13 @@ jobs:
       # Setup gcloud CLI
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2.1.10
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 #v3.0.0
         with:
           workload_identity_provider: "${{ vars.GCP_WIF }}"
           service_account: "${{ vars.GCP_DEPLOYMENTS_SA }}"
 
       - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2.1.4
+        uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db #v3.0.1
 
       # Retrieves a static IP address for long-running nodes.
       # This step runs only when triggered by a release or a manual workflow_dispatch event.
@@ -375,6 +365,24 @@ jobs:
           --version template="zebrad-${{ needs.versioning.outputs.major_version || env.GITHUB_REF_SLUG_URL }}-${{ env.GITHUB_SHA_SHORT }}-${NETWORK}" \
           --region "${{ vars.GCP_REGION }}"
 
+  deploy-nodes-success:
+    name: Deploy nodes success
+    runs-on: ubuntu-latest
+    # Always run this job to check the status of dependent jobs
+    if: always()
+    needs:
+      - versioning
+      - get-disk-name
+      - build
+      - set-matrix
+      - deploy-nodes
+    timeout-minutes: 1
+    steps:
+      - name: Decide whether the needed jobs succeeded or failed
+        uses: re-actors/alls-green@05ac9388f0aebcb5727afa17fcccfecd6f8ec5fe #v1.2.2
+        with:
+          jobs: ${{ toJSON(needs) }}
+
   failure-issue:
     name: Open or update issues for release failures
     # When a new job is added to this workflow, add it to this list.
@@ -385,7 +393,7 @@ jobs:
     if: (failure() && github.event.pull_request == null) || (cancelled() && github.event.pull_request == null)
     runs-on: ubuntu-latest
     steps:
-      - uses: jayqi/failed-build-issue-action@v1
+      - uses: jayqi/failed-build-issue-action@1a893bbf43ef1c2a8705e2b115cd4f0fe3c5649b #v1.2.0
         with:
           title-template: "{{refname}} branch CI failed: {{eventName}} in {{workflow}}"
           # New failures open an issue with this label.
