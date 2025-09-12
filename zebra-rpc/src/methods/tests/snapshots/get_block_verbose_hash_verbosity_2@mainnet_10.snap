@@ -52,6 +52,11 @@ expression: block
       "vShieldedSpend": [],
       "vShieldedOutput": [],
       "vjoinsplit": [],
+      "orchard": {
+        "actions": [],
+        "valueBalance": 0.0,
+        "valueBalanceZat": 0
+      },
       "valueBalance": 0.0,
       "valueBalanceZat": 0,
       "size": 129,

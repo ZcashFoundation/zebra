@@ -21,7 +21,7 @@ use zebra_rpc::client::{
         transparent::{OutputIndex, Script},
         work::difficulty::{CompactDifficulty, ExpandedDifficulty},
     },
-    GetBlockchainInfoBalance, JoinSplit,
+    GetBlockchainInfoBalance, JoinSplit, OrchardFlags,
 };
 use zebra_rpc::client::{
     BlockHeaderObject, BlockObject, BlockTemplateResponse, Commitments, DefaultRoots,
@@ -807,7 +807,20 @@ fn test_get_raw_transaction_true() -> Result<(), Box<dyn std::error::Error>> {
             .collect();
         let value_balance = bundle.value_balance();
         let value_balance_zat = bundle.value_balance_zat();
-        Orchard::new(actions, value_balance, value_balance_zat)
+        let spends_flag = bundle.flags().as_ref().map(|f| f.enable_spends());
+        let outputs_flag = bundle.flags().as_ref().map(|f| f.enable_outputs());
+        let anchor = bundle.anchor();
+        let proof = bundle.proof().clone();
+        let binding_sig = bundle.binding_sig();
+        Orchard::new(
+            actions,
+            value_balance,
+            value_balance_zat,
+            spends_flag.map(|_| OrchardFlags::new(spends_flag.unwrap(), outputs_flag.unwrap())),
+            anchor,
+            proof,
+            binding_sig,
+        )
     });
     let binding_sig = tx.binding_sig();
     let joinsplit_pub_key = tx.joinsplit_pub_key();
