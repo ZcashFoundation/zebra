@@ -70,6 +70,8 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync", "tracing"] }
 tower = { workspace = true, features = ["buffer", "util"] }
 tracing = { workspace = true }
 
+sapling-crypto = { workspace = true }
+
 # elasticsearch specific dependencies.
 # Security: avoid default dependency on openssl
 elasticsearch = { workspace = true, features = ["rustls-tls"], optional = true }

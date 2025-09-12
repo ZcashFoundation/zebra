@@ -348,7 +348,7 @@ pub enum ReadResponse {
     /// Response to [`ReadRequest::SaplingSubtrees`] with the specified Sapling note commitment
     /// subtrees.
     SaplingSubtrees(
-        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling::tree::Node>>,
+        BTreeMap<NoteCommitmentSubtreeIndex, NoteCommitmentSubtreeData<sapling_crypto::Node>>,
     ),
 
     /// Response to [`ReadRequest::OrchardSubtrees`] with the specified Orchard note commitment
