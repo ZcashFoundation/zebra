@@ -154,6 +154,7 @@ x25519-dalek = "2.0.1"
 zcash_note_encryption = "0.4.1"
 zcash_script = "0.3.2"
 config = { version = "0.15.14", features = ["toml"] }
+which = "8.0.0"
 
 [workspace.metadata.release]
 

@@ -18,6 +18,12 @@ delete this before the release.)
   changed `Commitments::new()` to take the `final_root` parameter.
 - Added new arguments to `Orchard::new()`
 
+## [2.0.1] - 2025-08-22
+
+### Changed
+
+- Removed dependency on `protoc`
+
 ## [2.0.0] - 2025-08-07
 
 ### Breaking Changes

@@ -19,6 +19,9 @@ categories = [
     "network-programming",
 ]
 
+# Exclude proto files so crates.io consumers don't need protoc.
+exclude = ["*.proto"]
+
 [features]
 
 # Production features that activate extra dependencies, or extra features in
@@ -99,6 +102,7 @@ zebra-state = { path = "../zebra-state", version = "2.0.0" }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }
+which = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true, features = ["redactions", "json", "ron"] }
