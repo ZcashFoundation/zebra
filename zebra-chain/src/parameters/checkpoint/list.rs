@@ -9,6 +9,7 @@ use std::{
     collections::{BTreeMap, HashSet},
     ops::RangeBounds,
     str::FromStr,
+    sync::Arc,
 };
 
 use crate::{
@@ -57,11 +58,10 @@ impl Network {
         }
     }
     /// Returns the hard-coded checkpoint list for `network`.
-    pub fn checkpoint_list(&self) -> CheckpointList {
+    pub fn checkpoint_list(&self) -> Arc<CheckpointList> {
         let checkpoints_for_network = match self {
             Network::Mainnet => MAINNET_CHECKPOINTS,
-            Network::Testnet(params) if params.is_default_testnet() => TESTNET_CHECKPOINTS,
-            Network::Testnet(_params) => "",
+            Network::Testnet(params) => return params.checkpoints(),
         };
 
         // Check that the list starts with the correct genesis block and parses checkpoint list.
@@ -70,7 +70,7 @@ impl Network {
             .next()
             .map(checkpoint_height_and_hash);
 
-        match first_checkpoint_height {
+        let checkpoints = match first_checkpoint_height {
             // parse calls CheckpointList::from_list
             Some(Ok((block::Height(0), hash))) if hash == self.genesis_hash() => {
                 checkpoints_for_network
@@ -88,10 +88,12 @@ impl Network {
                     .expect("hard-coded checkpoint list parses and validates")
             }
             None => panic!(
-                "Zebra requires checkpoints on networks which do not activate\
+                "Zebra requires checkpoints on networks which do not activate \
                  the Canopy network upgrade at block height 1"
             ),
-        }
+        };
+
+        Arc::new(checkpoints)
     }
 }
 
@@ -233,6 +235,16 @@ impl CheckpointList {
         self.0.iter()
     }
 
+    /// Returns an iterator over all the checkpoints, in increasing height order, cloning the keys and values.
+    pub fn iter_cloned(&self) -> impl Iterator<Item = (block::Height, block::Hash)> + '_ {
+        self.iter()
+            .map(|(height, hash)| (height.clone(), hash.clone()))
+    }
+
+    /// Consumes self and returns an iterator over all the checkpoints, in increasing height order.
+    pub fn into_iter(self) -> impl Iterator<Item = (block::Height, block::Hash)> {
+        self.0.into_iter()
+    }
     /// Returns the checkpoint at `height`, as a zero-based index.
     /// If `height` is not a checkpoint height, returns the checkpoint immediately before that height.
     pub fn prev_checkpoint_index(&self, height: block::Height) -> usize {
