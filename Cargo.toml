@@ -225,7 +225,8 @@ lto = "thin"
 
 
 [workspace.lints.rust]
+# The linter should ignore these expected config flags/values
 unexpected_cfgs = { level = "warn", check-cfg = [
-    'cfg(tokio_unstable)',
-    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))'
+    'cfg(tokio_unstable)', # Used by tokio-console
+    'cfg(zcash_unstable, values("zfuture", "nu6.1", "nu7"))' # Used in Zebra and librustzcash
 ] }
