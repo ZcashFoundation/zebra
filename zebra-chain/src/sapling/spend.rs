@@ -259,10 +259,8 @@ impl ZcashDeserialize for SpendPrefixInTransactionV5 {
         Ok(SpendPrefixInTransactionV5 {
             // Type is `ValueCommit^{Sapling}.Output`, i.e. J
             // https://zips.z.cash/protocol/protocol.pdf#abstractcommit
-            // See [`sapling_crypto::value::ValueCommitment::::zcash_deserialize`].
-            cv: commitment::ValueCommitment(
-                sapling_crypto::value::ValueCommitment::zcash_deserialize(&mut reader)?,
-            ),
+            // See [`sapling_crypto::value::ValueCommitment::zcash_deserialize`].
+            cv: commitment::ValueCommitment::zcash_deserialize(&mut reader)?,
             // Type is `B^Y^{[ℓ_{PRFnfSapling}/8]}`, i.e. 32 bytes
             nullifier: note::Nullifier::from(reader.read_32_bytes()?),
             // Type is `SpendAuthSig^{Sapling}.Public`, i.e. J

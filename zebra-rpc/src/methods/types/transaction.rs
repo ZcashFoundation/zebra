@@ -460,7 +460,7 @@ pub struct ShieldedSpend {
     spend_auth_sig: [u8; 64],
 }
 
-// We can't use `#[getter(skip)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
 impl ShieldedSpend {
     /// The value commitment to the input note.
     pub fn cv(&self) -> ValueCommitment {
@@ -492,7 +492,7 @@ pub struct ShieldedOutput {
     proof: [u8; 192],
 }
 
-// We can't use `#[getter(skip)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
+// We can't use `#[getter(copy)]` as upstream `sapling_crypto::note::ValueCommitment` is not `Copy`.
 impl ShieldedOutput {
     /// The value commitment to the output note.
     pub fn cv(&self) -> ValueCommitment {
