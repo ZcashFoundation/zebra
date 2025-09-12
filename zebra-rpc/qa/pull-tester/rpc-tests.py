@@ -43,7 +43,8 @@ BASE_SCRIPTS= [
     'nuparams.py',
     'addnode.py',
     'wallet.py',
-    'feature_nu6.py']
+    'feature_nu6.py',
+    'feature_nu6_1.py']
 
 ZMQ_SCRIPTS = [
     # ZMQ test can only be run if bitcoin was built with zmq-enabled.

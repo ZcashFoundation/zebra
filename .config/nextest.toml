@@ -6,9 +6,22 @@ fail-fast = true
 status-level = "pass"
 
 # --- All Tests profile ---
-# Runs all tests except 'check_no_git_dependencies'
+# CI-friendly test selection.
+#
+# Runs fast unit/integration tests and explicitly excludes:
+# - 'check_no_git_dependencies' (it has its own profile)
+# - stateful or long-running tests that require a local cache dir or external
+#   services (lightwalletd RPC/GRPC, full sync, checkpoint generation, mining
+#   RPCs, etc.).
+#
+# Notes:
+# - CI now provides a default cache directory, so stateful tests are no longer
+#   auto-skipped when the cache dir is undefined. To keep this profile fast and
+#   deterministic, we exclude those tests here and offer dedicated profiles
+#   below for running them when needed.
+# TODO: We need a better test architecture to run all non-stateful
 [profile.all-tests]
-default-filter = 'not test(check_no_git_dependencies)'
+default-filter = "not test(check_no_git_dependencies) and not test(=fully_synced_rpc_z_getsubtreesbyindex_snapshot_test) and not test(=lwd_rpc_test) and not test(=lwd_rpc_send_tx) and not test(=lwd_grpc_wallet) and not test(=lwd_integration) and not test(=lwd_sync_full) and not test(=lwd_sync_update) and not test(=lightwalletd_test_suite) and not test(=rpc_get_block_template) and not test(=rpc_submit_block) and not test(=get_peer_info) and not test(~generate_checkpoints_) and not test(=sync_update_mainnet) and not test(=activate_mempool_mainnet)"
 
 # --- Individual Test Profiles ---
 
@@ -29,10 +42,15 @@ slow-timeout = { period = "1500m", terminate-after = 1 }
 success-output = "immediate"
 default-filter = 'package(zebrad) and test(=sync_full_testnet)'
 
-[profile.sync-to-mandatory-checkpoint]
+[profile.sync-to-mandatory-checkpoint-mainnet]
 slow-timeout = { period = "1500m", terminate-after = 1 }
 success-output = "immediate"
-default-filter = 'package(zebrad) and test(~sync_to_mandatory_checkpoint_)'
+default-filter = 'package(zebrad) and test(=sync_to_mandatory_checkpoint_mainnet)'
+
+[profile.sync-to-mandatory-checkpoint-testnet]
+slow-timeout = { period = "1500m", terminate-after = 1 }
+success-output = "immediate"
+default-filter = 'package(zebrad) and test(=sync_to_mandatory_checkpoint_testnet)'
 
 [profile.sync-update-mainnet]
 slow-timeout = { period = "30m", terminate-after = 2 }

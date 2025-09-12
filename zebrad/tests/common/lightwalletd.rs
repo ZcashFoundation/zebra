@@ -41,15 +41,15 @@ pub mod wallet_grpc_test;
 ///
 /// This environmental variable is used to enable the lightwalletd tests.
 /// But the network tests are *disabled* by their environmental variables.
-pub const ZEBRA_TEST_LIGHTWALLETD: &str = "ZEBRA_TEST_LIGHTWALLETD";
+pub const TEST_LIGHTWALLETD: &str = "TEST_LIGHTWALLETD";
 
-/// Optional environment variable with the cached state for lightwalletd.
+/// Optional environment variable that points to a cached lightwalletd state directory.
 ///
-/// Required for [`TestType::UpdateCachedState`],
-/// so we can test lightwalletd RPC integration with a populated state.
-///
-/// Can also be used to speed up the [`sending_transactions_using_lightwalletd`] test,
-/// by skipping the lightwalletd initial sync.
+/// - If unset, tests look for a platform-specific default (for example, `~/.cache/lwd` on Linux).
+/// - Tests that require a populated lightwalletd cache (currently [`TestType::UpdateCachedState`])
+///   will be skipped if neither an override nor an existing default cache is found.
+/// - Providing a populated cache can significantly speed up certain tests (for example,
+///   the sending-transactions-via-lightwalletd test), by avoiding the initial lightwalletd sync.
 pub const LWD_CACHE_DIR: &str = "LWD_CACHE_DIR";
 
 /// Should we skip Zebra lightwalletd integration tests?
@@ -60,12 +60,12 @@ pub fn zebra_skip_lightwalletd_tests() -> bool {
     //
     // See is_command_available() in zebra-test/src/tests/command.rs for one way to do this.
 
-    if env::var_os(ZEBRA_TEST_LIGHTWALLETD).is_none() {
+    if env::var_os(TEST_LIGHTWALLETD).is_none() {
         // This message is captured by the test runner, use
         // `cargo test -- --nocapture` to see it.
         eprintln!(
             "Skipped lightwalletd integration test, \
-             set the 'ZEBRA_TEST_LIGHTWALLETD' environmental variable to run the test",
+             set the 'TEST_LIGHTWALLETD' environmental variable to run the test",
         );
         return true;
     }

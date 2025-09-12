@@ -44,15 +44,17 @@ proptest! {
 
         if let Some(sanitized) = addr.sanitize(&Mainnet) {
             // check that all sanitized addresses are valid for outbound
-            prop_assert!(addr.last_known_info_is_valid_for_outbound(&Mainnet));
+            prop_assert!(sanitized.last_known_info_is_valid_for_outbound(&Mainnet));
             // also check the address, port, and services individually
-            prop_assert!(!addr.addr.ip().is_unspecified());
-            prop_assert_ne!(addr.addr.port(), 0);
-            prop_assert_eq!(addr.misbehavior(), 0);
-            prop_assert!(!addr.is_inbound());
+            prop_assert!(!sanitized.addr.ip().is_unspecified());
+            prop_assert_ne!(sanitized.addr.port(), 0);
+            prop_assert_eq!(sanitized.misbehavior(), 0);
+            prop_assert!(!sanitized.is_inbound());
 
-            if let Some(services) = addr.services {
+            if let Some(services) = sanitized.services {
                 prop_assert!(services.contains(PeerServices::NODE_NETWORK));
+            } else {
+                prop_assert!(false, "sanitized services must be Some(PeerServices) and contain NODE_NETWORK");
             }
 
             check::sanitize_avoids_leaks(&addr, &sanitized);

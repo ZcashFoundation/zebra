@@ -9,13 +9,14 @@ use std::{
     fmt::{self, Debug},
 };
 
+use derive_getters::Getters;
 use itertools::Itertools;
 #[cfg(any(test, feature = "proptest-impl"))]
 use proptest_derive::Arbitrary;
 use serde::{de::DeserializeOwned, Serialize};
 
 use crate::{
-    amount::{Amount, NegativeAllowed},
+    amount::Amount,
     primitives::{
         redjubjub::{Binding, Signature},
         Groth16Proof,
@@ -84,7 +85,7 @@ pub trait AnchorVariant {
 /// there is a single `shared_anchor` for the entire transaction, which is only
 /// present when there is at least one spend. These structural differences are
 /// modeled using the `AnchorVariant` type trait and `TransferData` enum.
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Getters)]
 pub struct ShieldedData<AnchorV>
 where
     AnchorV: AnchorVariant + Clone,
@@ -285,13 +286,6 @@ where
         let key_bytes: [u8; 32] = (cv_old - cv_new - cv_balance).into();
 
         key_bytes.into()
-    }
-
-    /// Provide access to the `value_balance` field of the shielded data.
-    ///
-    /// Needed to calculate the sapling value balance.
-    pub fn value_balance(&self) -> Amount<NegativeAllowed> {
-        self.value_balance
     }
 }
 
