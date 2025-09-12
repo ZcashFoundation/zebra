@@ -849,7 +849,9 @@ impl<'de> Deserialize<'de> for Config {
                     funding_streams_vec.insert(0, funding_streams);
                 }
 
-                params_builder = params_builder.with_funding_streams(funding_streams_vec);
+                if !funding_streams_vec.is_empty() {
+                    params_builder = params_builder.with_funding_streams(funding_streams_vec);
+                }
 
                 if let Some(lockbox_disbursements) = lockbox_disbursements {
                     params_builder =

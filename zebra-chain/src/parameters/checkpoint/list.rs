@@ -235,16 +235,11 @@ impl CheckpointList {
         self.0.iter()
     }
 
-    /// Returns an iterator over all the checkpoints, in increasing height order, cloning the keys and values.
+    /// Returns an iterator over all the checkpoints, in increasing height order.
     pub fn iter_cloned(&self) -> impl Iterator<Item = (block::Height, block::Hash)> + '_ {
-        self.iter()
-            .map(|(height, hash)| (height.clone(), hash.clone()))
+        self.iter().map(|(&height, &hash)| (height, hash))
     }
 
-    /// Consumes self and returns an iterator over all the checkpoints, in increasing height order.
-    pub fn into_iter(self) -> impl Iterator<Item = (block::Height, block::Hash)> {
-        self.0.into_iter()
-    }
     /// Returns the checkpoint at `height`, as a zero-based index.
     /// If `height` is not a checkpoint height, returns the checkpoint immediately before that height.
     pub fn prev_checkpoint_index(&self, height: block::Height) -> usize {
