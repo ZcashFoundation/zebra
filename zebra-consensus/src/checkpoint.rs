@@ -124,7 +124,7 @@ where
     S::Future: Send + 'static,
 {
     /// The checkpoint list for this verifier.
-    checkpoint_list: CheckpointList,
+    checkpoint_list: Arc<CheckpointList>,
 
     /// The network rules used by this verifier.
     network: Network,
@@ -238,7 +238,9 @@ where
         state_service: S,
     ) -> Result<Self, VerifyCheckpointError> {
         Ok(Self::from_checkpoint_list(
-            CheckpointList::from_list(list).map_err(VerifyCheckpointError::CheckpointList)?,
+            CheckpointList::from_list(list)
+                .map(Arc::new)
+                .map_err(VerifyCheckpointError::CheckpointList)?,
             network,
             initial_tip,
             state_service,
@@ -253,7 +255,7 @@ where
     /// Callers should prefer `CheckpointVerifier::new`, which uses the
     /// hard-coded checkpoint lists. See that function for more details.
     pub(crate) fn from_checkpoint_list(
-        checkpoint_list: CheckpointList,
+        checkpoint_list: Arc<CheckpointList>,
         network: &Network,
         initial_tip: Option<(block::Height, block::Hash)>,
         state_service: S,
